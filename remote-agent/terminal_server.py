@@ -456,6 +456,10 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        handlers=[
+            # Log to file to avoid filling stderr pipe buffer
+            logging.FileHandler(f"/tmp/terminal_server_{args.terminal_id[:8]}.log"),
+        ],
     )
 
     port = args.port

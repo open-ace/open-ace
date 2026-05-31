@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+import urllib.parse
 import uuid
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -798,13 +799,18 @@ def agent_message():
     data = request.get_json() or {}
     msg_type = data.get("type")
 
-    # Debug: log all non-poll agent messages
+    # Debug: log all non-poll agent messages (filter sensitive fields)
     if msg_type not in ("poll", "heartbeat"):
         import sys
 
         status = data.get("status", "")
         stream = data.get("stream", "")
-        d = (data.get("data") or "")[:200]
+        # For vscode_status, filter out sensitive fields before logging
+        if msg_type == "vscode_status":
+            debug_data = {k: v for k, v in data.items() if k not in ("cs_password", "token")}
+            d = str(debug_data)[:200]
+        else:
+            d = (data.get("data") or "")[:200]
         print(
             f"AGENT-DEBUG type={msg_type} sid={(data.get('session_id') or '')[:8]} status={status} stream={stream} data={d}",
             file=sys.stderr,
@@ -2334,6 +2340,14 @@ def remote_vscode_proxy(vscode_id, path=""):
     if status_code == 302 and request.args.get("token"):
         location = resp_headers.get("Location", "")
         if location and "token=" not in location:
+            # Handle relative paths properly using urljoin
+            # If location is relative (e.g., "./?folder=xxx"), resolve it against current URL
+            if (
+                location.startswith("./")
+                or location.startswith("/")
+                or not location.startswith("http")
+            ):
+                location = urllib.parse.urljoin(request.url, location)
             # Add token to redirect URL
             separator = "?" if "?" not in location else "&"
             response.headers["Location"] = f"{location}{separator}token={token}"
