@@ -5,7 +5,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.remote_ws_handler import _WS_PATH_RE, RemoteWSHandler
+from app.remote_ws_handler import (
+    _WS_PATH_RE,
+    RemoteWSHandler,
+    _build_vscode_remote_ws_url,
+    _match_vscode_ws_path,
+    _query_token_and_upstream_query,
+)
 
 # ---------------------------------------------------------------------------
 # Tests: _WS_PATH_RE
@@ -39,6 +45,48 @@ class TestWSPathRegex:
     )
     def test_invalid_paths(self, path):
         assert _WS_PATH_RE.match(path) is None
+
+
+class TestVSCodeWSPathMatching:
+    def test_legacy_ws_path_matches_root_upstream_path(self):
+        assert _match_vscode_ws_path(
+            "/api/remote/vscode/12345678-1234-1234-1234-123456789abc/ws"
+        ) == ("12345678-1234-1234-1234-123456789abc", "/")
+
+    def test_proxy_root_matches_root_upstream_path(self):
+        assert _match_vscode_ws_path(
+            "/api/remote/vscode/12345678-1234-1234-1234-123456789abc/proxy/"
+        ) == ("12345678-1234-1234-1234-123456789abc", "/")
+
+    def test_proxy_nested_path_preserved(self):
+        assert _match_vscode_ws_path(
+            "/api/remote/vscode/12345678-1234-1234-1234-123456789abc/proxy/stable/ws"
+        ) == ("12345678-1234-1234-1234-123456789abc", "/stable/ws")
+
+    def test_non_vscode_proxy_path_rejected(self):
+        assert _match_vscode_ws_path("/api/remote/vscode/not-a-uuid/proxy/stable/ws") is None
+
+
+class TestVSCodeWSUrlBuilding:
+    def test_token_removed_from_upstream_query(self):
+        token, query = _query_token_and_upstream_query(
+            "token=openace-token&folder=%2Froot%2Fworkspace&reconnectionToken=abc"
+        )
+
+        assert token == "openace-token"
+        assert "token=" not in query
+        assert "folder=%2Froot%2Fworkspace" in query
+        assert "reconnectionToken=abc" in query
+
+    def test_remote_ws_url_preserves_proxy_path_and_query(self):
+        assert (
+            _build_vscode_remote_ws_url(
+                "http://192.168.64.3:45678",
+                "/stable/ws",
+                "reconnectionToken=abc",
+            )
+            == "ws://192.168.64.3:45678/stable/ws?reconnectionToken=abc"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +312,95 @@ class TestHandleTerminalWs:
         RemoteWSHandler._handle_terminal_ws(handler)
 
         mock_send_close.assert_called_once_with(handler.socket, 1011)
+
+
+class TestHandleVSCodeWs:
+    UUID = "12345678-1234-1234-1234-123456789abc"
+
+    def _make_handler(self, path=None, query_string="", cookie=""):
+        handler = MagicMock(spec=RemoteWSHandler)
+        handler.environ = {
+            "PATH_INFO": path or f"/api/remote/vscode/{self.UUID}/proxy/stable/ws",
+            "QUERY_STRING": query_string or "token=my-token&folder=%2Froot%2Fworkspace",
+            "HTTP_COOKIE": cookie,
+            "HTTP_SEC_WEBSOCKET_KEY": "dGhlIHNhbXBsZSBub25jZQ==",
+        }
+        handler.socket = MagicMock()
+        handler.close_connection = False
+        return handler
+
+    @patch("app.ws_frame.send_close")
+    @patch("app.ws_frame.perform_handshake")
+    @patch("app.modules.workspace.vscode_ws_bridge.bridge_vscode_ws_raw")
+    @patch("app.modules.workspace.vscode_store.vscode_info_store")
+    def test_proxy_path_bridges_to_matching_remote_path(
+        self, mock_store, mock_bridge, mock_handshake, mock_send_close
+    ):
+        handler = self._make_handler()
+        mock_store.find_by_vscode_id.return_value = (
+            "machine-123",
+            {
+                "status": "running",
+                "token": "my-token",
+                "original_http_url": "http://remote:45678",
+            },
+        )
+
+        RemoteWSHandler._handle_vscode_ws(handler)
+
+        mock_handshake.assert_called_once_with(handler.environ, handler.socket)
+        mock_bridge.assert_called_once_with(
+            self.UUID,
+            handler.socket,
+            "ws://remote:45678/stable/ws?folder=%2Froot%2Fworkspace",
+        )
+        mock_send_close.assert_not_called()
+        assert handler.close_connection is True
+
+    @patch("app.ws_frame.send_close")
+    @patch("app.ws_frame.perform_handshake")
+    @patch("app.modules.workspace.vscode_ws_bridge.bridge_vscode_ws_raw")
+    @patch("app.modules.workspace.vscode_store.vscode_info_store")
+    def test_cookie_token_can_authenticate_proxy_ws(
+        self, mock_store, mock_bridge, mock_handshake, mock_send_close
+    ):
+        handler = self._make_handler(
+            query_string="reconnectionToken=abc",
+            cookie=f"vscode_token_{self.UUID}=cookie-token",
+        )
+        mock_store.find_by_vscode_id.return_value = (
+            "machine-123",
+            {
+                "status": "running",
+                "token": "cookie-token",
+                "original_http_url": "http://remote:45678",
+            },
+        )
+
+        RemoteWSHandler._handle_vscode_ws(handler)
+
+        mock_bridge.assert_called_once_with(
+            self.UUID,
+            handler.socket,
+            "ws://remote:45678/stable/ws?reconnectionToken=abc",
+        )
+        mock_send_close.assert_not_called()
+
+    @patch("app.ws_frame.send_close")
+    @patch("app.ws_frame.perform_handshake")
+    @patch("app.modules.workspace.vscode_store.vscode_info_store")
+    def test_invalid_proxy_ws_token_closes(self, mock_store, mock_handshake, mock_send_close):
+        handler = self._make_handler(query_string="token=wrong")
+        mock_store.find_by_vscode_id.return_value = (
+            "machine-123",
+            {
+                "status": "running",
+                "token": "correct",
+                "original_http_url": "http://remote:45678",
+            },
+        )
+
+        RemoteWSHandler._handle_vscode_ws(handler)
+
+        mock_send_close.assert_called_once_with(handler.socket, 4001)
+        assert handler.close_connection is True

@@ -398,6 +398,7 @@ class TestVSCodeStatus(unittest.TestCase):
         data = resp.get_json()
         self.assertTrue(data["success"])
         self.assertEqual(data["status"], "running")
+        self.assertTrue(data["url"].startswith("http://localhost/api/remote/vscode/"))
         self.assertIn("/proxy/", data["url"])
         self.assertIn("browser-secret-token", data["url"])
 
@@ -557,13 +558,13 @@ class TestVSCodeProxy(unittest.TestCase):
     def _restore_store(self, vs_mod, original_store):
         vs_mod.vscode_info_store = original_store
 
-    def test_auth_required(self):
-        """No session token returns 401."""
+    def test_proxy_does_not_require_session_cookie(self):
+        """Proxy auth is handled by vscode token, not Open ACE session cookie."""
         mgr = MagicMock()
         app = _make_app(mgr)
         with app.test_client() as client:
             resp = client.get("/api/remote/vscode/vs1/proxy/")
-            self.assertEqual(resp.status_code, 401)
+            self.assertEqual(resp.status_code, 404)
 
     def test_unknown_vscode_id_returns_404(self):
         """Unknown vscode_id returns 404."""
@@ -583,8 +584,8 @@ class TestVSCodeProxy(unittest.TestCase):
         data = resp.get_json()
         self.assertIn("not found", data["error"].lower())
 
-    def test_missing_token_returns_403(self):
-        """Missing token query parameter returns 403."""
+    def test_missing_token_uses_running_session_fallback(self):
+        """Running sessions may proxy resource requests after initial load."""
         mgr = MagicMock()
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
@@ -597,20 +598,29 @@ class TestVSCodeProxy(unittest.TestCase):
                 },
             ),
         )
-        try:
-            with app.test_client() as client:
-                # No token parameter in URL
-                resp = _auth_get(
-                    client,
-                    "/api/remote/vscode/vs1/proxy/",
-                    "test-token-1-admin",
-                )
-        finally:
-            self._restore_store(vs_mod, orig)
 
-        self.assertEqual(resp.status_code, 403)
-        data = resp.get_json()
-        self.assertIn("token", data["error"].lower())
+        def _gen():
+            yield b"<h1>VSCode</h1>"
+
+        mock_proxy_result = (200, {"Content-Type": "text/html"}, _gen())
+
+        with (
+            patch(
+                "app.modules.workspace.vscode_proxy.build_target_url",
+                return_value="http://remote:8080/",
+            ),
+            patch(
+                "app.modules.workspace.vscode_proxy.proxy_request_streaming",
+                return_value=mock_proxy_result,
+            ),
+        ):
+            try:
+                with app.test_client() as client:
+                    resp = client.get("/api/remote/vscode/vs1/proxy/")
+            finally:
+                self._restore_store(vs_mod, orig)
+
+        self.assertEqual(resp.status_code, 200)
 
     def test_invalid_token_returns_403(self):
         """Wrong token returns 403."""
@@ -667,8 +677,8 @@ class TestVSCodeProxy(unittest.TestCase):
         data = resp.get_json()
         self.assertIn("not running", data["error"].lower())
 
-    def test_no_stored_token_returns_403(self):
-        """Info record with empty stored token returns 403."""
+    def test_no_stored_token_returns_500(self):
+        """Info record with empty stored token returns server error."""
         mgr = MagicMock()
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
@@ -690,7 +700,7 @@ class TestVSCodeProxy(unittest.TestCase):
         finally:
             self._restore_store(vs_mod, orig)
 
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 500)
 
     def test_successful_proxy(self):
         """Valid token with running session proxies the request."""

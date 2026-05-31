@@ -7,6 +7,7 @@ import threading
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import gevent
 from websockets.exceptions import ConnectionClosed
@@ -151,9 +152,14 @@ def bridge_vscode_ws_raw(vscode_id: str, browser_sock, remote_ws_url: str) -> No
     state = VSCodeBridgeConnection(vscode_id=vscode_id, browser_ws=browser_sock)
     _register_bridge(state)
 
+    parsed = urlparse(remote_ws_url)
+    origin_scheme = "https" if parsed.scheme == "wss" else "http"
+    origin = f"{origin_scheme}://{parsed.netloc}" if parsed.netloc else None
+
     try:
         with connect(
             remote_ws_url,
+            origin=origin,
             close_timeout=5,
             proxy=None,
         ) as remote_ws:
