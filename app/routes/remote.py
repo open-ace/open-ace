@@ -1004,6 +1004,7 @@ def agent_message():
         status = data.get("status", "")
         http_url = data.get("http_url", "")
         vscode_token = data.get("token", "")
+        cs_password = data.get("cs_password", "")  # code-server's own password
         error = data.get("error", "")
 
         machine_id_for_vs = data.get("machine_id", "")
@@ -1023,6 +1024,7 @@ def agent_message():
                     "status": "running",
                     "original_http_url": http_url,
                     "original_token": vscode_token,
+                    "cs_password": cs_password,  # Store code-server password for proxy
                     "token": browser_token,
                     "machine_id": machine_id_for_vs,
                     "project_path": data.get("project_path", ""),
@@ -2261,11 +2263,13 @@ def remote_vscode_proxy(vscode_id, path=""):
     # For nested iframe scenarios (cookies blocked by SameSite), allow requests
     # without explicit token if the session is running. The proxy URL path
     # itself provides authentication (only valid vscode_id can be accessed).
-    # This is a capability URL design:
-    # 1. vscode_id is a UUID4 (~122 bits of randomness)
+    # This is a capability URL design - the security relies solely on:
+    # 1. vscode_id is a UUID4 (~122 bits of randomness), hard to guess
     # 2. The URL is only visible to the user who started the session
     # 3. The session is scoped to a specific machine and project
-    # 4. The stored token (secrets.token_hex(32) = 256 bits) provides additional security
+    # Note: In this fallback case, we use stored_token for HMAC validation
+    # but the caller does NOT prove they hold it. The real access control
+    # is the vscode_id in the URL path (capability URL semantics).
     if not token and info.get("status") == "running":
         # Use stored token for internal validation (not sent to browser)
         token = stored_token
@@ -2292,6 +2296,16 @@ def remote_vscode_proxy(vscode_id, path=""):
 
     # Collect request headers
     headers = {k: v for k, v in request.headers if k.lower() != "host"}
+
+    # Add code-server password auth if available
+    # code-server uses HTTP Basic Auth with empty username and password
+    cs_password = info.get("cs_password", "")
+    if cs_password:
+        import base64 as _b64
+
+        # Format: base64(":password") = base64(password) with colon prefix
+        auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
+        headers["Authorization"] = f"Basic {auth_value}"
 
     # Get request body
     body = request.get_data()

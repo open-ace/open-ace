@@ -61,6 +61,7 @@ class RemoteAgent:
         self._vscode_processes: dict[str, subprocess.Popen] = {}
         self._vscode_tokens: dict[str, str] = {}
         self._vscode_ports: dict[str, int] = {}
+        self._vscode_passwords: dict[str, str] = {}  # code-server's own password
         # Terminal info persistence directory
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self._terminal_info_dir = os.path.join(script_dir, ".terminal_sessions")
@@ -1384,6 +1385,7 @@ class RemoteAgent:
         status: str,
         http_url: str | None = None,
         token: str | None = None,
+        cs_password: str | None = None,  # code-server's own password
         error: str | None = None,
     ) -> None:
         """Send a vscode_status message back to the server."""
@@ -1397,6 +1399,8 @@ class RemoteAgent:
             msg["http_url"] = http_url
         if token is not None:
             msg["token"] = token
+        if cs_password is not None:
+            msg["cs_password"] = cs_password
         if error is not None:
             msg["error"] = error
         self._http_send(msg)
@@ -1442,9 +1446,13 @@ class RemoteAgent:
 
         logger.info("Starting VSCode %s for %s", vscode_id[:8], cwd)
 
-        # Generate auth token
+        # Generate auth token for Open ACE proxy layer
         vscode_token = secrets.token_hex(32)
         self._vscode_tokens[vscode_id] = vscode_token
+
+        # Generate password for code-server itself (protects direct access)
+        code_server_password = secrets.token_hex(16)  # 128 bits, sufficient for port-level auth
+        self._vscode_passwords[vscode_id] = code_server_password
 
         try:
             cmd = [
@@ -1454,17 +1462,22 @@ class RemoteAgent:
                 "--bind-addr",
                 "0.0.0.0",  # Listen on all interfaces for remote access
                 "--auth",
-                "none",  # Auth handled by open-ace proxy
+                "password",  # Enable code-server's own password auth
                 "--disable-telemetry",
                 "--disable-workspace-trust",
                 "--disable-getting-started-override",
                 cwd,
             ]
 
+            # Set PASSWORD env var for code-server password auth
+            env = os.environ.copy()
+            env["PASSWORD"] = code_server_password
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
                 start_new_session=True,
             )
             self._vscode_processes[vscode_id] = proc
@@ -1482,7 +1495,11 @@ class RemoteAgent:
                 http_url = f"http://{hostname}:{port}"
 
                 self._send_vscode_status(
-                    vscode_id, "running", http_url=http_url, token=vscode_token
+                    vscode_id,
+                    "running",
+                    http_url=http_url,
+                    token=vscode_token,
+                    cs_password=code_server_password,
                 )
                 logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
             else:
@@ -1546,6 +1563,7 @@ class RemoteAgent:
 
         self._vscode_ports.pop(vscode_id, None)
         self._vscode_tokens.pop(vscode_id, None)
+        self._vscode_passwords.pop(vscode_id, None)
         self._send_vscode_status(vscode_id, "stopped")
 
     def _cmd_attach_vscode(self, data: dict[str, Any]) -> None:
