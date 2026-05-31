@@ -2235,7 +2235,7 @@ def remote_vscode_proxy(vscode_id, path=""):
     For nested iframe scenarios where cookies don't work, we also allow
     requests without token if the session is known to be running.
     """
-    import hmac as _hmc
+    import hmac as _hmac
 
     from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
     from app.modules.workspace.vscode_store import vscode_info_store
@@ -2277,7 +2277,7 @@ def remote_vscode_proxy(vscode_id, path=""):
     if not token:
         return jsonify({"error": "Invalid or missing token"}), 403
 
-    if not _hmc.compare_digest(token, stored_token):
+    if not _hmac.compare_digest(token, stored_token):
         return jsonify({"error": "Invalid token"}), 403
 
     if info.get("status") != "running":
@@ -2346,12 +2346,14 @@ def remote_vscode_proxy(vscode_id, path=""):
         cookie_name = f"vscode_token_{vscode_id}"
         cookie_value = token
         cookie_path = f"/api/remote/vscode/{vscode_id}/proxy/"
+        # Add Secure flag if request is HTTPS (for production security)
+        secure_flag = "; Secure" if request.is_secure else ""
         # Directly set Set-Cookie header (set_cookie may not work with streaming responses)
         response.headers["Set-Cookie"] = (
             f"{cookie_name}={cookie_value}; "
             f"Path={cookie_path}; "
             f"Max-Age={24 * 3600}; "
-            f"HttpOnly; SameSite=Lax"
+            f"HttpOnly; SameSite=Lax{secure_flag}"
         )
 
     return response
