@@ -39,6 +39,24 @@ _proxy_session = requests.Session()
 _proxy_session.trust_env = False
 
 
+def _prepare_request_headers(headers: dict, target_url: str) -> dict:
+    """Build upstream request headers for code-server.
+
+    Force identity encoding so Flask can stream the response body without
+    having to understand browser-negotiated encodings such as br or zstd.
+    """
+    filtered_headers = {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in HOP_BY_HOP_HEADERS and k.lower() != "accept-encoding"
+    }
+
+    parsed = urllib.parse.urlparse(target_url)
+    filtered_headers["Host"] = parsed.netloc
+    filtered_headers["Accept-Encoding"] = "identity"
+    return filtered_headers
+
+
 def proxy_request(
     method: str,
     target_url: str,
@@ -58,12 +76,7 @@ def proxy_request(
     Returns:
         Tuple of (status_code, response_headers, response_body)
     """
-    # Filter hop-by-hop headers
-    filtered_headers = {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}
-
-    # Set Host header to match the target
-    parsed = urllib.parse.urlparse(target_url)
-    filtered_headers["Host"] = parsed.netloc
+    filtered_headers = _prepare_request_headers(headers, target_url)
 
     try:
         resp = _proxy_session.request(
@@ -116,12 +129,7 @@ def proxy_request_streaming(
     Returns:
         Tuple of (status_code, response_headers, content_generator)
     """
-    # Filter hop-by-hop headers
-    filtered_headers = {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}
-
-    # Set Host header to match the target
-    parsed = urllib.parse.urlparse(target_url)
-    filtered_headers["Host"] = parsed.netloc
+    filtered_headers = _prepare_request_headers(headers, target_url)
 
     try:
         resp = _proxy_session.request(

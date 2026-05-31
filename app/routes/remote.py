@@ -2169,14 +2169,13 @@ def remote_vscode_status(vscode_id):
     response = {"success": True, "status": status}
 
     if status == "running":
-        proxy_url = f"/api/remote/vscode/{vscode_id}/proxy/"
+        proxy_path = f"/api/remote/vscode/{vscode_id}/proxy/"
+        proxy_url = f"{request.host_url.rstrip('/')}{proxy_path}"
         browser_token = info.get("token", "")
         # NOTE: Token is passed in the query string so that the iframe src URL
-        # includes it for all sub-resource requests (JS, CSS, WS upgrades via
-        # the proxy path).  This is a deliberate trade-off — the alternative
-        # (cookie-based auth) would not survive cross-origin iframe contexts.
-        # The token is generated with secrets.token_hex(32) (256 bits of
-        # entropy) and is scoped to a single VSCode session.
+        # is absolute to Open ACE rather than relative to qwen-code-webui's
+        # iframe origin. The token is generated with secrets.token_hex(32)
+        # (256 bits of entropy) and is scoped to a single VSCode session.
         response["url"] = f"{proxy_url}?token={browser_token}"
     elif status == "error":
         response["error"] = info.get("error", "")

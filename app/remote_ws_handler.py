@@ -14,7 +14,8 @@ from __future__ import annotations
 import hmac
 import logging
 import re
-from urllib.parse import urlparse, urlunparse
+from http.cookies import SimpleCookie
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from gevent.pywsgi import WSGIHandler
 
@@ -29,12 +30,72 @@ _WS_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
-_VSCODE_WS_PATH_RE = re.compile(
+_VSCODE_LEGACY_WS_PATH_RE = re.compile(
     r"^/api/remote/vscode/"
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
     r"/ws$",
     re.IGNORECASE,
 )
+
+_VSCODE_PROXY_WS_PATH_RE = re.compile(
+    r"^/api/remote/vscode/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"/proxy(?P<path>/.*)?$",
+    re.IGNORECASE,
+)
+
+
+def _match_vscode_ws_path(path: str) -> tuple[str, str] | None:
+    """Return (vscode_id, upstream_path) for VSCode websocket proxy paths."""
+    legacy_match = _VSCODE_LEGACY_WS_PATH_RE.match(path)
+    if legacy_match:
+        return legacy_match.group(1), "/"
+
+    proxy_match = _VSCODE_PROXY_WS_PATH_RE.match(path)
+    if proxy_match:
+        return proxy_match.group(1), proxy_match.group("path") or "/"
+
+    return None
+
+
+def _query_token_and_upstream_query(query: str) -> tuple[str, str]:
+    """Extract Open ACE token and remove it from the upstream query string."""
+    token = ""
+    upstream_pairs = []
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if key == "token":
+            if not token:
+                token = value
+            continue
+        upstream_pairs.append((key, value))
+    return token, urlencode(upstream_pairs)
+
+
+def _cookie_value(cookie_header: str, name: str) -> str:
+    if not cookie_header:
+        return ""
+    try:
+        cookies = SimpleCookie()
+        cookies.load(cookie_header)
+        morsel = cookies.get(name)
+        return morsel.value if morsel else ""
+    except Exception:
+        return ""
+
+
+def _build_vscode_remote_ws_url(original_http_url: str, upstream_path: str, query: str) -> str:
+    """Build the remote code-server websocket URL for a proxied browser path."""
+    parsed = urlparse(original_http_url)
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunparse(
+        parsed._replace(
+            scheme=ws_scheme,
+            path=upstream_path or "/",
+            params="",
+            query=query,
+            fragment="",
+        )
+    )
 
 
 class RemoteWSHandler(WSGIHandler):
@@ -141,13 +202,13 @@ class RemoteWSHandler(WSGIHandler):
         if upgrade != "websocket":
             return False
         path = self.environ.get("PATH_INFO", "")
-        return _VSCODE_WS_PATH_RE.match(path) is not None
+        return _match_vscode_ws_path(path) is not None
 
     def _handle_vscode_ws(self) -> None:
         path = self.environ.get("PATH_INFO", "")
-        m = _VSCODE_WS_PATH_RE.match(path)
-        assert m is not None
-        vscode_id = m.group(1)
+        matched = _match_vscode_ws_path(path)
+        assert matched is not None
+        vscode_id, upstream_path = matched
 
         # WebSocket handshake directly on the raw socket.
         try:
@@ -158,12 +219,8 @@ class RemoteWSHandler(WSGIHandler):
             return
 
         # Parse token from query string.
-        token = ""
         query = self.environ.get("QUERY_STRING", "")
-        for part in query.split("&"):
-            if part.startswith("token="):
-                token = part[6:]
-                break
+        token, upstream_query = _query_token_and_upstream_query(query)
 
         # Look up VSCode info.
         from app.modules.workspace.vscode_store import vscode_info_store
@@ -179,6 +236,13 @@ class RemoteWSHandler(WSGIHandler):
 
         # Validate token.
         stored_token = info.get("token", "")
+        if not token:
+            token = _cookie_value(
+                self.environ.get("HTTP_COOKIE", ""),
+                f"vscode_token_{vscode_id}",
+            )
+        if not token and info.get("status") == "running":
+            token = stored_token
         if not token or not stored_token or not hmac.compare_digest(token, stored_token):
             logger.warning("VSCode WS handler: invalid token for vscode %s", vscode_id[:8])
             ws_frame.send_close(self.socket, 4001)
@@ -192,10 +256,11 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
-        # Convert http URL to ws URL using urllib.parse for safety
-        parsed = urlparse(original_http_url)
-        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
-        remote_ws_url = urlunparse(parsed._replace(scheme=ws_scheme))
+        remote_ws_url = _build_vscode_remote_ws_url(
+            original_http_url,
+            upstream_path,
+            upstream_query,
+        )
 
         # Bridge browser socket to remote code-server.
         try:
