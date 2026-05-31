@@ -33,6 +33,11 @@ HOP_BY_HOP_HEADERS = frozenset(
     ]
 )
 
+# Create a session that bypasses system proxy settings
+# System proxies (like SpeedCat) can interfere with direct IP access to remote machines
+_proxy_session = requests.Session()
+_proxy_session.trust_env = False
+
 
 def proxy_request(
     method: str,
@@ -60,12 +65,8 @@ def proxy_request(
     parsed = urllib.parse.urlparse(target_url)
     filtered_headers["Host"] = parsed.netloc
 
-    # Disable system proxy - remote code-server is accessed directly via IP
-    # Empty dict means no proxy (bypasses system proxy settings)
-    proxies: dict[str, str] = {}
-
     try:
-        resp = requests.request(
+        resp = _proxy_session.request(
             method=method,
             url=target_url,
             headers=filtered_headers,
@@ -73,7 +74,6 @@ def proxy_request(
             params=params,
             timeout=60,
             allow_redirects=False,
-            proxies=proxies,
         )
 
         # Build response headers, filtering hop-by-hop
@@ -123,13 +123,8 @@ def proxy_request_streaming(
     parsed = urllib.parse.urlparse(target_url)
     filtered_headers["Host"] = parsed.netloc
 
-    # Disable system proxy - remote code-server is accessed directly via IP
-    # System proxy settings may interfere with direct IP access
-    # Empty dict means no proxy (bypasses system proxy settings)
-    proxies: dict[str, str] = {}
-
     try:
-        resp = requests.request(
+        resp = _proxy_session.request(
             method=method,
             url=target_url,
             headers=filtered_headers,
@@ -138,7 +133,6 @@ def proxy_request_streaming(
             stream=True,
             timeout=60,
             allow_redirects=False,
-            proxies=proxies,
         )
 
         # Build response headers, filtering hop-by-hop
