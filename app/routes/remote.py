@@ -2261,10 +2261,11 @@ def remote_vscode_proxy(vscode_id, path=""):
     # For nested iframe scenarios (cookies blocked by SameSite), allow requests
     # without explicit token if the session is running. The proxy URL path
     # itself provides authentication (only valid vscode_id can be accessed).
-    # This is safe because:
-    # 1. vscode_id is a UUID with 256 bits of entropy
+    # This is a capability URL design:
+    # 1. vscode_id is a UUID4 (~122 bits of randomness)
     # 2. The URL is only visible to the user who started the session
     # 3. The session is scoped to a specific machine and project
+    # 4. The stored token (secrets.token_hex(32) = 256 bits) provides additional security
     if not token and info.get("status") == "running":
         # Use stored token for internal validation (not sent to browser)
         token = stored_token

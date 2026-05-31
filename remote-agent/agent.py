@@ -861,14 +861,11 @@ class RemoteAgent:
 
                 # Wait for READY:port output
                 port = self._read_terminal_port(proc, terminal_id)
-                # Close old PIPE file descriptors and redirect to DEVNULL
-                # to prevent pipe buffer deadlock.
-                old_stdout, old_stderr = proc.stdout, proc.stderr
-                proc.stdout = open(os.devnull, "wb")
-                proc.stderr = open(os.devnull, "wb")
-                old_stdout.close()
-                old_stderr.close()
+
                 if port:
+                    # Terminal restarted successfully - keep pipes open.
+                    # Do NOT close stdout/stderr pipes; they must remain open
+                    # for terminal_server.py to write logs without BrokenPipe.
                     self._terminal_ports[terminal_id] = port
                     hostname = self._get_reachable_hostname()
                     ws_url = f"ws://{hostname}:{port}"
