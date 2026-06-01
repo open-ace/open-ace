@@ -47,9 +47,7 @@ const JsonValidationIndicator: React.FC<JsonValidationIndicatorProps> = ({
     <div
       className={`mt-1 d-flex align-items-center ${validation.valid ? 'text-success' : 'text-danger'}`}
     >
-      <i
-        className={`bi ${validation.valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'} me-1`}
-      />
+      <i className={`bi ${validation.valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'} me-1`} />
       <small>
         {validation.valid
           ? t('jsonValid', language)
