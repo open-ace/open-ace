@@ -424,11 +424,7 @@ else
             # Run install with timeout (300s) and progress dots
             log_info "Running code-server installer..."
             _cs_killed=false
-            if command -v timeout &>/dev/null; then
-                timeout 300 sh "$CS_INSTALL_SCRIPT" &
-            else
-                sh "$CS_INSTALL_SCRIPT" &
-            fi
+            sh "$CS_INSTALL_SCRIPT" &
             CS_PID=$!
             _CS_START=$SECONDS
             while kill -0 "$CS_PID" 2>/dev/null; do
