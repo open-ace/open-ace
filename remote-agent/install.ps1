@@ -242,11 +242,16 @@ if ($SkipCodeServer) {
                 $prevErrorAction = $ErrorActionPreference
                 $ErrorActionPreference = "Continue"
                 # Run npm install with timeout (300s)
-                $job = Start-Job -ScriptBlock { npm install -g code-server 2>&1 }
+                # Pass full npm path since Start-Job doesn't inherit current session env
+                $npmPath = (Get-Command npm).Source
+                $job = Start-Job -ScriptBlock {
+                    param($p) & $p install -g code-server 2>&1; $LASTEXITCODE
+                } -ArgumentList $npmPath
                 $completed = Wait-Job $job -Timeout 300
                 if ($completed) {
                     $output = Receive-Job $job
-                    if ($job.State -eq 'Completed') {
+                    $exitCode = ($output | Select-Object -Last 1)
+                    if ($job.State -eq 'Completed' -and "$exitCode" -eq '0') {
                         $csInstalled = $true
                     }
                 } else {

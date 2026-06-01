@@ -423,27 +423,27 @@ else
         if [[ "$CS_DOWNLOAD_OK" == "true" ]]; then
             # Run install with timeout (300s) and progress dots
             log_info "Running code-server installer..."
+            _cs_killed=false
             if command -v timeout &>/dev/null; then
-                timeout 300 sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+                timeout 300 sh "$CS_INSTALL_SCRIPT" &
             else
-                # macOS fallback: background process with manual timeout
                 sh "$CS_INSTALL_SCRIPT" &
-                CS_PID=$!
-                _CS_START=$SECONDS
-                while kill -0 "$CS_PID" 2>/dev/null; do
-                    if [[ $(( SECONDS - _CS_START )) -gt 300 ]]; then
-                        kill "$CS_PID" 2>/dev/null
-                        log_warn "code-server install timed out after 300s"
-                        break
-                    fi
-                    sleep 5
-                    echo -n "."
-                done
-                echo ""
-                # Check if process exited 0 (only if not killed)
-                if wait "$CS_PID" 2>/dev/null; then
-                    CS_INSTALLED=true
+            fi
+            CS_PID=$!
+            _CS_START=$SECONDS
+            while kill -0 "$CS_PID" 2>/dev/null; do
+                if [[ $(( SECONDS - _CS_START )) -gt 300 ]]; then
+                    kill "$CS_PID" 2>/dev/null
+                    _cs_killed=true
+                    log_warn "code-server install timed out after 300s"
+                    break
                 fi
+                sleep 5
+                echo -n "."
+            done
+            echo ""
+            if [[ "$_cs_killed" == "false" ]] && wait "$CS_PID" 2>/dev/null; then
+                CS_INSTALLED=true
             fi
         else
             log_warn "Failed to download code-server install script (network timeout or unavailable)"
