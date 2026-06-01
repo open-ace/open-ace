@@ -6,6 +6,7 @@ Provides utility functions for the ai_token_usage project.
 """
 
 import os
+import re
 import sys
 from typing import Optional
 
@@ -46,14 +47,15 @@ def parse_date(date_str: str) -> Optional[str]:
         return None
 
 
+# Pattern to match placeholder values like <HOST_NAME>, <hostname>, etc.
+_PLACEHOLDER_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
+
+
 def _is_placeholder(value: str) -> bool:
     """Check if a value is a placeholder like <HOST_NAME>."""
     if not value:
         return False
-    import re
-
-    # Match placeholder patterns like <HOST_NAME>, <YOUR_API_KEY>, etc.
-    return bool(re.match(r"^<[A-Z_]+>$", value))
+    return bool(_PLACEHOLDER_PATTERN.match(value))
 
 
 def load_config(config_path: Optional[str] = None) -> dict:

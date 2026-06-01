@@ -10,7 +10,7 @@ import logging
 import os
 import re
 from functools import wraps
-from typing import Any
+from typing import Any, Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -18,14 +18,18 @@ from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
 
 
-def _is_placeholder_host_name(host_name: str) -> bool:
+# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
+_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
+
+
+def _is_placeholder_host_name(host_name: Optional[str]) -> bool:
     """Check if host_name is a placeholder like <HOST_NAME>."""
     if not host_name:
         return False
-    return bool(re.match(r"^<[A-Z_]+>$", host_name))
+    return bool(_PLACEHOLDER_HOST_PATTERN.match(host_name))
 
 
-def _sanitize_host_name(host_name: str) -> str:
+def _sanitize_host_name(host_name: Optional[str]) -> str:
     """Sanitize host_name, replacing placeholders/invalid values with localhost."""
     if not host_name or _is_placeholder_host_name(host_name):
         return "localhost"

@@ -6,6 +6,7 @@ Repository for usage data access operations.
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
@@ -14,6 +15,9 @@ from app.repositories.database import Database, escape_like, is_postgresql
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
+_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
 
 # Cache for JSON parsing to avoid repeated parsing of same strings
@@ -410,12 +414,10 @@ class UsageRepository:
 
         rows = self.db.fetch_all(query)
         # Additional Python-side filter for placeholder patterns
-        import re
-        placeholder_pattern = re.compile(r"^<[A-Z_]+>$")
         return [
             row["host_name"]
             for row in rows
-            if not placeholder_pattern.match(row["host_name"])
+            if not _PLACEHOLDER_HOST_PATTERN.match(row["host_name"])
         ]
 
     def get_daily_aggregated(
