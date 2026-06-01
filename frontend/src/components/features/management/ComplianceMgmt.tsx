@@ -155,10 +155,9 @@ export const ComplianceMgmt: React.FC = () => {
 
       // Download the report
       const isCsv = format === 'csv';
-      const blob = new Blob(
-        [isCsv ? (report as string) : JSON.stringify(report, null, 2)],
-        { type: isCsv ? 'text/csv' : 'application/json' }
-      );
+      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+        type: isCsv ? 'text/csv' : 'application/json',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -180,10 +179,9 @@ export const ComplianceMgmt: React.FC = () => {
     try {
       const report = await complianceApi.getSavedReport(reportId, reportFormat);
       const isCsv = reportFormat === 'csv';
-      const blob = new Blob(
-        [isCsv ? (report as string) : JSON.stringify(report, null, 2)],
-        { type: isCsv ? 'text/csv' : 'application/json' }
-      );
+      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+        type: isCsv ? 'text/csv' : 'application/json',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

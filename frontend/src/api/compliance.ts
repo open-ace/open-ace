@@ -150,12 +150,20 @@ export const complianceApi = {
     return response.reports;
   },
 
-  async getSavedReport(reportId: string, format?: 'json' | 'csv'): Promise<ComplianceReport | string> {
+  async getSavedReport(
+    reportId: string,
+    format?: 'json' | 'csv'
+  ): Promise<ComplianceReport | string> {
     const queryParams: Record<string, string> = format ? { format } : {};
     const isCsv = format === 'csv';
     if (isCsv) {
       // CSV format returns raw text
-      return apiClient.get<string>(`/api/compliance/reports/${reportId}`, queryParams, undefined, true);
+      return apiClient.get<string>(
+        `/api/compliance/reports/${reportId}`,
+        queryParams,
+        undefined,
+        true
+      );
     }
     return apiClient.get<ComplianceReport>(`/api/compliance/reports/${reportId}`, queryParams);
   },
