@@ -86,17 +86,32 @@ class TestAnalysisService:
     def test_get_user_ranking(self):
         svc, _, mock_msg, _ = self._make_service()
         mock_msg.get_user_token_totals.return_value = [
-            {"sender_name": "user1", "total_tokens": 5000, "message_count": 50},
-            {"sender_name": "user2", "total_tokens": 3000, "message_count": 30},
+            {
+                "user_id": 1,
+                "unified_username": "user1",
+                "sender_name": "user1",
+                "total_tokens": 5000,
+                "message_count": 50,
+            },
+            {
+                "user_id": 2,
+                "unified_username": "user2",
+                "sender_name": "user2",
+                "total_tokens": 3000,
+                "message_count": 30,
+            },
         ]
         result = svc.get_user_ranking("2026-05-01", "2026-05-23")
         assert len(result["users"]) == 2
         assert result["users"][0]["tokens"] == 5000
 
-    def test_get_user_ranking_cleans_machine_suffix(self):
+    def test_get_user_ranking_uses_unified_username(self):
+        """Test that get_user_ranking uses unified_username from get_user_token_totals."""
         svc, _, mock_msg, _ = self._make_service()
         mock_msg.get_user_token_totals.return_value = [
             {
+                "user_id": 1,
+                "unified_username": "testuser",  # unified username from users table
                 "sender_name": "testuser-MacBook-Pro.local",
                 "total_tokens": 1000,
                 "message_count": 10,
@@ -104,6 +119,32 @@ class TestAnalysisService:
         ]
         result = svc.get_user_ranking("2026-05-01", "2026-05-23")
         assert result["users"][0]["username"] == "testuser"
+        assert result["users"][0]["user_id"] == 1
+
+    def test_get_user_ranking_merges_duplicate_users(self):
+        """Test that multiple sender_names with same user_id are merged."""
+        svc, _, mock_msg, _ = self._make_service()
+        # Simulate merged result: same user_id appears only once
+        mock_msg.get_user_token_totals.return_value = [
+            {
+                "user_id": 1,
+                "unified_username": "alice",
+                "sender_name": "alice-host1-qwen",
+                "total_tokens": 3000,
+                "message_count": 30,
+            },
+            {
+                "user_id": -1,
+                "unified_username": "bob-host2-qwen",
+                "sender_name": "bob-host2-qwen",
+                "total_tokens": 2000,
+                "message_count": 20,
+            },
+        ]
+        result = svc.get_user_ranking("2026-05-01", "2026-05-23")
+        # Only 2 users, not 3 (alice merged)
+        assert len(result["users"]) == 2
+        assert result["users"][0]["username"] == "alice"
 
     def test_get_conversation_stats(self):
         svc, _, mock_msg, _ = self._make_service()
