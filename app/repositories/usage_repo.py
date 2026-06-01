@@ -404,11 +404,19 @@ class UsageRepository:
         query = """
             SELECT DISTINCT host_name
             FROM daily_messages
+            WHERE (host_name NOT LIKE '<%%>' OR host_name IS NULL)
             ORDER BY host_name
         """
 
         rows = self.db.fetch_all(query)
-        return [row["host_name"] for row in rows]
+        # Additional Python-side filter for placeholder patterns
+        import re
+        placeholder_pattern = re.compile(r"^<[A-Z_]+>$")
+        return [
+            row["host_name"]
+            for row in rows
+            if not placeholder_pattern.match(row["host_name"])
+        ]
 
     def get_daily_aggregated(
         self, start_date: str, end_date: str, host_name: Optional[str] = None

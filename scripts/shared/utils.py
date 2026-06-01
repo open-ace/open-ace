@@ -46,6 +46,16 @@ def parse_date(date_str: str) -> Optional[str]:
         return None
 
 
+def _is_placeholder(value: str) -> bool:
+    """Check if a value is a placeholder like <HOST_NAME>."""
+    if not value:
+        return False
+    import re
+
+    # Match placeholder patterns like <HOST_NAME>, <YOUR_API_KEY>, etc.
+    return bool(re.match(r"^<[A-Z_]+>$", value))
+
+
 def load_config(config_path: Optional[str] = None) -> dict:
     """Load configuration from JSON file."""
     import json
@@ -60,9 +70,18 @@ def load_config(config_path: Optional[str] = None) -> dict:
         with open(config_path) as f:
             config = json.load(f)
 
-    # If host_name is not set in config, use system hostname
-    if not config.get("host_name"):
+    # If host_name is not set or is a placeholder, use system hostname
+    host_name = config.get("host_name")
+    if not host_name or _is_placeholder(host_name):
         config["host_name"] = platform.node()
+
+    # Also clean up placeholder hostnames in tools config
+    tools = config.get("tools", {})
+    for tool_name, tool_cfg in tools.items():
+        if isinstance(tool_cfg, dict):
+            hostname = tool_cfg.get("hostname")
+            if hostname and _is_placeholder(hostname):
+                tool_cfg["hostname"] = platform.node()
 
     return config
 

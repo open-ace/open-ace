@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from functools import wraps
 from typing import Any
 
@@ -15,6 +16,21 @@ from flask import Blueprint, jsonify, request
 
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
+
+
+def _is_placeholder_host_name(host_name: str) -> bool:
+    """Check if host_name is a placeholder like <HOST_NAME>."""
+    if not host_name:
+        return False
+    return bool(re.match(r"^<[A-Z_]+>$", host_name))
+
+
+def _sanitize_host_name(host_name: str) -> str:
+    """Sanitize host_name, replacing placeholders/invalid values with localhost."""
+    if not host_name or _is_placeholder_host_name(host_name):
+        return "localhost"
+    return host_name
+
 
 upload_bp = Blueprint("upload", __name__)
 usage_service = UsageService()
@@ -66,7 +82,7 @@ def api_upload_usage():
     cache_tokens = data.get("cache_tokens", 0)
     request_count = data.get("request_count", 0)
     models_used = data.get("models_used")
-    host_name = data.get("host_name", "localhost")
+    host_name = _sanitize_host_name(data.get("host_name"))
 
     success = usage_service.save_usage(
         date=date,
@@ -117,7 +133,7 @@ def api_upload_messages():
                 tool_name=tool_name,
                 message_id=message_id,
                 role=role,
-                host_name=msg.get("host_name", "localhost"),
+                host_name=_sanitize_host_name(msg.get("host_name")),
                 parent_id=msg.get("parent_id"),
                 content=msg.get("content"),
                 full_entry=(
@@ -193,7 +209,7 @@ def api_upload_batch():
                 cache_tokens=u.get("cache_tokens", 0),
                 request_count=u.get("request_count", 0),
                 models_used=u.get("models_used"),
-                host_name=u.get("host_name", "localhost"),
+                host_name=_sanitize_host_name(u.get("host_name")),
             )
             if success:
                 results["usage"]["saved"] += 1
@@ -209,7 +225,7 @@ def api_upload_batch():
                 tool_name=m.get("tool_name"),
                 message_id=m.get("message_id"),
                 role=m.get("role"),
-                host_name=m.get("host_name", "localhost"),
+                host_name=_sanitize_host_name(m.get("host_name")),
                 parent_id=m.get("parent_id"),
                 content=m.get("content"),
                 full_entry=m.get("full_entry"),
