@@ -154,17 +154,16 @@ export const ComplianceMgmt: React.FC = () => {
       });
 
       // Download the report
-      if (format === 'json') {
-        const blob = new Blob([JSON.stringify(report, null, 2)], {
-          type: 'application/json',
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const isCsv = format === 'csv';
+      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+        type: isCsv ? 'text/csv' : 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
 
       // Refresh saved reports
       const reports = await complianceApi.getSavedReports();
@@ -179,10 +178,10 @@ export const ComplianceMgmt: React.FC = () => {
   const handleDownload = async (reportId: string, reportFormat: 'json' | 'csv') => {
     try {
       const report = await complianceApi.getSavedReport(reportId, reportFormat);
-      const blob = new Blob(
-        [reportFormat === 'json' ? JSON.stringify(report, null, 2) : (report as unknown as string)],
-        { type: reportFormat === 'json' ? 'application/json' : 'text/csv' }
-      );
+      const isCsv = reportFormat === 'csv';
+      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+        type: isCsv ? 'text/csv' : 'application/json',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

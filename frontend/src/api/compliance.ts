@@ -124,7 +124,12 @@ export const complianceApi = {
     format?: 'json' | 'csv';
     tenant_id?: number;
     filters?: Record<string, unknown>;
-  }): Promise<ComplianceReport> {
+  }): Promise<ComplianceReport | string> {
+    const isCsv = data.format === 'csv';
+    if (isCsv) {
+      // CSV format returns raw text
+      return apiClient.post<string>('/api/compliance/reports', data, undefined, undefined, true);
+    }
     return apiClient.post<ComplianceReport>('/api/compliance/reports', data);
   },
 
@@ -145,8 +150,21 @@ export const complianceApi = {
     return response.reports;
   },
 
-  async getSavedReport(reportId: string, format?: 'json' | 'csv'): Promise<ComplianceReport> {
+  async getSavedReport(
+    reportId: string,
+    format?: 'json' | 'csv'
+  ): Promise<ComplianceReport | string> {
     const queryParams: Record<string, string> = format ? { format } : {};
+    const isCsv = format === 'csv';
+    if (isCsv) {
+      // CSV format returns raw text
+      return apiClient.get<string>(
+        `/api/compliance/reports/${reportId}`,
+        queryParams,
+        undefined,
+        true
+      );
+    }
     return apiClient.get<ComplianceReport>(`/api/compliance/reports/${reportId}`, queryParams);
   },
 
