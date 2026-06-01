@@ -1,3 +1,3 @@
 {"rule": "SQL003", "file": "app/modules/governance/quota_manager.py", "line": 550, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 1020, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+{"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 1030, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
 {"rule": "SQL003", "file": "scripts/fetch_claude.py", "line": 831, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}

@@ -6,6 +6,7 @@ Provides fast dashboard queries by maintaining a summary table.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
@@ -14,6 +15,9 @@ from app.repositories.usage_repo import UsageRepository
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
+_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
 
 class SummaryService:
@@ -384,7 +388,13 @@ class SummaryService:
             SELECT DISTINCT host_name
             FROM usage_summary
             WHERE host_name != ''
+            AND (host_name NOT LIKE '<%%>' OR host_name IS NULL)
             ORDER BY host_name
         """
         rows = self.db.fetch_all(query)
-        return [row["host_name"] for row in rows]
+        # Additional Python-side filter for placeholder patterns
+        return [
+            row["host_name"]
+            for row in rows
+            if not _PLACEHOLDER_HOST_PATTERN.match(row["host_name"])
+        ]

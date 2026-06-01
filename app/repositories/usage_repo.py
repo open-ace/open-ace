@@ -6,6 +6,7 @@ Repository for usage data access operations.
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
@@ -14,6 +15,9 @@ from app.repositories.database import Database, escape_like, is_postgresql
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
+_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
 
 # Cache for JSON parsing to avoid repeated parsing of same strings
@@ -404,11 +408,17 @@ class UsageRepository:
         query = """
             SELECT DISTINCT host_name
             FROM daily_messages
+            WHERE (host_name NOT LIKE '<%%>' OR host_name IS NULL)
             ORDER BY host_name
         """
 
         rows = self.db.fetch_all(query)
-        return [row["host_name"] for row in rows]
+        # Additional Python-side filter for placeholder patterns
+        return [
+            row["host_name"]
+            for row in rows
+            if not _PLACEHOLDER_HOST_PATTERN.match(row["host_name"])
+        ]
 
     def get_daily_aggregated(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
