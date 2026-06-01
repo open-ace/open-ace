@@ -933,14 +933,25 @@ class AnalysisService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        anomaly_type: Optional[str] = None,
+        severity: Optional[str] = None,
     ) -> dict:
         """
         Get anomaly trend over time.
 
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            anomaly_type: Optional filter by anomaly type ('spike', 'drop').
+            severity: Optional filter by severity ('high', 'medium', 'low').
+
         Returns:
             Dict: Anomaly trend data grouped by date.
         """
-        anomaly_data = self.detect_anomalies(start_date, end_date, host_name)
+        anomaly_data = self.detect_anomalies(
+            start_date, end_date, host_name, anomaly_type, severity
+        )
         anomalies = anomaly_data.get("anomalies", [])
 
         # Group anomalies by date

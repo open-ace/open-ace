@@ -100,10 +100,16 @@ export function useAnomalyDetection(
   });
 }
 
-export function useAnomalyTrend(startDate?: string, endDate?: string, host?: string) {
+export function useAnomalyTrend(
+  startDate?: string,
+  endDate?: string,
+  host?: string,
+  type?: string,
+  severity?: string
+) {
   return useQuery({
-    queryKey: ['analysis', 'anomaly-trend', startDate, endDate, host],
-    queryFn: () => analysisApi.getAnomalyTrend(startDate, endDate, host),
+    queryKey: ['analysis', 'anomaly-trend', startDate, endDate, host, type, severity],
+    queryFn: () => analysisApi.getAnomalyTrend(startDate, endDate, host, type, severity),
     staleTime: 60 * 1000, // 1 minute
   });
 }
