@@ -182,3 +182,52 @@ class TestValidateCliSettingsPayload:
         error = validate_cli_settings_payload('{"codex-cli":"[broken"}')
         assert error is not None
         assert "Invalid Codex settings TOML" in error
+
+
+class TestToolModelPool:
+    """Test HA model-pool construction for integrated qwen sessions."""
+
+    def test_unions_models_across_priorities_with_stable_canonical_choice(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = APIKeyProxyService.__new__(APIKeyProxyService)
+        svc._list_tool_key_rows = lambda tenant_id, provider, tool_name, scope: [  # type: ignore[attr-defined]
+            {"id": 10, "priority": 200, "weight": 50, "scope": "remote"},
+            {"id": 30, "priority": 100, "weight": 100, "scope": "shared"},
+        ]
+        settings_by_id = {
+            10: {
+                "modelProviders": {
+                    "openai": [
+                        {"id": "shared-model", "name": "High Priority Shared"},
+                        {"id": "high-only", "name": "High Only"},
+                    ]
+                },
+                "theme": "kept-from-top-rank",
+            },
+            30: {
+                "modelProviders": {
+                    "openai": [
+                        {"id": "shared-model", "name": "Lower Priority Shared"},
+                        {"id": "low-only", "name": "Low Only"},
+                    ]
+                }
+            },
+        }
+        svc._get_tool_settings_from_row = lambda row, tool_name: settings_by_id[row["id"]]  # type: ignore[attr-defined]
+
+        pool = svc.get_tool_model_pool(tenant_id=1, tool_name="qwen-code", scope="remote")
+
+        assert [model["id"] for model in pool["models"]] == [
+            "high-only",
+            "shared-model",
+            "low-only",
+        ]
+        assert pool["models"][1]["name"] == "High Priority Shared"
+        assert pool["model_key_ids"]["shared-model"] == [10, 30]
+        assert pool["settings"]["theme"] == "kept-from-top-rank"
+        assert [model["id"] for model in pool["settings"]["modelProviders"]["openai"]] == [
+            "high-only",
+            "shared-model",
+            "low-only",
+        ]

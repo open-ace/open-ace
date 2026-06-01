@@ -14,12 +14,14 @@ import json
 import logging
 import os
 import time
+import urllib.parse
 import uuid
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 from app.modules.workspace.terminal_store import terminal_info_store
@@ -63,6 +65,12 @@ def load_user():
     if request.path.startswith("/api/remote/llm-proxy"):
         return
     if request.endpoint == "remote.terminal_websocket":
+        return
+    # VSCode proxy and WebSocket endpoints use their own token authentication
+    # (token in query string, validated against vscode_info_store)
+    if request.path.startswith("/api/remote/vscode/") and (
+        "/proxy/" in request.path or request.path.endswith("/ws")
+    ):
         return
     # Agent file downloads are public (needed for agent installation)
     if request.path.startswith("/api/remote/agent/files/"):
@@ -356,6 +364,7 @@ def create_remote_session():
     cli_tool = data.get("cli_tool", "qwen-code-cli")
     title = data.get("title", "")
     permission_mode = data.get("permission_mode")
+    ha_pool_token = data.get("ha_pool_token")
 
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
@@ -371,6 +380,7 @@ def create_remote_session():
         cli_tool=cli_tool,
         title=title,
         permission_mode=permission_mode,
+        ha_pool_token=ha_pool_token,
     )
 
     if result:
@@ -789,13 +799,18 @@ def agent_message():
     data = request.get_json() or {}
     msg_type = data.get("type")
 
-    # Debug: log all non-poll agent messages
+    # Debug: log all non-poll agent messages (filter sensitive fields)
     if msg_type not in ("poll", "heartbeat"):
         import sys
 
         status = data.get("status", "")
         stream = data.get("stream", "")
-        d = (data.get("data") or "")[:200]
+        # For vscode_status, filter out sensitive fields before logging
+        if msg_type == "vscode_status":
+            debug_data = {k: v for k, v in data.items() if k not in ("cs_password", "token")}
+            d = str(debug_data)[:200]
+        else:
+            d = (data.get("data") or "")[:200]
         print(
             f"AGENT-DEBUG type={msg_type} sid={(data.get('session_id') or '')[:8]} status={status} stream={stream} data={d}",
             file=sys.stderr,
@@ -962,6 +977,78 @@ def agent_message():
             logger.info("Stored browse result for request %s", request_id[:8])
         else:
             logger.warning("browse_result received without request_id")
+
+        return jsonify({"success": True})
+
+    elif msg_type == "git_result":
+        # Agent reports git command result (git_status, git_diff, git_file)
+        request_id = data.get("request_id", "")
+        success = data.get("success", False)
+        result = data.get("result")
+        error = data.get("error")
+
+        if request_id:
+            agent_mgr.store_browse_result(
+                request_id,
+                {
+                    "success": success,
+                    "result": result,
+                    "error": error,
+                },
+            )
+            logger.info("Stored git result for request %s", request_id[:8])
+        else:
+            logger.warning("git_result received without request_id")
+
+        return jsonify({"success": True})
+
+    elif msg_type == "vscode_status":
+        # Agent reports VSCode (code-server) status
+        from app.modules.workspace.vscode_store import vscode_info_store
+
+        vscode_id = data.get("vscode_id", "")
+        status = data.get("status", "")
+        http_url = data.get("http_url", "")
+        vscode_token = data.get("token", "")
+        cs_password = data.get("cs_password", "")  # code-server's own password
+        error = data.get("error", "")
+
+        machine_id_for_vs = data.get("machine_id", "")
+
+        if not vscode_id:
+            logger.warning("vscode_status received without vscode_id")
+            return jsonify({"success": True})
+
+        if status == "running" and http_url:
+            import secrets as _secrets
+
+            browser_token = _secrets.token_hex(32)
+            vscode_info_store.put(
+                machine_id_for_vs,
+                vscode_id,
+                {
+                    "status": "running",
+                    "original_http_url": http_url,
+                    "original_token": vscode_token,
+                    "cs_password": cs_password,  # Store code-server password for proxy
+                    "token": browser_token,
+                    "machine_id": machine_id_for_vs,
+                    "project_path": data.get("project_path", ""),
+                },
+            )
+            logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+        elif status == "stopped":
+            vscode_info_store.pop(machine_id_for_vs, vscode_id)
+            logger.info("VSCode %s stopped", vscode_id[:8])
+        elif status == "error":
+            vscode_info_store.put(
+                machine_id_for_vs,
+                vscode_id,
+                {"status": "error", "error": error, "machine_id": machine_id_for_vs},
+            )
+            logger.warning("VSCode %s error: %s", vscode_id[:8], error)
+        elif status == "not_found":
+            vscode_info_store.pop(machine_id_for_vs, vscode_id)
 
         return jsonify({"success": True})
 
@@ -1574,480 +1661,8 @@ def terminal_websocket(terminal_id):
 @remote_bp.route("/llm-proxy", methods=["POST", "HEAD"])
 @remote_bp.route("/llm-proxy/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "HEAD"])
 def llm_proxy(path=""):
-    """
-    Transparent LLM API proxy for remote CLI tools.
-
-    The remote CLI sends standard LLM API requests here with a proxy token
-    in the Authorization header. The server:
-    1. Validates the proxy token
-    2. Looks up the real API key
-    3. Checks quota
-    4. Forwards to the real LLM provider
-    5. Streams the response back
-    6. Records token usage
-    """
-    # Extract proxy token from Authorization header or x-api-key (Claude Code)
-    auth_header = request.headers.get("Authorization", "")
-    proxy_token = auth_header.replace("Bearer ", "").strip()
-    if not proxy_token:
-        proxy_token = request.headers.get("x-api-key", "").strip()
-
-    if not proxy_token:
-        if request.method == "HEAD":
-            return "", 401
-        return (
-            jsonify({"error": {"message": "Missing authorization token", "type": "auth_error"}}),
-            401,
-        )
-
-    # Validate proxy token
     api_proxy = get_api_key_proxy_service()
-    token_payload = api_proxy.validate_proxy_token(proxy_token)
-
-    if not token_payload:
-        return (
-            jsonify({"error": {"message": "Invalid or expired proxy token", "type": "auth_error"}}),
-            401,
-        )
-
-    user_id = token_payload["user_id"]
-    tenant_id = token_payload["tenant_id"]
-    provider = token_payload["provider"]
-    session_id = token_payload["session_id"]
-
-    # Check quota
-    try:
-        from app.modules.governance.quota_manager import QuotaManager
-
-        quota_mgr = QuotaManager()
-        quota_result = quota_mgr.check_quota(user_id)
-        if not quota_result["allowed"]:
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "message": f"Quota exceeded: {quota_result['reason']}",
-                            "type": "quota_exceeded",
-                        }
-                    }
-                ),
-                429,
-            )
-    except Exception as e:
-        logger.error(f"Quota check failed, denying request for safety: {e}")
-        return (
-            jsonify(
-                {
-                    "error": {
-                        "message": "Quota check unavailable - request denied for safety",
-                        "type": "quota_check_error",
-                    }
-                }
-            ),
-            429,
-        )
-
-    # Resolve real API key with scope filtering + failover loop.
-    # Retries until no more candidate keys remain for the provider/scope.
-    api_proxy = get_api_key_proxy_service()
-    exclude_key_ids: set[int] = set()
-    attempt = 0
-
-    while True:
-        attempt += 1
-        key_result = api_proxy.resolve_api_key_for_scope(
-            tenant_id, provider, scope="remote", exclude_key_ids=exclude_key_ids
-        )
-        if not key_result:
-            if exclude_key_ids:
-                # All candidate keys exhausted
-                return (
-                    jsonify(
-                        {
-                            "error": {
-                                "message": (
-                                    f"All {len(exclude_key_ids)} API key(s) failed "
-                                    f"for provider '{provider}'"
-                                ),
-                                "type": "upstream_error",
-                            }
-                        }
-                    ),
-                    502,
-                )
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "message": f"No API key configured for provider '{provider}'",
-                            "type": "config_error",
-                        }
-                    }
-                ),
-                500,
-            )
-
-        api_key, base_url, key_id = key_result
-
-        # Determine target URL
-        if base_url:
-            target_base = base_url.rstrip("/")
-            if target_base.endswith("/v1"):
-                target_base = target_base[:-3]
-        else:
-            provider_urls = {
-                "openai": "https://api.openai.com",
-                "anthropic": "https://api.anthropic.com",
-                "google": "https://generativelanguage.googleapis.com",
-            }
-            target_base = provider_urls.get(provider, "https://api.openai.com")
-
-        if path:
-            target_url = f"{target_base}/{path}"
-        else:
-            target_url = f"{target_base}{request.path.split('/llm-proxy')[-1]}"
-
-        # Log model from request body
-        try:
-            _body_json = json.loads(request.get_data())
-            _model = _body_json.get("model", "?")
-        except Exception:
-            _model = "?"
-        logger.info(
-            "LLM proxy: %s -> %s model=%s provider=%s key_id=%s attempt=%d",
-            request.method,
-            target_url,
-            _model,
-            provider,
-            key_id,
-            attempt,
-        )
-
-        # Log response status for debugging
-        _orig_target_url = target_url
-
-        # ------------------------------------------------------------------
-        # Responses API → Chat Completions conversion for non-OpenAI providers
-        # ------------------------------------------------------------------
-        # Codex CLI uses the OpenAI Responses API (POST /v1/responses) which
-        # many third-party providers (dashscope, etc.) do not support. When
-        # the target provider is not the real OpenAI and the request targets
-        # /v1/responses, we convert the request body to Chat Completions
-        # format and forward to /v1/chat/completions instead.
-        _converted_from_responses = False
-        # Check if the target provider actually supports the Responses API.
-        # Only the real OpenAI API (api.openai.com) supports /v1/responses.
-        # Third-party OpenAI-compatible providers (dashscope, etc.) typically
-        # only support /v1/chat/completions, so we convert the request.
-        _is_real_openai = "api.openai.com" in target_url
-        if path and path.endswith("/responses") and not _is_real_openai:
-            try:
-                resp_body = json.loads(request.get_data())
-                messages = []
-                # Extract input: can be a string or array of content items
-                input_data = resp_body.get("input", "")
-                if isinstance(input_data, str):
-                    messages.append({"role": "user", "content": input_data})
-                elif isinstance(input_data, list):
-                    # Build message list from input array
-                    for item in input_data:
-                        if isinstance(item, dict):
-                            role = item.get("role", "user")
-                            content = item.get("content", "")
-                            if isinstance(content, list):
-                                # Multi-part content
-                                content = " ".join(
-                                    p.get("text", "") for p in content if isinstance(p, dict)
-                                )
-                            # Map unsupported roles for non-OpenAI providers
-                            if role == "developer":
-                                role = "system"
-                            messages.append({"role": role, "content": content or ""})
-
-                # Add instructions as system message if present
-                instructions = resp_body.get("instructions")
-                if instructions:
-                    messages.insert(0, {"role": "system", "content": instructions})
-
-                if not messages:
-                    messages.append({"role": "user", "content": ""})
-
-                cc_body = {
-                    "model": resp_body.get("model", ""),
-                    "messages": messages,
-                    "stream": False,  # Non-streaming: we'll convert the response
-                }
-                if resp_body.get("max_output_tokens"):
-                    cc_body["max_tokens"] = resp_body["max_output_tokens"]
-                if resp_body.get("temperature") is not None:
-                    cc_body["temperature"] = resp_body["temperature"]
-
-                # Rewrite target URL to /v1/chat/completions
-                target_url = target_url.replace("/responses", "/chat/completions")
-                body = json.dumps(cc_body).encode("utf-8")
-                _converted_from_responses = True
-                logger.info(
-                    "LLM proxy: converted Responses API -> Chat Completions for %s "
-                    "(non-streaming; streaming conversion not yet implemented)",
-                    target_url,
-                )
-            except Exception as e:
-                logger.warning("Failed to convert Responses API request: %s", e)
-
-        # Forward the request
-        try:
-            import requests as http_requests
-
-            # Build forwarded headers
-            fwd_headers = {}
-            for key, value in request.headers:
-                if key.lower() in ("content-type", "accept", "user-agent"):
-                    fwd_headers[key] = value
-
-            # Set the real API key
-            if provider == "anthropic":
-                fwd_headers["x-api-key"] = api_key
-                fwd_headers["anthropic-version"] = "2023-06-01"
-            else:
-                fwd_headers["Authorization"] = f"Bearer {api_key}"
-
-            # Check if this is a streaming request
-            if not _converted_from_responses:
-                body = request.get_data()
-
-            # Forward the request (bypass system proxy to avoid interference)
-            resp = http_requests.request(
-                method=request.method,
-                url=target_url,
-                headers=fwd_headers,
-                data=body,
-                stream=True,
-                timeout=120,
-                proxies={"http": None, "https": None},  # type: ignore[dict-item]
-            )
-
-            if resp.status_code >= 400:
-                peek = (
-                    resp.content[:500]
-                    if not resp.headers.get("Content-Type", "").startswith("text/event-stream")
-                    else b""
-                )
-                logger.error(
-                    "LLM proxy error %d from %s key_id=%s: %s",
-                    resp.status_code,
-                    _orig_target_url,
-                    key_id,
-                    peek.decode("utf-8", errors="replace"),
-                )
-
-                # Failover: on auth/quota errors, exclude this key and retry
-                if resp.status_code in (401, 403):
-                    logger.info(
-                        "LLM proxy failover: excluding key_id=%s, retrying (attempt %d)",
-                        key_id,
-                        attempt,
-                    )
-                    exclude_key_ids.add(key_id)
-                    continue
-                if resp.status_code == 429:
-                    logger.info(
-                        "LLM proxy rate-limited: excluding key_id=%s, retrying (attempt %d)",
-                        key_id,
-                        attempt,
-                    )
-                    exclude_key_ids.add(key_id)
-                    continue
-
-            # If we converted from Responses API, convert the Chat Completions
-            # response back to Responses API format
-            if _converted_from_responses and resp.status_code == 200:
-                try:
-                    cc_resp = resp.json()
-                    # Build a minimal Responses API compatible response
-                    response_id = f"resp_{cc_resp.get('id', 'default')}"
-                    model = cc_resp.get("model", "")
-                    output_text = ""
-                    if cc_resp.get("choices"):
-                        output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
-                    usage = cc_resp.get("usage", {})
-
-                    # Return SSE stream in Responses API format
-                    import uuid as _uuid
-
-                    item_id = f"msg_{_uuid.uuid4().hex[:24]}"
-                    events: list[dict] = [
-                        {
-                            "type": "response.created",
-                            "response": {
-                                "id": response_id,
-                                "object": "response",
-                                "status": "in_progress",
-                                "model": model,
-                                "output": [],
-                                "usage": None,
-                            },
-                        },
-                        {
-                            "type": "response.output_item.added",
-                            "output_index": 0,
-                            "item": {
-                                "type": "message",
-                                "id": item_id,
-                                "status": "in_progress",
-                                "role": "assistant",
-                                "content": [],
-                            },
-                        },
-                        {
-                            "type": "response.content_part.added",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "part": {"type": "output_text", "text": ""},
-                        },
-                        {
-                            "type": "response.output_text.delta",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": output_text,
-                        },
-                        {
-                            "type": "response.output_text.done",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "text": output_text,
-                        },
-                        {
-                            "type": "response.content_part.done",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "part": {"type": "output_text", "text": output_text},
-                        },
-                        {
-                            "type": "response.output_item.done",
-                            "output_index": 0,
-                            "item": {
-                                "type": "message",
-                                "id": item_id,
-                                "status": "completed",
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": output_text}],
-                            },
-                        },
-                        {
-                            "type": "response.completed",
-                            "response": {
-                                "id": response_id,
-                                "object": "response",
-                                "status": "completed",
-                                "model": model,
-                                "output": [
-                                    {
-                                        "type": "message",
-                                        "id": item_id,
-                                        "status": "completed",
-                                        "role": "assistant",
-                                        "content": [{"type": "output_text", "text": output_text}],
-                                    }
-                                ],
-                                "usage": (
-                                    {
-                                        "input_tokens": usage.get("prompt_tokens", 0),
-                                        "output_tokens": usage.get("completion_tokens", 0),
-                                        "total_tokens": usage.get("total_tokens", 0),
-                                    }
-                                    if usage
-                                    else None
-                                ),
-                            },
-                        },
-                    ]
-
-                    def sse_stream(_events=events):  # noqa: B023
-                        for event in _events:
-                            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
-
-                    return Response(
-                        sse_stream(),
-                        status=200,
-                        content_type="text/event-stream",
-                    )
-                except Exception as e:
-                    logger.error("Failed to convert CC response to Responses format: %s", e)
-                    # Fall through to normal response handling
-
-            # Handle streaming response
-            content_type = resp.headers.get("Content-Type", "")
-
-            def generate(_resp=resp, _content_type=content_type):  # noqa: B023
-                total_content = b""
-                for chunk in _resp.iter_content(chunk_size=4096):
-                    total_content += chunk
-                    yield chunk
-
-                # After streaming completes, try to extract token usage
-                try:
-                    _record_llm_usage(total_content, session_id, user_id, provider, _content_type)
-                except Exception as e:
-                    logger.error(f"Failed to record LLM usage: {e}")
-
-            # Build response headers
-            response_headers = {}
-            for key, value in resp.headers.items():
-                if key.lower() in (
-                    "content-type",
-                    "x-request-id",
-                    "openai-organization",
-                ):
-                    response_headers[key] = value
-
-            if "text/event-stream" in content_type:
-                return Response(
-                    stream_with_context(generate()),
-                    status=resp.status_code,
-                    headers=response_headers,
-                    content_type=content_type,
-                )
-            else:
-                # Non-streaming response
-                content = resp.content
-                try:
-                    _record_llm_usage(content, session_id, user_id, provider, content_type)
-                except Exception as e:
-                    logger.error(f"Failed to record LLM usage: {e}")
-
-                return Response(
-                    content,
-                    status=resp.status_code,
-                    headers=response_headers,
-                    content_type=content_type,
-                )
-
-        except Exception as e:
-            logger.error(f"LLM proxy error: {e}")
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "message": f"Proxy error: {str(e)}",
-                            "type": "proxy_error",
-                        }
-                    }
-                ),
-                502,
-            )
-
-    # Should not reach here — all loop paths either return or continue
-    return (
-        jsonify(
-            {
-                "error": {
-                    "message": "All API key attempts failed",
-                    "type": "proxy_error",
-                }
-            }
-        ),
-        502,
-    )
+    return handle_llm_proxy_request(scope="remote", api_proxy=api_proxy, path=path)
 
 
 def _record_llm_usage(
@@ -2203,8 +1818,9 @@ def browse_remote_directory(machine_id):
     work_dir = machine.get("work_dir") or "/root/workspace"
     browse_path = path or work_dir
 
-    # Check if agent is online (accept both "online" and "idle" as active states)
-    if machine.get("status") not in ("online", "idle"):
+    # Check if agent is online (accept "online", "idle", and "busy" as active states)
+    # "busy" means the machine has active sessions but is still connected
+    if machine.get("status") not in ("online", "idle", "busy"):
         # Agent offline - return fallback response
         return jsonify(
             {
@@ -2354,3 +1970,414 @@ def create_remote_directory(machine_id):
             "error": result.get("error"),
         }
     )
+
+
+# ── Remote Git endpoints ────────────────────────────────────────────
+
+
+def _dispatch_remote_git_command(machine_id, command, required_params):
+    """Common auth check, agent lookup, command dispatch, and wait for git commands.
+
+    Args:
+        machine_id: The remote machine ID.
+        command: The git command to send (e.g. "git_status", "git_diff", "git_file").
+        required_params: List of query param names that must be present and non-empty.
+
+    Returns:
+        Flask JSON response tuple.
+    """
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    # Validate required query params
+    missing = [name for name in required_params if not request.args.get(name)]
+    if missing:
+        names = " and ".join(missing)
+        plural = "s" if len(missing) > 1 else ""
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"{names} parameter{plural} required",
+                }
+            ),
+            400,
+        )
+
+    # Map query param names to command payload names
+    # query "path" → command "project_path"
+    query_to_command = {"path": "project_path"}
+    payload = {}
+    for name in required_params:
+        key = query_to_command.get(name, name)
+        payload[key] = request.args.get(name)
+
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    request_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": command,
+            "request_id": request_id,
+            **payload,
+        },
+    )
+
+    result = agent_mgr.get_browse_result(request_id, timeout=15.0)
+
+    if result is None:
+        return (
+            jsonify({"success": False, "error": "Timeout waiting for agent response"}),
+            504,
+        )
+
+    return jsonify(
+        {
+            "success": result.get("success", False),
+            "result": result.get("result"),
+            "error": result.get("error"),
+        }
+    )
+
+
+@remote_bp.route("/machines/<machine_id>/git/status", methods=["GET"])
+def remote_git_status(machine_id):
+    """Get git status on a remote machine.
+
+    Query params: path (project path on the remote machine)
+    """
+    return _dispatch_remote_git_command(machine_id, "git_status", ["path"])
+
+
+@remote_bp.route("/machines/<machine_id>/git/diff", methods=["GET"])
+def remote_git_diff(machine_id):
+    """Get git diff for a specific file on a remote machine.
+
+    Query params: path (project path), file (relative file path)
+    """
+    return _dispatch_remote_git_command(machine_id, "git_diff", ["path", "file"])
+
+
+@remote_bp.route("/machines/<machine_id>/git/file", methods=["GET"])
+def remote_git_file(machine_id):
+    """Read a file from a remote machine.
+
+    Query params: path (project path), file (relative file path)
+    """
+    return _dispatch_remote_git_command(machine_id, "git_file", ["path", "file"])
+
+
+# ── Remote VSCode (code-server) endpoints ───────────────────────────
+
+
+@remote_bp.route("/vscode/start", methods=["POST"])
+def remote_vscode_start():
+    """Start a code-server instance on a remote machine."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id", "")
+    project_path = data.get("project_path", "")
+
+    if not machine_id or not project_path:
+        return jsonify({"success": False, "error": "machine_id and project_path are required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    if not agent_mgr.is_agent_connected(machine_id):
+        return jsonify({"success": False, "error": "Agent is not connected"}), 503
+
+    vscode_id = str(uuid.uuid4())
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "start_vscode",
+            "vscode_id": vscode_id,
+            "project_path": project_path,
+        },
+    )
+
+    return jsonify({"success": True, "vscode_id": vscode_id, "status": "pending"})
+
+
+@remote_bp.route("/vscode/stop", methods=["POST"])
+def remote_vscode_stop():
+    """Stop a code-server instance on a remote machine."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    vscode_id = data.get("vscode_id", "")
+    machine_id = data.get("machine_id", "")
+
+    if not vscode_id or not machine_id:
+        return jsonify({"success": False, "error": "vscode_id and machine_id are required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "stop_vscode",
+            "vscode_id": vscode_id,
+        },
+    )
+
+    # Clean up local store
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    vscode_info_store.pop(machine_id, vscode_id)
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route("/vscode/<vscode_id>/status", methods=["GET"])
+def remote_vscode_status(vscode_id):
+    """Get the status of a code-server instance."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        return jsonify({"success": True, "status": "unknown"})
+
+    machine_id, info = found
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    status = info.get("status", "unknown")
+    response = {"success": True, "status": status}
+
+    if status == "running":
+        proxy_path = f"/api/remote/vscode/{vscode_id}/proxy/"
+        proxy_url = f"{request.host_url.rstrip('/')}{proxy_path}"
+        browser_token = info.get("token", "")
+        # NOTE: Token is passed in the query string so that the iframe src URL
+        # is absolute to Open ACE rather than relative to qwen-code-webui's
+        # iframe origin. The token is generated with secrets.token_hex(32)
+        # (256 bits of entropy) and is scoped to a single VSCode session.
+        response["url"] = f"{proxy_url}?token={browser_token}"
+    elif status == "error":
+        response["error"] = info.get("error", "")
+
+    return jsonify(response)
+
+
+@remote_bp.route("/vscode/<vscode_id>/attach", methods=["POST"])
+def remote_vscode_attach(vscode_id):
+    """Re-attach to an existing code-server instance."""
+    if not hasattr(g, "user") or g.user is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    agent_mgr = get_remote_agent_manager()
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id", "")
+
+    if not machine_id:
+        return jsonify({"success": False, "error": "machine_id is required"}), 400
+
+    if g.user.get("role") != "admin":
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Access denied"}), 403
+
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "type": "command",
+            "command": "attach_vscode",
+            "vscode_id": vscode_id,
+        },
+    )
+
+    return jsonify({"success": True})
+
+
+@remote_bp.route(
+    "/vscode/<vscode_id>/proxy/<path:path>",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+@remote_bp.route(
+    "/vscode/<vscode_id>/proxy/",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+)
+def remote_vscode_proxy(vscode_id, path=""):
+    """HTTP reverse proxy to remote code-server.
+
+    Authentication is via the token in query string, validated against
+    vscode_info_store. No session_token cookie required (needed for iframe access).
+
+    For subsequent requests (static assets, API calls), the token can also be
+    provided via a vscode_token cookie, which is set on the first successful
+    request with a token in the query string.
+
+    For nested iframe scenarios where cookies don't work, we also allow
+    requests without token if the session is known to be running.
+    """
+    import hmac as _hmac
+
+    from app.modules.workspace.vscode_proxy import build_target_url, proxy_request_streaming
+    from app.modules.workspace.vscode_store import vscode_info_store
+
+    found = vscode_info_store.find_by_vscode_id(vscode_id)
+    if not found:
+        return jsonify({"error": "VSCode session not found"}), 404
+
+    machine_id, info = found
+
+    # Get stored token
+    stored_token = info.get("token", "")
+
+    if not stored_token:
+        return jsonify({"error": "VSCode session has no token"}), 500
+
+    # Validate token from query string or cookie
+    # Query string token takes precedence (used for initial iframe load)
+    token = request.args.get("token", "")
+
+    # If no token in query string, try cookie (for static assets, API calls)
+    if not token:
+        token = request.cookies.get(f"vscode_token_{vscode_id}", "")
+
+    # For nested iframe scenarios (cookies blocked by SameSite), allow requests
+    # without explicit token if the session is running. The proxy URL path
+    # itself provides authentication (only valid vscode_id can be accessed).
+    # This is a capability URL design - the security relies solely on:
+    # 1. vscode_id is a UUID4 (~122 bits of randomness), hard to guess
+    # 2. The URL is only visible to the user who started the session
+    # 3. The session is scoped to a specific machine and project
+    # Note: In this fallback case, we use stored_token for HMAC validation
+    # but the caller does NOT prove they hold it. The real access control
+    # is the vscode_id in the URL path (capability URL semantics).
+    if not token and info.get("status") == "running":
+        # Use stored token for internal validation (not sent to browser)
+        token = stored_token
+
+    if not token:
+        return jsonify({"error": "Invalid or missing token"}), 403
+
+    if not _hmac.compare_digest(token, stored_token):
+        return jsonify({"error": "Invalid token"}), 403
+
+    if info.get("status") != "running":
+        return jsonify({"error": "VSCode session is not running"}), 503
+
+    original_http_url = info.get("original_http_url", "")
+    if not original_http_url:
+        return jsonify({"error": "Remote URL not available"}), 500
+
+    # Build target URL
+    target_url = build_target_url(original_http_url, path)
+
+    # Preserve query params (except token)
+    params = dict(request.args)
+    params.pop("token", None)
+
+    # Collect request headers
+    headers = {k: v for k, v in request.headers if k.lower() != "host"}
+
+    # Add code-server password auth if available
+    # code-server uses HTTP Basic Auth with empty username and password
+    cs_password = info.get("cs_password", "")
+    if cs_password:
+        import base64 as _b64
+
+        # Format: base64(":password") = base64(password) with colon prefix
+        auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
+        headers["Authorization"] = f"Basic {auth_value}"
+
+    # Get request body
+    body = request.get_data()
+
+    # Proxy the request (streaming for efficient handling of large assets)
+    status_code, resp_headers, content_gen = proxy_request_streaming(
+        method=request.method,
+        target_url=target_url,
+        headers=headers,
+        body=body,
+        params=params if params else None,
+    )
+
+    # Build Flask streaming response
+    response = Response(
+        stream_with_context(content_gen),
+        status=status_code,
+    )
+    for k, v in resp_headers.items():
+        if k.lower() not in ("content-length", "content-encoding", "transfer-encoding"):
+            response.headers[k] = v
+
+    # Handle 302 redirect: preserve token in redirect URL
+    # code-server redirects to ./?folder=xxx, but this loses the token param
+    # We need to add the token back to the redirect Location
+    if status_code == 302 and request.args.get("token"):
+        location = resp_headers.get("Location", "")
+        if location and "token=" not in location:
+            # Handle relative paths properly using urljoin
+            # If location is relative (e.g., "./?folder=xxx"), resolve it against current URL
+            if (
+                location.startswith("./")
+                or location.startswith("/")
+                or not location.startswith("http")
+            ):
+                location = urllib.parse.urljoin(request.url, location)
+            # Add token to redirect URL
+            separator = "?" if "?" not in location else "&"
+            response.headers["Location"] = f"{location}{separator}token={token}"
+
+    # Set cookie on first request with query string token
+    # This allows subsequent static asset requests to be authenticated via cookie
+    # Note: Set on any successful response (including 302 redirect), not just 200
+    # Note: SameSite=Lax works for same-site iframe, but not nested cross-site iframe
+    if request.args.get("token") and status_code < 400:
+        cookie_name = f"vscode_token_{vscode_id}"
+        cookie_value = token
+        cookie_path = f"/api/remote/vscode/{vscode_id}/proxy/"
+        # Add Secure flag if request is HTTPS (for production security)
+        secure_flag = "; Secure" if request.is_secure else ""
+        # Directly set Set-Cookie header (set_cookie may not work with streaming responses)
+        response.headers["Set-Cookie"] = (
+            f"{cookie_name}={cookie_value}; "
+            f"Path={cookie_path}; "
+            f"Max-Age={24 * 3600}; "
+            f"HttpOnly; SameSite=Lax{secure_flag}"
+        )
+
+    return response
+
+
+@remote_bp.route("/vscode/<vscode_id>/ws")
+def remote_vscode_ws(vscode_id):
+    """Fallback for non-WebSocket requests to the VSCode WS endpoint.
+
+    Real WebSocket connections are intercepted by RemoteWSHandler
+    at the WSGI layer (see app/remote_ws_handler.py).
+    """
+    return jsonify({"error": "WebSocket upgrade required"}), 400

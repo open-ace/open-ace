@@ -808,6 +808,8 @@ const translations: Record<Language, Translations> = {
       'Configure non-sensitive Codex settings only (model, sandbox, etc.). Do NOT include API keys — they are injected via environment variables automatically.',
     claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
     qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
+    jsonValid: 'JSON is valid',
+    jsonInvalid: 'JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
 
     // Help Documents
@@ -1656,6 +1658,8 @@ const translations: Record<Language, Translations> = {
       '仅配置非敏感 Codex 设置（model、sandbox 等）。请勿填写 API Key — 系统会通过环境变量自动注入。',
     claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
     qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
+    jsonValid: 'JSON 格式正确',
+    jsonInvalid: 'JSON 格式错误',
     providerCannotChange: '提供商不可更改',
 
     // 帮助文档

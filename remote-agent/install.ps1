@@ -22,7 +22,8 @@ param(
 
     [string]$MachineName = $env:COMPUTERNAME,
     [string]$InstallCli = "qwen-code-cli",
-    [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent"
+    [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent",
+    [switch]$SkipCodeServer
 )
 
 $ErrorActionPreference = "Stop"
@@ -195,6 +196,83 @@ if ($InstallCli) {
     }
 }
 
+# Step 5.5: Install git and code-server
+Write-Host "[INFO] Checking for git and code-server..." -ForegroundColor Cyan
+
+# Install git if not present
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    $gitVer = git --version 2>&1
+    Write-Host "[OK] git already installed: $gitVer" -ForegroundColor Green
+} else {
+    Write-Host "[INFO] git not found, attempting to install..." -ForegroundColor Cyan
+    $gitInstalled = $false
+    try {
+        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+        if ($wingetCmd) {
+            winget install Git.Git --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+            $gitInstalled = $true
+        }
+    } catch {
+        # winget not available
+    }
+    if ($gitInstalled -and (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "[OK] git installed: $(git --version 2>&1)" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] Failed to install git. Remote workspace will be missing file changes panel." -ForegroundColor Yellow
+        Write-Host "       Please install git manually: https://git-scm.com/download/win" -ForegroundColor Yellow
+    }
+}
+
+# Install code-server if not present
+if ($SkipCodeServer) {
+    Write-Host "[INFO] Skipping code-server installation (-SkipCodeServer)" -ForegroundColor Cyan
+} else {
+    $csCmd = Get-Command code-server -ErrorAction SilentlyContinue
+    if ($csCmd) {
+        $csVer = code-server --version 2>&1 | Select-Object -First 1
+        Write-Host "[OK] code-server already installed: $csVer" -ForegroundColor Green
+    } else {
+        Write-Host "[INFO] code-server not found, attempting to install..." -ForegroundColor Cyan
+        Write-Host "[INFO] This may take a few minutes, please wait..." -ForegroundColor Cyan
+        $csInstalled = $false
+        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+        if ($npmCmd) {
+            try {
+                $prevErrorAction = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                # Run npm install with timeout (300s)
+                # Pass full npm path since Start-Job doesn't inherit current session env
+                $npmPath = (Get-Command npm).Source
+                $job = Start-Job -ScriptBlock {
+                    param($p) & $p install -g code-server 2>&1; $LASTEXITCODE
+                } -ArgumentList $npmPath
+                $completed = Wait-Job $job -Timeout 300
+                if ($completed) {
+                    $output = Receive-Job $job
+                    $exitCode = ($output | Select-Object -Last 1)
+                    if ($job.State -eq 'Completed' -and "$exitCode" -eq '0') {
+                        $csInstalled = $true
+                    }
+                } else {
+                    Stop-Job $job
+                    Write-Host "[WARN] code-server install timed out after 300s" -ForegroundColor Yellow
+                }
+                Remove-Job $job -Force -ErrorAction SilentlyContinue
+                $ErrorActionPreference = $prevErrorAction
+            } catch {
+                # npm install failed
+            }
+        }
+        if ($csInstalled -and (Get-Command code-server -ErrorAction SilentlyContinue)) {
+            Write-Host "[OK] code-server installed: $(code-server --version 2>&1 | Select-Object -First 1)" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] Failed to install code-server. Remote workspace will be missing VSCode editor." -ForegroundColor Yellow
+            Write-Host "       You can install it manually later: https://coder.com/docs/code-server/latest/install" -ForegroundColor Yellow
+        }
+    }
+}
+
 # Step 6: Generate machine ID and save config
 Write-Host "[INFO] Generating configuration..." -ForegroundColor Cyan
 $machineId = [guid]::NewGuid().ToString()
@@ -229,6 +307,10 @@ foreach ($cli in @("qwen", "claude", "openclaw")) {
     $cmd = Get-Command $cli -ErrorAction SilentlyContinue
     $capabilities["${cli}_installed"] = ($null -ne $cmd)
 }
+
+# Check git and code-server
+$capabilities["has_git"] = ($null -ne (Get-Command git -ErrorAction SilentlyContinue))
+$capabilities["has_code_server"] = ($null -ne (Get-Command code-server -ErrorAction SilentlyContinue))
 
 $body = @{
     registration_token = $RegistrationToken

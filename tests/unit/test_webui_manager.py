@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Tests for WebUI Manager — API key injection from database.
+Tests for WebUI Manager — local proxy environment wiring.
 
 Unit tests for WorkspaceConfig (without auth fields) and
-_inject_local_api_keys database-driven key injection.
+_configure_local_openai_proxy database-driven proxy wiring.
 """
 
 import json
@@ -88,12 +88,12 @@ class TestLoadConfig:
             assert not hasattr(manager.config, "auth_type")
 
 
-class TestInjectLocalApiKeys:
-    """Tests for _inject_local_api_keys database-driven key injection."""
+class TestConfigureLocalOpenAIProxy:
+    """Tests for local proxy environment wiring in multi-user mode."""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_inject_openai_key(self, mock_load):
-        """Test that OpenAI key from database is injected into env."""
+    def test_configure_openai_proxy(self, mock_load):
+        """Test that local qwen traffic is routed through Open ACE proxy."""
         config = WorkspaceConfig(enabled=True, token_secret="secret")
         mock_load.return_value = config
 
@@ -103,24 +103,35 @@ class TestInjectLocalApiKeys:
             "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
         ) as mock_get_proxy:
             mock_proxy = MagicMock()
-            mock_proxy.resolve_api_key_for_scope.return_value = (
-                "sk-db-key",
-                "https://api.example.com/v1",
-                42,
+            mock_proxy.get_tool_model_pool.return_value = {
+                "models": [{"id": "gpt-4.1", "name": "GPT-4.1"}],
+                "candidate_keys": [{"key_id": 42, "priority": 100, "weight": 100}],
+                "model_key_ids": {"gpt-4.1": [42]},
+                "settings": {"modelProviders": {"openai": [{"id": "gpt-4.1", "name": "GPT-4.1"}]}},
+                "empty_reason": None,
+            }
+            mock_proxy.generate_proxy_token.return_value = "proxy-token"
+            mock_get_proxy.return_value = mock_proxy
+
+            env = {}
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
+
+            assert env["OPENAI_API_KEY"] == "proxy-token"
+            assert (
+                env["OPENAI_BASE_URL"] == "http://openace.example:5000/api/workspace/llm-proxy/v1"
             )
-            mock_get_proxy.return_value = mock_proxy
-
-            env = {}
-            manager._inject_local_api_keys(env)
-
-            assert env["OPENAI_API_KEY"] == "sk-db-key"
-            assert env["OPENAI_BASE_URL"] == "https://api.example.com/v1"
-            # _inject_local_api_keys calls resolve for both openai and anthropic
-            assert mock_proxy.resolve_api_key_for_scope.call_count == 2
+            assert env["OPENACE_PROXY_URL"] == "http://openace.example:5000/api/workspace/llm-proxy"
+            assert pool["proxy_token"] == "proxy-token"
+            mock_proxy.get_tool_model_pool.assert_called_once_with(
+                tenant_id=1,
+                tool_name="qwen-code",
+                scope="local",
+                provider="openai",
+            )
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_inject_no_keys_available(self, mock_load):
-        """Test that env is unchanged when no keys are found in database."""
+    def test_configure_no_keys_available(self, mock_load):
+        """Test that empty model pools still produce a safe local proxy env."""
         config = WorkspaceConfig(enabled=True, token_secret="secret")
         mock_load.return_value = config
 
@@ -130,18 +141,26 @@ class TestInjectLocalApiKeys:
             "app.modules.workspace.api_key_proxy.get_api_key_proxy_service"
         ) as mock_get_proxy:
             mock_proxy = MagicMock()
-            mock_proxy.resolve_api_key_for_scope.return_value = None
+            mock_proxy.get_tool_model_pool.return_value = {
+                "models": [],
+                "candidate_keys": [],
+                "model_key_ids": {},
+                "settings": {},
+                "empty_reason": "No models",
+            }
+            mock_proxy.generate_proxy_token.return_value = "proxy-token"
             mock_get_proxy.return_value = mock_proxy
 
             env = {}
-            manager._inject_local_api_keys(env)
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
 
-            assert "OPENAI_API_KEY" not in env
-            assert "ANTHROPIC_API_KEY" not in env
+            assert env["OPENAI_API_KEY"] == "proxy-token"
+            assert pool["models"] == []
+            assert pool["empty_reason"] == "No models"
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
-    def test_inject_handles_exception(self, mock_load):
-        """Test that exceptions during key injection are handled gracefully."""
+    def test_configure_handles_exception(self, mock_load):
+        """Test that exceptions during model-pool lookup are handled gracefully."""
         config = WorkspaceConfig(enabled=True, token_secret="secret")
         mock_load.return_value = config
 
@@ -153,12 +172,14 @@ class TestInjectLocalApiKeys:
         ):
             env = {}
             # Should not raise
-            manager._inject_local_api_keys(env)
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
             assert "OPENAI_API_KEY" not in env
+            assert pool["models"] == []
+            assert pool["proxy_token"] == ""
 
     @patch("app.services.webui_manager.WebUIManager._load_config")
     def test_launch_process_calls_inject(self, mock_load):
-        """Test that _launch_webui_process calls _inject_local_api_keys."""
+        """Test that _launch_webui_process configures local proxy env."""
         config = WorkspaceConfig(
             enabled=True,
             multi_user_mode=False,
@@ -178,17 +199,20 @@ class TestInjectLocalApiKeys:
                 return_value=("/usr/local/bin/qwen-code-webui", None),
             ),
             patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
-            patch.object(manager, "_inject_local_api_keys") as mock_inject,
+            patch.object(
+                manager, "_configure_local_openai_proxy", return_value={"models": []}
+            ) as mock_proxy_setup,
             patch("subprocess.Popen") as mock_popen,
         ):
             mock_popen.return_value = MagicMock(pid=12345)
-            manager._launch_webui_process(1, "testuser", 9000)
+            _, model_pool = manager._launch_webui_process(1, "testuser", 9000)
 
-            # Verify _inject_local_api_keys was called
-            mock_inject.assert_called_once()
+            # Verify local proxy setup was called
+            mock_proxy_setup.assert_called_once()
             # Verify env was passed to Popen
             call_kwargs = mock_popen.call_args[1]
             assert "env" in call_kwargs
+            assert model_pool == {"models": []}
 
 
 if __name__ == "__main__":

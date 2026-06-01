@@ -243,6 +243,53 @@ class TestLLMProxyFailover:
         data = resp.get_json()
         assert "No API key configured" in data["error"]["message"]
 
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_ha_pool_failover_is_limited_to_selected_model_keys(
+        self, mock_get_proxy, mock_quota_cls, mock_http_req, app
+    ):
+        """Integrated-mode HA should only retry across keys that support the selected model."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = {
+            **_mock_proxy_token(),
+            "scope": "remote",
+            "ha_candidate_keys": [
+                {"key_id": 11, "priority": 200, "weight": 100},
+                {"key_id": 22, "priority": 100, "weight": 100},
+                {"key_id": 33, "priority": 50, "weight": 100},
+            ],
+            "ha_model_key_ids": {
+                "model-a": [11, 33],
+                "model-b": [22],
+            },
+        }
+        mock_proxy.resolve_api_key_from_key_ids.side_effect = [
+            ("sk-key1", "https://api.openai.com/v1", 11),
+            ("sk-key3", "https://api.openai.com/v1", 33),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+        mock_http_req.side_effect = [
+            _mock_upstream_response(429, b'{"error":{"message":"rate limited"}}'),
+            _mock_upstream_response(200),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "model-a", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 200
+        first_call, second_call = mock_proxy.resolve_api_key_from_key_ids.call_args_list
+        assert first_call.args[2] == [11, 33]
+        assert second_call.args[2] == [11, 33]
+        assert second_call.kwargs["exclude_key_ids"] == {11}
+        mock_proxy.resolve_api_key_for_scope.assert_not_called()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

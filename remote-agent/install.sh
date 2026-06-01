@@ -11,6 +11,7 @@
 #   --name NAME          Machine display name (default: hostname)
 #   --install-cli TOOL   Install a CLI tool: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   --dir DIR            Installation directory (default: ~/.open-ace-agent)
+#   --skip-code-server   Skip code-server installation
 #   --help               Show this help
 #
 
@@ -35,6 +36,7 @@ MACHINE_NAME=$(hostname)
 INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"
 AGENT_VERSION="1.0.0"
+SKIP_CODE_SERVER=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
         --dir)
             INSTALL_DIR="$2"
             shift 2
+            ;;
+        --skip-code-server)
+            SKIP_CODE_SERVER=true
+            shift
             ;;
         --help)
             head -20 "$0" | grep '^#' | sed 's/^# \?//'
@@ -344,6 +350,110 @@ if [[ -n "$INSTALL_CLI" ]]; then
     fi
 fi
 
+# Step 5.5: Install git and code-server
+log_info "Checking for git and code-server..."
+
+# Install git if not present
+if command -v git &>/dev/null; then
+    log_success "git already installed: $(git --version 2>/dev/null)"
+else
+    log_info "git not found, attempting to install..."
+    GIT_INSTALLED=false
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &>/dev/null; then
+            brew install git && GIT_INSTALLED=true
+        else
+            log_warn "Homebrew not found. Please install git manually: xcode-select --install"
+        fi
+    elif [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "$ID" in
+            debian|ubuntu|linuxmint|pop)
+                apt-get install -y git && GIT_INSTALLED=true
+                ;;
+            rhel|centos|fedora|rocky|almalinux|ol)
+                if command -v dnf &>/dev/null; then
+                    dnf install -y git && GIT_INSTALLED=true
+                else
+                    yum install -y git && GIT_INSTALLED=true
+                fi
+                ;;
+            alpine)
+                apk add --no-cache git && GIT_INSTALLED=true
+                ;;
+            arch|manjaro)
+                pacman -Sy --noconfirm git && GIT_INSTALLED=true
+                ;;
+            sles|suse)
+                zypper install -y git && GIT_INSTALLED=true
+                ;;
+            *)
+                log_warn "Unsupported OS: $ID. Cannot auto-install git."
+                ;;
+        esac
+    fi
+    if [[ "$GIT_INSTALLED" == "true" ]]; then
+        log_success "git installed: $(git --version 2>/dev/null)"
+    else
+        log_warn "Failed to install git. Remote workspace will be missing file changes panel."
+        log_warn "Please install git manually."
+    fi
+fi
+
+# Install code-server if not present
+if [[ "$SKIP_CODE_SERVER" == "true" ]]; then
+    log_info "Skipping code-server installation (--skip-code-server)"
+elif command -v code-server &>/dev/null; then
+    log_success "code-server already installed: $(code-server --version 2>/dev/null | head -1)"
+else
+    log_info "code-server not found, attempting to install..."
+    log_info "This may take a few minutes, please wait..."
+    CS_INSTALLED=false
+    if [[ "$(uname)" == "Darwin" ]] || [[ "$(uname)" == "Linux" ]]; then
+        CS_INSTALL_SCRIPT=$(mktemp)
+        CS_DOWNLOAD_OK=false
+
+        # Download install script with timeout
+        if command -v curl &>/dev/null; then
+            curl -fsSL --connect-timeout 10 --max-time 120 https://code-server.dev/install.sh -o "$CS_INSTALL_SCRIPT" && CS_DOWNLOAD_OK=true
+        elif command -v wget &>/dev/null; then
+            wget --timeout=120 -qO "$CS_INSTALL_SCRIPT" https://code-server.dev/install.sh && CS_DOWNLOAD_OK=true
+        fi
+
+        if [[ "$CS_DOWNLOAD_OK" == "true" ]]; then
+            # Run install with timeout (300s) and progress dots
+            log_info "Running code-server installer..."
+            _cs_killed=false
+            sh "$CS_INSTALL_SCRIPT" &
+            CS_PID=$!
+            _CS_START=$SECONDS
+            while kill -0 "$CS_PID" 2>/dev/null; do
+                if [[ $(( SECONDS - _CS_START )) -gt 300 ]]; then
+                    kill "$CS_PID" 2>/dev/null
+                    _cs_killed=true
+                    log_warn "code-server install timed out after 300s"
+                    break
+                fi
+                sleep 5
+                echo -n "."
+            done
+            echo ""
+            if [[ "$_cs_killed" == "false" ]] && wait "$CS_PID" 2>/dev/null; then
+                CS_INSTALLED=true
+            fi
+        else
+            log_warn "Failed to download code-server install script (network timeout or unavailable)"
+        fi
+        rm -f "$CS_INSTALL_SCRIPT"
+    fi
+    if [[ "$CS_INSTALLED" == "true" ]]; then
+        log_success "code-server installed: $(code-server --version 2>/dev/null | head -1)"
+    else
+        log_warn "Failed to install code-server. Remote workspace will be missing VSCode editor."
+        log_warn "You can install it manually later: https://coder.com/docs/code-server/latest/install"
+    fi
+fi
+
 # Step 6: Generate machine ID and save config
 log_info "Generating configuration..."
 MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
@@ -390,6 +500,9 @@ except:
 # Check installed CLIs
 for cli in ['qwen', 'claude', 'openclaw']:
     caps[f'{cli}_installed'] = shutil.which(cli) is not None
+# Check git and code-server
+caps['has_git'] = shutil.which('git') is not None
+caps['has_code_server'] = shutil.which('code-server') is not None
 print(json.dumps(caps))
 " 2>/dev/null || echo "{}")
 

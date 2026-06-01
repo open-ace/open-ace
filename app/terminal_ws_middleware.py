@@ -1,7 +1,7 @@
 """WSGI passthrough middleware for terminal WebSocket requests.
 
 Terminal WebSocket upgrades are now intercepted at the gevent WSGI handler
-level by ``TerminalWSHandler`` (see ``terminal_ws_handler.py``), which
+level by ``RemoteWSHandler`` (see ``remote_ws_handler.py``), which
 bypasses geventwebsocket entirely and uses raw socket I/O.
 
 This middleware is kept as a safety net: if a request somehow reaches the

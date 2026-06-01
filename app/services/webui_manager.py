@@ -43,6 +43,7 @@ class WebUIInstance:
     last_activity: datetime = field(default_factory=datetime.now)
     process: Optional[subprocess.Popen] = None
     url: str = ""
+    session_model_pool: dict[str, Any] = field(default_factory=dict)
 
     _last_health_check: float = 0.0
     _health_check_ttl: float = 30.0  # Cache health check result for 30s
@@ -479,7 +480,7 @@ class WebUIManager:
         process = None
 
         try:
-            process = self._launch_webui_process(user_id, system_account, port)
+            process, model_pool = self._launch_webui_process(user_id, system_account, port)
             pid = process.pid if process else None
 
             if process is None:
@@ -511,6 +512,7 @@ class WebUIManager:
             token=token,
             process=process,
             url=url,
+            session_model_pool=model_pool,
         )
 
         self._instances[user_id] = instance
@@ -533,43 +535,77 @@ class WebUIManager:
         except Exception:
             return {}
 
-    def _inject_local_api_keys(self, env: dict[str, str]) -> None:
-        """
-        Inject API keys from api_key_store into the child process environment.
+    def _build_local_session_model_pool(self, user_id: int) -> dict[str, Any]:
+        """Build the local qwen-code HA model pool snapshot for a webui instance."""
+        from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 
-        Resolves keys with scope='local' or scope='shared' and sets the
-        standard environment variables (OPENAI_API_KEY, OPENAI_BASE_URL,
-        ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL) for the webui subprocess.
+        api_proxy = get_api_key_proxy_service()
+        tenant_id = 1
+        pool = api_proxy.get_tool_model_pool(
+            tenant_id=tenant_id,
+            tool_name="qwen-code",
+            scope="local",
+            provider="openai",
+        )
+        proxy_token = api_proxy.generate_proxy_token(
+            user_id=user_id,
+            session_id=f"webui:{user_id}",
+            tenant_id=tenant_id,
+            provider="openai",
+            session_type="webui",
+            extra_payload={
+                "scope": "local",
+                "tool_name": "qwen-code",
+            },
+        )
+        return {
+            **pool,
+            "proxy_token": proxy_token,
+        }
+
+    def _configure_local_openai_proxy(
+        self,
+        user_id: int,
+        env: dict[str, str],
+        openace_api_url: str,
+    ) -> dict[str, Any]:
+        """
+        Route local multi-user qwen-code-webui traffic through the Open ACE proxy.
+
+        Returns the HA model pool snapshot that backs both request-time failover
+        and the integrated-model list shown in the iframe.
         """
         try:
-            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
-
-            api_proxy = get_api_key_proxy_service()
-            tenant_id = 1  # Default tenant for local workspace
-
-            # Resolve OpenAI provider key
-            openai_result = api_proxy.resolve_api_key_for_scope(tenant_id, "openai", scope="local")
-            if openai_result:
-                api_key, base_url, _ = openai_result
-                env["OPENAI_API_KEY"] = api_key
-                if base_url:
-                    env["OPENAI_BASE_URL"] = base_url
-
-            # Resolve Anthropic provider key
-            anthropic_result = api_proxy.resolve_api_key_for_scope(
-                tenant_id, "anthropic", scope="local"
-            )
-            if anthropic_result:
-                api_key, base_url, _ = anthropic_result
-                env["ANTHROPIC_API_KEY"] = api_key
-                if base_url:
-                    env["ANTHROPIC_BASE_URL"] = base_url
+            pool = self._build_local_session_model_pool(user_id)
+            proxy_token = str(pool.get("proxy_token", ""))
+            env["OPENAI_API_KEY"] = proxy_token
+            env["OPENAI_BASE_URL"] = f"{openace_api_url.rstrip('/')}/api/workspace/llm-proxy/v1"
+            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            env["OPENACE_PROXY_URL"] = f"{openace_api_url.rstrip('/')}/api/workspace/llm-proxy"
+            # qwen-code-webui reads the envKey from integrated model config;
+            # set all declared envKeys to the proxy token so the webui can find them
+            for model in pool.get("models", []):
+                env_key = model.get("envKey")
+                if env_key and env_key not in env:
+                    env[env_key] = proxy_token
+            return pool
         except Exception as e:
-            logger.warning("Failed to inject local API keys from database: %s", e)
+            logger.warning("Failed to configure local OpenAI proxy from database: %s", e)
+            return {
+                "provider": "openai",
+                "tool_name": "qwen-code",
+                "scope": "local",
+                "models": [],
+                "candidate_keys": [],
+                "model_key_ids": {},
+                "settings": {},
+                "empty_reason": "Failed to resolve local API key pool",
+                "proxy_token": "",
+            }
 
     def _launch_webui_process(
         self, user_id: int, system_account: str, port: int
-    ) -> Optional[subprocess.Popen]:
+    ) -> tuple[Optional[subprocess.Popen], dict[str, Any]]:
         """
         Launch a webui process as the specified user.
 
@@ -595,7 +631,7 @@ class WebUIManager:
 
         if not webui_cmd:
             logger.error("qwen-code-webui executable not found")
-            return None
+            return None, {}
 
         # Build openace_api_url from config
         openace_api_url = self.config.url  # e.g. "http://localhost"
@@ -605,8 +641,7 @@ class WebUIManager:
 
         # Build child environment first (needed for sudo env passing)
         child_env = os.environ.copy()
-        # Inject API keys from database for local workspace use
-        self._inject_local_api_keys(child_env)
+        model_pool = self._configure_local_openai_proxy(user_id, child_env, openace_api_url)
 
         # Set OPENACE_LOG_DIR to /tmp to avoid HOME permission issues
         webui_log_dir = f"/tmp/qwen-code-webui-{user_id}"
@@ -687,6 +722,10 @@ class WebUIManager:
             ]
             cwd = None
 
+        # All platforms: when proxy is configured, qwen-code CLI needs --auth-type openai
+        if child_env.get("OPENAI_API_KEY"):
+            cmd.extend(["--auth-type", "openai"])
+
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
@@ -704,10 +743,10 @@ class WebUIManager:
             )
             # Child has inherited the FD; parent no longer needs it
             os.close(log_fd)
-            return process
+            return process, model_pool
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
-            return None
+            return None, model_pool
 
     def _find_webui_executable(self) -> tuple[Optional[str], Optional[str]]:
         """

@@ -1,7 +1,7 @@
 """Tests for TerminalWebSocketMiddleware (issue #557).
 
 After issue #559, the middleware was simplified to a passthrough — terminal
-WebSocket handling moved to TerminalWSHandler at the WSGI handler level.
+WebSocket handling moved to RemoteWSHandler at the WSGI handler level.
 These tests verify the passthrough behavior.
 """
 
