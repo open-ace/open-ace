@@ -258,12 +258,16 @@ export const analysisApi = {
   async getAnomalyTrend(
     startDate?: string,
     endDate?: string,
-    host?: string
+    host?: string,
+    type?: string,
+    severity?: string
   ): Promise<AnomalyTrendResponse> {
     const params: Record<string, string> = {};
     if (startDate) params.start = startDate;
     if (endDate) params.end = endDate;
     if (host) params.host = host;
+    if (type) params.type = type;
+    if (severity) params.severity = severity;
 
     return apiClient.get<AnomalyTrendResponse>('/api/analysis/anomaly-trend', params);
   },

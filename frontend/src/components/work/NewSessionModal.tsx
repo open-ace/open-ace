@@ -65,7 +65,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const machines = useMemo(() => machinesData?.machines ?? [], [machinesData]);
 
   // Get default workspace path based on OS type
-  const getDefaultPath = (osType: string | null | undefined): string => {
+  const getDefaultPath = useCallback((osType: string | null | undefined): string => {
     const os = (osType ?? '').toLowerCase();
     if (os.includes('windows')) {
       return 'C:\\workspace';
@@ -74,7 +74,19 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       return '~/workspace';
     }
     return '/root/workspace';
-  };
+  }, []);
+
+  // Extract the last directory name from a path (cross-platform)
+  const getLastPathPart = useCallback((path: string): string => {
+    if (!path) return path;
+    // Handle both Unix and Windows paths
+    const parts = path.split(/[/\\]/).filter(Boolean);
+    // For Windows drive like "C:", return it directly
+    if (parts.length === 1 && parts[0].match(/^[A-Za-z]:$/)) {
+      return parts[0];
+    }
+    return parts[parts.length - 1] || path;
+  }, []);
 
   // Handle machine selection from RemoteMachineSelector
   const handleMachineSelect = useCallback(
@@ -84,7 +96,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
       }
     },
-    []
+    [getDefaultPath]
   );
 
   // Auto-select the only available machine
@@ -134,18 +146,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     () => machines.find((m) => m.machine_id === selectedMachineId),
     [machines, selectedMachineId]
   );
-
-  // Extract the last directory name from a path (cross-platform)
-  const getLastPathPart = (path: string): string => {
-    if (!path) return path;
-    // Handle both Unix and Windows paths
-    const parts = path.split(/[/\\]/).filter(Boolean);
-    // For Windows drive like "C:", return it directly
-    if (parts.length === 1 && parts[0].match(/^[A-Za-z]:$/)) {
-      return parts[0];
-    }
-    return parts[parts.length - 1] || path;
-  };
 
   const handleCreateLocal = () => {
     onClose();

@@ -107,7 +107,13 @@ export const AnomalyDetection: React.FC = () => {
   );
 
   // Fetch anomaly trend from backend API
-  const { data: trendData } = useAnomalyTrend(startDate, endDate, selectedHost || undefined);
+  const { data: trendData } = useAnomalyTrend(
+    startDate,
+    endDate,
+    selectedHost || undefined,
+    anomalyTypeFilter || undefined,
+    severityFilter || undefined
+  );
 
   // Fetch recommendations
   const { data: recommendations } = useRecommendations(selectedHost || undefined);
