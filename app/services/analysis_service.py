@@ -562,6 +562,9 @@ class AnalysisService:
         """
         Get user ranking by token usage.
 
+        Uses unified_username from get_user_token_totals which merges users by user_id.
+        This ensures users with multiple sender_name aliases appear as a single entry.
+
         Returns:
             Dict: User rankings with users array.
         """
@@ -570,24 +573,19 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        # Get user token usage from messages
+        # Get user token usage from messages (already merged by user_id)
         user_tokens = self.message_repo.get_user_token_totals(
             start_date=start_date, end_date=end_date, host_name=host_name
         )
 
-        # Sort by tokens and limit
+        # Build user ranking using unified_username
         users = []
         for i, user_data in enumerate(user_tokens[:limit]):
-            # Clean up username - remove machine-generated suffixes
-            username = user_data.get("sender_name", "Unknown")
-            if username and ".local" in username:
-                # Remove machine suffix like "rhuang-RichdeMacBook-Pro.local-openclaw"
-                # Just use the first part before any hyphen
-                username = username.split("-")[0]
+            username = user_data.get("unified_username", "Unknown")
 
             users.append(
                 {
-                    "user_id": i + 1,
+                    "user_id": user_data.get("user_id", i + 1),
                     "username": username,
                     "tokens": user_data.get("total_tokens", 0),
                     "requests": user_data.get("message_count", 0),

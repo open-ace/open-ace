@@ -646,42 +646,53 @@ class MessageRepository:
         """
         Get total tokens per user for segmentation analysis.
 
+        Merges users by user_id when available, falling back to sender_name for unmapped accounts.
+        This solves the issue where the same user appears multiple times with different
+        sender_name formats (e.g., user1-host1-qwen, user1-host2-qwen).
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
 
         Returns:
-            List[Dict]: List of user token totals.
+            List[Dict]: List of user token totals with unified_username field.
         """
-        conditions = []
+        conditions = ["dm.date IS NOT NULL"]
         params = []
 
         if start_date:
-            conditions.append("date >= ?")
+            conditions.append("dm.date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append("date <= ?")
+            conditions.append("dm.date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where_clause = f"WHERE {' AND '.join(conditions)}"
 
+        # Use LEFT JOIN to get unified username from users table
+        # Group by user_id when available, fallback to sender_name for unmapped accounts
+        # Use MAX/MIN for sender_name and sender_id as PostgreSQL requires all non-grouped
+        # columns to be in GROUP BY or aggregated
         query = f"""
             SELECT
-                sender_name,
-                sender_id,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens,
+                COALESCE(dm.user_id, -1) as user_id,
+                COALESCE(u.username, dm.sender_name) as unified_username,
+                MAX(dm.sender_name) as sender_name,
+                MAX(dm.sender_id) as sender_id,
+                SUM(dm.tokens_used) as total_tokens,
+                SUM(dm.input_tokens) as total_input_tokens,
+                SUM(dm.output_tokens) as total_output_tokens,
                 COUNT(*) as message_count
-            FROM daily_messages
+            FROM daily_messages dm
+            LEFT JOIN users u ON dm.user_id = u.id
             {where_clause}
-            GROUP BY sender_name, sender_id
+            GROUP BY COALESCE(dm.user_id, -1), COALESCE(u.username, dm.sender_name)
             ORDER BY total_tokens DESC
         """
 
