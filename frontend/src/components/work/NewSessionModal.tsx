@@ -62,7 +62,30 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const { data: machinesData, isLoading: machinesLoading } = useAvailableMachines();
   const createRemoteSession = useCreateRemoteSession();
 
-  const machines = machinesData?.machines ?? [];
+  const machines = useMemo(() => machinesData?.machines ?? [], [machinesData]);
+
+  // Get default workspace path based on OS type
+  const getDefaultPath = (osType: string | null | undefined): string => {
+    const os = (osType ?? '').toLowerCase();
+    if (os.includes('windows')) {
+      return 'C:\\workspace';
+    }
+    if (os.includes('darwin') || os.includes('mac')) {
+      return '~/workspace';
+    }
+    return '/root/workspace';
+  };
+
+  // Handle machine selection from RemoteMachineSelector
+  const handleMachineSelect = useCallback(
+    (machineId: string, machine: RemoteMachine | undefined) => {
+      setSelectedMachineId(machineId);
+      if (machine) {
+        setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
+      }
+    },
+    []
+  );
 
   // Auto-select the only available machine
   useEffect(() => {
@@ -70,7 +93,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       const machine = machines[0];
       handleMachineSelect(machine.machine_id, machine);
     }
-  }, [machines.length]);
+  }, [machines, selectedMachineId, handleMachineSelect]);
 
   // Load path history from localStorage when machine is selected
   useEffect(() => {
@@ -112,18 +135,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     [machines, selectedMachineId]
   );
 
-  // Get default workspace path based on OS type
-  const getDefaultPath = (osType: string | null | undefined): string => {
-    const os = (osType ?? '').toLowerCase();
-    if (os.includes('windows')) {
-      return 'C:\\workspace';
-    }
-    if (os.includes('darwin') || os.includes('mac')) {
-      return '~/workspace';
-    }
-    return '/root/workspace';
-  };
-
   // Extract the last directory name from a path (cross-platform)
   const getLastPathPart = (path: string): string => {
     if (!path) return path;
@@ -134,14 +145,6 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       return parts[0];
     }
     return parts[parts.length - 1] || path;
-  };
-
-  // Handle machine selection from RemoteMachineSelector
-  const handleMachineSelect = (machineId: string, machine: RemoteMachine | undefined) => {
-    setSelectedMachineId(machineId);
-    if (machine) {
-      setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
-    }
   };
 
   const handleCreateLocal = () => {

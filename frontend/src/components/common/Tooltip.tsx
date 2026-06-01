@@ -2,7 +2,7 @@
  * Tooltip Component - Hover tooltip with animations
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils';
 
@@ -35,7 +35,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
   const tooltipRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const calculatePosition = () => {
+  const calculatePosition = useCallback(() => {
     if (!triggerRef.current || !tooltipRef.current) return;
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
@@ -88,7 +88,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
 
     setPosition({ top, left });
     setActualPlacement(newPlacement);
-  };
+  }, [placement]);
 
   const showTooltip = () => {
     if (disabled) return;
@@ -108,7 +108,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
     if (isVisible) {
       calculatePosition();
     }
-  }, [isVisible]);
+  }, [isVisible, calculatePosition]);
 
   useEffect(() => {
     return () => {
