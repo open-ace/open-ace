@@ -17,7 +17,6 @@ from flask import Blueprint, jsonify, request
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
 
-
 # Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
 _PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
