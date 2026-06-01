@@ -69,7 +69,7 @@ export const AvatarUploader: React.FC<AvatarUploaderProps> = ({
         fileInputRef.current.value = '';
       }
     },
-    [language]
+    [language, toast]
   );
 
   const handleImageLoad = useCallback((img: HTMLImageElement) => {

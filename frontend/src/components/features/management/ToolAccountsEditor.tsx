@@ -2,7 +2,7 @@
  * ToolAccountsEditor Component - Edit tool accounts for a user
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, TextInput, Modal, Badge } from '@/components/common';
@@ -37,11 +37,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   const [showUnmappedModal, setShowUnmappedModal] = useState(false);
   const [selectedUnmapped, setSelectedUnmapped] = useState<string[]>([]);
 
-  useEffect(() => {
-    loadData();
-  }, [userId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [accounts, unmapped] = await Promise.all([
@@ -55,7 +51,11 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAddAccount = async () => {
     if (!newAccount.tool_account.trim()) return;
