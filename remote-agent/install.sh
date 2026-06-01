@@ -11,6 +11,7 @@
 #   --name NAME          Machine display name (default: hostname)
 #   --install-cli TOOL   Install a CLI tool: qwen-code-cli, claude-code (default: qwen-code-cli)
 #   --dir DIR            Installation directory (default: ~/.open-ace-agent)
+#   --skip-code-server   Skip code-server installation
 #   --help               Show this help
 #
 
@@ -35,6 +36,7 @@ MACHINE_NAME=$(hostname)
 INSTALL_CLI="qwen-code-cli"
 INSTALL_DIR="$HOME/.open-ace-agent"
 AGENT_VERSION="1.0.0"
+SKIP_CODE_SERVER=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
         --dir)
             INSTALL_DIR="$2"
             shift 2
+            ;;
+        --skip-code-server)
+            SKIP_CODE_SERVER=true
+            shift
             ;;
         --help)
             head -20 "$0" | grep '^#' | sed 's/^# \?//'
@@ -395,18 +401,52 @@ else
 fi
 
 # Install code-server if not present
-if command -v code-server &>/dev/null; then
+if [[ "$SKIP_CODE_SERVER" == "true" ]]; then
+    log_info "Skipping code-server installation (--skip-code-server)"
+elif command -v code-server &>/dev/null; then
     log_success "code-server already installed: $(code-server --version 2>/dev/null | head -1)"
 else
     log_info "code-server not found, attempting to install..."
+    log_info "This may take a few minutes, please wait..."
     CS_INSTALLED=false
     if [[ "$(uname)" == "Darwin" ]] || [[ "$(uname)" == "Linux" ]]; then
-        # Download install script to a temp file first (safer than piping to sh)
         CS_INSTALL_SCRIPT=$(mktemp)
+        CS_DOWNLOAD_OK=false
+
+        # Download install script with timeout
         if command -v curl &>/dev/null; then
-            curl -fsSL https://code-server.dev/install.sh -o "$CS_INSTALL_SCRIPT" && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+            curl -fsSL --connect-timeout 10 --max-time 120 https://code-server.dev/install.sh -o "$CS_INSTALL_SCRIPT" && CS_DOWNLOAD_OK=true
         elif command -v wget &>/dev/null; then
-            wget -qO "$CS_INSTALL_SCRIPT" https://code-server.dev/install.sh && sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+            wget --timeout=120 -qO "$CS_INSTALL_SCRIPT" https://code-server.dev/install.sh && CS_DOWNLOAD_OK=true
+        fi
+
+        if [[ "$CS_DOWNLOAD_OK" == "true" ]]; then
+            # Run install with timeout (300s) and progress dots
+            log_info "Running code-server installer..."
+            if command -v timeout &>/dev/null; then
+                timeout 300 sh "$CS_INSTALL_SCRIPT" && CS_INSTALLED=true
+            else
+                # macOS fallback: background process with manual timeout
+                sh "$CS_INSTALL_SCRIPT" &
+                CS_PID=$!
+                _CS_START=$SECONDS
+                while kill -0 "$CS_PID" 2>/dev/null; do
+                    if [[ $(( SECONDS - _CS_START )) -gt 300 ]]; then
+                        kill "$CS_PID" 2>/dev/null
+                        log_warn "code-server install timed out after 300s"
+                        break
+                    fi
+                    sleep 5
+                    echo -n "."
+                done
+                echo ""
+                # Check if process exited 0 (only if not killed)
+                if wait "$CS_PID" 2>/dev/null; then
+                    CS_INSTALLED=true
+                fi
+            fi
+        else
+            log_warn "Failed to download code-server install script (network timeout or unavailable)"
         fi
         rm -f "$CS_INSTALL_SCRIPT"
     fi
@@ -414,7 +454,7 @@ else
         log_success "code-server installed: $(code-server --version 2>/dev/null | head -1)"
     else
         log_warn "Failed to install code-server. Remote workspace will be missing VSCode editor."
-        log_warn "Please install manually: https://coder.com/docs/code-server/latest/install"
+        log_warn "You can install it manually later: https://coder.com/docs/code-server/latest/install"
     fi
 fi
 

@@ -22,7 +22,8 @@ param(
 
     [string]$MachineName = $env:COMPUTERNAME,
     [string]$InstallCli = "qwen-code-cli",
-    [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent"
+    [string]$InstallDir = "$env:USERPROFILE\.open-ace-agent",
+    [switch]$SkipCodeServer
 )
 
 $ErrorActionPreference = "Stop"
@@ -224,32 +225,46 @@ if ($gitCmd) {
 }
 
 # Install code-server if not present
-$csCmd = Get-Command code-server -ErrorAction SilentlyContinue
-if ($csCmd) {
-    $csVer = code-server --version 2>&1 | Select-Object -First 1
-    Write-Host "[OK] code-server already installed: $csVer" -ForegroundColor Green
+if ($SkipCodeServer) {
+    Write-Host "[INFO] Skipping code-server installation (-SkipCodeServer)" -ForegroundColor Cyan
 } else {
-    Write-Host "[INFO] code-server not found, attempting to install..." -ForegroundColor Cyan
-    $csInstalled = $false
-    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
-    if ($npmCmd) {
-        try {
-            $prevErrorAction = $ErrorActionPreference
-            $ErrorActionPreference = "Continue"
-            npm install -g code-server 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                $csInstalled = $true
-            }
-            $ErrorActionPreference = $prevErrorAction
-        } catch {
-            # npm install failed
-        }
-    }
-    if ($csInstalled -and (Get-Command code-server -ErrorAction SilentlyContinue)) {
-        Write-Host "[OK] code-server installed: $(code-server --version 2>&1 | Select-Object -First 1)" -ForegroundColor Green
+    $csCmd = Get-Command code-server -ErrorAction SilentlyContinue
+    if ($csCmd) {
+        $csVer = code-server --version 2>&1 | Select-Object -First 1
+        Write-Host "[OK] code-server already installed: $csVer" -ForegroundColor Green
     } else {
-        Write-Host "[WARN] Failed to install code-server. Remote workspace will be missing VSCode editor." -ForegroundColor Yellow
-        Write-Host "       Please install manually: https://coder.com/docs/code-server/latest/install" -ForegroundColor Yellow
+        Write-Host "[INFO] code-server not found, attempting to install..." -ForegroundColor Cyan
+        Write-Host "[INFO] This may take a few minutes, please wait..." -ForegroundColor Cyan
+        $csInstalled = $false
+        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+        if ($npmCmd) {
+            try {
+                $prevErrorAction = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                # Run npm install with timeout (300s)
+                $job = Start-Job -ScriptBlock { npm install -g code-server 2>&1 }
+                $completed = Wait-Job $job -Timeout 300
+                if ($completed) {
+                    $output = Receive-Job $job
+                    if ($job.State -eq 'Completed') {
+                        $csInstalled = $true
+                    }
+                } else {
+                    Stop-Job $job
+                    Write-Host "[WARN] code-server install timed out after 300s" -ForegroundColor Yellow
+                }
+                Remove-Job $job -Force -ErrorAction SilentlyContinue
+                $ErrorActionPreference = $prevErrorAction
+            } catch {
+                # npm install failed
+            }
+        }
+        if ($csInstalled -and (Get-Command code-server -ErrorAction SilentlyContinue)) {
+            Write-Host "[OK] code-server installed: $(code-server --version 2>&1 | Select-Object -First 1)" -ForegroundColor Green
+        } else {
+            Write-Host "[WARN] Failed to install code-server. Remote workspace will be missing VSCode editor." -ForegroundColor Yellow
+            Write-Host "       You can install it manually later: https://coder.com/docs/code-server/latest/install" -ForegroundColor Yellow
+        }
     }
 }
 
