@@ -837,7 +837,11 @@ class SessionManager:
                     duration_seconds = 0
                     if created_at_str:
                         try:
-                            created_at = datetime.fromisoformat(created_at_str)
+                            # PostgreSQL returns datetime objects, SQLite returns strings
+                            if isinstance(created_at_str, datetime):
+                                created_at = created_at_str
+                            else:
+                                created_at = datetime.fromisoformat(created_at_str)
                             duration_seconds = int((now - created_at).total_seconds())
                             # Cap at reasonable maximum (24 hours)
                             duration_seconds = min(duration_seconds, 24 * 3600)
