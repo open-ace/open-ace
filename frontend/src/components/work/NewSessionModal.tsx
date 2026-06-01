@@ -62,7 +62,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   const { data: machinesData, isLoading: machinesLoading } = useAvailableMachines();
   const createRemoteSession = useCreateRemoteSession();
 
-  const machines = machinesData?.machines ?? [];
+  const machines = useMemo(() => machinesData?.machines ?? [], [machinesData]);
 
   // Auto-select the only available machine
   useEffect(() => {
@@ -70,7 +70,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       const machine = machines[0];
       handleMachineSelect(machine.machine_id, machine);
     }
-  }, [machines.length]);
+  }, [machines, selectedMachineId, handleMachineSelect]);
 
   // Load path history from localStorage when machine is selected
   useEffect(() => {
@@ -137,12 +137,15 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   };
 
   // Handle machine selection from RemoteMachineSelector
-  const handleMachineSelect = (machineId: string, machine: RemoteMachine | undefined) => {
-    setSelectedMachineId(machineId);
-    if (machine) {
-      setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
-    }
-  };
+  const handleMachineSelect = useCallback(
+    (machineId: string, machine: RemoteMachine | undefined) => {
+      setSelectedMachineId(machineId);
+      if (machine) {
+        setProjectPath(machine.work_dir ?? getDefaultPath(machine.os_type));
+      }
+    },
+    []
+  );
 
   const handleCreateLocal = () => {
     onClose();
