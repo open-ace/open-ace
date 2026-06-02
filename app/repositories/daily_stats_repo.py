@@ -153,44 +153,86 @@ class DailyStatsRepository:
         """
         Get user token totals from pre-aggregated data.
 
+        This method merges users by user_id when available, falling back to
+        sender_name matching for unmapped accounts. This fixes Issue #626
+        where the same user appears multiple times with different sender_name
+        formats (e.g., WebUI format and Feishu format).
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
             host_name: Optional host name filter.
 
         Returns:
-            List[Dict]: List of user totals.
+            List[Dict]: List of user totals with unified_username field.
         """
-        conditions = ["sender_name IS NOT NULL"]  # Only include rows with sender
+        conditions = ["ds.sender_name IS NOT NULL"]  # Only include rows with sender
         params = []
 
         if start_date:
-            conditions.append("date >= ?")
+            conditions.append("ds.date >= ?")
             params.append(start_date)
 
         if end_date:
-            conditions.append("date <= ?")
+            conditions.append("ds.date <= ?")
             params.append(end_date)
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("ds.host_name = ?")
             params.append(host_name)
 
-        # Aggregate by sender_name (sum across all dates/tools)
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
-        query = f"""
-            SELECT
-                sender_name,
-                SUM(total_tokens) as total_tokens,
-                SUM(total_input_tokens) as total_input_tokens,
-                SUM(total_output_tokens) as total_output_tokens,
-                SUM(message_count) as message_count
-            FROM daily_stats
-            {where_clause}
-            GROUP BY sender_name
-            ORDER BY total_tokens DESC
-        """
+        if is_postgresql():
+            # PostgreSQL: use subquery for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(ds.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE ds.sender_name LIKE (u.system_account || '-%%')
+                            OR ds.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN ds.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTRING(ds.sender_name FROM '^[^-]+')
+                             ELSE ds.sender_name END) as unified_username,
+                    SUM(ds.total_tokens) as total_tokens,
+                    SUM(ds.total_input_tokens) as total_input_tokens,
+                    SUM(ds.total_output_tokens) as total_output_tokens,
+                    SUM(ds.message_count) as message_count
+                FROM daily_stats ds
+                LEFT JOIN users u ON ds.user_id = u.id
+                    OR ds.sender_name LIKE (u.system_account || '-%%')
+                    OR ds.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username
+                ORDER BY total_tokens DESC
+            """
+        else:
+            # SQLite: use subquery for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(ds.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE ds.sender_name LIKE (u.system_account || '-%%')
+                            OR ds.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN ds.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTR(ds.sender_name, 1, INSTR(ds.sender_name, '-') - 1)
+                             ELSE ds.sender_name END) as unified_username,
+                    SUM(ds.total_tokens) as total_tokens,
+                    SUM(ds.total_input_tokens) as total_input_tokens,
+                    SUM(ds.total_output_tokens) as total_output_tokens,
+                    SUM(ds.message_count) as message_count
+                FROM daily_stats ds
+                LEFT JOIN users u ON ds.user_id = u.id
+                    OR ds.sender_name LIKE (u.system_account || '-%%')
+                    OR ds.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username
+                ORDER BY total_tokens DESC
+            """
 
         return self.db.fetch_all(query, tuple(params))
 
@@ -348,6 +390,9 @@ class DailyStatsRepository:
         """
         Get all aggregates in a single query from pre-aggregated data.
 
+        This method counts unique_users by user_id instead of sender_name,
+        fixing Issue #626 where users were counted multiple times.
+
         Args:
             start_date: Optional start date filter.
             end_date: Optional end date filter.
@@ -373,19 +418,48 @@ class DailyStatsRepository:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        query = f"""
-            SELECT
-                SUM(message_count) as total_messages,
-                SUM(total_tokens) as total_tokens,
-                SUM(total_input_tokens) as total_input_tokens,
-                SUM(total_output_tokens) as total_output_tokens,
-                COUNT(DISTINCT tool_name) as unique_tools,
-                COUNT(DISTINCT host_name) as unique_hosts,
-                COUNT(DISTINCT sender_name) as unique_users,
-                COUNT(DISTINCT date) as unique_days
-            FROM daily_stats
-            {where_clause}
-        """
+        if is_postgresql():
+            # PostgreSQL: use subquery for user_id resolution
+            # Fallback to sender_name when user_id cannot be resolved
+            query = f"""
+                SELECT
+                    SUM(message_count) as total_messages,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(total_input_tokens) as total_input_tokens,
+                    SUM(total_output_tokens) as total_output_tokens,
+                    COUNT(DISTINCT tool_name) as unique_tools,
+                    COUNT(DISTINCT host_name) as unique_hosts,
+                    COUNT(DISTINCT COALESCE(user_id,
+                        (SELECT u.id FROM users u
+                         WHERE sender_name LIKE (u.system_account || '-%%')
+                            OR sender_name = u.username
+                         LIMIT 1),
+                        sender_name)) as unique_users,
+                    COUNT(DISTINCT date) as unique_days
+                FROM daily_stats
+                {where_clause}
+            """
+        else:
+            # SQLite: use subquery for user_id resolution
+            # Fallback to sender_name when user_id cannot be resolved
+            query = f"""
+                SELECT
+                    SUM(message_count) as total_messages,
+                    SUM(total_tokens) as total_tokens,
+                    SUM(total_input_tokens) as total_input_tokens,
+                    SUM(total_output_tokens) as total_output_tokens,
+                    COUNT(DISTINCT tool_name) as unique_tools,
+                    COUNT(DISTINCT host_name) as unique_hosts,
+                    COUNT(DISTINCT COALESCE(user_id,
+                        (SELECT u.id FROM users u
+                         WHERE sender_name LIKE (u.system_account || '-%%')
+                            OR sender_name = u.username
+                         LIMIT 1),
+                        sender_name)) as unique_users,
+                    COUNT(DISTINCT date) as unique_days
+                FROM daily_stats
+                {where_clause}
+            """
 
         result = self.db.fetch_one(query, tuple(params))
 
@@ -416,6 +490,10 @@ class DailyStatsRepository:
         """
         Refresh daily_stats from daily_messages.
 
+        This method aggregates daily_messages into daily_stats, populating user_id
+        by matching sender_name to users table. This fixes Issue #626 where users
+        were counted multiple times due to different sender_name formats.
+
         Args:
             date: Optional specific date to refresh. If None, refreshes all.
 
@@ -441,48 +519,71 @@ class DailyStatsRepository:
                     params,
                 )
 
-                # Insert new stats
+                # Insert new stats with user_id populated from users table
+                # sender_name formats:
+                # 1. WebUI: {system_account}-{hostname}-{tool} -> match users.system_account
+                # 2. Feishu: username (real name) -> match users.username
                 self.db.execute(
                     f"""
                     INSERT INTO daily_stats
-                    (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
-                     total_output_tokens, message_count, updated_at)
+                    (date, tool_name, host_name, sender_name, user_id, total_tokens,
+                     total_input_tokens, total_output_tokens, message_count, updated_at)
                     SELECT
-                        date,
-                        tool_name,
-                        host_name,
-                        sender_name,
-                        SUM(tokens_used) as total_tokens,
-                        SUM(input_tokens) as total_input_tokens,
-                        SUM(output_tokens) as total_output_tokens,
+                        dm.date,
+                        dm.tool_name,
+                        dm.host_name,
+                        dm.sender_name,
+                        COALESCE(dm.user_id,
+                            (SELECT u.id FROM users u
+                             WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                                OR dm.sender_name = u.username
+                             LIMIT 1)) as user_id,
+                        SUM(dm.tokens_used) as total_tokens,
+                        SUM(dm.input_tokens) as total_input_tokens,
+                        SUM(dm.output_tokens) as total_output_tokens,
                         COUNT(*) as message_count,
                         ?
-                    FROM daily_messages
+                    FROM daily_messages dm
                     WHERE {date_condition}
-                    GROUP BY date, tool_name, host_name, sender_name
+                    GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name,
+                             COALESCE(dm.user_id,
+                                (SELECT u.id FROM users u
+                                 WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                                    OR dm.sender_name = u.username
+                                 LIMIT 1))
                     """,
                     (now,) + params,
                 )
             else:
-                # SQLite: use INSERT OR REPLACE
+                # SQLite: use INSERT OR REPLACE with user_id populated
                 self.db.execute(
                     f"""
                     INSERT OR REPLACE INTO daily_stats
-                    (date, tool_name, host_name, sender_name, total_tokens, total_input_tokens,
-                     total_output_tokens, message_count, updated_at)
+                    (date, tool_name, host_name, sender_name, user_id, total_tokens,
+                     total_input_tokens, total_output_tokens, message_count, updated_at)
                     SELECT
-                        date,
-                        tool_name,
-                        host_name,
-                        sender_name,
-                        SUM(tokens_used) as total_tokens,
-                        SUM(input_tokens) as total_input_tokens,
-                        SUM(output_tokens) as total_output_tokens,
+                        dm.date,
+                        dm.tool_name,
+                        dm.host_name,
+                        dm.sender_name,
+                        COALESCE(dm.user_id,
+                            (SELECT u.id FROM users u
+                             WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                                OR dm.sender_name = u.username
+                             LIMIT 1)) as user_id,
+                        SUM(dm.tokens_used) as total_tokens,
+                        SUM(dm.input_tokens) as total_input_tokens,
+                        SUM(dm.output_tokens) as total_output_tokens,
                         COUNT(*) as message_count,
                         ?
-                    FROM daily_messages
+                    FROM daily_messages dm
                     WHERE {date_condition}
-                    GROUP BY date, tool_name, host_name, sender_name
+                    GROUP BY dm.date, dm.tool_name, dm.host_name, dm.sender_name,
+                             COALESCE(dm.user_id,
+                                (SELECT u.id FROM users u
+                                 WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                                    OR dm.sender_name = u.username
+                                 LIMIT 1))
                     """,
                     (now,) + params,
                 )

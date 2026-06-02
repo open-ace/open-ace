@@ -122,6 +122,7 @@ def _create_sqlite_tables(db):
                 tool_name TEXT,
                 host_name TEXT,
                 sender_name TEXT,
+                user_id INTEGER NULL,
                 total_tokens INTEGER DEFAULT 0,
                 total_input_tokens INTEGER DEFAULT 0,
                 total_output_tokens INTEGER DEFAULT 0,
@@ -298,7 +299,8 @@ def _create_sqlite_tables(db):
                 updated_at TEXT,
                 last_login TEXT,
                 deleted_at TEXT,
-                tenant_id INTEGER
+                tenant_id INTEGER,
+                system_account TEXT
             )
         """
         )
@@ -436,6 +438,7 @@ def _create_pg_tables(db):
                 tool_name TEXT,
                 host_name TEXT,
                 sender_name TEXT,
+                user_id INTEGER NULL,
                 total_tokens INTEGER DEFAULT 0,
                 total_input_tokens INTEGER DEFAULT 0,
                 total_output_tokens INTEGER DEFAULT 0,
@@ -607,7 +610,8 @@ def _create_pg_tables(db):
                 updated_at TEXT,
                 last_login TEXT,
                 deleted_at TEXT,
-                tenant_id INTEGER
+                tenant_id INTEGER,
+                system_account TEXT
             )
         """
         )
