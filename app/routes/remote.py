@@ -10,6 +10,7 @@ API endpoints for remote workspace management including:
 """
 
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -733,6 +734,15 @@ def agent_files(filename):
 # ==================== Agent Communication ====================
 
 
+def validate_ip(ip_str: str) -> bool:
+    """验证 IP 地址格式是否有效。"""
+    try:
+        ipaddress.ip_address(ip_str)
+        return True
+    except ValueError:
+        return False
+
+
 def get_client_ip_from_request() -> str:
     """从 HTTP Headers 或 remote_addr 获取客户端 IP（作为回退）。"""
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -771,7 +781,7 @@ def agent_register():
     
     # 优先使用 Agent 上报的 IP，否则从请求获取
     agent_reported_ip = data.get("ip_address")
-    if agent_reported_ip and agent_reported_ip != "127.0.0.1":
+    if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
         ip_address = agent_reported_ip
     else:
         ip_address = get_client_ip_from_request()
