@@ -16,9 +16,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of pending browser connections per terminal.
-MAX_PENDING_BRIDGES = 10
-
 
 class TerminalRelayStore:
     """Thread-safe store for terminal relay WebSocket connections.

@@ -141,7 +141,7 @@ def _get_backend_private_ip_prefix() -> str | None:
                 return "10."  # Class A private
             elif local_ip.startswith("192.168."):
                 return "192.168"  # Class C private
-            elif re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", local_ip):
+            elif re.match(r"^172\.(1[6-9]|2[0-9]|3[01])\.", local_ip):
                 return prefix  # Class B private (172.16-31)
         return None
     except Exception:
@@ -183,9 +183,9 @@ def _can_reach_directly(ws_url: str) -> bool:
                     return True  # Both in 10.x.x.x
                 if host.startswith("192.168.") and backend_prefix == "192.168":
                     return True  # Both in 192.168.x.x
-                if re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", host):
+                if re.match(r"^172\.(1[6-9]|2[0-9]|3[01])\.", host):
                     # Class B - check if in same 172.16-31 range
-                    if re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", backend_prefix or ""):
+                    if re.match(r"^172\.(1[6-9]|2[0-9]|3[01])\.", backend_prefix or ""):
                         # Both in 172.16-31 range, check exact subnet
                         backend_parts = backend_prefix.split(".")
                         if len(backend_parts) >= 2:
@@ -476,70 +476,31 @@ class RemoteWSHandler(WSGIHandler):
 
         # Check if relay connection exists (for private network machines).
         from app.modules.workspace.terminal_relay_store import terminal_relay_store
-        from app.modules.workspace.terminal_ws_bridge import bridge_browser_to_relay
 
-        relay_ws = terminal_relay_store.get_relay(terminal_id)
-        if relay_ws:
-            # Relay exists - bridge browser to relay.
-            logger.info(
-                "Terminal WS handler: using relay for terminal %s (machine %s)",
-                terminal_id[:8],
-                machine_id[:8],
-            )
-            try:
-                bridge_browser_to_relay(terminal_id, self.socket, relay_ws)
-            except Exception:
-                logger.exception(
-                    "Terminal WS handler: relay bridge failed for terminal %s", terminal_id[:8]
-                )
-                try:
-                    ws_frame.send_close(self.socket, 1011)
-                except Exception:
-                    pass
-            self.close_connection = True
-            return
-
-        # No relay - check if we should wait for relay (private IP) or try direct connection.
-        remote_ws_url = info.get("original_ws_url") or info.get("ws_url", "")
-        remote_token = info.get("original_token", "")
-        if not remote_ws_url or remote_ws_url.startswith("/"):
-            logger.error("Terminal WS handler: missing remote URL for terminal %s", terminal_id[:8])
-            ws_frame.send_close(self.socket, 1011)
-            self.close_connection = True
-            return
-
-        # Check if backend cannot directly reach the remote WebSocket URL.
-        if _needs_relay_cached(remote_ws_url):
-            # Cannot reach directly - need relay, add browser to pending queue.
-            logger.info(
-                "Terminal WS handler: backend cannot reach remote URL, waiting for relay for terminal %s",
-                terminal_id[:8],
-            )
+        # Use add_pending_browser for ALL relay paths to ensure _active_bridges
+        # tracking is consistent and concurrent access is prevented.
+        if terminal_relay_store.has_relay(terminal_id) or _needs_relay_cached(
+            info.get("original_ws_url") or info.get("ws_url", "")
+        ):
             from gevent.event import Event
 
-            # Create a "bridge done" event that relay handler will signal
             bridge_done_event = Event()
-
-            # Add raw browser socket to pending (relay handler will bridge)
-            if terminal_relay_store.add_pending_browser(
+            added = terminal_relay_store.add_pending_browser(
                 terminal_id, self.socket, bridge_done_event
-            ):
-                # Successfully added to pending - wait for relay to bridge
+            )
+            if added:
+                # No relay yet - wait for relay to connect and bridge
                 try:
-                    # Wait up to 30 seconds for bridge to start and complete
                     bridge_done_event.wait(timeout=30.0)
                     if not bridge_done_event.is_set():
                         logger.warning(
                             "Terminal WS handler: timeout waiting for relay for terminal %s",
                             terminal_id[:8],
                         )
-                        # Remove from pending to prevent bridging closed socket
                         terminal_relay_store.remove_pending_browser(terminal_id, self.socket)
                         ws_frame.send_close(self.socket, 1001, "Relay timeout")
                         self.close_connection = True
                     else:
-                        # Bridge completed, socket was handled by bridge
-                        # Don't close connection - bridge already closed it
                         self.close_connection = False
                 except Exception as e:
                     logger.info(
@@ -548,18 +509,26 @@ class RemoteWSHandler(WSGIHandler):
                         e,
                     )
                     self.close_connection = True
-                return
             else:
-                # add_pending_browser returned False — bridge was started by the store,
-                # or browser was rejected. Wait for bridge completion.
+                # Bridge was started by the store (or browser was rejected).
+                # Wait for bridge completion.
                 try:
                     bridge_done_event.wait(timeout=30.0)
                 except Exception:
                     pass
                 self.close_connection = True
-                return
+            return
 
-        # Public IP - try direct connection to remote terminal.
+        # No relay needed - check if we should try direct connection.
+        remote_ws_url = info.get("original_ws_url") or info.get("ws_url", "")
+        remote_token = info.get("original_token", "")
+        if not remote_ws_url or remote_ws_url.startswith("/"):
+            logger.error("Terminal WS handler: missing remote URL for terminal %s", terminal_id[:8])
+            ws_frame.send_close(self.socket, 1011)
+            self.close_connection = True
+            return
+
+        # Direct connection to remote terminal (public IP, no relay needed).
         try:
             from app.modules.workspace.terminal_ws_bridge import bridge_terminal_websocket_raw
 
