@@ -17,7 +17,14 @@
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Python-3.9%2B-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/React-18.3-61DAFB.svg" alt="React">
-  <img src="https://img.shields.io/badge/Flask-3.x-orange.svg" alt="Flask">
+  <img src="https://img.shields.io/badge/Flask-2.x-orange.svg" alt="Flask">
+</p>
+
+<p align="center">
+  <a href="https://www.open-ace.com">Website</a> ·
+  <a href="docs/README.md">Docs</a> ·
+  <a href="ROADMAP.md">Roadmap</a> ·
+  <a href="https://github.com/open-ace/open-ace/discussions">Discussions</a>
 </p>
 
 ---
@@ -26,12 +33,20 @@
 
 ## 🎯 这是什么？
 
-**Open ACE** 是一个开源的**企业级 AI 工作平台**，解决企业在 AI 应用中的两大核心问题：
+**Open ACE** 是一个开源的**企业级 AI 工作平台**：一边给团队成员提供统一的 AI 工作入口，一边给管理员提供用量、成本、权限、合规和审计视图。
+
+它适合正在把 Claude Code、Qwen Code、Codex、OpenClaw 等 AI 工具引入团队的组织，尤其适合需要私有化部署、统一治理和可量化 ROI 的研发团队、IT 团队和 AI 平台团队。
 
 | 问题 | 解决方案 |
 |------|----------|
 | 🤔 **AI 用得好不好？** | Work 模式让员工高效使用 AI，提升生产力 |
 | 😰 **AI 管得住管不住？** | Manage 模式让管理者全面掌控 AI 使用情况 |
+
+**你可以用 Open ACE 做什么：**
+
+- 给员工一个统一入口，管理 AI 会话、提示词、历史记录和远程工作区
+- 给管理者一套治理面板，查看 Token、成本、异常、配额、审计和 ROI
+- 在自己的网络里部署，保留企业数据边界，并逐步接入 SSO、飞书/钉钉和 Kubernetes
 
 ## ✨ 两种模式，双重价值
 
@@ -127,7 +142,7 @@ python3 web.py
 |------|--------|------|
 | 管理员 | admin | admin123 |
 
-> ⚠️ 生产环境请务必修改默认密码！
+> ⚠️ 默认账号仅用于本地首次启动。生产环境请务必设置 `SECRET_KEY`、修改默认密码，并参考 [部署指南](docs/cn/DEPLOYMENT.md) 完成安全配置。
 
 ---
 
@@ -227,11 +242,11 @@ open-ace/
 
 | 文档 | 说明 |
 |------|------|
-| [架构说明](docs/ARCHITECTURE.md) | 系统架构与核心概念 |
-| [部署指南](docs/DEPLOYMENT.md) | 本地与生产环境部署 |
-| [开发指南](docs/DEVELOPMENT.md) | 参与开发 |
-| [飞书配置](docs/FEISHU_CONFIG.md) | 飞书集成配置 |
-| [API 文档](docs/API.md) | API 接口说明 |
+| [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
+| [部署指南](docs/cn/DEPLOYMENT.md) | 本地与生产环境部署 |
+| [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
+| [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
+| [API 文档](docs/cn/API.md) | API 接口说明 |
 
 ---
 
@@ -241,6 +256,7 @@ open-ace/
 
 - 🐛 发现 Bug？[提交 Issue](https://github.com/open-ace/open-ace/issues)
 - 💡 有想法？[参与讨论](https://github.com/open-ace/open-ace/discussions)
+- 🗺️ 想了解计划？查看 [Roadmap](ROADMAP.md)
 - 🔧 想贡献代码？阅读 [贡献指南](CONTRIBUTING.md)
 
 ---
@@ -262,12 +278,20 @@ open-ace/
 
 ## 🎯 What is This?
 
-**Open ACE** is an open-source **Enterprise AI Work Platform** that solves two core challenges in enterprise AI adoption:
+**Open ACE** is an open-source **Enterprise AI Work Platform**: it gives employees a unified AI work entry point and gives administrators visibility into usage, cost, access control, compliance, and audit trails.
+
+It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and OpenClaw, especially organizations that need self-hosted deployment, centralized governance, and measurable AI ROI.
 
 | Challenge | Solution |
 |-----------|----------|
 | 🤔 **Are we using AI effectively?** | Work Mode empowers employees to use AI efficiently and boost productivity |
 | 😰 **Is AI under control?** | Manage Mode gives administrators full visibility and control over AI usage |
+
+**What you can do with Open ACE:**
+
+- Give employees one workspace for AI sessions, prompts, history, and remote workspaces
+- Give administrators dashboards for tokens, cost, anomalies, quotas, audits, and ROI
+- Deploy inside your own network while integrating SSO, Feishu/DingTalk, and Kubernetes over time
 
 ## ✨ Two Modes, Double Value
 
@@ -363,7 +387,7 @@ python3 web.py
 |------|----------|----------|
 | Admin | admin | admin123 |
 
-> ⚠️ Please change the default password in production!
+> ⚠️ The default account is only for the first local startup. For production, set `SECRET_KEY`, change the default password, and follow the [Deployment Guide](docs/en/DEPLOYMENT.md).
 
 ---
 
@@ -463,11 +487,11 @@ open-ace/
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](docs/ARCHITECTURE.md) | System architecture and concepts |
-| [Deployment](docs/DEPLOYMENT.md) | Local and production deployment |
-| [Development](docs/DEVELOPMENT.md) | Contributing guide |
-| [Feishu Config](docs/FEISHU_CONFIG.md) | Feishu integration |
-| [API Reference](docs/API.md) | API documentation |
+| [Architecture](docs/en/ARCHITECTURE.md) | System architecture and concepts |
+| [Deployment](docs/en/DEPLOYMENT.md) | Local and production deployment |
+| [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
+| [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
+| [API Reference](docs/en/API.md) | API documentation |
 
 ---
 
@@ -477,6 +501,7 @@ We welcome all forms of contribution!
 
 - 🐛 Found a bug? [Submit an Issue](https://github.com/open-ace/open-ace/issues)
 - 💡 Have an idea? [Join the discussion](https://github.com/open-ace/open-ace/discussions)
+- 🗺️ Want to see what's next? Read the [Roadmap](ROADMAP.md)
 - 🔧 Want to contribute code? Read the [Contributing Guide](CONTRIBUTING.md)
 
 ---

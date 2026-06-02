@@ -27,6 +27,7 @@ Documentation files are in the [en/](en/) directory.
 | [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
+| [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist |
 
 ### Reading Guide by Role
 
@@ -63,6 +64,7 @@ Documentation files are in the [en/](en/) directory.
 | [**DEVELOPMENT**](cn/DEVELOPMENT.md) | 开发环境搭建、项目结构和测试 |
 | [**FEISHU-CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |
 | [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
+| [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub 仓库 topics、labels、releases 和 Demo 检查清单 |
 
 ### 按角色阅读指南
 
