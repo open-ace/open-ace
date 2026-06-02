@@ -4,51 +4,83 @@
 
 Open ACE supports the following keyboard shortcuts to help users use the system more efficiently.
 
-> Tip: macOS users use the Cmd key, Windows/Linux users use the Ctrl key.
-
-## Workspace/Tab Management
-
-- **Cmd+Shift+<** (macOS) / **Ctrl+Shift+<** (Win/Linux): Switch to previous tab
-- **Cmd+Shift+>** (macOS) / **Ctrl+Shift+>** (Win/Linux): Switch to next tab
-
-## AI Conversation Interface (inside iframe)
-
-- **Cmd+Left Arrow** / **Ctrl+Left Arrow**: Switch to previous tab
-- **Cmd+Right Arrow** / **Ctrl+Right Arrow**: Switch to next tab
-
-## Fullscreen Mode
-
-- **Esc**: Exit workspace fullscreen mode
-- **Esc**: Exit conversation history fullscreen mode
-
-## Popups/Modals
-
-- **Esc**: Close current popup/modal
-- **Enter**: Submit form or confirm action
-
-## Dropdown Menus
-
-- **Esc**: Close dropdown menu
-
-## Searchable Select Boxes
-
-- **Esc**: Close select box and clear search content
-- **Enter**: Select first matching option
-
-## Rename Conversation
-
-- **Enter**: Save new conversation name
-- **Esc**: Cancel rename operation
-
-## Input Box Submission
-
-- Quota Management: **Enter** Save quota settings
-- Quota Alerts: **Enter** Save alert configuration
-
-## Confirmation Dialogs
-
-- **Enter**: Execute confirm action
+> **Tip**: macOS users use the **Cmd** key, Windows/Linux users use the **Ctrl** key.
 
 ---
 
-All shortcuts above are implemented in the current version.
+## Tab Switching
+
+The following shortcuts work in both the workspace and AI conversation interface (inside iframe):
+
+| Shortcut | Function |
+|----------|----------|
+| **Cmd+Shift+<** / **Ctrl+Shift+<** | Switch to previous tab |
+| **Cmd+Shift+>** / **Ctrl+Shift+>** | Switch to next tab |
+
+> **Note**: `<` corresponds to the Comma key, `>` corresponds to the Period key.
+
+---
+
+## Fullscreen Mode
+
+| Shortcut | Function |
+|----------|----------|
+| **Esc** | Exit current fullscreen mode (workspace fullscreen / conversation history fullscreen) |
+
+---
+
+## Popups/Modals
+
+| Shortcut | Function |
+|----------|----------|
+| **Esc** | Close current popup or modal |
+| **Enter** | Submit form or confirm action |
+
+---
+
+## Dropdown Menus
+
+| Shortcut | Function |
+|----------|----------|
+| **Esc** | Close dropdown menu |
+
+---
+
+## Searchable Select Boxes
+
+| Shortcut | Function |
+|----------|----------|
+| **Esc** | Close select box and clear search content |
+| **Enter** | Select first matching option |
+
+---
+
+## Rename Conversation
+
+| Shortcut | Function |
+|----------|----------|
+| **Enter** | Save new conversation name |
+| **Esc** | Cancel rename operation |
+
+---
+
+## Input Box Submission
+
+The following shortcuts apply to input box submission in specific configuration interfaces:
+
+| Shortcut | Scenario | Function |
+|----------|----------|----------|
+| **Enter** | Quota Management | Save quota settings |
+| **Enter** | Quota Alerts | Save alert configuration |
+
+---
+
+## Confirmation Dialogs
+
+| Shortcut | Function |
+|----------|----------|
+| **Enter** | Execute confirm action |
+
+---
+
+**Note**: The shortcuts above are currently supported features and may be adjusted in future versions.
