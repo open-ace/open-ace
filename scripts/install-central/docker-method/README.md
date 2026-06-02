@@ -104,7 +104,7 @@ docker compose up -d --build
 | `WORKSPACE_BASE_DIR` | 用户项目存储根目录 | /workspace（Docker）/home（二进制） |
 | `WORKSPACE_PORT_RANGE_START` | 端口池起始端口 | 3100 |
 | `WORKSPACE_PORT_RANGE_END` | 端口池结束端口 | 3200 |
-| `WORKSPACE_MAX_INSTANCES` | 最大实例数 | 20 |
+| `WORKSPACE_MAX_INSTANCES` | 最大实例数 | 30 |
 | `WORKSPACE_IDLE_TIMEOUT` | 空闲超时(分钟) | 30 |
 
 **启动方式：**

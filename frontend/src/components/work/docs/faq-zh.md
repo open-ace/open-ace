@@ -33,9 +33,9 @@
 - 会话找不到
 
 **五、系统设置**
+- 页面刷新后设置丢失
 - 语言切换
 - 主题切换（暗色/亮色）
-- 页面刷新后设置丢失
 
 ---
 
@@ -56,7 +56,7 @@
 3. 如果 PostgreSQL 正在初始化，等待完成后重启：`docker compose restart open-ace-web`
 4. 检查数据库连接参数是否正确
 
-**预防措施：** 确保 docker-compose.yml 中配置了 depends_on 和 healthcheck
+**预防措施：** 确保 docker-compose.yml 中配置了 `depends_on` 和 `healthcheck`
 
 ---
 
@@ -70,7 +70,7 @@
 
 **解决步骤：**
 1. 查看端口占用：`lsof -i :5000` 或 `netstat -tlnp | grep 5000`
-2. 停止占用端口的进程：`kill -9 <PID>` 或 `docker compose down`
+2. 停止占用端口的进程：`kill -9 <PID>`（将 `<PID>` 替换为实际进程 ID）或 `docker compose down`
 3. 更换端口启动：`PORT=8080 docker compose up -d`
 
 ---
@@ -94,10 +94,16 @@
 
 **问题现象：** 启动后 Workspace 功能无法使用，日志显示：`Config file not found: ~/.open-ace/config.json`
 
+**可能原因：**
+1. 首次安装，配置文件尚未创建
+2. 配置目录权限问题
+3. 配置文件路径配置错误
+
 **解决步骤：**
-1. 创建配置目录和文件：`mkdir -p ~/.open-ace` 并复制示例配置
-2. 编辑配置文件修改 host_name 等参数
-3. 重启服务
+1. 创建配置目录：`mkdir -p ~/.open-ace`
+2. 复制示例配置文件：`cp docs/config.example.json ~/.open-ace/config.json`
+3. 编辑配置文件，修改 `host_name` 等参数
+4. 重启服务
 
 ---
 
@@ -106,6 +112,11 @@
 ### 登录失败：用户名或密码错误
 
 **问题现象：** 登录页面提示"用户名或密码错误"或"Invalid username or password"
+
+**可能原因：**
+1. 输入的用户名或密码错误
+2. 密码已被修改
+3. 用户不存在
 
 **解决步骤：**
 1. 首次登录使用默认管理员账号：用户名 `admin`，密码 `admin123`
@@ -131,6 +142,10 @@
 
 **问题现象：** 登录失败，提示"Account is disabled"
 
+**可能原因：**
+1. 账户被管理员禁用
+2. 账户因安全原因被自动禁用
+
 **解决步骤：** 联系管理员重新启用账户：
 ```bash
 docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=true WHERE username='xxx';"
@@ -142,15 +157,23 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 **问题现象：** 访问管理页面时提示"Admin access required"
 
+**可能原因：**
+1. 当前用户角色不是管理员
+2. 用户权限配置错误
+
 **解决步骤：**
 1. 检查当前用户角色
-2. 联系管理员修改用户角色为 admin
+2. 联系管理员修改用户角色为 `admin`
 
 ---
 
 ### 修改密码失败：密码长度不足
 
 **问题现象：** 修改密码时提示"New password must be at least 8 characters"
+
+**可能原因：**
+1. 新密码长度不足 8 个字符
+2. 新密码与当前密码相同
 
 **解决步骤：**
 1. 确保新密码至少 8 个字符
@@ -164,10 +187,15 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 **问题现象：** 创建项目时提示"Permission denied to create directory"
 
+**可能原因：**
+1. 目标路径权限不足
+2. 用户系统账户 (system_account) 无写入权限
+3. 路径已被其他用户占用
+
 **解决步骤：**
-1. 检查用户 system_account 是否有权限：`sudo chown -R <user>:<group> /path`
+1. 检查用户系统账户是否有权限：`sudo chown -R <用户名>:<用户组> <项目路径>`
 2. 授权或更换路径
-3. 多用户模式下默认路径：`/workspace/<username>/`
+3. 多用户模式下默认路径为：`/workspace/<username>/`
 
 ---
 
@@ -175,15 +203,25 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 **问题现象：** 打开项目时提示"Directory does not exist"
 
+**可能原因：**
+1. 项目路径已被删除
+2. 项目路径被移动或重命名
+3. 无访问权限
+
 **解决步骤：**
 1. 确认路径存在且为目录
-2. 如路径不存在，重新创建项目
+2. 检查路径权限
+3. 如路径不存在，重新创建项目
 
 ---
 
 ### 项目已存在：重复创建
 
 **问题现象：** 创建项目时提示"Project already exists"
+
+**可能原因：**
+1. 已有项目使用相同路径
+2. 之前创建失败但路径已创建
 
 **解决步骤：** 使用不同的路径创建新项目，或删除已有项目后重新创建
 
@@ -195,12 +233,12 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 **可能原因：**
 1. qwen-code-webui 未安装或路径配置错误
-2. 用户 system_account 系统账户不存在
+2. 用户的系统账户 (system_account) 不存在
 3. sudo 配置问题
 
 **解决步骤：**
 1. 检查 qwen-code-webui 是否可用：`which qwen-code-webui`
-2. 检查用户 system_account 是否存在：`id <account>`
+2. 检查用户的系统账户是否存在：`id <用户系统账户名>`
 3. 检查 sudoers 配置
 4. 查看启动日志：`tail -f /tmp/open-ace-*.log`
 
@@ -208,11 +246,15 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ### Workspace 实例数达到上限
 
-**问题现象：** 创建新会话时提示"Maximum instances (20) reached"
+**问题现象：** 创建新会话时提示"Maximum instances reached"或"已达到最大实例数上限（默认 30）"
+
+**可能原因：**
+1. 当前用户 Workspace 实例数已达到配置上限
+2. 空闲实例未及时清理
 
 **解决步骤：**
 1. 等待空闲实例自动清理（默认 30 分钟超时）
-2. 管理员修改配置增加上限（max_instances）
+2. 联系管理员修改配置增加上限（`max_instances` 参数）
 
 ---
 
@@ -284,9 +326,25 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ## 五、系统设置
 
-### 语言切换
+### 页面刷新后设置丢失
 
-**解决步骤：** 在登录页面或设置页面选择语言，支持：
+**问题现象：** 刷新页面后，语言、主题等设置恢复为默认值
+
+**可能原因：**
+1. 浏览器禁用了本地存储 (localStorage)
+2. 浏览器隐私模式限制了存储功能
+3. 浏览器存储空间已满
+
+**解决步骤：**
+1. 确保浏览器允许使用 localStorage
+2. 退出隐私/无痕模式
+3. 清理浏览器缓存后重新设置
+
+---
+
+### 如何切换界面语言
+
+**操作步骤：** 在登录页面或设置页面选择语言，支持：
 - English（英语）
 - 中文（简体中文）
 - 日本語（日语）
@@ -294,17 +352,9 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ---
 
-### 主题切换（暗色/亮色）
+### 如何切换主题（暗色/亮色）
 
-**解决步骤：** 在界面顶部或设置中找到主题切换按钮，选择 Light / Dark 模式
-
----
-
-### 页面刷新后设置丢失
-
-**可能原因：** 浏览器禁用了本地存储
-
-**解决步骤：** 确保浏览器允许使用 localStorage，重新设置偏好
+**操作步骤：** 在界面顶部或设置中找到主题切换按钮，选择 Light / Dark 模式
 
 ---
 
