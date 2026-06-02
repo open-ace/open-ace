@@ -23,10 +23,107 @@ import app.ws_frame as ws_frame
 
 logger = logging.getLogger(__name__)
 
+
+class _RawSocketRelayWrapper:
+    """Wrapper for raw socket to provide WebSocket-like interface for relay.
+
+    This wrapper provides send/receive methods compatible with the bridge functions,
+    using ws_frame for actual I/O on the raw socket.
+    """
+
+    def __init__(self, socket, close_event=None):
+        self._socket = socket
+        self._closed = False
+        self._close_event = close_event
+
+    def send(self, data) -> None:
+        """Send data through the relay socket."""
+        if self._closed:
+            raise ConnectionError("Socket is closed")
+        try:
+            ws_frame.send_message(self._socket, data)
+        except Exception:
+            self._closed = True
+            if self._close_event:
+                self._close_event.set()
+            raise
+
+    def recv(self):
+        """Receive data from the relay socket."""
+        if self._closed:
+            raise ConnectionError("Socket is closed")
+        try:
+            result = ws_frame.recv_message(self._socket)
+            if result is None:
+                self._closed = True
+                if self._close_event:
+                    self._close_event.set()
+            return result
+        except Exception:
+            self._closed = True
+            if self._close_event:
+                self._close_event.set()
+            raise
+
+    def close(self, code: int = 1000, reason: str = "") -> None:
+        """Close the relay socket."""
+        if not self._closed:
+            self._closed = True
+            if self._close_event:
+                self._close_event.set()
+            try:
+                ws_frame.send_close(self._socket, code, reason)
+            except Exception:
+                pass
+
+    @property
+    def closed(self) -> bool:
+        """Check if the socket is closed."""
+        return self._closed
+
+
+def _is_private_ip_ws_url(ws_url: str) -> bool:
+    """Check if a WebSocket URL points to a private IP address.
+
+    Private IPs cannot be reached from the backend, so relay is required.
+    Private IP ranges:
+    - 10.0.0.0 - 10.255.255.255 (10.x.x.x)
+    - 172.16.0.0 - 172.31.255.255 (172.16-31.x.x)
+    - 192.168.0.0 - 192.168.255.255 (192.168.x.x)
+    - 127.0.0.0 - 127.255.255.255 (loopback)
+    """
+    import re
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(ws_url)
+        host = parsed.hostname or ""
+        # Check for private IP patterns
+        private_patterns = [
+            r"^10\.",  # 10.x.x.x
+            r"^172\.(1[6-9]|2[0-9]|3[1])\.",  # 172.16-31.x.x
+            r"^192\.168\.",  # 192.168.x.x
+            r"^127\.",  # loopback
+            r"^169\.254\.",  # link-local
+            r"^0\.0\.0\.0$",  # unspecified
+        ]
+        return any(re.match(pattern, host) for pattern in private_patterns)
+    except Exception:
+        return False
+
+
 _WS_PATH_RE = re.compile(
     r"^/api/remote/terminal/"
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
     r"/ws$",
+    re.IGNORECASE,
+)
+
+# Agent relay WebSocket path - agent connects here for terminal relay
+_AGENT_RELAY_WS_PATH_RE = re.compile(
+    r"^/api/remote/agent/terminal-relay/"
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    r"$",
     re.IGNORECASE,
 )
 
@@ -102,6 +199,9 @@ class RemoteWSHandler(WSGIHandler):
     """WSGI handler that intercepts remote terminal and VSCode WebSocket upgrades."""
 
     def run_application(self) -> None:
+        if self._is_agent_relay_ws_request():
+            self._handle_agent_relay_ws()
+            return
         if self._is_terminal_ws_request():
             self._handle_terminal_ws()
             return
@@ -111,6 +211,101 @@ class RemoteWSHandler(WSGIHandler):
         # Non-terminal: fall through to normal WSGI handling.
         super().run_application()
 
+    # ------------------------------------------------------------------
+    # Agent relay WebSocket handling
+    # ------------------------------------------------------------------
+
+    def _is_agent_relay_ws_request(self) -> bool:
+        if self.command != "GET":
+            return False
+        upgrade = self.environ.get("HTTP_UPGRADE", "").lower()
+        if upgrade != "websocket":
+            return False
+        path = self.environ.get("PATH_INFO", "")
+        return _AGENT_RELAY_WS_PATH_RE.match(path) is not None
+
+    def _handle_agent_relay_ws(self) -> None:
+        """Handle agent WebSocket connection for terminal relay.
+
+        When remote machines are on private networks, the agent connects
+        to this endpoint to establish a relay WebSocket. The backend then
+        bridges browser connections through this relay to the remote terminal.
+        """
+        path = self.environ.get("PATH_INFO", "")
+        m = _AGENT_RELAY_WS_PATH_RE.match(path)
+        assert m is not None
+        terminal_id = m.group(1)
+
+        # WebSocket handshake directly on the raw socket.
+        try:
+            ws_frame.perform_handshake(self.environ, self.socket)
+        except Exception:
+            logger.exception("Agent relay WS handshake failed for %s", terminal_id[:8])
+            self.close_connection = True
+            return
+
+        # Parse token from query string.
+        token = ""
+        query = self.environ.get("QUERY_STRING", "")
+        for part in query.split("&"):
+            if part.startswith("token="):
+                token = part[6:]
+                break
+
+        # Validate token against terminal info store.
+        from app.modules.workspace.terminal_relay_store import terminal_relay_store
+        from app.modules.workspace.terminal_store import terminal_info_store
+
+        found = terminal_info_store.find_by_terminal_id(terminal_id)
+        if not found:
+            logger.warning("Agent relay WS: unknown terminal %s", terminal_id[:8])
+            ws_frame.send_close(self.socket, 1011)
+            self.close_connection = True
+            return
+
+        machine_id, info = found
+
+        # For agent relay, we use the original_token (the terminal server's token)
+        # Agent must present this token to authenticate
+        original_token = info.get("original_token", "")
+        if not token or not original_token or not hmac.compare_digest(token, original_token):
+            logger.warning("Agent relay WS: invalid token for terminal %s", terminal_id[:8])
+            ws_frame.send_close(self.socket, 4001)
+            self.close_connection = True
+            return
+
+        logger.info(
+            "Agent relay WS: registered relay for terminal %s from machine %s",
+            terminal_id[:8],
+            machine_id[:8],
+        )
+
+        # Create relay wrapper and close event for lifecycle management
+        from gevent.event import Event
+
+        close_event = Event()
+
+        relay_ws = _RawSocketRelayWrapper(self.socket, close_event)
+        terminal_relay_store.register_relay(terminal_id, relay_ws, token)
+
+        # Check for pending browsers and start bridges
+        pending = terminal_relay_store.get_pending_browsers(terminal_id)
+        for browser_sock, bridge_done_event in pending:
+            terminal_relay_store._start_bridge(terminal_id, browser_sock, bridge_done_event)
+
+        # Keep relay alive until close_event is set (by bridge or agent disconnection)
+        try:
+            close_event.wait()
+            logger.info("Agent relay WS: close_event signaled for terminal %s", terminal_id[:8])
+        except Exception as e:
+            logger.info("Agent relay WS: connection ended for terminal %s: %s", terminal_id[:8], e)
+        finally:
+            terminal_relay_store.unregister_relay(terminal_id)
+
+        self.close_connection = True
+
+    # ------------------------------------------------------------------
+    # Terminal WebSocket handling (browser connections)
     # ------------------------------------------------------------------
 
     def _is_terminal_ws_request(self) -> bool:
@@ -164,6 +359,32 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
+        # Check if relay connection exists (for private network machines).
+        from app.modules.workspace.terminal_relay_store import terminal_relay_store
+        from app.modules.workspace.terminal_ws_bridge import bridge_browser_to_relay
+
+        relay_ws = terminal_relay_store.get_relay(terminal_id)
+        if relay_ws:
+            # Relay exists - bridge browser to relay.
+            logger.info(
+                "Terminal WS handler: using relay for terminal %s (machine %s)",
+                terminal_id[:8],
+                machine_id[:8],
+            )
+            try:
+                bridge_browser_to_relay(terminal_id, self.socket, relay_ws)
+            except Exception:
+                logger.exception(
+                    "Terminal WS handler: relay bridge failed for terminal %s", terminal_id[:8]
+                )
+                try:
+                    ws_frame.send_close(self.socket, 1011)
+                except Exception:
+                    pass
+            self.close_connection = True
+            return
+
+        # No relay - check if we should wait for relay (private IP) or try direct connection.
         remote_ws_url = info.get("original_ws_url") or info.get("ws_url", "")
         remote_token = info.get("original_token", "")
         if not remote_ws_url or remote_ws_url.startswith("/"):
@@ -172,7 +393,64 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
-        # Bridge browser socket to remote terminal.
+        # Check if remote URL is a private IP (can't be reached directly).
+        if _is_private_ip_ws_url(remote_ws_url):
+            # Private IP - need relay, add browser to pending queue.
+            logger.info(
+                "Terminal WS handler: remote URL is private IP, waiting for relay for terminal %s",
+                terminal_id[:8],
+            )
+            from gevent.event import Event
+
+            # Create a "bridge done" event that relay handler will signal
+            bridge_done_event = Event()
+
+            # Add raw browser socket to pending (relay handler will bridge)
+            if terminal_relay_store.add_pending_browser(
+                terminal_id, self.socket, bridge_done_event
+            ):
+                # Successfully added to pending - wait for relay to bridge
+                try:
+                    # Wait up to 30 seconds for bridge to start and complete
+                    bridge_done_event.wait(timeout=30.0)
+                    if not bridge_done_event.is_set():
+                        logger.warning(
+                            "Terminal WS handler: timeout waiting for relay for terminal %s",
+                            terminal_id[:8],
+                        )
+                        ws_frame.send_close(self.socket, 1001, "Relay timeout")
+                        self.close_connection = True
+                    else:
+                        # Bridge completed, socket was handled by bridge
+                        # Don't close connection - bridge already closed it
+                        self.close_connection = False
+                except Exception as e:
+                    logger.info(
+                        "Terminal WS handler: browser wait ended for terminal %s: %s",
+                        terminal_id[:8],
+                        e,
+                    )
+                    self.close_connection = True
+                return
+            else:
+                # Relay exists - bridge immediately
+                relay_ws = terminal_relay_store.get_relay(terminal_id)
+                if relay_ws:
+                    try:
+                        bridge_browser_to_relay(terminal_id, self.socket, relay_ws)
+                    except Exception:
+                        logger.exception(
+                            "Terminal WS handler: relay bridge failed for terminal %s",
+                            terminal_id[:8],
+                        )
+                        try:
+                            ws_frame.send_close(self.socket, 1011)
+                        except Exception:
+                            pass
+                self.close_connection = True
+                return
+
+        # Public IP - try direct connection to remote terminal.
         try:
             from app.modules.workspace.terminal_ws_bridge import bridge_terminal_websocket_raw
 
