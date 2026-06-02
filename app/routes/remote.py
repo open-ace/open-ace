@@ -736,6 +736,8 @@ def agent_files(filename):
 
 def validate_ip(ip_str: str) -> bool:
     """验证 IP 地址格式是否有效。"""
+    if not isinstance(ip_str, str):
+        return False
     try:
         ipaddress.ip_address(ip_str)
         return True
