@@ -747,14 +747,14 @@ def validate_ip(ip_str: str) -> bool:
 
 def get_client_ip_from_request() -> str:
     """从 HTTP Headers 或 remote_addr 获取客户端 IP（作为回退）。"""
-    forwarded_for = request.headers.get("X-Forwarded-For")
+    forwarded_for: str | None = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
-    
-    real_ip = request.headers.get("X-Real-IP")
+
+    real_ip: str | None = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip.strip()
-    
+
     return request.remote_addr or "127.0.0.1"
 
 

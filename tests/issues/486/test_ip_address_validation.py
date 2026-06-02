@@ -200,11 +200,11 @@ class TestAgentRegisterIP(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 200)
 
-            # Verify manager was called with fallback IP (not agent-reported 127.0.0.1)
+            # Agent-reported 127.0.0.1 was rejected, fallback used from request
+            # (In test client, request.remote_addr is 127.0.0.1, so fallback matches)
             call_args = mgr.register_machine.call_args
-            ip_used = call_args.kwargs.get("ip_address")
-            # The fallback should come from request, which in test client is 127.0.0.1
-            # But the key is that agent-reported 127.0.0.1 was rejected
+            # Verify register_machine was called
+            self.assertIsNotNone(call_args)
 
     def test_agent_reports_valid_ipv6(self):
         """Agent reports valid IPv6 → should be stored."""
