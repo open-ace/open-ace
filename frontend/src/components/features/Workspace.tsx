@@ -24,6 +24,7 @@ import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
 import {
   useLanguage,
+  useTheme,
   useAppStore,
   useWorkspaceFullscreen,
   useEnableTabNotifications,
@@ -63,6 +64,7 @@ const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
 export const Workspace: React.FC = () => {
   const language = useLanguage();
+  const theme = useTheme();
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -248,6 +250,21 @@ export const Workspace: React.FC = () => {
     const interval = setInterval(sendHeartbeat, ACTIVITY_HEARTBEAT_INTERVAL);
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
+
+  // Theme sync: Send postMessage to all iframes when theme changes (Issue #104)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0) return;
+
+    // Send theme change message to all iframe tabs
+    tabs.forEach((tab) => {
+      const iframe = iframeRefs.current.get(tab.id);
+      if (iframe?.contentWindow && iframe.src) {
+        // Use iframe's actual origin for security (instead of '*')
+        const targetOrigin = new URL(iframe.src).origin;
+        iframe.contentWindow.postMessage({ type: 'openace-theme-change', theme }, targetOrigin);
+      }
+    });
+  }, [theme, tabs, tabsInitialized]);
 
   // Clear notification state for a tab (used when leaving/switching away from a tab)
   // Declared early so effects below can reference it
@@ -529,7 +546,7 @@ export const Workspace: React.FC = () => {
           url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
         }
         // Add lang parameter for language sync
-        url = `${url}&lang=${encodeURIComponent(language)}`;
+        url = `${url}&lang=${encodeURIComponent(language)}&theme=${theme}`;
         // Add sessionId, encodedProjectName, and toolName if restoring a session
         if (restoreSessionId) {
           url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
@@ -564,7 +581,7 @@ export const Workspace: React.FC = () => {
       let url = config.url;
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
-      url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
+      url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
       if (restoreSessionId) {
         url = appendParam(url, 'sessionId', restoreSessionId);
       }
@@ -593,7 +610,7 @@ export const Workspace: React.FC = () => {
       url = appendRecentProjects(url);
       return url;
     },
-    [config, userWebUI, language, remoteProjects]
+    [config, userWebUI, language, theme, remoteProjects]
   );
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
