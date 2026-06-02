@@ -176,7 +176,7 @@ Manage 모드는 관리자 전용 백엔드 관리 인터페이스. **일반 사
 | | Anomaly Detection | 비정상 사용 행동 감지 및 알림 |
 | | ROI Analysis | 투자 수익률 분석 리포트 |
 | | Conversation History | 모든 사용자의 대화 기록 |
-| | Messages | 메시지 통계 및 관리 |
+| | Messages | 메시지 목록 조회 및 필터 |
 | **거버넌스** | Audit Center | 운영 감사 로그, 컴플라이언스 추적 |
 | | Quota & Alerts | 사용자 할당 설정 및 알림 규칙 |
 | | Compliance Management | 컴플라이언스 정책 설정 및 관리 |

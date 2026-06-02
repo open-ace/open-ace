@@ -176,7 +176,7 @@ Manage Mode is the admin-only backend management interface. **Regular users cann
 | | Anomaly Detection | Abnormal usage behavior detection and alerts |
 | | ROI Analysis | Return on investment analysis reports |
 | | Conversation History | All users' conversation history records |
-| | Messages | Message statistics and management |
+| | Messages | Message list viewing and filtering |
 | **Governance** | Audit Center | Operation audit logs, compliance tracking |
 | | Quota & Alerts | User quota settings and alert rules |
 | | Compliance Management | Compliance policy configuration and management |
