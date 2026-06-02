@@ -662,7 +662,7 @@ class CostOptimizer:
 
         # High model concentration
         if model_distribution:
-            top_model = max(model_distribution, key=model_distribution.get)
+            top_model = max(model_distribution, key=lambda k: model_distribution.get(k, 0))
             total_tokens = sum(model_distribution.values())
             if total_tokens > 0:
                 top_share = model_distribution[top_model] / total_tokens
