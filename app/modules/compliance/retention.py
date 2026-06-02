@@ -395,7 +395,8 @@ class DataRetentionManager:
             limit: Maximum number of records.
 
         Returns:
-            List[Dict]: Retention history records.
+            List[Dict]: Retention history records with executed_at, cleanup_type,
+                        records_deleted, status fields.
         """
         import json
 
@@ -413,16 +414,17 @@ class DataRetentionManager:
         for row in rows:
             try:
                 report_data = json.loads(row["report_data"])
+                timestamp = row["timestamp"]
+                executed_at = (
+                    timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp)
+                )
+                errors_count = len(report_data.get("errors", []))
                 history.append(
                     {
-                        "id": row["id"],
-                        "timestamp": row["timestamp"],
-                        "summary": {
-                            "records_deleted": report_data.get("records_deleted", 0),
-                            "records_archived": report_data.get("records_archived", 0),
-                            "records_anonymized": report_data.get("records_anonymized", 0),
-                            "errors_count": len(report_data.get("errors", [])),
-                        },
+                        "executed_at": executed_at,
+                        "cleanup_type": "scheduled",
+                        "records_deleted": report_data.get("records_deleted", 0),
+                        "status": "success" if errors_count == 0 else "failed",
                     }
                 )
             except (json.JSONDecodeError, KeyError):
@@ -430,14 +432,14 @@ class DataRetentionManager:
 
         return history
 
-    def estimate_storage(self) -> dict[str, Any]:
+    def estimate_storage(self) -> list[dict[str, Any]]:
         """
         Estimate storage usage by data type.
 
         Returns:
-            Dict with storage estimates.
+            List of storage estimates with data_type, record_count, estimated_size_mb.
         """
-        estimates = {}
+        estimates = []
 
         tables = {
             "audit_logs": "audit_logs",
@@ -448,19 +450,26 @@ class DataRetentionManager:
             "users": "users",
         }
 
-        for name, table in tables.items():
+        for data_type, table in tables.items():
             try:
                 result = self.db.fetch_one(f"SELECT COUNT(*) as count FROM {table}")
-                estimates[name] = {
-                    "record_count": result["count"] if result else 0,
-                }
+                estimates.append(
+                    {
+                        "data_type": data_type,
+                        "record_count": result["count"] if result else 0,
+                        "estimated_size_mb": 0,
+                    }
+                )
             except Exception:
-                estimates[name] = {"record_count": 0, "error": "Table not found"}
+                estimates.append(
+                    {
+                        "data_type": data_type,
+                        "record_count": 0,
+                        "estimated_size_mb": 0,
+                    }
+                )
 
-        return {
-            "estimates": estimates,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        }
+        return estimates
 
     def get_compliance_status(self) -> dict[str, Any]:
         """
@@ -504,12 +513,24 @@ class DataRetentionManager:
             if not rule.enabled:
                 issues.append(f"Retention rule for {data_type} is disabled")
 
+        # Calculate compliance score (0-100)
+        compliance_score = 100
+        if not last_cleanup_time:
+            compliance_score -= 30
+        elif days_since_cleanup and days_since_cleanup > 7:
+            compliance_score -= min(days_since_cleanup * 2, 50)
+
+        rules_enabled_count = len([r for r in self.rules.values() if r.enabled])
+        rules_enabled_ratio = rules_enabled_count / len(self.rules) if self.rules else 1
+        compliance_score -= int((1 - rules_enabled_ratio) * 20)
+
         return {
+            "compliance_score": max(0, compliance_score),
             "is_compliant": is_compliant,
             "last_cleanup": last_cleanup_time.isoformat() if last_cleanup_time else None,
             "days_since_cleanup": days_since_cleanup,
             "rules_configured": len(self.rules),
-            "rules_enabled": len([r for r in self.rules.values() if r.enabled]),
+            "rules_enabled": rules_enabled_count,
             "issues": issues,
             "recommendations": [
                 "Run retention cleanup at least weekly",
