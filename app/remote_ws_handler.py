@@ -82,10 +82,9 @@ class _RawSocketRelayWrapper:
         return self._closed
 
 
-def _is_private_ip_ws_url(ws_url: str) -> bool:
+def _is_private_ip(ws_url: str) -> bool:
     """Check if a WebSocket URL points to a private IP address.
 
-    Private IPs cannot be reached from the backend, so relay is required.
     Private IP ranges:
     - 10.0.0.0 - 10.255.255.255 (10.x.x.x)
     - 172.16.0.0 - 172.31.255.255 (172.16-31.x.x)
@@ -110,6 +109,110 @@ def _is_private_ip_ws_url(ws_url: str) -> bool:
         return any(re.match(pattern, host) for pattern in private_patterns)
     except Exception:
         return False
+
+
+def _get_backend_private_ip_prefix() -> str | None:
+    """Get the private IP network prefix of the backend server.
+
+    Returns the first two octets of the backend's private IP (e.g., "192.168")
+    if the backend is on a private network, otherwise None.
+    """
+    import socket
+
+    try:
+        # Get backend's primary IP by connecting to an external address
+        # (doesn't actually send data, just determines local IP)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        try:
+            # Connect to a public IP (Google DNS) to determine local interface
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        finally:
+            s.close()
+
+        # Check if local IP is private and return prefix
+        parts = local_ip.split(".")
+        if len(parts) >= 2:
+            prefix = f"{parts[0]}.{parts[1]}"
+            # Check if it's a private IP range
+            if local_ip.startswith("10."):
+                return "10."  # Class A private
+            elif local_ip.startswith("192.168."):
+                return "192.168"  # Class C private
+            elif re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", local_ip):
+                return prefix  # Class B private (172.16-31)
+        return None
+    except Exception:
+        return None
+
+
+def _can_reach_directly(ws_url: str) -> bool:
+    """Check if backend can directly reach the remote WebSocket server.
+
+    Returns True if:
+    - The URL is a public IP (always reachable)
+    - The URL is a private IP in the same network segment as backend
+
+    Returns False if:
+    - The URL is a private IP in a different network segment
+    - Quick TCP probe fails (optional check)
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(ws_url)
+        host = parsed.hostname or ""
+        port = parsed.port or 80
+
+        # Public IP - assume reachable
+        if not _is_private_ip(ws_url):
+            return True
+
+        # Private IP - check if in same network segment as backend
+        backend_prefix = _get_backend_private_ip_prefix()
+        if backend_prefix:
+            # Extract target IP prefix
+            parts = host.split(".")
+            if len(parts) >= 2:
+                target_prefix = f"{parts[0]}.{parts[1]}"
+
+                # Same private network segment - likely reachable
+                if host.startswith("10.") and backend_prefix == "10.":
+                    return True  # Both in 10.x.x.x
+                if host.startswith("192.168.") and backend_prefix == "192.168":
+                    return True  # Both in 192.168.x.x
+                if re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", host):
+                    # Class B - check if in same 172.16-31 range
+                    if re.match(r"^172\.(1[6-9]|2[0-9]|3[1])\.", backend_prefix or ""):
+                        # Both in 172.16-31 range, check exact subnet
+                        backend_parts = backend_prefix.split(".")
+                        if len(backend_parts) >= 2:
+                            # Same Class B subnet (first two octets match)
+                            if target_prefix == backend_prefix:
+                                return True
+
+        # Different private network - try quick TCP probe
+        import socket
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)  # Quick timeout
+            s.connect((host, port))
+            s.close()
+            return True  # Connection succeeded
+        except OSError:
+            return False  # Cannot reach
+    except Exception:
+        return False
+
+
+def _needs_relay(ws_url: str) -> bool:
+    """Determine if relay is needed for connecting to remote terminal.
+
+    Relay is needed when backend cannot directly reach the remote WebSocket URL.
+    """
+    return not _can_reach_directly(ws_url)
 
 
 _WS_PATH_RE = re.compile(
@@ -393,11 +496,11 @@ class RemoteWSHandler(WSGIHandler):
             self.close_connection = True
             return
 
-        # Check if remote URL is a private IP (can't be reached directly).
-        if _is_private_ip_ws_url(remote_ws_url):
-            # Private IP - need relay, add browser to pending queue.
+        # Check if backend cannot directly reach the remote WebSocket URL.
+        if _needs_relay(remote_ws_url):
+            # Cannot reach directly - need relay, add browser to pending queue.
             logger.info(
-                "Terminal WS handler: remote URL is private IP, waiting for relay for terminal %s",
+                "Terminal WS handler: backend cannot reach remote URL, waiting for relay for terminal %s",
                 terminal_id[:8],
             )
             from gevent.event import Event
