@@ -693,9 +693,7 @@ def pg_db():
         # point to our test database instead of the production config.
         with patch.object(db_mod, "is_postgresql", return_value=True):
             with patch.object(db_mod, "get_database_url", return_value=test_url):
-                with patch.object(
-                    config_mod, "get_database_url", return_value=test_url
-                ):
+                with patch.object(config_mod, "get_database_url", return_value=test_url):
                     yield db
     finally:
         # Cleanup: close connections and drop test database

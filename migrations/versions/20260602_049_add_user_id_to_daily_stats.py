@@ -57,9 +57,7 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
         )
     else:
         result = conn.execute(
-            sa.text(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name = :index_name"
-            ),
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='index' AND name = :index_name"),
             {"index_name": index_name},
         )
     return result.fetchone() is not None

@@ -208,7 +208,9 @@ class UsageRepository:
         if is_postgresql():
             join_on = "dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
         else:
-            join_on = "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+            join_on = (
+                "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+            )
         query = f"""
             SELECT dm.*,
                    COALESCE(du.request_count, 0) as request_count
@@ -252,9 +254,9 @@ class UsageRepository:
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        start_date = (
-            datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
+        start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days)).strftime(
+            "%Y-%m-%d"
+        )
 
         conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
         params = [tool_name, start_date, end_date]
@@ -369,21 +371,15 @@ class UsageRepository:
             if tool in results:
                 existing = results[tool]
                 existing["total_tokens"] += row["total_tokens"] or 0
-                existing["total_requests"] += (
-                    row["total_requests"] if row["total_requests"] else 0
-                )
+                existing["total_requests"] += row["total_requests"] if row["total_requests"] else 0
                 existing["total_input_tokens"] += row["total_input_tokens"] or 0
                 existing["total_output_tokens"] += row["total_output_tokens"] or 0
             else:
                 results[tool] = {
                     "days_count": row["days_count"],
                     "total_tokens": row["total_tokens"] or 0,
-                    "avg_tokens": (
-                        round(row["avg_tokens"], 2) if row["avg_tokens"] else 0
-                    ),
-                    "total_requests": (
-                        row["total_requests"] if row["total_requests"] else 0
-                    ),
+                    "avg_tokens": (round(row["avg_tokens"], 2) if row["avg_tokens"] else 0),
+                    "total_requests": (row["total_requests"] if row["total_requests"] else 0),
                     "total_input_tokens": row["total_input_tokens"] or 0,
                     "total_output_tokens": row["total_output_tokens"] or 0,
                     "first_date": row["first_date"],
@@ -607,9 +603,7 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = (
-                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
-                )
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
             results.append(
                 {
                     "date": date_str,
@@ -661,9 +655,7 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = (
-                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
-                )
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
             tool = normalize_tool_name(row["tool_name"])
             key = (date_str, tool)
             if key in results:
@@ -703,9 +695,7 @@ class UsageRepository:
             WHERE {' AND '.join(conditions)}
         """
         total_result = self.db.fetch_one(total_query, tuple(params))
-        total_requests = (
-            int(total_result.get("total_requests", 0) or 0) if total_result else 0
-        )
+        total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
 
         # Get by tool
         by_tool_query = f"""
@@ -827,9 +817,7 @@ class UsageRepository:
 
         results = []
         for row in rows:
-            username = (
-                row.get("unified_username") or row.get("sender_name") or "unknown"
-            )
+            username = row.get("unified_username") or row.get("sender_name") or "unknown"
             results.append(
                 {
                     "user": username,
@@ -936,9 +924,7 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = (
-                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
-                )
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
             results.append(
                 {
                     "date": date_str,

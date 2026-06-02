@@ -142,9 +142,7 @@ class DailyStatsRepository:
             else:
                 merged[tool] = {**row, "tool_name": tool}
 
-        return sorted(
-            merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True
-        )
+        return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
 
     def get_user_totals(
         self,
@@ -373,19 +371,13 @@ class DailyStatsRepository:
             "total_messages": total_messages,
             "total_tokens": total_tokens,
             "average_messages_per_conversation": (
-                total_messages / estimated_conversations
-                if estimated_conversations > 0
-                else 0
+                total_messages / estimated_conversations if estimated_conversations > 0 else 0
             ),
             "average_tokens_per_conversation": (
-                total_tokens / estimated_conversations
-                if estimated_conversations > 0
-                else 0
+                total_tokens / estimated_conversations if estimated_conversations > 0 else 0
             ),
             "avg_conversation_length": (
-                total_messages / estimated_conversations
-                if estimated_conversations > 0
-                else 0
+                total_messages / estimated_conversations if estimated_conversations > 0 else 0
             ),
         }
 
@@ -428,6 +420,7 @@ class DailyStatsRepository:
 
         if is_postgresql():
             # PostgreSQL: use subquery for user_id resolution
+            # Fallback to sender_name when user_id cannot be resolved
             query = f"""
                 SELECT
                     SUM(message_count) as total_messages,
@@ -440,13 +433,15 @@ class DailyStatsRepository:
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
-                         LIMIT 1))) as unique_users,
+                         LIMIT 1),
+                        sender_name)) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}
             """
         else:
             # SQLite: use subquery for user_id resolution
+            # Fallback to sender_name when user_id cannot be resolved
             query = f"""
                 SELECT
                     SUM(message_count) as total_messages,
@@ -459,7 +454,8 @@ class DailyStatsRepository:
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
-                         LIMIT 1))) as unique_users,
+                         LIMIT 1),
+                        sender_name)) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}
