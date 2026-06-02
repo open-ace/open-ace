@@ -208,7 +208,7 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ### Workspaceインスタンス数上限到達
 
-**現象：** 新セッション作成時「Maximum instances (20) reached」表示
+**現象：** 新セッション作成時「Maximum instances (30) reached」表示
 
 **解決手順：**
 1. 空きインスタンス自動クリーン待機（デフォルト30分タイムアウト）
