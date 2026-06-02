@@ -430,11 +430,13 @@ class PromptLibrary:
 
         if search:
             conditions.append("(name LIKE ? OR description LIKE ? OR content LIKE ?)")
-            params.extend([
-                f"%{escape_like(search)}%",
-                f"%{escape_like(search)}%",
-                f"%{escape_like(search)}%",
-            ])
+            params.extend(
+                [
+                    f"%{escape_like(search)}%",
+                    f"%{escape_like(search)}%",
+                    f"%{escape_like(search)}%",
+                ]
+            )
 
         if tags:
             for tag in tags:
