@@ -16,8 +16,10 @@ Open ACE 支持以下键盘快捷键，帮助用户更高效地使用系统。
 |--------|------|
 | **Cmd+Shift+<** / **Ctrl+Shift+<** | 切换到上一个标签页 |
 | **Cmd+Shift+>** / **Ctrl+Shift+>** | 切换到下一个标签页 |
+| **Cmd+Left Arrow** / **Ctrl+Left Arrow** | 切换到上一个标签页 |
+| **Cmd+Right Arrow** / **Ctrl+Right Arrow** | 切换到下一个标签页 |
 
-> **说明**：`<` 对应键盘上的逗号键（Comma），`>` 对应句号键（Period）。
+> **说明**：`<` 对应键盘上的逗号键（Comma），`>` 对应句号键（Period）；箭头键方式同样有效。
 
 ---
 
