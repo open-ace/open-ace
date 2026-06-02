@@ -14,6 +14,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
+import threading
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -100,7 +101,7 @@ def _is_private_ip(ws_url: str) -> bool:
         # Check for private IP patterns
         private_patterns = [
             r"^10\.",  # 10.x.x.x
-            r"^172\.(1[6-9]|2[0-9]|3[1])\.",  # 172.16-31.x.x
+            r"^172\.(1[6-9]|2[0-9]|3[01])\.",  # 172.16-31.x.x
             r"^192\.168\.",  # 192.168.x.x
             r"^127\.",  # loopback
             r"^169\.254\.",  # link-local
@@ -211,8 +212,26 @@ def _needs_relay(ws_url: str) -> bool:
     """Determine if relay is needed for connecting to remote terminal.
 
     Relay is needed when backend cannot directly reach the remote WebSocket URL.
+    Results are cached per ws_url to avoid repeated TCP probes (SSRF mitigation).
     """
     return not _can_reach_directly(ws_url)
+
+
+# Cache reachability results to avoid repeated TCP probes per ws_url.
+# This mitigates SSRF via repeated probe requests.
+_reachability_cache: dict[str, bool] = {}
+_reachability_cache_lock = threading.Lock()
+
+
+def _needs_relay_cached(ws_url: str) -> bool:
+    """Cached version of _needs_relay to avoid repeated TCP probes."""
+    with _reachability_cache_lock:
+        if ws_url in _reachability_cache:
+            return _reachability_cache[ws_url]
+    result = _needs_relay(ws_url)
+    with _reachability_cache_lock:
+        _reachability_cache[ws_url] = result
+    return result
 
 
 _WS_PATH_RE = re.compile(
@@ -269,6 +288,14 @@ def _query_token_and_upstream_query(query: str) -> tuple[str, str]:
             continue
         upstream_pairs.append((key, value))
     return token, urlencode(upstream_pairs)
+
+
+def _parse_token_from_query(query_string: str) -> str:
+    """Extract the token parameter from a raw query string."""
+    for part in query_string.split("&"):
+        if part.startswith("token="):
+            return part[6:]
+    return ""
 
 
 def _cookie_value(cookie_header: str, name: str) -> str:
@@ -348,12 +375,7 @@ class RemoteWSHandler(WSGIHandler):
             return
 
         # Parse token from query string.
-        token = ""
-        query = self.environ.get("QUERY_STRING", "")
-        for part in query.split("&"):
-            if part.startswith("token="):
-                token = part[6:]
-                break
+        token = _parse_token_from_query(self.environ.get("QUERY_STRING", ""))
 
         # Validate token against terminal info store.
         from app.modules.workspace.terminal_relay_store import terminal_relay_store
@@ -390,11 +412,6 @@ class RemoteWSHandler(WSGIHandler):
 
         relay_ws = _RawSocketRelayWrapper(self.socket, close_event)
         terminal_relay_store.register_relay(terminal_id, relay_ws, token)
-
-        # Check for pending browsers and start bridges
-        pending = terminal_relay_store.get_pending_browsers(terminal_id)
-        for browser_sock, bridge_done_event in pending:
-            terminal_relay_store._start_bridge(terminal_id, browser_sock, bridge_done_event)
 
         # Keep relay alive until close_event is set (by bridge or agent disconnection)
         try:
@@ -435,12 +452,7 @@ class RemoteWSHandler(WSGIHandler):
             return
 
         # Parse token from query string.
-        token = ""
-        query = self.environ.get("QUERY_STRING", "")
-        for part in query.split("&"):
-            if part.startswith("token="):
-                token = part[6:]
-                break
+        token = _parse_token_from_query(self.environ.get("QUERY_STRING", ""))
 
         # Look up terminal info.
         from app.modules.workspace.terminal_store import terminal_info_store
@@ -497,7 +509,7 @@ class RemoteWSHandler(WSGIHandler):
             return
 
         # Check if backend cannot directly reach the remote WebSocket URL.
-        if _needs_relay(remote_ws_url):
+        if _needs_relay_cached(remote_ws_url):
             # Cannot reach directly - need relay, add browser to pending queue.
             logger.info(
                 "Terminal WS handler: backend cannot reach remote URL, waiting for relay for terminal %s",
@@ -521,6 +533,8 @@ class RemoteWSHandler(WSGIHandler):
                             "Terminal WS handler: timeout waiting for relay for terminal %s",
                             terminal_id[:8],
                         )
+                        # Remove from pending to prevent bridging closed socket
+                        terminal_relay_store.remove_pending_browser(terminal_id, self.socket)
                         ws_frame.send_close(self.socket, 1001, "Relay timeout")
                         self.close_connection = True
                     else:
@@ -536,20 +550,12 @@ class RemoteWSHandler(WSGIHandler):
                     self.close_connection = True
                 return
             else:
-                # Relay exists - bridge immediately
-                relay_ws = terminal_relay_store.get_relay(terminal_id)
-                if relay_ws:
-                    try:
-                        bridge_browser_to_relay(terminal_id, self.socket, relay_ws)
-                    except Exception:
-                        logger.exception(
-                            "Terminal WS handler: relay bridge failed for terminal %s",
-                            terminal_id[:8],
-                        )
-                        try:
-                            ws_frame.send_close(self.socket, 1011)
-                        except Exception:
-                            pass
+                # add_pending_browser returned False — bridge was started by the store,
+                # or browser was rejected. Wait for bridge completion.
+                try:
+                    bridge_done_event.wait(timeout=30.0)
+                except Exception:
+                    pass
                 self.close_connection = True
                 return
 

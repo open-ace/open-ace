@@ -162,38 +162,7 @@ def bridge_terminal_websocket_raw(
         ) as remote_ws:
             state.remote_ws = remote_ws
             logger.info("Connected raw bridge to remote terminal: %s", remote_ws_url)
-
-            def browser_to_remote() -> None:
-                try:
-                    while True:
-                        message = ws_frame.recv_message(browser_sock)
-                        if message is None:
-                            logger.info("Raw bridge B→R: browser closed")
-                            break
-                        remote_ws.send(message)
-                except ConnectionClosed as e:
-                    logger.info("Raw bridge B→R: remote closed: %s", e)
-                except Exception as e:
-                    logger.info("Raw bridge B→R error: %s", e)
-                finally:
-                    with suppress(Exception):
-                        remote_ws.close()
-
-            def remote_to_browser() -> None:
-                try:
-                    while True:
-                        message = remote_ws.recv()
-                        ws_frame.send_message(browser_sock, message)
-                except ConnectionClosed as e:
-                    logger.info("Raw bridge R→B: remote closed: %s", e)
-                except Exception as e:
-                    logger.debug("Raw bridge R→B error: %s", e)
-                finally:
-                    with suppress(Exception):
-                        ws_frame.send_close(browser_sock)
-
-            state.jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
-            gevent.joinall(state.jobs)
+            _run_raw_bridge(browser_sock, remote_ws, "Raw")
     finally:
         _unregister_bridge(state)
 
@@ -217,40 +186,51 @@ def bridge_browser_to_relay(terminal_id: str, browser_sock, relay_ws: Any) -> No
 
     try:
         logger.info("Starting browser-to-relay bridge for terminal %s", terminal_id[:8])
-
-        def browser_to_relay() -> None:
-            try:
-                while True:
-                    message = ws_frame.recv_message(browser_sock)
-                    if message is None:
-                        logger.info("Relay bridge B→R: browser closed")
-                        break
-                    relay_ws.send(message)
-            except ConnectionClosed as e:
-                logger.info("Relay bridge B→R: relay closed: %s", e)
-            except Exception as e:
-                logger.info("Relay bridge B→R error: %s", e)
-            finally:
-                with suppress(Exception):
-                    relay_ws.close()
-
-        def relay_to_browser() -> None:
-            try:
-                while True:
-                    message = relay_ws.recv()
-                    if message is None:
-                        logger.info("Relay bridge R→B: relay closed")
-                        break
-                    ws_frame.send_message(browser_sock, message)
-            except ConnectionClosed as e:
-                logger.info("Relay bridge R→B: relay closed: %s", e)
-            except Exception as e:
-                logger.debug("Relay bridge R→B error: %s", e)
-            finally:
-                with suppress(Exception):
-                    ws_frame.send_close(browser_sock)
-
-        state.jobs = [gevent.spawn(browser_to_relay), gevent.spawn(relay_to_browser)]
-        gevent.joinall(state.jobs)
+        _run_raw_bridge(browser_sock, relay_ws, "Relay")
     finally:
         _unregister_bridge(state)
+
+
+def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
+    """Run bidirectional bridge between a raw browser socket and a remote WS.
+
+    Shared by both direct (bridge_terminal_websocket_raw) and relay
+    (bridge_browser_to_relay) paths to avoid duplicating try/except logic.
+    """
+    tag_b2r = f"{label} bridge B→R"
+    tag_r2b = f"{label} bridge R→B"
+
+    def browser_to_remote() -> None:
+        try:
+            while True:
+                message = ws_frame.recv_message(browser_sock)
+                if message is None:
+                    logger.info("%s: browser closed", tag_b2r)
+                    break
+                remote_ws.send(message)
+        except ConnectionClosed as e:
+            logger.info("%s: remote closed: %s", tag_b2r, e)
+        except Exception as e:
+            logger.info("%s error: %s", tag_b2r, e)
+        finally:
+            with suppress(Exception):
+                remote_ws.close()
+
+    def remote_to_browser() -> None:
+        try:
+            while True:
+                message = remote_ws.recv()
+                if message is None:
+                    logger.info("%s: remote closed", tag_r2b)
+                    break
+                ws_frame.send_message(browser_sock, message)
+        except ConnectionClosed as e:
+            logger.info("%s: remote closed: %s", tag_r2b, e)
+        except Exception as e:
+            logger.debug("%s error: %s", tag_r2b, e)
+        finally:
+            with suppress(Exception):
+                ws_frame.send_close(browser_sock)
+
+    jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
+    gevent.joinall(jobs)

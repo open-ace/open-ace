@@ -95,6 +95,11 @@ class RemoteAgent:
                                     terminal_id[:8],
                                     port,
                                 )
+                                # Restart relay for restored terminals that need it
+                                ws_url = info.get("ws_url", "")
+                                term_token = info.get("token", "")
+                                if ws_url and term_token:
+                                    self._start_terminal_relay(terminal_id, ws_url, term_token)
                             else:
                                 # Port not listening, remove stale info file
                                 logger.info(
@@ -1634,8 +1639,8 @@ class RemoteAgent:
         try:
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 env=env,
                 start_new_session=True,
             )
@@ -1747,6 +1752,17 @@ class RemoteAgent:
         logger.info("Shutting down agent...")
         self._session_sync.stop()
         self._executor.stop_all()
+        # Stop relay subprocesses
+        for terminal_id, proc in list(self._terminal_relays.items()):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._terminal_relays.clear()
         # Clear terminal process tracking (but don't kill them - they persist)
         self._terminal_processes.clear()
         logger.info("Agent shutdown complete (terminal servers left running)")
