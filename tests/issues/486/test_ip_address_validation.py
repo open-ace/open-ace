@@ -322,9 +322,7 @@ class TestIPRegistrationIntegration(unittest.TestCase):
 
         # Verify IP stored correctly by fetching machine
         machines = self.mgr.list_machines()
-        test_machine = next(
-            (m for m in machines if m["machine_id"] == "test-machine-1"), None
-        )
+        test_machine = next((m for m in machines if m["machine_id"] == "test-machine-1"), None)
         self.assertIsNotNone(test_machine)
         self.assertEqual(test_machine.get("ip_address"), "192.168.1.100")
 
@@ -359,9 +357,7 @@ class TestIPRegistrationIntegration(unittest.TestCase):
         )
 
         machines = self.mgr.list_machines()
-        test_machine = next(
-            (m for m in machines if m["machine_id"] == "test-machine-3"), None
-        )
+        test_machine = next((m for m in machines if m["machine_id"] == "test-machine-3"), None)
         self.assertIsNotNone(test_machine)
         self.assertEqual(test_machine["ip_address"], "10.0.0.50")
 
