@@ -54,7 +54,7 @@ If you are an **admin**, you need to configure before first use:
 
 **Configuration steps:**
 1. After login, switch to **Manage Mode** (click top mode switcher)
-2. Left sidebar → **Remote Workspaces** → **API Keys**
+2. Left sidebar → **Settings** → **API Keys**
 3. Click **"Add API Key"** button
 4. Select Provider (e.g., OpenAI, Anthropic, Google), enter API Key and optional Base URL
 5. Click save
@@ -84,6 +84,7 @@ If you are an **admin**, you need to configure before first use:
    - **Qwen** — Qwen series (e.g., qwen3-coder-plus)
    - **Claude** — Anthropic Claude series
    - **OpenClaw** — Other OpenAI compatible models
+   - **Codex** — OpenAI Codex series
 3. After selecting your tool, system will automatically load corresponding model
 4. Some tools support **specifying model name**, enter when creating session
 
@@ -154,7 +155,7 @@ Work Mode is the daily work interface for regular users, using **three-column la
 | Tab | Description |
 |-----|-------------|
 | **Prompts** | Quickly browse common prompts, one-click copy |
-| **Tools** | Quick entry to switch different AI tools (Qwen, Claude, OpenClaw) |
+| **Tools** | Quick entry to switch AI tools (Qwen, Claude, OpenClaw, Codex), opens new session on click |
 | **Docs** | Help documentation entry (Getting Started, FAQ, etc.) |
 
 > 💡 **Tip**: Right panel can be collapsed/expanded, click arrow next to panel title.
@@ -184,8 +185,8 @@ Manage Mode is the admin-only backend management interface. **Regular users cann
 | | Tenant Management | Multi-tenant management, tenant isolation |
 | **Projects** | Project Management | Project creation and management |
 | **Remote Workspaces** | Remote Machines | Remote machine registration and management |
-| | API Keys | API Key centralized management |
 | **Settings** | SSO Settings | Single sign-on configuration |
+| | API Keys | API Key centralized management |
 
 > 💡 **Tip**: All features in Manage Mode are admin-exclusive, regular users cannot access.
 
