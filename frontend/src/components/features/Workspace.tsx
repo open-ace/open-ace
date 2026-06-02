@@ -24,6 +24,7 @@ import { requestApi, type QuotaStatusResponse } from '@/api/request';
 import { sessionsApi } from '@/api/sessions';
 import {
   useLanguage,
+  useTheme,
   useAppStore,
   useWorkspaceFullscreen,
   useEnableTabNotifications,
@@ -63,6 +64,7 @@ const ACTIVITY_HEARTBEAT_INTERVAL = 2 * 60 * 1000;
 
 export const Workspace: React.FC = () => {
   const language = useLanguage();
+  const theme = useTheme();
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -529,7 +531,7 @@ export const Workspace: React.FC = () => {
           url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
         }
         // Add lang parameter for language sync
-        url = `${url}&lang=${encodeURIComponent(language)}`;
+        url = `${url}&lang=${encodeURIComponent(language)}&theme=${theme}`;
         // Add sessionId, encodedProjectName, and toolName if restoring a session
         if (restoreSessionId) {
           url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
@@ -564,7 +566,7 @@ export const Workspace: React.FC = () => {
       let url = config.url;
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
-      url = `${url}${langSeparator}lang=${encodeURIComponent(language)}`;
+      url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
       if (restoreSessionId) {
         url = appendParam(url, 'sessionId', restoreSessionId);
       }
@@ -593,7 +595,7 @@ export const Workspace: React.FC = () => {
       url = appendRecentProjects(url);
       return url;
     },
-    [config, userWebUI, language, remoteProjects]
+    [config, userWebUI, language, theme, remoteProjects]
   );
 
   // Initialize tabs when config is loaded (Issue #65: Restore from store if available)
