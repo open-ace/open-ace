@@ -140,7 +140,10 @@ class UsageRepository:
         return True
 
     def get_usage_rows_by_date(
-        self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+        self,
+        date: str,
+        tool_name: Optional[str] = None,
+        host_name: Optional[str] = None,
     ) -> list[dict]:
         """
         Get raw usage rows from daily_usage for a specific date.
@@ -182,7 +185,10 @@ class UsageRepository:
         return self.db.fetch_all(query, tuple(params))
 
     def get_usage_by_date(
-        self, date: str, tool_name: Optional[str] = None, host_name: Optional[str] = None
+        self,
+        date: str,
+        tool_name: Optional[str] = None,
+        host_name: Optional[str] = None,
     ) -> list[dict]:
         """
         Get usage data for a specific date from daily_messages joined with daily_usage.
@@ -202,9 +208,7 @@ class UsageRepository:
         if is_postgresql():
             join_on = "dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
         else:
-            join_on = (
-                "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
-            )
+            join_on = "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
         query = f"""
             SELECT dm.*,
                    COALESCE(du.request_count, 0) as request_count
@@ -248,9 +252,9 @@ class UsageRepository:
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days)).strftime(
-            "%Y-%m-%d"
-        )
+        start_date = (
+            datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
         params = [tool_name, start_date, end_date]
@@ -365,15 +369,21 @@ class UsageRepository:
             if tool in results:
                 existing = results[tool]
                 existing["total_tokens"] += row["total_tokens"] or 0
-                existing["total_requests"] += row["total_requests"] if row["total_requests"] else 0
+                existing["total_requests"] += (
+                    row["total_requests"] if row["total_requests"] else 0
+                )
                 existing["total_input_tokens"] += row["total_input_tokens"] or 0
                 existing["total_output_tokens"] += row["total_output_tokens"] or 0
             else:
                 results[tool] = {
                     "days_count": row["days_count"],
                     "total_tokens": row["total_tokens"] or 0,
-                    "avg_tokens": round(row["avg_tokens"], 2) if row["avg_tokens"] else 0,
-                    "total_requests": row["total_requests"] if row["total_requests"] else 0,
+                    "avg_tokens": (
+                        round(row["avg_tokens"], 2) if row["avg_tokens"] else 0
+                    ),
+                    "total_requests": (
+                        row["total_requests"] if row["total_requests"] else 0
+                    ),
                     "total_input_tokens": row["total_input_tokens"] or 0,
                     "total_output_tokens": row["total_output_tokens"] or 0,
                     "first_date": row["first_date"],
@@ -597,7 +607,9 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                date_str = (
+                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                )
             results.append(
                 {
                     "date": date_str,
@@ -649,7 +661,9 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                date_str = (
+                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                )
             tool = normalize_tool_name(row["tool_name"])
             key = (date_str, tool)
             if key in results:
@@ -689,7 +703,9 @@ class UsageRepository:
             WHERE {' AND '.join(conditions)}
         """
         total_result = self.db.fetch_one(total_query, tuple(params))
-        total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
+        total_requests = (
+            int(total_result.get("total_requests", 0) or 0) if total_result else 0
+        )
 
         # Get by tool
         by_tool_query = f"""
@@ -726,50 +742,98 @@ class UsageRepository:
         This queries daily_messages table to get request counts per user.
         A request is counted when role = 'assistant' (API response).
 
+        This method merges users by user_id when available, fixing Issue #626
+        where the same user appears multiple times with different sender_name
+        formats.
+
         Args:
             date: Optional date filter (YYYY-MM-DD). If None, uses today.
             host_name: Optional host name filter.
             user_name: Optional user name filter (matches sender_name prefix).
 
         Returns:
-            List[Dict]: Request stats by user.
+            List[Dict]: Request stats by user with unified username.
         """
+        from app.repositories.database import is_postgresql
+
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        conditions = ["date = ?", "role = ?"]
+        conditions = ["dm.date = ?", "dm.role = ?"]
         params = [date, "assistant"]
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
         if user_name:
             # sender_name format is: {username}-{hostname}-{tool}
             # Use LIKE to match username prefix
-            conditions.append("sender_name LIKE ?")
+            conditions.append("dm.sender_name LIKE ?")
             params.append(f"{escape_like(user_name)}%")
 
-        query = f"""
-            SELECT
-                sender_name,
-                tool_name,
-                COUNT(*) as requests,
-                SUM(tokens_used) as tokens
-            FROM daily_messages
-            WHERE {' AND '.join(conditions)}
-            GROUP BY sender_name, tool_name
-            ORDER BY requests DESC
-        """
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        if is_postgresql():
+            # PostgreSQL: use LEFT JOIN for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN dm.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTRING(dm.sender_name FROM '^[^-]+')
+                             ELSE dm.sender_name END) as unified_username,
+                    dm.tool_name,
+                    COUNT(*) as requests,
+                    SUM(dm.tokens_used) as tokens
+                FROM daily_messages dm
+                LEFT JOIN users u ON dm.user_id = u.id
+                    OR dm.sender_name LIKE (u.system_account || '-%%')
+                    OR dm.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username, dm.tool_name
+                ORDER BY requests DESC
+            """
+        else:
+            # SQLite: use LEFT JOIN for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN dm.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTR(dm.sender_name, 1, INSTR(dm.sender_name, '-') - 1)
+                             ELSE dm.sender_name END) as unified_username,
+                    dm.tool_name,
+                    COUNT(*) as requests,
+                    SUM(dm.tokens_used) as tokens
+                FROM daily_messages dm
+                LEFT JOIN users u ON dm.user_id = u.id
+                    OR dm.sender_name LIKE (u.system_account || '-%%')
+                    OR dm.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username, dm.tool_name
+                ORDER BY requests DESC
+            """
 
         rows = self.db.fetch_all(query, tuple(params))
 
         results = []
         for row in rows:
-            sender_name = row["sender_name"] or "unknown"
+            username = (
+                row.get("unified_username") or row.get("sender_name") or "unknown"
+            )
             results.append(
                 {
-                    "user": sender_name,
+                    "user": username,
+                    "user_id": row.get("resolved_user_id", -1),
                     "tool": normalize_tool_name(row["tool_name"]),
                     "requests": int(row["requests"] or 0),
                     "tokens": int(row["tokens"] or 0),
@@ -779,7 +843,11 @@ class UsageRepository:
         return results
 
     def get_user_request_trend(
-        self, user_name: str, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        user_name: str,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
     ) -> list[dict]:
         """
         Get request trend for a specific user.
@@ -798,7 +866,8 @@ class UsageRepository:
         """
         # First, try to get user_id from username
         user = self.db.fetch_one(
-            "SELECT id FROM users WHERE username = ? OR system_account = ?", (user_name, user_name)
+            "SELECT id FROM users WHERE username = ? OR system_account = ?",
+            (user_name, user_name),
         )
 
         if user:
@@ -867,7 +936,9 @@ class UsageRepository:
                 date_str = date_val.strftime("%Y-%m-%d")
             else:
                 # Parse HTTP date format if needed
-                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                date_str = (
+                    str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+                )
             results.append(
                 {
                     "date": date_str,
