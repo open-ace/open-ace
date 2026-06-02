@@ -667,7 +667,9 @@ class CostOptimizer:
             if total_tokens > 0:
                 top_share = model_distribution[top_model] / total_tokens
                 if top_share > 0.9:
-                    recommendations.append(f"模型使用高度集中于 {top_model}，建议探索其他模型以降低风险")
+                    recommendations.append(
+                        f"模型使用高度集中于 {top_model}，建议探索其他模型以降低风险"
+                    )
 
         # Default positive recommendation
         if not recommendations:
@@ -729,8 +731,11 @@ class CostOptimizer:
 
         # Generate recommendations
         recommendations = self._generate_recommendations(
-            efficiency_score, output_ratio, avg_cost_per_request,
-            avg_tokens_per_request, model_distribution
+            efficiency_score,
+            output_ratio,
+            avg_cost_per_request,
+            avg_tokens_per_request,
+            model_distribution,
         )
 
         return {
