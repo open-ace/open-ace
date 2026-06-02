@@ -52,9 +52,7 @@ def _create_sqlite_tables(db):
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
         from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import (
-            get_ddl_statements as ram_ddl,
-        )
+        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
         from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
         from app.services.auth_service import get_ddl_statements as auth_ddl
         from app.services.permission_service import get_ddl_statements as ps_ddl
@@ -301,7 +299,8 @@ def _create_sqlite_tables(db):
                 updated_at TEXT,
                 last_login TEXT,
                 deleted_at TEXT,
-                tenant_id INTEGER
+                tenant_id INTEGER,
+                system_account TEXT
             )
         """
         )
@@ -368,9 +367,7 @@ def _create_pg_tables(db):
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
         from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import (
-            get_ddl_statements as ram_ddl,
-        )
+        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
         from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
         from app.services.auth_service import get_ddl_statements as auth_ddl
         from app.services.permission_service import get_ddl_statements as ps_ddl
@@ -613,7 +610,8 @@ def _create_pg_tables(db):
                 updated_at TEXT,
                 last_login TEXT,
                 deleted_at TEXT,
-                tenant_id INTEGER
+                tenant_id INTEGER,
+                system_account TEXT
             )
         """
         )
