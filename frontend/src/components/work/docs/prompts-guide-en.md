@@ -318,13 +318,7 @@ Please provide:
 - Provide examples of expected output format
 - Guide AI step by step to complete the task
 
-### Q2: How to make AI remember previous conversation content?
-
-Open ACE automatically saves session context. You just need to:
-- Continue conversation in the same session
-- Use "History Sessions" feature to restore previous sessions
-
-### Q3: How to use templates in the prompt library?
+### Q2: How to use templates in the prompt library?
 
 1. Open "Prompt Library"
 2. Find the needed template
@@ -332,14 +326,15 @@ Open ACE automatically saves session context. You just need to:
 4. Modify placeholder content according to actual situation
 5. Send to AI
 
-### Q4: How to share prompts with team members?
+### Q3: How to share prompts with team members?
 
 1. Create or edit a prompt
-2. Select "Sharing Scope"
-3. Choose "Team" or "Company-wide"
-4. Click Save
+2. Check "Make this prompt public"
+3. Click Save
 
-### Q5: AI response too long/short怎么办?
+Public prompts can be viewed and used by other team members.
+
+### Q4: AI response too long or too short?
 
 Specify clearly in the prompt:
 - Need concise answer: "Please answer in 3 sentences or less"
