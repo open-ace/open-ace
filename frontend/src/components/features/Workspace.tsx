@@ -258,11 +258,10 @@ export const Workspace: React.FC = () => {
     // Send theme change message to all iframe tabs
     tabs.forEach((tab) => {
       const iframe = iframeRefs.current.get(tab.id);
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage(
-          { type: 'openace-theme-change', theme },
-          '*'
-        );
+      if (iframe?.contentWindow && iframe.src) {
+        // Use iframe's actual origin for security (instead of '*')
+        const targetOrigin = new URL(iframe.src).origin;
+        iframe.contentWindow.postMessage({ type: 'openace-theme-change', theme }, targetOrigin);
       }
     });
   }, [theme, tabs, tabsInitialized]);
