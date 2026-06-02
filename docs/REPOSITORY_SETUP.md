@@ -20,6 +20,8 @@ Use this checklist for GitHub settings that cannot be fully configured from file
 - Publish releases from Git tags such as `v1.0.1`.
 - Attach Docker/deployment notes and a short upgrade guide to each release.
 - Keep `CHANGELOG.md` aligned with the latest release.
+- Configure `PYPI_API_TOKEN` only after confirming the intended PyPI project and package ownership.
+- If `PYPI_API_TOKEN` is not configured, the release workflow skips PyPI publishing and still uploads GitHub release assets.
 
 ## Demo
 

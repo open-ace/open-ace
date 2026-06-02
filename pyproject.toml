@@ -1,18 +1,28 @@
 [project]
 name = "open-ace"
 version = "1.0.0"
-description = "Open ACE (AI Computing Explorer) - Track, analyze, and optimize AI usage"
+description = "Self-hosted enterprise AI workspace and governance platform"
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 requires-python = ">=3.9"
 authors = [
     {name = "Open ACE Team"}
+]
+keywords = [
+    "ai",
+    "ai-governance",
+    "ai-workspace",
+    "codex",
+    "claude-code",
+    "enterprise-ai",
+    "llmops",
+    "qwen-code",
+    "self-hosted",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -61,10 +71,11 @@ openace = "cli:main"
 include = ["app*", "scripts*"]
 
 [project.urls]
-Homepage = "https://github.com/open-ace/open-ace"
+Homepage = "https://www.open-ace.com"
 Documentation = "https://github.com/open-ace/open-ace#readme"
 Repository = "https://github.com/open-ace/open-ace.git"
 Issues = "https://github.com/open-ace/open-ace/issues"
+Roadmap = "https://github.com/open-ace/open-ace/blob/main/ROADMAP.md"
 
 # =============================================================================
 # Black Configuration
