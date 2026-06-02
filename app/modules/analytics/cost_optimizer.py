@@ -517,6 +517,171 @@ class CostOptimizer:
 
         return trend
 
+    def _calculate_efficiency_score(
+        self,
+        tokens: int,
+        input_tokens: int,
+        output_tokens: int,
+        requests: int,
+        total_cost: float,
+    ) -> float:
+        """
+        Calculate efficiency score based on multiple factors.
+
+        Args:
+            tokens: Total tokens used.
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+            requests: Number of requests.
+            total_cost: Total cost.
+
+        Returns:
+            Efficiency score (0-100).
+
+        Note:
+            This method differs from ROICalculator._calculate_efficiency_score:
+            - ROICalculator uses cost-benefit ratio (estimated_savings / total_cost)
+            - CostOptimizer uses cost efficiency (avg_cost_per_request thresholds)
+            This difference is intentional: CostOptimizer focuses on raw cost metrics,
+            while ROICalculator incorporates estimated labor savings.
+        """
+        # Base score: 60 points
+        efficiency_score = 60.0
+
+        # Factor 1: Output ratio (output_tokens / total_tokens)
+        if tokens > 0:
+            output_ratio = (output_tokens / tokens) * 100
+            if 30 <= output_ratio <= 50:
+                efficiency_score += 20
+            elif 20 <= output_ratio <= 60:
+                efficiency_score += 15
+            elif output_ratio > 10:
+                efficiency_score += 10
+
+        # Factor 2: Cost efficiency (cost_per_request)
+        if requests > 0:
+            avg_cost = total_cost / requests
+            if avg_cost < 0.01:  # Low cost
+                efficiency_score += 15
+            elif avg_cost < 0.05:
+                efficiency_score += 10
+            elif avg_cost < 0.10:
+                efficiency_score += 5
+
+        # Factor 3: Request efficiency (avg_tokens_per_request)
+        if requests > 0:
+            avg_tokens = tokens / requests
+            if 500 <= avg_tokens <= 2000:
+                efficiency_score += 5
+            elif 200 <= avg_tokens <= 5000:
+                efficiency_score += 3
+
+        return min(efficiency_score, 100.0)
+
+    def _calculate_total_cost(self, by_model: list) -> float:
+        """
+        Calculate total cost from model usage data.
+
+        Args:
+            by_model: List of model usage data.
+
+        Returns:
+            Total cost in USD.
+        """
+        total_cost = 0.0
+        for row in by_model:
+            model = row.get("model") or "unknown"
+            input_tokens = row.get("input_tokens") or 0
+            output_tokens = row.get("output_tokens") or 0
+            total_cost += self._calculate_cost(model, input_tokens, output_tokens)
+        return total_cost
+
+    def _calculate_waste_percentage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> float:
+        """
+        Calculate waste percentage based on input/output imbalance.
+
+        Args:
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+
+        Returns:
+            Waste percentage (0-100).
+        """
+        total_tokens = input_tokens + output_tokens
+
+        # Factor: Input/output imbalance waste
+        # Ideal output ratio should be 20-50%, below this is considered waste
+        if total_tokens > 0:
+            output_ratio = output_tokens / total_tokens
+            if output_ratio < 0.1:  # Output ratio below 10%
+                input_waste = (1 - output_ratio) * 50  # Max 50% waste
+            else:
+                input_waste = 0
+        else:
+            input_waste = 0
+
+        return min(input_waste, 100.0)
+
+    def _generate_recommendations(
+        self,
+        efficiency_score: float,
+        output_ratio: float,
+        avg_cost_per_request: float,
+        avg_tokens_per_request: float,
+        model_distribution: dict,
+    ) -> list[str]:
+        """
+        Generate efficiency optimization recommendations.
+
+        Args:
+            efficiency_score: Overall efficiency score.
+            output_ratio: Output ratio percentage.
+            avg_cost_per_request: Average cost per request.
+            avg_tokens_per_request: Average tokens per request.
+            model_distribution: Model usage distribution.
+
+        Returns:
+            List of recommendation strings.
+        """
+        recommendations = []
+
+        # Low efficiency score
+        if efficiency_score < 70:
+            recommendations.append("效率评分较低，建议检查使用模式优化成本")
+
+        # Low output ratio
+        if output_ratio < 10:
+            recommendations.append("输出比例较低，建议优化提示词减少输入 token 使用")
+
+        # High cost per request
+        if avg_cost_per_request > 0.10:
+            recommendations.append("单请求成本较高，考虑使用更经济的模型")
+
+        # High average tokens per request
+        if avg_tokens_per_request > 5000:
+            recommendations.append("平均请求 token 较高，可考虑拆分任务或优化提示词")
+
+        # High model concentration
+        if model_distribution:
+            top_model = max(model_distribution, key=lambda k: model_distribution.get(k, 0))
+            total_tokens = sum(model_distribution.values())
+            if total_tokens > 0:
+                top_share = model_distribution[top_model] / total_tokens
+                if top_share > 0.9:
+                    recommendations.append(
+                        f"模型使用高度集中于 {top_model}，建议探索其他模型以降低风险"
+                    )
+
+        # Default positive recommendation
+        if not recommendations:
+            recommendations.append("使用模式健康，继续保持良好习惯")
+
+        return recommendations
+
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
     def get_efficiency_report(self, days: int = 30) -> dict[str, Any]:
         """
@@ -551,6 +716,31 @@ class CostOptimizer:
             tokens = (row.get("input_tokens") or 0) + (row.get("output_tokens") or 0)
             model_distribution[model] = tokens
 
+        # ===== New fields: efficiency score, cost, waste, recommendations =====
+
+        # Calculate total cost
+        total_cost = self._calculate_total_cost(data["by_model"])
+
+        # Average cost per request
+        avg_cost_per_request = total_cost / total_requests if total_requests > 0 else 0
+
+        # Efficiency score
+        efficiency_score = self._calculate_efficiency_score(
+            total_tokens, total_input, total_output, total_requests, total_cost
+        )
+
+        # Waste percentage
+        waste_percentage = self._calculate_waste_percentage(total_input, total_output)
+
+        # Generate recommendations
+        recommendations = self._generate_recommendations(
+            efficiency_score,
+            output_ratio,
+            avg_cost_per_request,
+            avg_tokens_per_request,
+            model_distribution,
+        )
+
         return {
             "period_days": days,
             "total_tokens": total_tokens,
@@ -563,4 +753,9 @@ class CostOptimizer:
             "unique_tools": len(
                 {r.get("tool_name") for r in data["by_model"] if r.get("tool_name")}
             ),
+            # ===== New fields =====
+            "overall_efficiency": round(efficiency_score, 1),
+            "avg_cost_per_request": round(avg_cost_per_request, 6),
+            "waste_percentage": round(waste_percentage, 1),
+            "recommendations": recommendations,
         }
