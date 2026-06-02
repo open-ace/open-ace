@@ -45,10 +45,7 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
         result = conn.execute(
             sa.text(f"PRAGMA table_info({table_name})"),
         )
-        for row in result.fetchall():
-            if row[1] == column_name:
-                return True
-        return False
+        return any(row[1] == column_name for row in result.fetchall())
 
 
 def _index_exists(conn, table_name: str, index_name: str) -> bool:

@@ -52,7 +52,9 @@ def _create_sqlite_tables(db):
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
         from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
+        from app.modules.workspace.remote_agent_manager import (
+            get_ddl_statements as ram_ddl,
+        )
         from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
         from app.services.auth_service import get_ddl_statements as auth_ddl
         from app.services.permission_service import get_ddl_statements as ps_ddl
@@ -122,6 +124,7 @@ def _create_sqlite_tables(db):
                 tool_name TEXT,
                 host_name TEXT,
                 sender_name TEXT,
+                user_id INTEGER NULL,
                 total_tokens INTEGER DEFAULT 0,
                 total_input_tokens INTEGER DEFAULT 0,
                 total_output_tokens INTEGER DEFAULT 0,
@@ -365,7 +368,9 @@ def _create_pg_tables(db):
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
         from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
+        from app.modules.workspace.remote_agent_manager import (
+            get_ddl_statements as ram_ddl,
+        )
         from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
         from app.services.auth_service import get_ddl_statements as auth_ddl
         from app.services.permission_service import get_ddl_statements as ps_ddl
@@ -436,6 +441,7 @@ def _create_pg_tables(db):
                 tool_name TEXT,
                 host_name TEXT,
                 sender_name TEXT,
+                user_id INTEGER NULL,
                 total_tokens INTEGER DEFAULT 0,
                 total_input_tokens INTEGER DEFAULT 0,
                 total_output_tokens INTEGER DEFAULT 0,
@@ -689,7 +695,9 @@ def pg_db():
         # point to our test database instead of the production config.
         with patch.object(db_mod, "is_postgresql", return_value=True):
             with patch.object(db_mod, "get_database_url", return_value=test_url):
-                with patch.object(config_mod, "get_database_url", return_value=test_url):
+                with patch.object(
+                    config_mod, "get_database_url", return_value=test_url
+                ):
                     yield db
     finally:
         # Cleanup: close connections and drop test database
