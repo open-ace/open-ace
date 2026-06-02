@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>AI Computing Explorer</strong><br>
-  <em>企业级 AI 工作平台 · 让 AI 用得好、管得住</em>
+  <em>自托管 AI 工作台 · 统一接入 Claude Code、Qwen Code、Codex 与 OpenClaw</em>
 </p>
 
 <p align="center">
@@ -44,9 +44,22 @@
 
 **你可以用 Open ACE 做什么：**
 
-- 给员工一个统一入口，管理 AI 会话、提示词、历史记录和远程工作区
-- 给管理者一套治理面板，查看 Token、成本、异常、配额、审计和 ROI
+- 给员工一个统一入口，管理本地/远程 AI 会话、提示词、历史记录和项目上下文
+- 通过 Remote Agent 把 AI CLI 跑在团队自己的开发机、测试机或 GPU 机器上
+- 给管理者一套治理面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
+- 加密保存 LLM API Key，通过短期代理令牌给本地和远程会话安全调用模型
 - 在自己的网络里部署，保留企业数据边界，并逐步接入 SSO、飞书/钉钉和 Kubernetes
+
+## 🔥 近期功能亮点
+
+| 功能 | 为什么重要 |
+|------|------------|
+| 远程工作区与 Remote Agent | 用户在浏览器里选择远程机器，AI CLI 直接在目标机器运行，无需反复传 SSH 凭据 |
+| 多 CLI 适配器 | Claude Code、Qwen Code、Codex、OpenClaw 统一接入，包含会话恢复、权限模式和历史同步 |
+| API Key 代理 | API Key 加密存储在服务器，远程 Agent 只拿短期代理令牌，统一配额和用量统计 |
+| 终端与 VSCode/code-server 代理 | 支持浏览器终端、远程目录浏览和 code-server/VSCode 访问，适合真实研发工作流 |
+| 合规与报表 | 支持审计追踪、配额检查、合规报告生成和 CSV 下载 |
+| 开源协作基础 | 已补齐 Roadmap、Security Policy、Issue 模板、Dependabot、CODEOWNERS 和适合新手的 Issue 标签 |
 
 ## ✨ 两种模式，双重价值
 
@@ -59,8 +72,9 @@
 </p>
 
 **核心能力：**
-- 🤖 **多 AI 工具集成** — 支持 Claude Code、Qwen Code、OpenClaw 等主流 AI，一个平台全搞定
-- 💬 **智能对话管理** — 历史记录、会话恢复、上下文记忆，对话不中断
+- 🤖 **多 AI 工具集成** — Claude Code、Qwen Code、Codex、OpenClaw 一个入口统一使用
+- 🖥️ **远程工作区** — 在浏览器里选择远程机器，启动 AI 编码会话、终端和目录浏览
+- 💬 **智能会话管理** — 历史记录、会话恢复、上下文记忆和跨工具会话同步
 - 📝 **提示词库** — 团队共享优质提示词，最佳实践一键复用
 - 🔍 **快速检索** — 跨会话搜索历史对话，知识沉淀不丢失
 
@@ -76,8 +90,9 @@
 
 **核心能力：**
 - 📈 **用量可视化** — Token 消耗趋势、成本分析、使用热力图，一目了然
+- 🔑 **API Key 治理** — 加密存储 API Key，通过代理令牌调用模型，避免密钥下发到远程机器
 - 🚨 **智能告警** — 配额预警、异常检测、超支提醒，风险早知道
-- 📋 **合规审计** — 敏感内容检测、对话记录追溯、合规报告生成
+- 📋 **合规审计** — 敏感内容检测、对话记录追溯、合规报告生成和 CSV 下载
 - 👥 **多租户管理** — 部门隔离、权限控制、资源配额，精细化管理
 - 💰 **ROI 分析** — 投入产出比、效率提升量化，让 AI 价值看得见
 
@@ -87,12 +102,12 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🔒 **安全可控** | 私有化部署，数据不出域，满足企业安全合规要求 |
-| 🌐 **多工具支持** | Claude Code、Qwen Code、OpenClaw... 一个平台管理所有 AI |
-| 📊 **数据驱动** | 用量分析、成本优化、效率提升，用数据说话 |
-| 🔌 **易于集成** | 支持 SSO 单点登录、飞书/钉钉集成，无缝融入现有体系 |
-| 🐳 **一键部署** | Docker/K8s 支持，10 分钟完成私有化部署 |
-| 🆓 **完全开源** | Apache 2.0 协议，自由使用、修改、分发 |
+| 🔒 **默认自托管** | 私有化部署，数据和 API Key 留在自己的网络与数据库里 |
+| 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、OpenClaw 统一入口、统一历史、统一治理 |
+| 🖥️ **远程执行** | Remote Agent 让 AI CLI 在目标机器运行，适合研发服务器、测试环境和 GPU 机器 |
+| 📊 **治理可观测** | Token、成本、配额、异常、审计、合规和 ROI 统一分析 |
+| 🔌 **企业集成** | 支持 SSO、飞书/钉钉、Kubernetes、反向代理和多租户权限模型 |
+| 🆓 **开放协作** | Apache 2.0 协议，Roadmap、贡献指南和 good first issue 已就位 |
 
 ---
 
@@ -166,6 +181,16 @@ python3 web.py
 | 会话导出 | 导出对话记录用于审计 |
 | 时间线视图 | 可视化展示对话流程 |
 
+### 🖥️ 远程工作区
+
+| 功能 | 描述 |
+|------|------|
+| Remote Agent | 在 Linux/macOS/Windows 远程机器上运行 AI CLI 守护进程 |
+| CLI 适配器 | 支持 Claude Code、Qwen Code、Codex、OpenClaw 的启动、会话恢复和权限模式 |
+| 浏览器终端 | 通过 WebSocket PTY 访问远程 shell，并支持断线后的屏幕恢复 |
+| VSCode/code-server | 代理远程 code-server/VSCode 路径，方便在浏览器中继续开发 |
+| API Key 代理 | 真实密钥只保存在服务器，远程会话通过短期代理令牌访问模型 |
+
 ### 🔔 告警中心
 
 | 功能 | 描述 |
@@ -183,6 +208,15 @@ python3 web.py
 | 角色权限 | 管理员/普通用户角色区分 |
 | SSO 集成 | 支持企业单点登录 |
 | 飞书同步 | 自动同步飞书组织架构 |
+
+### 📋 合规与报表
+
+| 功能 | 描述 |
+|------|------|
+| 审计日志 | 追踪用户、会话、工具和关键管理操作 |
+| 合规检查 | 覆盖数据留存、配额使用、敏感内容和访问控制 |
+| 报告生成 | 生成企业合规报告，并支持 JSON/CSV 等格式 |
+| 风险建议 | 基于检查结果给出治理建议和后续动作 |
 
 ---
 
@@ -224,11 +258,17 @@ open-ace/
 ├── app/                   # 后端应用
 │   ├── routes/            # API 路由
 │   ├── services/          # 业务逻辑
+│   ├── modules/           # 工作区、合规等领域模块
 │   ├── models/            # 数据模型
 │   └── repositories/      # 数据访问
 ├── frontend/              # 前端应用
 │   ├── src/               # 源代码
+│   ├── e2e/               # Playwright 端到端测试
 │   └── package.json       # 依赖配置
+├── remote-agent/          # 远程工作区 Agent 与 CLI 适配器
+├── k8s/                   # Kubernetes 部署清单
+├── migrations/            # Alembic 数据库迁移
+├── schema/                # 数据库 Schema 辅助文件
 ├── scripts/               # 核心脚本
 │   ├── fetch_*.py         # 数据收集
 │   └── shared/            # 共享模块
@@ -245,8 +285,13 @@ open-ace/
 | [架构说明](docs/cn/ARCHITECTURE.md) | 系统架构与核心概念 |
 | [部署指南](docs/cn/DEPLOYMENT.md) | 本地与生产环境部署 |
 | [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
+| [远程工作区](docs/cn/REMOTE-WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
+| [远程 Agent](docs/cn/REMOTE-AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
+| [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
+| [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考 |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
 | [API 文档](docs/cn/API.md) | API 接口说明 |
+| [仓库设置](docs/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
 
 ---
 
@@ -258,6 +303,9 @@ open-ace/
 - 💡 有想法？[参与讨论](https://github.com/open-ace/open-ace/discussions)
 - 🗺️ 想了解计划？查看 [Roadmap](ROADMAP.md)
 - 🔧 想贡献代码？阅读 [贡献指南](CONTRIBUTING.md)
+- 🌱 第一次贡献？从 [`good first issue`](https://github.com/open-ace/open-ace/labels/good%20first%20issue) 或 [`help wanted`](https://github.com/open-ace/open-ace/labels/help%20wanted) 开始
+
+适合参与的方向包括：远程工作区体验、CLI 适配器、部署脚本、文档翻译、前端可用性、测试覆盖和企业集成。
 
 ---
 
@@ -268,8 +316,8 @@ open-ace/
 ---
 
 <p align="center">
-  <strong>让 AI 的价值最大化，让 AI 的风险最小化</strong><br>
-  <em>Open ACE — 您的 AI 治理专家</em>
+  <strong>把 AI 工具接进来，把成本和风险管起来</strong><br>
+  <em>Open ACE — self-hosted workspace and governance for real AI adoption</em>
 </p>
 
 ---
@@ -289,9 +337,22 @@ It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and 
 
 **What you can do with Open ACE:**
 
-- Give employees one workspace for AI sessions, prompts, history, and remote workspaces
-- Give administrators dashboards for tokens, cost, anomalies, quotas, audits, and ROI
+- Give employees one place for local/remote AI sessions, prompts, history, and project context
+- Run AI CLIs on your own development, staging, or GPU machines through the Remote Agent
+- Give administrators dashboards for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
+- Store LLM API keys centrally and issue short-lived proxy tokens to local and remote sessions
 - Deploy inside your own network while integrating SSO, Feishu/DingTalk, and Kubernetes over time
+
+## 🔥 Recent Highlights
+
+| Capability | Why it matters |
+|------------|----------------|
+| Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
+| Multi-CLI adapters | Claude Code, Qwen Code, Codex, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
+| API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived proxy tokens with unified quota and usage tracking |
+| Terminal and VSCode/code-server proxy | Browser terminal, remote directory browsing, and code-server/VSCode access make the workspace useful for real development loops |
+| Compliance and reporting | Audit trails, quota checks, compliance reports, and CSV downloads are available for governance workflows |
+| Open-source readiness | Roadmap, Security Policy, issue templates, Dependabot, CODEOWNERS, and beginner-friendly labels are in place |
 
 ## ✨ Two Modes, Double Value
 
@@ -304,8 +365,9 @@ It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and 
 </p>
 
 **Key Capabilities:**
-- 🤖 **Multi-AI Integration** — Support for Claude Code, Qwen Code, OpenClaw and more — all in one platform
-- 💬 **Smart Conversation Management** — History, session recovery, context memory — never lose a conversation
+- 🤖 **Multi-AI Integration** — Claude Code, Qwen Code, Codex, and OpenClaw behind one workspace
+- 🖥️ **Remote Workspace** — Choose a remote machine in the browser, then start AI coding sessions, terminals, and directory browsing
+- 💬 **Smart Session Management** — History, session recovery, context memory, and cross-tool history sync
 - 📝 **Prompt Library** — Share best practices across your team with reusable prompts
 - 🔍 **Quick Search** — Search across all conversations, knowledge preserved
 
@@ -321,8 +383,9 @@ It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and 
 
 **Key Capabilities:**
 - 📈 **Usage Visualization** — Token consumption trends, cost analysis, heatmaps at a glance
+- 🔑 **API Key Governance** — Encrypt API keys on the server and call models through scoped proxy tokens
 - 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
-- 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports
+- 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
 - 👥 **Multi-tenant Management** — Department isolation, permission control, resource quotas
 - 💰 **ROI Analysis** — Quantify AI value with ROI metrics and efficiency gains
 
@@ -332,12 +395,12 @@ It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and 
 
 | Feature | Description |
 |---------|-------------|
-| 🔒 **Secure & Controllable** | Self-hosted deployment, data stays on-premise, meets enterprise compliance |
-| 🌐 **Multi-tool Support** | Claude Code, Qwen Code, OpenClaw... manage all AI in one platform |
-| 📊 **Data-Driven** | Usage analytics, cost optimization, efficiency gains — let data speak |
-| 🔌 **Easy Integration** | SSO support, Feishu/DingTalk integration, seamless with existing systems |
-| 🐳 **One-Click Deploy** | Docker/K8s support, deploy in 10 minutes |
-| 🆓 **Fully Open Source** | Apache 2.0 license, free to use, modify, and distribute |
+| 🔒 **Self-hosted by default** | Keep data and API keys inside your own network and database |
+| 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, and OpenClaw with unified access, history, and governance |
+| 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
+| 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
+| 🔌 **Enterprise integration** | SSO, Feishu/DingTalk, Kubernetes, reverse proxy, and multi-tenant permissions |
+| 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
 
 ---
 
@@ -411,6 +474,16 @@ python3 web.py
 | Session Export | Export conversations for audit |
 | Timeline View | Visualize conversation flow |
 
+### 🖥️ Remote Workspace
+
+| Feature | Description |
+|---------|-------------|
+| Remote Agent | Run AI CLI daemons on Linux/macOS/Windows remote machines |
+| CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, and OpenClaw |
+| Browser Terminal | Access remote shells through WebSocket PTY with screen recovery after disconnects |
+| VSCode/code-server | Proxy remote code-server/VSCode paths so users can continue development in the browser |
+| API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived proxy tokens |
+
 ### 🔔 Alert Center
 
 | Feature | Description |
@@ -428,6 +501,15 @@ python3 web.py
 | Role Permissions | Admin/user role distinction |
 | SSO Integration | Enterprise single sign-on support |
 | Feishu Sync | Auto-sync Feishu organization structure |
+
+### 📋 Compliance and Reporting
+
+| Feature | Description |
+|---------|-------------|
+| Audit Logs | Track users, sessions, tools, and key administration actions |
+| Compliance Checks | Cover data retention, quota usage, sensitive content, and access control |
+| Report Generation | Generate governance reports with JSON/CSV export paths |
+| Risk Recommendations | Turn report results into practical follow-up actions |
 
 ---
 
@@ -469,11 +551,17 @@ open-ace/
 ├── app/                   # Backend application
 │   ├── routes/            # API routes
 │   ├── services/          # Business logic
+│   ├── modules/           # Domain modules: workspace, compliance, and more
 │   ├── models/            # Data models
 │   └── repositories/      # Data access
 ├── frontend/              # Frontend application
 │   ├── src/               # Source code
+│   ├── e2e/               # Playwright end-to-end tests
 │   └── package.json       # Dependencies
+├── remote-agent/          # Remote Workspace agent and CLI adapters
+├── k8s/                   # Kubernetes manifests
+├── migrations/            # Alembic database migrations
+├── schema/                # Database schema helpers
 ├── scripts/               # Core scripts
 │   ├── fetch_*.py         # Data collection
 │   └── shared/            # Shared modules
@@ -490,8 +578,13 @@ open-ace/
 | [Architecture](docs/en/ARCHITECTURE.md) | System architecture and concepts |
 | [Deployment](docs/en/DEPLOYMENT.md) | Local and production deployment |
 | [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
+| [Remote Workspace](docs/en/REMOTE-WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
+| [Remote Agent](docs/en/REMOTE-AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
+| [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
+| [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
 | [API Reference](docs/en/API.md) | API documentation |
+| [Repository Setup](docs/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
 
 ---
 
@@ -503,6 +596,9 @@ We welcome all forms of contribution!
 - 💡 Have an idea? [Join the discussion](https://github.com/open-ace/open-ace/discussions)
 - 🗺️ Want to see what's next? Read the [Roadmap](ROADMAP.md)
 - 🔧 Want to contribute code? Read the [Contributing Guide](CONTRIBUTING.md)
+- 🌱 First contribution? Start with [`good first issue`](https://github.com/open-ace/open-ace/labels/good%20first%20issue) or [`help wanted`](https://github.com/open-ace/open-ace/labels/help%20wanted)
+
+Good places to help include Remote Workspace UX, CLI adapters, deployment scripts, documentation translation, frontend usability, test coverage, and enterprise integrations.
 
 ---
 
@@ -513,6 +609,6 @@ This project is licensed under the [Apache 2.0 License](LICENSE).
 ---
 
 <p align="center">
-  <strong>Maximize AI Value, Minimize AI Risk</strong><br>
-  <em>Open ACE — Your AI Governance Expert</em>
+  <strong>Bring AI tools in. Keep cost and risk under control.</strong><br>
+  <em>Open ACE — self-hosted workspace and governance for real AI adoption</em>
 </p>
