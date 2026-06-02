@@ -33,6 +33,14 @@ from config import AgentConfig
 logger = logging.getLogger("openace-agent")
 
 
+def get_local_ip() -> str:
+    """获取本机 IP 地址（从 hostname 解析）。"""
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
+
+
 class RemoteAgent:
     """
     Main remote agent daemon.
@@ -229,6 +237,7 @@ class RemoteAgent:
                 "type": "register",
                 "machine_id": self.config.machine_id,
                 "capabilities": self._capabilities,
+                "ip_address": get_local_ip(),
             }
         )
         if resp and isinstance(resp, dict):
