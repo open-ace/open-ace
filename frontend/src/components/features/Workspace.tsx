@@ -251,6 +251,22 @@ export const Workspace: React.FC = () => {
     return () => clearInterval(interval);
   }, [config?.multi_user_mode, userWebUI?.success]);
 
+  // Theme sync: Send postMessage to all iframes when theme changes (Issue #104)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0) return;
+
+    // Send theme change message to all iframe tabs
+    tabs.forEach((tab) => {
+      const iframe = iframeRefs.current.get(tab.id);
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { type: 'openace-theme-change', theme },
+          '*'
+        );
+      }
+    });
+  }, [theme, tabs, tabsInitialized]);
+
   // Clear notification state for a tab (used when leaving/switching away from a tab)
   // Declared early so effects below can reference it
   const clearTabNotification = useCallback((tabId: string) => {
