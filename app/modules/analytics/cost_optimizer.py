@@ -730,9 +730,7 @@ class CostOptimizer:
         )
 
         # Waste percentage
-        waste_percentage = self._calculate_waste_percentage(
-            total_input, total_output
-        )
+        waste_percentage = self._calculate_waste_percentage(total_input, total_output)
 
         # Generate recommendations
         recommendations = self._generate_recommendations(
