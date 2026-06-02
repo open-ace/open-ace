@@ -747,11 +747,11 @@ def validate_ip(ip_str: str) -> bool:
 
 def get_client_ip_from_request() -> str:
     """从 HTTP Headers 或 remote_addr 获取客户端 IP（作为回退）。"""
-    forwarded_for: str | None = request.headers.get("X-Forwarded-For")
+    forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
 
-    real_ip: str | None = request.headers.get("X-Real-IP")
+    real_ip = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip.strip()
 
@@ -780,14 +780,14 @@ def agent_register():
         return jsonify({"error": "machine_name is required"}), 400
 
     agent_mgr = get_remote_agent_manager()
-    
+
     # 优先使用 Agent 上报的 IP，否则从请求获取
     agent_reported_ip = data.get("ip_address")
     if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
         ip_address = agent_reported_ip
     else:
         ip_address = get_client_ip_from_request()
-    
+
     result = agent_mgr.register_machine(
         registration_token=registration_token,
         machine_id=machine_id,
