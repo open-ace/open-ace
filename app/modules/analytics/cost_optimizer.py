@@ -537,6 +537,13 @@ class CostOptimizer:
 
         Returns:
             Efficiency score (0-100).
+
+        Note:
+            This method differs from ROICalculator._calculate_efficiency_score:
+            - ROICalculator uses cost-benefit ratio (estimated_savings / total_cost)
+            - CostOptimizer uses cost efficiency (avg_cost_per_request thresholds)
+            This difference is intentional: CostOptimizer focuses on raw cost metrics,
+            while ROICalculator incorporates estimated labor savings.
         """
         # Base score: 60 points
         efficiency_score = 60.0
@@ -593,7 +600,6 @@ class CostOptimizer:
         self,
         input_tokens: int,
         output_tokens: int,
-        requests: int,
     ) -> float:
         """
         Calculate waste percentage based on input/output imbalance.
@@ -601,7 +607,6 @@ class CostOptimizer:
         Args:
             input_tokens: Input tokens.
             output_tokens: Output tokens.
-            requests: Number of requests.
 
         Returns:
             Waste percentage (0-100).
@@ -726,7 +731,7 @@ class CostOptimizer:
 
         # Waste percentage
         waste_percentage = self._calculate_waste_percentage(
-            total_input, total_output, total_requests
+            total_input, total_output
         )
 
         # Generate recommendations
