@@ -1920,8 +1920,8 @@ def get_workspace_config():
             "enabled": False,
             "url": "",
             "multi_user_mode": False,
-            "port_range_start": 9000,
-            "port_range_end": 9999,
+            "port_range_start": 3100,
+            "port_range_end": 3200,
             "max_instances": 30,
             "idle_timeout_minutes": 30,
         }
@@ -1933,8 +1933,8 @@ def get_workspace_config():
                 workspace_config["enabled"] = workspace.get("enabled", False)
                 workspace_config["url"] = workspace.get("url", "")
                 workspace_config["multi_user_mode"] = workspace.get("multi_user_mode", False)
-                workspace_config["port_range_start"] = workspace.get("port_range_start", 9000)
-                workspace_config["port_range_end"] = workspace.get("port_range_end", 9999)
+                workspace_config["port_range_start"] = workspace.get("port_range_start", 3100)
+                workspace_config["port_range_end"] = workspace.get("port_range_end", 3200)
                 workspace_config["max_instances"] = workspace.get("max_instances", 30)
                 workspace_config["idle_timeout_minutes"] = workspace.get("idle_timeout_minutes", 30)
 
