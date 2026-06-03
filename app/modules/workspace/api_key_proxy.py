@@ -674,14 +674,14 @@ class APIKeyProxyService:
             Merged settings dict with the union of all models.
         """
         # Sort so the highest-priority key comes first
-        ranked_settings.sort(key=lambda item: item[0])
-        base_settings = deepcopy(ranked_settings[0][1])
+        sorted_settings = sorted(ranked_settings, key=lambda item: item[0])
+        base_settings = deepcopy(sorted_settings[0][1])
 
         # Collect per-provider model entries, deduplicated by model ID
         provider_model_entries: dict[
             str, dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]]
         ] = {}
-        for rank, settings in ranked_settings:
+        for rank, settings in sorted_settings:
             for provider_name, provider_models in settings.get("modelProviders", {}).items():
                 if not isinstance(provider_models, list):
                     continue
