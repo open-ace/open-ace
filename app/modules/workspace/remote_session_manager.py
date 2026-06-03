@@ -41,6 +41,7 @@ class RemoteSessionManager:
     _assistant_text_buffer: dict[str, str] = {}
     _content_blocks_buffer: dict[str, list[dict]] = {}
     _buffer_lock = threading.Lock()
+    _allowed_request_states = frozenset({"aborted", "abort_failed", "done"})
 
     def __init__(self):
         self._session_manager = SessionManager()
@@ -411,7 +412,7 @@ class RemoteSessionManager:
         }
         return self._agent_manager.send_command(machine_id, command)
 
-    def abort_request(self, session_id: str) -> bool:
+    def abort_request(self, session_id: str, reason: str = "user") -> bool:
         """Abort the current in-progress request without stopping the session.
 
         Sends an interrupt signal (SIGINT/Ctrl+C) to the remote CLI process
@@ -425,10 +426,11 @@ class RemoteSessionManager:
             "type": "command",
             "command": "abort_request",
             "session_id": session_id,
+            "reason": reason,
         }
 
         self._agent_manager.send_command(machine_id, command)
-        logger.info(f"Sent abort_request for session {session_id[:8]}")
+        logger.info("Sent abort_request for session %s (reason=%s)", session_id[:8], reason)
         return True
 
     def stop_session(self, session_id: str) -> bool:
@@ -806,6 +808,45 @@ class RemoteSessionManager:
             "Buffered permission request for session %s: %s",
             session_id[:8],
             control_request.get("request", {}).get("subtype"),
+        )
+
+    def process_request_state(
+        self,
+        session_id: str,
+        state: str,
+        reason: str = "user",
+        message: Optional[str] = None,
+    ) -> None:
+        """Buffer a request lifecycle event for SSE delivery to the frontend."""
+        if state not in self._allowed_request_states:
+            logger.warning(
+                "Ignoring unsupported request_state for session %s: %s",
+                session_id[:8],
+                state,
+            )
+            return
+
+        payload: dict[str, Any] = {
+            "type": state,
+            "reason": reason,
+        }
+        if message:
+            payload["message"] = message
+
+        output_entry = {
+            "session_id": session_id,
+            "data": json.dumps(payload, ensure_ascii=False),
+            "stream": "request_state",
+            "is_complete": state == "abort_failed",
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+        }
+
+        self._agent_manager.buffer_output(session_id, output_entry)
+        logger.info(
+            "Buffered request_state for session %s: %s (reason=%s)",
+            session_id[:8],
+            state,
+            reason,
         )
 
     def process_session_status_update(
