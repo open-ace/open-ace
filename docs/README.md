@@ -28,6 +28,7 @@ Documentation files are in the [en/](en/) directory.
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist |
+| [**MARKETING**](marketing/README.md) | Launch kit, early adopter discussion, and technical article drafts |
 
 ### Reading Guide by Role
 
@@ -38,6 +39,7 @@ Documentation files are in the [en/](en/) directory.
 | DevOps / Deployment | DEPLOYMENT → KUBERNETES → NGINX |
 | API integrator | API → PERMISSION-MODEL → CONCEPTS |
 | Managing remote machines | REMOTE-WORKSPACE → REMOTE-AGENT |
+| Growing the project | MARKETING → REPOSITORY-SETUP |
 
 ---
 
@@ -65,6 +67,7 @@ Documentation files are in the [en/](en/) directory.
 | [**FEISHU-CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |
 | [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub 仓库 topics、labels、releases 和 Demo 检查清单 |
+| [**MARKETING**](marketing/README.md) | 发布传播材料、早期用户讨论帖和技术文章草稿 |
 
 ### 按角色阅读指南
 
@@ -75,6 +78,7 @@ Documentation files are in the [en/](en/) directory.
 | 运维 / 部署 | DEPLOYMENT → KUBERNETES → NGINX |
 | API 集成 | API → PERMISSION-MODEL → CONCEPTS |
 | 管理远程机器 | REMOTE-WORKSPACE → REMOTE-AGENT |
+| 推广项目 | MARKETING → REPOSITORY-SETUP |
 
 ---
 
@@ -85,5 +89,6 @@ docs/
 ├── README.md          ← You are here / 你在这里
 ├── en/                # English documentation (15 files)
 ├── cn/                # 中文文档（15 个文件）
+├── marketing/         # Launch and outreach materials / 发布传播材料
 └── images/            # Documentation images / 文档图片
 ```
