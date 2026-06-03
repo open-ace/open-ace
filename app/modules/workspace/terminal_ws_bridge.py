@@ -11,6 +11,7 @@ from typing import Any
 
 import gevent
 from gevent.event import Event
+from gevent.lock import Semaphore
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
@@ -134,6 +135,7 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
     """
     tag_b2r = f"{label} bridge B→R"
     tag_r2b = f"{label} bridge R→B"
+    write_lock = Semaphore(1)
 
     def browser_to_remote() -> None:
         try:
@@ -158,14 +160,16 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
                 if message is None:
                     logger.info("%s: remote closed", tag_r2b)
                     break
-                ws_frame.send_message(browser_sock, message)
+                with write_lock:
+                    ws_frame.send_message(browser_sock, message)
         except ConnectionClosed as e:
             logger.info("%s: remote closed: %s", tag_r2b, e)
         except Exception as e:
             logger.debug("%s error: %s", tag_r2b, e)
         finally:
             with suppress(Exception):
-                ws_frame.send_close(browser_sock)
+                with write_lock:
+                    ws_frame.send_close(browser_sock)
 
     shutdown = Event()
 
@@ -175,7 +179,8 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
             while not shutdown.is_set():
                 shutdown.wait(30)
                 if not shutdown.is_set():
-                    ws_frame.send_ping(browser_sock)
+                    with write_lock:
+                        ws_frame.send_ping(browser_sock)
         except Exception as e:
             logger.debug("Keepalive greenlet exiting: %s", e)
 
