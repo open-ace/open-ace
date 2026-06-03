@@ -141,6 +141,7 @@
   border: 1px solid var(--border-color) !important;
   border-radius: var(--border-radius-lg) !important;
   box-shadow: var(--shadow-xl) !important;
+  color: var(--text-primary) !important;
 }
 
 .modal-header {
@@ -161,6 +162,7 @@
 .modal-footer {
   background-color: var(--bg-secondary) !important;
   border-top: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
 }
 
 .btn-close {
@@ -238,6 +240,13 @@
 
   /* Dark theme close button - invert to white */
   --btn-close-filter: invert(1) grayscale(100%) brightness(200%);
+
+  /* Bootstrap Modal Dark Theme Variables */
+  --bs-modal-bg: var(--bg-primary);
+  --bs-modal-color: var(--text-primary);
+  --bs-modal-border-color: var(--border-color);
+  --bs-modal-header-bg: var(--bg-secondary);
+  --bs-modal-footer-bg: var(--bg-secondary);
 }
 
 /* Reset and Base Styles */
