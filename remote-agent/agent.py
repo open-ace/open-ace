@@ -432,6 +432,25 @@ class RemoteAgent:
             }
         )
 
+    def _send_request_state(
+        self,
+        session_id: str,
+        state: str,
+        reason: str = "user",
+        message: str | None = None,
+    ) -> None:
+        """Send request lifecycle state to the server for SSE delivery."""
+        payload: dict[str, Any] = {
+            "type": "request_state",
+            "session_id": session_id,
+            "state": state,
+            "reason": reason,
+            "machine_id": self.config.machine_id,
+        }
+        if message:
+            payload["message"] = message
+        self._http_send(payload)
+
     def _handle_command(self, data: dict[str, Any]) -> None:
         """Dispatch a command from the server."""
         command = data.get("command")
@@ -466,6 +485,7 @@ class RemoteAgent:
                     session_id, f"Resume failed: {result.get('error')}", "stderr", True
                 )
         elif command == "abort_request":
+            reason = data.get("reason", "user")
             result = self._executor.interrupt_session(session_id)
             if not result["success"]:
                 logger.warning(
@@ -473,6 +493,15 @@ class RemoteAgent:
                     session_id[:8] if session_id else "N/A",
                     result.get("error"),
                 )
+                if session_id:
+                    self._send_request_state(
+                        session_id,
+                        "abort_failed",
+                        reason=reason,
+                        message=result.get("error", "interrupt failed"),
+                    )
+            elif session_id:
+                self._send_request_state(session_id, "aborted", reason=reason)
         elif command == "start_terminal":
             self._cmd_start_terminal(data)
         elif command == "stop_terminal":

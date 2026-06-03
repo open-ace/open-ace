@@ -486,8 +486,11 @@ def abort_remote_request(session_id):
     if access_error:
         return access_error
 
+    payload = request.get_json(silent=True) or {}
+    reason = payload.get("reason", "user")
+
     session_mgr = get_remote_session_manager()
-    success = session_mgr.abort_request(session_id)
+    success = session_mgr.abort_request(session_id, reason=reason)
 
     if success:
         return jsonify({"success": True})
@@ -629,6 +632,14 @@ def stream_session_output(session_id):
                             yield f"data: {json.dumps({'type': 'error', 'data': data})}\n\n"
                             last_index += 1
                             continue
+                        if stream == "request_state":
+                            try:
+                                parsed = json.loads(data)
+                                yield f"data: {json.dumps({'type': 'request_state', 'data': parsed})}\n\n"
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            last_index += 1
+                            continue
                         try:
                             parsed = json.loads(data)
                             if stream == "permission":
@@ -659,7 +670,7 @@ def stream_session_output(session_id):
             )
             try:
                 session_mgr = get_remote_session_manager()
-                session_mgr.abort_request(session_id)
+                session_mgr.abort_request(session_id, reason="disconnect")
             except Exception:
                 pass
 
@@ -943,6 +954,24 @@ def agent_message():
             session_mgr.process_permission_request(
                 session_id=session_id,
                 control_request=control_request,
+            )
+
+        pending = agent_mgr.get_pending_commands(machine_id)
+        return jsonify({"success": True, "pending_commands": pending})
+
+    elif msg_type == "request_state":
+        session_id = data.get("session_id")
+        state = data.get("state")
+        reason = data.get("reason", "user")
+        message = data.get("message")
+
+        if session_id and state:
+            session_mgr = get_remote_session_manager()
+            session_mgr.process_request_state(
+                session_id=session_id,
+                state=state,
+                reason=reason,
+                message=message,
             )
 
         pending = agent_mgr.get_pending_commands(machine_id)

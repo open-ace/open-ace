@@ -128,12 +128,14 @@ class TestAgentAbortRequest(unittest.TestCase):
 
         agent = RemoteAgent.__new__(RemoteAgent)
         agent._executor = mock_executor
+        agent._send_request_state = MagicMock()
         agent._running = True
 
-        data = {"command": "abort_request", "session_id": "test-12345678"}
+        data = {"command": "abort_request", "session_id": "test-12345678", "reason": "user"}
         agent._handle_command(data)
 
         mock_executor.interrupt_session.assert_called_once_with("test-12345678")
+        agent._send_request_state.assert_called_once_with("test-12345678", "aborted", reason="user")
 
     @patch("executor.ProcessExecutor")
     def test_abort_request_logs_warning_on_failure(self, MockExecutor):
@@ -144,11 +146,18 @@ class TestAgentAbortRequest(unittest.TestCase):
 
         agent = RemoteAgent.__new__(RemoteAgent)
         agent._executor = mock_executor
+        agent._send_request_state = MagicMock()
         agent._running = True
 
-        data = {"command": "abort_request", "session_id": "test-12345678"}
+        data = {"command": "abort_request", "session_id": "test-12345678", "reason": "disconnect"}
         # Should not raise
         agent._handle_command(data)
+        agent._send_request_state.assert_called_once_with(
+            "test-12345678",
+            "abort_failed",
+            reason="disconnect",
+            message="Not found",
+        )
 
 
 class TestSSEDisconnectDetection(unittest.TestCase):
