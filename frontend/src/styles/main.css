@@ -1532,6 +1532,13 @@ link[rel='dns-prefetch'] {
   flex-direction: column;
 }
 
+.assist-panel .tab-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* Assist Panel Tabs - Equal width tabs for right panel */
 .assist-panel .nav-tabs {
   display: flex;
