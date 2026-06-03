@@ -72,8 +72,8 @@ export const workspaceApi = {
         enabled: false,
         url: '',
         multi_user_mode: false,
-        port_range_start: 9000,
-        port_range_end: 9999,
+        port_range_start: 3100,
+        port_range_end: 3200,
         max_instances: 30,
         idle_timeout_minutes: 30,
       };
