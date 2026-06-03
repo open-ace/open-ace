@@ -530,6 +530,8 @@ def list_sessions():
         db = Database()
 
         tool_name = request.args.get("tool_name")
+        status = request.args.get("status")
+        session_type = request.args.get("session_type")
         host_name = request.args.get("host_name")
         search = request.args.get("search")
         search_days = request.args.get("search_days")
@@ -556,6 +558,14 @@ def list_sessions():
         if host_name:
             base_conditions.append("host_name = ?")
             base_params.append(host_name)
+
+        if status:
+            base_conditions.append("status = ?")
+            base_params.append(status)
+
+        if session_type:
+            base_conditions.append("session_type = ?")
+            base_params.append(session_type)
 
         base_where_clause = " AND ".join(base_conditions)
         p = get_param_placeholder()
