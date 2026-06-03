@@ -482,7 +482,11 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
 
         # Simulate the logic from agent_message register handler
         agent_reported_ip = "192.168.1.200"
-        if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
             self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
 
         machine = self.mgr.get_machine("test-register-logic-machine")
@@ -497,7 +501,11 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
 
         # Simulate register with loopback IP
         agent_reported_ip = "127.0.0.1"
-        if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
             self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
 
         # IP should remain unchanged
@@ -513,7 +521,11 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
 
         # Simulate register with invalid IP format
         agent_reported_ip = "invalid-ip-format"
-        if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
             self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
 
         # IP should remain unchanged
@@ -525,7 +537,11 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
         from app.routes.remote import validate_ip
 
         agent_reported_ip = "2001:db8::1"
-        if agent_reported_ip and agent_reported_ip != "127.0.0.1" and validate_ip(agent_reported_ip):
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
             self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
 
         machine = self.mgr.get_machine("test-register-logic-machine")
