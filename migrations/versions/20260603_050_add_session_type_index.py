@@ -27,7 +27,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "050_session_type_index"
-down_revision: Union[str, None] = "049_add_user_id_to_daily"
+down_revision: Union[str, None] = "049_add_user_id_to_daily_stats"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
