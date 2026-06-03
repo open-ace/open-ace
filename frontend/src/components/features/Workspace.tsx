@@ -578,7 +578,15 @@ export const Workspace: React.FC = () => {
       }
 
       // Single-user mode: use configured URL
+      // Remove any existing port from URL (keep only scheme://hostname)
       let url = config.url;
+      try {
+        const parsedUrl = new URL(url);
+        url = `${parsedUrl.protocol}//${parsedUrl.hostname}`;
+      } catch {
+        // Fallback: if URL parsing fails, use original
+        console.warn('Failed to parse workspace URL:', url);
+      }
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
       url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
