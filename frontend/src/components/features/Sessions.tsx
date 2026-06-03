@@ -403,11 +403,9 @@ export const Sessions: React.FC = () => {
                 isDeleting={deleteMutation.isPending}
                 isCompleting={completeMutation.isPending}
                 isRestoring={restoreMutation.isPending}
-                isRemoteControlPending={
-                  stopRemoteMutation.isPending ||
-                  pauseRemoteMutation.isPending ||
-                  resumeRemoteMutation.isPending
-                }
+                stopRemoteMutation={stopRemoteMutation}
+                pauseRemoteMutation={pauseRemoteMutation}
+                resumeRemoteMutation={resumeRemoteMutation}
               />
             ))}
           </div>
@@ -511,7 +509,9 @@ interface SessionCardProps {
   isDeleting: boolean;
   isCompleting: boolean;
   isRestoring: boolean;
-  isRemoteControlPending: boolean;
+  stopRemoteMutation: ReturnType<typeof useStopRemoteSession>;
+  pauseRemoteMutation: ReturnType<typeof usePauseRemoteSession>;
+  resumeRemoteMutation: ReturnType<typeof useResumeRemoteSession>;
 }
 
 const SessionCard: React.FC<SessionCardProps> = ({
@@ -528,7 +528,9 @@ const SessionCard: React.FC<SessionCardProps> = ({
   isDeleting,
   isCompleting,
   isRestoring,
-  isRemoteControlPending,
+  stopRemoteMutation,
+  pauseRemoteMutation,
+  resumeRemoteMutation,
 }) => {
   const isRemote = session.workspace_type === 'remote';
   return (
@@ -588,7 +590,10 @@ const SessionCard: React.FC<SessionCardProps> = ({
                     variant="outline-warning"
                     size="sm"
                     onClick={() => onPauseRemote(session.session_id)}
-                    loading={isRemoteControlPending}
+                    loading={
+                      pauseRemoteMutation.isPending &&
+                      pauseRemoteMutation.variables === session.session_id
+                    }
                   >
                     <i className="bi bi-pause-fill" />
                   </Button>
@@ -598,7 +603,10 @@ const SessionCard: React.FC<SessionCardProps> = ({
                     variant="outline-danger"
                     size="sm"
                     onClick={() => onStopRemote(session.session_id)}
-                    loading={isRemoteControlPending}
+                    loading={
+                      stopRemoteMutation.isPending &&
+                      stopRemoteMutation.variables === session.session_id
+                    }
                   >
                     <i className="bi bi-stop-fill" />
                   </Button>
@@ -611,7 +619,10 @@ const SessionCard: React.FC<SessionCardProps> = ({
                   variant="outline-success"
                   size="sm"
                   onClick={() => onResumeRemote(session.session_id)}
-                  loading={isRemoteControlPending}
+                  loading={
+                    resumeRemoteMutation.isPending &&
+                    resumeRemoteMutation.variables === session.session_id
+                  }
                 >
                   <i className="bi bi-play-fill" />
                 </Button>
