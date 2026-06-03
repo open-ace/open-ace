@@ -654,6 +654,66 @@ class APIKeyProxyService:
         # Multiple keys — merge modelProviders from all keys
         return self._merge_multi_key_settings(ranked_settings)
 
+    @staticmethod
+    def _collect_model_entries(
+        ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]],
+    ) -> dict[str, dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]]]:
+        """Collect per-provider model entries from ranked settings.
+
+        Iterates over all ranked settings and extracts models from
+        ``modelProviders.*``, grouping them by (provider_name, model_id).
+        Duplicate model IDs within the same key are ignored.
+
+        Args:
+            ranked_settings: List of ``(rank_tuple, settings_dict)`` pairs.
+
+        Returns:
+            Nested dict: ``{provider_name: {model_id: [(rank, model_dict), ...]}}``
+        """
+        provider_model_entries: dict[
+            str, dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]]
+        ] = {}
+        for rank, settings in ranked_settings:
+            for provider_name, provider_models in settings.get("modelProviders", {}).items():
+                if not isinstance(provider_models, list):
+                    continue
+                model_map = provider_model_entries.setdefault(provider_name, {})
+                seen_in_key: set[str] = set()
+                for raw_model in provider_models:
+                    if not isinstance(raw_model, dict):
+                        continue
+                    model_id = raw_model.get("id")
+                    if not isinstance(model_id, str) or not model_id:
+                        continue
+                    # Skip duplicate model IDs within the same key
+                    if model_id in seen_in_key:
+                        continue
+                    seen_in_key.add(model_id)
+                    model_map.setdefault(model_id, []).append((rank, deepcopy(raw_model)))
+        return provider_model_entries
+
+    @staticmethod
+    def _dedup_and_sort_models(
+        model_entries: dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]],
+    ) -> list[dict[str, Any]]:
+        """Deduplicate models by ID and sort by rank for deterministic output.
+
+        For each model ID, the config from the highest-priority entry (lowest
+        rank tuple) is used as the canonical version.
+
+        Args:
+            model_entries: ``{model_id: [(rank, model_dict), ...]}``
+
+        Returns:
+            Sorted list of deduplicated model dicts.
+        """
+        ranked: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
+        for model_id, entries in model_entries.items():
+            canonical_rank, canonical_model = sorted(entries, key=lambda x: x[0])[0]
+            ranked.append((canonical_rank, model_id, canonical_model))
+        ranked.sort(key=lambda x: (x[0], x[1]))
+        return [model for _, _, model in ranked]
+
     def _merge_multi_key_settings(
         self,
         ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]],
@@ -677,22 +737,8 @@ class APIKeyProxyService:
         sorted_settings = sorted(ranked_settings, key=lambda item: item[0])
         base_settings = deepcopy(sorted_settings[0][1])
 
-        # Collect per-provider model entries, deduplicated by model ID
-        provider_model_entries: dict[
-            str, dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]]
-        ] = {}
-        for rank, settings in sorted_settings:
-            for provider_name, provider_models in settings.get("modelProviders", {}).items():
-                if not isinstance(provider_models, list):
-                    continue
-                model_map = provider_model_entries.setdefault(provider_name, {})
-                for raw_model in provider_models:
-                    if not isinstance(raw_model, dict):
-                        continue
-                    model_id = raw_model.get("id")
-                    if not isinstance(model_id, str) or not model_id:
-                        continue
-                    model_map.setdefault(model_id, []).append((rank, deepcopy(raw_model)))
+        # Collect per-provider model entries (with per-key dedup)
+        provider_model_entries = self._collect_model_entries(sorted_settings)
 
         # If no modelProviders found, return base settings as-is
         if not provider_model_entries:
@@ -701,14 +747,7 @@ class APIKeyProxyService:
         # Rebuild each provider's model list with deduplication
         merged_providers: dict[str, list[dict[str, Any]]] = {}
         for provider_name, pm_map in provider_model_entries.items():
-            ranked: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
-            for mid, model_entries in pm_map.items():
-                # Pick the config from the highest-priority key
-                canonical_rank, canonical_model = sorted(model_entries, key=lambda x: x[0])[0]
-                ranked.append((canonical_rank, mid, canonical_model))
-            # Sort by rank then model ID for deterministic ordering
-            ranked.sort(key=lambda x: (x[0], x[1]))
-            merged_providers[provider_name] = [model for _, _, model in ranked]
+            merged_providers[provider_name] = self._dedup_and_sort_models(pm_map)
 
         base_settings["modelProviders"] = merged_providers
         if merged_providers and "$version" not in base_settings:
@@ -801,6 +840,7 @@ class APIKeyProxyService:
             provider_models = settings.get("modelProviders", {}).get("openai", [])
             supported_model_ids: list[str] = []
             if isinstance(provider_models, list):
+                seen_in_key: set[str] = set()
                 for raw_model in provider_models:
                     if not isinstance(raw_model, dict):
                         continue
@@ -808,6 +848,10 @@ class APIKeyProxyService:
                     if not isinstance(model_id, str) or not model_id:
                         continue
                     supported_model_ids.append(model_id)
+                    # Skip duplicate model IDs within the same key
+                    if model_id in seen_in_key:
+                        continue
+                    seen_in_key.add(model_id)
                     rank = (-priority, -weight, key_id)
                     model_entries.setdefault(model_id, []).append((rank, deepcopy(raw_model)))
                     model_key_ids.setdefault(model_id, []).append(key_id)
@@ -822,15 +866,7 @@ class APIKeyProxyService:
                 }
             )
 
-        models: list[dict[str, Any]] = []
-        ranked_model_meta: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
-        for model_id, entries in model_entries.items():
-            canonical_rank, canonical_model = sorted(entries, key=lambda item: item[0])[0]
-            ranked_model_meta.append((canonical_rank, model_id, canonical_model))
-
-        ranked_model_meta.sort(key=lambda item: (item[0], item[1]))
-        for _, _, model in ranked_model_meta:
-            models.append(model)
+        models = self._dedup_and_sort_models(model_entries)
 
         base_settings = (
             deepcopy(sorted(ranked_settings, key=lambda item: item[0])[0][1])

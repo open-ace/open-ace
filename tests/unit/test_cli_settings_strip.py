@@ -405,3 +405,29 @@ class TestMergeMultiKeySettings:
 
         assert result["model_provider"] == "openace"
         assert result["model_providers"]["openace"]["name"] == "Proxy A"
+
+    def test_dedup_within_single_key(self):
+        """Duplicate model IDs within the same key are ignored."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 1),
+                {
+                    "modelProviders": {
+                        "openai": [
+                            {"id": "qwen-max", "name": "First"},
+                            {"id": "qwen-max", "name": "Duplicate"},
+                            {"id": "qwen-plus", "name": "Plus"},
+                        ]
+                    },
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        models = result["modelProviders"]["openai"]
+        model_ids = [m["id"] for m in models]
+        assert model_ids == ["qwen-max", "qwen-plus"]
+        # First occurrence wins within the same key
+        assert next(m for m in models if m["id"] == "qwen-max")["name"] == "First"
