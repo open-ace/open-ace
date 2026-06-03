@@ -16,10 +16,8 @@ Open ACE는 다음 키보드 단축키를 지원하여 사용자가 시스템을
 |--------|------|
 | **Cmd+Shift+<** / **Ctrl+Shift+<** | 이전 탭으로 전환 |
 | **Cmd+Shift+>** / **Ctrl+Shift+>** | 다음 탭으로 전환 |
-| **Cmd+Left Arrow** / **Ctrl+Left Arrow** | 이전 탭으로 전환 |
-| **Cmd+Right Arrow** / **Ctrl+Right Arrow** | 다음 탭으로 전환 |
 
-> **참고**: `<`는 쉼표 키(Comma), `>`는 마침표 키(Period)에 해당합니다; 화살표 키도 동일하게 작동합니다.
+> **참고**: `<`는 쉼표 키(Comma), `>`는 마침표 키(Period)에 해당합니다.
 
 ---
 

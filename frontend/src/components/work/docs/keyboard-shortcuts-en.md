@@ -16,10 +16,8 @@ The following shortcuts work in both the workspace and AI conversation interface
 |----------|----------|
 | **Cmd+Shift+<** / **Ctrl+Shift+<** | Switch to previous tab |
 | **Cmd+Shift+>** / **Ctrl+Shift+>** | Switch to next tab |
-| **Cmd+Left Arrow** / **Ctrl+Left Arrow** | Switch to previous tab |
-| **Cmd+Right Arrow** / **Ctrl+Right Arrow** | Switch to next tab |
 
-> **Note**: `<` corresponds to the Comma key, `>` corresponds to the Period key; arrow key method also works.
+> **Note**: `<` corresponds to the Comma key, `>` corresponds to the Period key.
 
 ---
 
