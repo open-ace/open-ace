@@ -1176,7 +1176,7 @@ def agent_message():
         if not sync_user_id:
             # Verify machine has an active agent connection before trusting
             # machine_id from the unauthenticated POST body.
-            agent_mgr = get_remote_agent_manager()
+            # agent_mgr is already available from L871 (top of agent_message).
             if not agent_mgr.is_connected(machine_id):
                 logger.warning(
                     "session_sync: machine %s is not connected, skipping user_id resolution",

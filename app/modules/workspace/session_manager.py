@@ -613,6 +613,7 @@ class SessionManager:
         "expires_at",
         "terminal_id",
         "project_path",
+        "user_id",
     }
 
     def update_session_fields(self, session_id: str, fields: dict[str, Any]) -> bool:
