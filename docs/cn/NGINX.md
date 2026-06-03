@@ -112,6 +112,7 @@ server {
 
     # ── Open-ACE 主应用 ──
     location / {
+        client_max_body_size 50m;      # Agent 会话同步数据可能超过默认的 1MB 限制
         proxy_pass         http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header   Host $host;
@@ -121,7 +122,7 @@ server {
         proxy_set_header   Upgrade $http_upgrade;
         proxy_set_header   Connection "";
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 3600s;      # 远程终端 relay 等长连接 WebSocket 需要 1 小时超时
         proxy_connect_timeout 75s;
         proxy_send_timeout 75s;
     }
@@ -243,6 +244,45 @@ proxy_pass http://127.0.0.1:$webui_port$webui_path$is_args$args;
 ```
 - `$is_args`：如果请求有查询参数则为 `?`，否则为空
 - `$args`：查询参数字符串
+
+#### 问题 E：Agent HTTP 413 — 请求体过大
+
+**现象**：远程 agent 状态一直离线，或 agent 日志中持续出现 `/api/remote/agent/message` 的 `HTTP 413` 错误。
+
+**原因**：nginx 的 `client_max_body_size` 默认值为 **1MB**。远程 agent 通过 `POST /api/remote/agent/message` 发送会话同步数据（包含完整的 Claude/Qwen 对话历史和 content blocks），较长的会话（如 2.9MB、1370 条消息）会超过此限制。由于 agent 的所有流量（轮询、心跳、会话同步）都走同一个端点，413 错误会阻塞 agent 的**全部**通信。
+
+**解决**：在 `location /` 块中添加 `client_max_body_size 50m;`：
+
+```nginx
+location / {
+    client_max_body_size 50m;
+    # ... 其他代理设置
+}
+```
+
+然后重载 nginx：`nginx -s reload`。
+
+> **注意**：这是 nginx 特有的限制。直连 Flask/gevent 没有请求体大小限制。
+
+#### 问题 F：远程终端 5 分钟后断连
+
+**现象**：远程终端 relay 连接（用于私有网络机器）初始正常，但空闲约 5 分钟后断开。浏览器显示 "Connection closed. Reconnecting..."。
+
+**原因**：nginx 的 `proxy_read_timeout` 默认为 **60s**（常见配置设为 300s）。终端空闲时，WebSocket relay 无数据流，nginx 在超时后关闭连接，导致 relay bridge 断裂。
+
+**解决**：两部分 — 提高超时时间和添加 keepalive ping：
+
+1. 在 `location /` 块中提高 `proxy_read_timeout`：
+```nginx
+location / {
+    proxy_read_timeout 3600s;  # 1 小时，适用于远程终端等长连接
+    # ... 其他代理设置
+}
+```
+
+2. Open-ACE v1.0+ 在 WebSocket bridge 中内置了 keepalive ping（30 秒间隔），防止空闲超时。无需应用层改动。
+
+> **注意**：直连环境（无 nginx）不会出现此问题。keepalive ping 对其他中间件（CDN、负载均衡器）的空闲超时同样有效。
 
 ## 部署步骤
 

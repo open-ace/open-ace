@@ -170,6 +170,11 @@ def send_close(sock, code: int = 1000, reason: str = "") -> None:
     _send_frame(sock, payload, OP_CLOSE)
 
 
+def send_ping(sock, payload: bytes = b"") -> None:
+    """Send a WebSocket ping frame."""
+    _send_frame(sock, payload, OP_PING)
+
+
 def send_pong(sock, payload: bytes = b"") -> None:
     """Send a WebSocket pong frame."""
     _send_frame(sock, payload, OP_PONG)

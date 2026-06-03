@@ -112,6 +112,7 @@ server {
 
     # ── Open-ACE 主应用 ──
     location / {
+        client_max_body_size 50m;      # Agent session sync payloads can exceed 1MB default
         proxy_pass         http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header   Host $host;
@@ -121,7 +122,7 @@ server {
         proxy_set_header   Upgrade $http_upgrade;
         proxy_set_header   Connection "";
         proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 300s;
+        proxy_read_timeout 3600s;      # Long-lived WebSocket relay connections (terminal, VSCode)
         proxy_connect_timeout 75s;
         proxy_send_timeout 75s;
     }
@@ -244,7 +245,46 @@ proxy_pass http://127.0.0.1:$webui_port$webui_path$is_args$args;
 - `$is_args`：如果请求有查询参数则为 `?`，否则为空
 - `$args`：查询参数字符串
 
-## 部署步骤
+#### Problem E: Agent HTTP 413 — Request Entity Too Large
+
+**Symptom**: Remote agent status stays offline, or agent logs show repeated `HTTP 413` errors from `/api/remote/agent/message`.
+
+**Cause**: nginx's `client_max_body_size` defaults to **1MB**. The remote agent sends session sync data (full Claude/Qwen conversation history including content blocks) via `POST /api/remote/agent/message`. Long sessions (e.g., 2.9MB with 1370 messages) exceed this limit. Since all agent traffic (poll, heartbeat, session sync) goes through the same endpoint, 413 errors block **all** agent communication — not just session sync.
+
+**Fix**: Add `client_max_body_size 50m;` to the `location /` block:
+
+```nginx
+location / {
+    client_max_body_size 50m;
+    # ... other proxy settings
+}
+```
+
+Then reload nginx: `nginx -s reload`.
+
+> **Note**: This is nginx-specific. Direct Flask/gevent connections have no body size limit.
+
+#### Problem F: Remote Terminal Disconnects After 5 Minutes
+
+**Symptom**: Remote terminal relay connections (for machines on private networks) work initially but disconnect after exactly 5 minutes of idle time. Browser shows "Connection closed. Reconnecting...".
+
+**Cause**: nginx's `proxy_read_timeout` defaults to **60s** (commonly set to 300s in configs). When the terminal is idle, no data flows through the WebSocket relay. nginx closes the connection after this timeout, breaking the relay bridge.
+
+**Fix**: Two parts — raise the timeout and add keepalive pings:
+
+1. Raise `proxy_read_timeout` in the `location /` block:
+```nginx
+location / {
+    proxy_read_timeout 3600s;  # 1 hour for long-lived WebSocket relay
+    # ... other proxy settings
+}
+```
+
+2. Open-ACE v1.0+ includes built-in keepalive pings (30-second interval) in the WebSocket bridge to prevent idle timeouts. No application-level changes needed.
+
+> **Note**: Direct connections (without nginx) never experience this issue. The keepalive ping also protects against other middleboxes (CDN, load balancers) with similar idle timeouts.
+
+## Deployment Steps
 
 ```bash
 # 1. 复制配置文件
