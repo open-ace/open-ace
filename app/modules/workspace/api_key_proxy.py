@@ -572,8 +572,8 @@ class APIKeyProxyService:
         Get CLI settings for a specific tool from active API keys.
 
         Searches api_key_store where cli_tools contains the tool_name.
-        Returns the tool-specific settings from cli_settings, merged with
-        the actual API key and base_url.
+        When multiple matching keys exist, merges modelProviders from all
+        keys so the resulting settings contain the union of available models.
 
         Tool name normalization is applied so that aliases like "codex-cli"
         and "codex" match each other, and "claude-code" matches "claude".
@@ -581,6 +581,7 @@ class APIKeyProxyService:
         Args:
             tenant_id: Tenant ID.
             tool_name: CLI tool name (e.g., "claude-code", "qwen-code", "codex", "codex-cli").
+            scope: Key scope filter (default "remote").
 
         Returns:
             Dict with complete settings ready for agent to write to settings.json,
@@ -591,15 +592,16 @@ class APIKeyProxyService:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Find API key where cli_tools contains the tool_name
+        # Find API keys where cli_tools contains the tool_name
         cursor.execute(
             f"""
-            SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings
+            SELECT id, provider, encrypted_key, base_url, cli_tools, cli_settings,
+                   priority, weight
             FROM api_key_store
             WHERE tenant_id = {_param()} AND is_active = TRUE
               AND (scope = {_param()} OR scope = 'shared')
-            ORDER BY id DESC
-            LIMIT 10
+            ORDER BY priority DESC, weight DESC, id ASC
+            LIMIT 50
         """,
             (tenant_id, scope),
         )
@@ -607,7 +609,8 @@ class APIKeyProxyService:
         rows = cursor.fetchall()
         conn.close()
 
-        # Find matching row
+        # Collect ALL matching keys with their ranked settings
+        ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
         for row in rows:
             cli_tools_str = row["cli_tools"] or ""
             cli_settings_str = row["cli_settings"] or "{}"
@@ -622,7 +625,11 @@ class APIKeyProxyService:
             if canonical_tool not in {normalize_tool_name(t) for t in cli_tools}:
                 continue
 
-            # Found matching key - build settings
+            key_id = int(row["id"])
+            priority = int(row.get("priority") or 0)
+            weight = int(row.get("weight") or 100)
+
+            # Build settings for this key
             try:
                 cli_settings = json.loads(cli_settings_str) if cli_settings_str else {}
             except json.JSONDecodeError:
@@ -633,13 +640,81 @@ class APIKeyProxyService:
             # so that cli_settings keyed by either "codex" or "codex-cli" are found.
             tool_settings = cli_settings.get(tool_name, cli_settings.get(canonical_tool, {}))
 
-            # Return non-sensitive settings only.
-            # API credentials (key + base_url) are NOT injected here —
-            # they are set via environment variables by the agent
-            # (terminal_server.py for web terminal, executor for sessions).
-            return self._build_cli_settings_for_tool(tool_name, tool_settings)
+            settings = self._build_cli_settings_for_tool(tool_name, tool_settings)
+            rank = (-priority, -weight, key_id)
+            ranked_settings.append((rank, settings))
 
-        return None
+        if not ranked_settings:
+            return None
+
+        # Single key fast path — backward compatible
+        if len(ranked_settings) == 1:
+            return ranked_settings[0][1]
+
+        # Multiple keys — merge modelProviders from all keys
+        return self._merge_multi_key_settings(ranked_settings)
+
+    def _merge_multi_key_settings(
+        self,
+        ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Merge settings from multiple API keys, unioning modelProviders.
+
+        Base settings (theme, permissions, etc.) come from the highest-priority
+        key.  ``modelProviders`` is merged: models from all keys are collected,
+        deduplicated by model ID (using the highest-priority key's config), and
+        sorted by rank for deterministic output.
+
+        Args:
+            ranked_settings: List of ``(rank_tuple, settings_dict)`` pairs.
+                ``rank_tuple`` is ``(-priority, -weight, key_id)`` so that
+                sorting ascending puts the best key first.
+
+        Returns:
+            Merged settings dict with the union of all models.
+        """
+        # Sort so the highest-priority key comes first
+        ranked_settings.sort(key=lambda item: item[0])
+        base_settings = deepcopy(ranked_settings[0][1])
+
+        # Collect per-provider model entries, deduplicated by model ID
+        provider_model_entries: dict[
+            str, dict[str, list[tuple[tuple[int, int, int], dict[str, Any]]]]
+        ] = {}
+        for rank, settings in ranked_settings:
+            for provider_name, provider_models in settings.get("modelProviders", {}).items():
+                if not isinstance(provider_models, list):
+                    continue
+                model_map = provider_model_entries.setdefault(provider_name, {})
+                for raw_model in provider_models:
+                    if not isinstance(raw_model, dict):
+                        continue
+                    model_id = raw_model.get("id")
+                    if not isinstance(model_id, str) or not model_id:
+                        continue
+                    model_map.setdefault(model_id, []).append((rank, deepcopy(raw_model)))
+
+        # If no modelProviders found, return base settings as-is
+        if not provider_model_entries:
+            return base_settings
+
+        # Rebuild each provider's model list with deduplication
+        merged_providers: dict[str, list[dict[str, Any]]] = {}
+        for provider_name, pm_map in provider_model_entries.items():
+            ranked: list[tuple[tuple[int, int, int], str, dict[str, Any]]] = []
+            for mid, model_entries in pm_map.items():
+                # Pick the config from the highest-priority key
+                canonical_rank, canonical_model = sorted(model_entries, key=lambda x: x[0])[0]
+                ranked.append((canonical_rank, mid, canonical_model))
+            # Sort by rank then model ID for deterministic ordering
+            ranked.sort(key=lambda x: (x[0], x[1]))
+            merged_providers[provider_name] = [model for _, _, model in ranked]
+
+        base_settings["modelProviders"] = merged_providers
+        if merged_providers and "$version" not in base_settings:
+            base_settings["$version"] = 3
+
+        return base_settings
 
     def _list_tool_key_rows(
         self,
