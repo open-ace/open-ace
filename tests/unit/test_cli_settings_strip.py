@@ -231,3 +231,203 @@ class TestToolModelPool:
             "shared-model",
             "low-only",
         ]
+
+
+class TestMergeMultiKeySettings:
+    """Test _merge_multi_key_settings for multi-API-key model merging."""
+
+    def _make_svc(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        return APIKeyProxyService.__new__(APIKeyProxyService)
+
+    def test_single_key_returns_unchanged(self):
+        """Single key fast path — returned directly, not merged."""
+        svc = self._make_svc()
+        settings = {"modelProviders": {"openai": [{"id": "qwen-max"}]}, "theme": "dark"}
+
+        result = svc._merge_multi_key_settings([((0, -100, 1), settings)])
+
+        assert result["theme"] == "dark"
+        assert result["modelProviders"]["openai"] == [{"id": "qwen-max"}]
+
+    def test_disjoint_models_are_unioned(self):
+        """Two keys with non-overlapping models — all models appear."""
+        svc = self._make_svc()
+        ranked = [
+            ((-10, -100, 1), {"modelProviders": {"openai": [{"id": "qwen-max"}]}}),
+            ((-5, -100, 2), {"modelProviders": {"openai": [{"id": "qwen-turbo"}]}}),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        model_ids = [m["id"] for m in result["modelProviders"]["openai"]]
+        assert sorted(model_ids) == ["qwen-max", "qwen-turbo"]
+
+    def test_overlapping_model_id_uses_highest_priority(self):
+        """Same model ID in two keys — highest-priority config wins."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 1),
+                {
+                    "modelProviders": {
+                        "openai": [
+                            {
+                                "id": "qwen-max",
+                                "name": "Key A qwen-max",
+                                "generationConfig": {"temperature": 0.5},
+                            },
+                        ]
+                    },
+                },
+            ),
+            (
+                (-5, -100, 2),
+                {
+                    "modelProviders": {
+                        "openai": [
+                            {"id": "qwen-max", "name": "Key B qwen-max"},
+                        ]
+                    },
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        models = result["modelProviders"]["openai"]
+        assert len(models) == 1
+        assert models[0]["name"] == "Key A qwen-max"
+        assert models[0]["generationConfig"]["temperature"] == 0.5
+
+    def test_base_settings_from_highest_priority(self):
+        """Non-model settings come from the highest-priority key."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 1),
+                {
+                    "modelProviders": {"openai": [{"id": "m1"}]},
+                    "theme": "dark",
+                    "customField": "from-high-priority",
+                },
+            ),
+            (
+                (-5, -100, 2),
+                {
+                    "modelProviders": {"openai": [{"id": "m2"}]},
+                    "theme": "light",
+                    "customField": "from-low-priority",
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        assert result["theme"] == "dark"
+        assert result["customField"] == "from-high-priority"
+
+    def test_no_model_providers_returns_base_settings(self):
+        """Keys without modelProviders — base settings returned as-is."""
+        svc = self._make_svc()
+        ranked = [
+            ((-10, -100, 1), {"theme": "dark", "model": "haiku"}),
+            ((-5, -100, 2), {"theme": "light"}),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        assert result["theme"] == "dark"
+        assert result["model"] == "haiku"
+        # No modelProviders key injected
+        assert "modelProviders" not in result
+
+    def test_same_priority_lower_key_id_wins(self):
+        """Same priority — lower key_id (earlier insertion) wins as canonical."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 5),
+                {
+                    "modelProviders": {"openai": [{"id": "m1", "name": "Key 5"}]},
+                },
+            ),
+            (
+                (-10, -100, 2),
+                {
+                    "modelProviders": {"openai": [{"id": "m1", "name": "Key 2"}]},
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        models = result["modelProviders"]["openai"]
+        assert len(models) == 1
+        # Key 2 has lower key_id, so after sorting (-10, -100, 2) comes before (-10, -100, 5)
+        assert models[0]["name"] == "Key 2"
+
+    def test_does_not_affect_claude_code_settings(self):
+        """Claude Code has no modelProviders — merge returns base settings."""
+        svc = self._make_svc()
+        ranked = [
+            ((-10, -100, 1), {"env": {"ANTHROPIC_MODEL": "claude-3"}, "model": "haiku"}),
+            ((-5, -100, 2), {"env": {"ANTHROPIC_MODEL": "claude-4"}, "model": "sonnet"}),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        assert result["env"]["ANTHROPIC_MODEL"] == "claude-3"
+        assert result["model"] == "haiku"
+
+    def test_does_not_affect_codex_settings(self):
+        """Codex uses model_providers (snake_case), not modelProviders — merge is a no-op."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 1),
+                {
+                    "model_provider": "openace",
+                    "model_providers": {"openace": {"name": "Proxy A"}},
+                },
+            ),
+            (
+                (-5, -100, 2),
+                {
+                    "model_provider": "openace",
+                    "model_providers": {"openace": {"name": "Proxy B"}},
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        assert result["model_provider"] == "openace"
+        assert result["model_providers"]["openace"]["name"] == "Proxy A"
+
+    def test_dedup_within_single_key(self):
+        """Duplicate model IDs within the same key are ignored."""
+        svc = self._make_svc()
+        ranked = [
+            (
+                (-10, -100, 1),
+                {
+                    "modelProviders": {
+                        "openai": [
+                            {"id": "qwen-max", "name": "First"},
+                            {"id": "qwen-max", "name": "Duplicate"},
+                            {"id": "qwen-plus", "name": "Plus"},
+                        ]
+                    },
+                },
+            ),
+        ]
+
+        result = svc._merge_multi_key_settings(ranked)
+
+        models = result["modelProviders"]["openai"]
+        model_ids = [m["id"] for m in models]
+        assert model_ids == ["qwen-max", "qwen-plus"]
+        # First occurrence wins within the same key
+        assert next(m for m in models if m["id"] == "qwen-max")["name"] == "First"
