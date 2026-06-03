@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import gevent
+from gevent.event import Event
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
@@ -232,14 +233,17 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
             with suppress(Exception):
                 ws_frame.send_close(browser_sock)
 
+    shutdown = Event()
+
     def browser_keepalive() -> None:
         """Send periodic WebSocket pings to browser to prevent nginx timeout."""
         try:
-            while True:
-                gevent.sleep(30)
-                ws_frame.send_ping(browser_sock)
-        except Exception:
-            pass
+            while not shutdown.is_set():
+                shutdown.wait(30)
+                if not shutdown.is_set():
+                    ws_frame.send_ping(browser_sock)
+        except Exception as e:
+            logger.debug("Keepalive greenlet exiting: %s", e)
 
     jobs = [
         gevent.spawn(browser_to_remote),
@@ -247,3 +251,4 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
         gevent.spawn(browser_keepalive),
     ]
     gevent.joinall(jobs)
+    shutdown.set()
