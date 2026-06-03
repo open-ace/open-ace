@@ -1372,6 +1372,66 @@ def restore_session(session_id):
                 }
             )
 
+        # For remote CLI sessions, check if the process is actually running
+        # before returning the URL. If process has terminated, return error
+        # to prompt user to create a new session.
+        if workspace_type == "remote" and remote_machine_id:
+            try:
+                from app.modules.workspace.remote_session_manager import get_remote_session_manager
+
+                session_mgr = get_remote_session_manager()
+                process_info = session_mgr.check_session_process(session_id, timeout=3.0)
+
+                if process_info is None:
+                    # Agent not responding or session not found on agent
+                    logger.warning(
+                        "restore_session: session %s not found on remote agent %s",
+                        session_id[:8],
+                        remote_machine_id[:8],
+                    )
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": "Session process not found on remote agent. Please create a new session.",
+                            "error_code": "SESSION_PROCESS_NOT_FOUND",
+                        }
+                    ), 400
+
+                if not process_info.get("is_running"):
+                    # Process has terminated (e.g., received SIGINT)
+                    logger.warning(
+                        "restore_session: session %s process terminated (pid=%s)",
+                        session_id[:8],
+                        process_info.get("pid"),
+                    )
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": "Session process has terminated. Please create a new session.",
+                            "error_code": "SESSION_PROCESS_TERMINATED",
+                            "terminated_session": {
+                                "project_path": process_info.get("project_path"),
+                                "cli_tool": process_info.get("cli_tool"),
+                            },
+                        }
+                    ), 400
+
+                logger.info(
+                    "restore_session: session %s process verified (pid=%s is_running=%s)",
+                    session_id[:8],
+                    process_info.get("pid"),
+                    process_info.get("is_running"),
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "restore_session: failed to check process status for %s: %s",
+                    session_id[:8],
+                    e,
+                )
+                # Continue without check if verification fails - agent may be offline
+                # Frontend will handle reconnect error when actually connecting
+
         # Generate encodedProjectName based on tool
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
             # project_path may be actual path or encoded name

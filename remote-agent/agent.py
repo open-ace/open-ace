@@ -495,6 +495,8 @@ class RemoteAgent:
             self._cmd_stop_vscode(data)
         elif command == "attach_vscode":
             self._cmd_attach_vscode(data)
+        elif command == "get_session_info":
+            self._cmd_get_session_info(data)
         else:
             logger.warning("Unknown command: %s", command)
 
@@ -600,6 +602,23 @@ class RemoteAgent:
                 "Failed to handle permission response: %s",
                 result.get("error"),
             )
+
+    def _cmd_get_session_info(self, data: dict[str, Any]) -> None:
+        """Handle a get_session_info command to check if a session's process is running."""
+        session_id = data.get("session_id", "")
+        request_id = data.get("request_id", "")
+
+        logger.info("Getting session info for %s (request_id=%s)", session_id[:8], request_id[:8] if request_id else "N/A")
+
+        info = self._executor.get_session_info(session_id)
+
+        # Send response back to server
+        self._send_message_to_server({
+            "type": "session_info_response",
+            "session_id": session_id,
+            "request_id": request_id,
+            "info": info,  # None if session not found
+        })
 
     def _cmd_update_permission_mode(self, data: dict[str, Any]) -> None:
         """Handle update_permission_mode command from the frontend."""

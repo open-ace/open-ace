@@ -525,6 +525,49 @@ class RemoteSessionManager:
             "paused_at": session.paused_at.isoformat() if session.paused_at else None,
         }
 
+    def check_session_process(self, session_id: str, timeout: float = 5.0) -> Optional[dict[str, Any]]:
+        """
+        Check if a session's process is actually running on the remote agent.
+
+        Sends a get_session_info command to the agent and waits for response.
+        This is used by restore_session to verify the process hasn't terminated.
+
+        Returns:
+            dict with session info if found, containing 'is_running' key.
+            None if session not found or agent timeout.
+        """
+        machine_id = self._get_machine_id(session_id)
+        if not machine_id:
+            logger.warning("check_session_process: no machine_id for session %s", session_id[:8])
+            return None
+
+        request_id = str(uuid.uuid4())
+        command = {
+            "type": "command",
+            "command": "get_session_info",
+            "session_id": session_id,
+            "request_id": request_id,
+        }
+
+        # Send command to agent
+        self._agent_manager.send_command(machine_id, command)
+
+        # Wait for response
+        result = self._agent_manager.get_session_info_result(request_id, timeout)
+
+        if result is None:
+            logger.warning("check_session_process: timeout for session %s", session_id[:8])
+            return None
+
+        logger.info(
+            "check_session_process: session %s is_running=%s pid=%s",
+            session_id[:8],
+            result.get("is_running"),
+            result.get("pid"),
+        )
+
+        return result
+
     def process_session_output(
         self, session_id: str, data: str, stream: str = "stdout", is_complete: bool = False
     ) -> None:

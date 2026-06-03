@@ -72,6 +72,8 @@ class RemoteAgentManager:
         self._last_heartbeat_db_write: dict[str, float] = {}
         # Browse results: {request_id: result} for directory browsing
         self._browse_results: dict[str, dict] = {}
+        # Session info results: {request_id: info} for get_session_info command responses
+        self._session_info_results: dict[str, dict] = {}
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
         self._restore_in_memory_state()
@@ -627,6 +629,28 @@ class RemoteAgentManager:
             # Sleep briefly before checking again
             gevent.sleep(0.1)
         logger.warning("Timeout waiting for browse result %s", request_id[:8])
+        return None
+
+    def store_session_info_result(self, request_id: str, info: dict | None) -> None:
+        """Store session info result from agent for later retrieval."""
+        with self._lock:
+            self._session_info_results[request_id] = {"info": info}
+        logger.info("Stored session info result for request %s", request_id[:8])
+
+    def get_session_info_result(self, request_id: str, timeout: float = 5.0) -> dict | None:
+        """Wait for and retrieve session info result.
+
+        Polls for the result with a timeout. Returns None if timeout expires.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            with self._lock:
+                if request_id in self._session_info_results:
+                    result = self._session_info_results.pop(request_id)
+                    return result.get("info")
+            # Sleep briefly before checking again
+            gevent.sleep(0.1)
+        logger.warning("Timeout waiting for session info result %s", request_id[:8])
         return None
 
     def store_terminal_info(self, machine_id: str, terminal_id: str, info: dict) -> None:

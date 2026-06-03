@@ -927,6 +927,18 @@ def agent_message():
 
         return jsonify({"success": True})
 
+    elif msg_type == "session_info_response":
+        # Agent responds to get_session_info command
+        request_id = data.get("request_id")
+        info = data.get("info")
+
+        logger.info("Agent session_info_response: request_id=%s info=%s", request_id[:8] if request_id else "N/A", info)
+
+        if request_id:
+            agent_mgr.store_session_info_result(request_id, info)
+
+        return jsonify({"success": True})
+
     elif msg_type == "usage_report":
         session_id = data.get("session_id")
         tokens = data.get("tokens", {})
