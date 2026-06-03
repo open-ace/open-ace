@@ -224,6 +224,33 @@ class WebUIManager:
             logger.error(f"Error loading config: {e}")
             return WorkspaceConfig()
 
+    def _remove_port_from_url(self, url: str) -> str:
+        """Remove any existing port from URL, keeping only scheme and host.
+
+        This ensures consistent URL handling when workspace.url is configured
+        with a port (e.g., user mistakenly includes webui port).
+
+        Examples:
+            http://localhost:3100 -> http://localhost
+            http://192.168.1.169:3100 -> http://192.168.1.169
+            http://[::1]:5000 -> http://[::1] (IPv6)
+            http://localhost -> http://localhost (no change)
+
+        Args:
+            url: URL string that may contain a port.
+
+        Returns:
+            URL string without port, preserving scheme and host.
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        # Return scheme://hostname (no port)
+        if parsed.scheme and parsed.hostname:
+            return f"{parsed.scheme}://{parsed.hostname}"
+        # Fallback: if URL lacks scheme, return original
+        return url
+
     def start_cleanup_thread(self):
         """Start the background cleanup greenlet."""
         if self._cleanup_greenlet is not None:
@@ -420,8 +447,9 @@ class WebUIManager:
         if not self.config.multi_user_mode:
             # Single-user mode: return configured URL with a generated token
             # The token is needed for iframe auth when making cross-origin API calls
+            # Remove port from URL to ensure correct iframe address
             token = self.generate_token(user_id, 0)
-            return self.config.url, token
+            return self._remove_port_from_url(self.config.url), token
 
         with self._lock:
             # Check if user already has an instance
@@ -468,11 +496,8 @@ class WebUIManager:
         # Generate token
         token = self.generate_token(user_id, port)
 
-        # Build URL
-        base_url = self.config.url
-        # Remove any existing port from base_url
-        if ":" in base_url.split("//")[-1]:
-            base_url = base_url.split(":")[0] + ":" + base_url.split(":")[1]
+        # Build URL (remove any existing port from config.url)
+        base_url = self._remove_port_from_url(self.config.url)
         url = f"{base_url}:{port}"
 
         # Start process
@@ -633,8 +658,8 @@ class WebUIManager:
             logger.error("qwen-code-webui executable not found")
             return None, {}
 
-        # Build openace_api_url from config
-        openace_api_url = self.config.url  # e.g. "http://localhost"
+        # Build openace_api_url from config (remove any existing port first)
+        openace_api_url = self._remove_port_from_url(self.config.url)
         server_config = self._load_server_config()
         server_port = server_config.get("web_port", 5000)
         openace_api_url = f"{openace_api_url}:{server_port}"
