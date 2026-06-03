@@ -232,5 +232,18 @@ def _run_raw_bridge(browser_sock: Any, remote_ws: Any, label: str) -> None:
             with suppress(Exception):
                 ws_frame.send_close(browser_sock)
 
-    jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
+    def browser_keepalive() -> None:
+        """Send periodic WebSocket pings to browser to prevent nginx timeout."""
+        try:
+            while True:
+                gevent.sleep(30)
+                ws_frame.send_ping(browser_sock)
+        except Exception:
+            pass
+
+    jobs = [
+        gevent.spawn(browser_to_remote),
+        gevent.spawn(remote_to_browser),
+        gevent.spawn(browser_keepalive),
+    ]
     gevent.joinall(jobs)
