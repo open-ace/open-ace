@@ -211,9 +211,8 @@ class AnalysisService:
         # User ranking
         users = []
         for i, user_data in enumerate(user_tokens[:10]):
-            username = user_data.get("sender_name", "Unknown")
-            if username and ".local" in username:
-                username = username.split("-")[0]
+            # Use unified_username which is resolved via LEFT JOIN users table
+            username = user_data.get("unified_username", "Unknown")
             users.append(
                 {
                     "user_id": i + 1,
