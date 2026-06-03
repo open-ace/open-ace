@@ -20,6 +20,7 @@ def ensure_all_tables() -> None:
     """
     from app.modules.compliance.report import get_ddl_statements as report_ddl
     from app.modules.compliance.retention import get_ddl_statements as ret_ddl
+    from app.modules.governance.audit_logger import get_ddl_statements as audit_ddl
     from app.modules.sso.manager import get_ddl_statements as sso_ddl
     from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
     from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -37,6 +38,7 @@ def ensure_all_tables() -> None:
         pl_ddl,
         akp_ddl,
         ram_ddl,
+        audit_ddl,
         sso_ddl,
         ret_ddl,
         ps_ddl,
