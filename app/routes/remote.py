@@ -637,7 +637,11 @@ def stream_session_output(session_id):
                                 parsed = json.loads(data)
                                 yield f"data: {json.dumps({'type': 'request_state', 'data': parsed})}\n\n"
                             except (json.JSONDecodeError, TypeError):
-                                pass
+                                logger.warning(
+                                    "Failed to parse request_state payload for session %s: %r",
+                                    session_id[:8],
+                                    data,
+                                )
                             last_index += 1
                             continue
                         try:

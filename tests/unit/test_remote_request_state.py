@@ -87,6 +87,15 @@ class TestRemoteRequestState(unittest.TestCase):
             },
         )
 
+    def test_process_request_state_ignores_unsupported_state(self):
+        self.manager.process_request_state(
+            "session-123",
+            "unexpected_state",
+            reason="user",
+        )
+
+        self.mock_agent_mgr.buffer_output.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

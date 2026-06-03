@@ -41,6 +41,7 @@ class RemoteSessionManager:
     _assistant_text_buffer: dict[str, str] = {}
     _content_blocks_buffer: dict[str, list[dict]] = {}
     _buffer_lock = threading.Lock()
+    _allowed_request_states = frozenset({"aborted", "abort_failed", "done"})
 
     def __init__(self):
         self._session_manager = SessionManager()
@@ -817,6 +818,14 @@ class RemoteSessionManager:
         message: Optional[str] = None,
     ) -> None:
         """Buffer a request lifecycle event for SSE delivery to the frontend."""
+        if state not in self._allowed_request_states:
+            logger.warning(
+                "Ignoring unsupported request_state for session %s: %s",
+                session_id[:8],
+                state,
+            )
+            return
+
         payload: dict[str, Any] = {
             "type": state,
             "reason": reason,
