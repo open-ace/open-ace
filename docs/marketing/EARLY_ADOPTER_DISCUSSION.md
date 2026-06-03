@@ -44,4 +44,3 @@ If you prefer issues instead of discussion replies:
 - Contributing: https://github.com/open-ace/open-ace/blob/main/CONTRIBUTING.md
 
 Thanks for taking a look. We care more about real deployment feedback than vanity metrics.
-
