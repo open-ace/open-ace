@@ -87,21 +87,12 @@ def test_close_terminal_bridges_closes_active_connections():
         def close(self):
             self.closed = True
 
-    class FakeJob:
-        def __init__(self):
-            self.killed = False
-
-        def kill(self, block=False):
-            self.killed = True
-
     browser_ws = FakeSocket()
     remote_ws = FakeSocket()
-    job = FakeJob()
     state = TerminalBridgeConnection(
         terminal_id="terminal-close-test",
         browser_ws=browser_ws,
         remote_ws=remote_ws,
-        jobs=[job],
     )
 
     before_count = get_active_bridge_count()
@@ -111,7 +102,6 @@ def test_close_terminal_bridges_closes_active_connections():
 
     assert browser_ws.closed
     assert remote_ws.closed
-    assert job.killed
     assert get_active_bridge_count() == before_count
 
 
@@ -126,19 +116,11 @@ def test_terminal_store_cleanup_stale_closes_active_bridges():
         def close(self):
             self.closed = True
 
-    class FakeJob:
-        def __init__(self):
-            self.killed = False
-
-        def kill(self, block=False):
-            self.killed = True
-
     store = TerminalInfoStore(ttl=0)
     terminal_id = "terminal-stale-test"
     machine_id = "machine-stale-test"
     browser_ws = FakeSocket()
     remote_ws = FakeSocket()
-    job = FakeJob()
 
     store.put(machine_id, terminal_id, {"status": "running"})
     _register_bridge(
@@ -146,12 +128,10 @@ def test_terminal_store_cleanup_stale_closes_active_bridges():
             terminal_id=terminal_id,
             browser_ws=browser_ws,
             remote_ws=remote_ws,
-            jobs=[job],
         )
     )
 
     assert store.cleanup_stale() == 1
     assert browser_ws.closed
     assert remote_ws.closed
-    assert job.killed
     assert store.find_by_terminal_id(terminal_id) is None

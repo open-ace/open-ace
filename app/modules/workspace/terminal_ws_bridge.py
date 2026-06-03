@@ -6,7 +6,7 @@ import logging
 import threading
 import urllib.parse
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import gevent
@@ -31,7 +31,6 @@ class TerminalBridgeConnection:
     terminal_id: str
     browser_ws: Any
     remote_ws: Any = None
-    jobs: list[Any] = field(default_factory=list)
 
 
 def _register_bridge(state: TerminalBridgeConnection) -> None:
@@ -65,77 +64,12 @@ def close_terminal_bridges(terminal_id: str) -> None:
         if state.remote_ws is not None:
             with suppress(Exception):
                 state.remote_ws.close()
-        for job in state.jobs:
-            with suppress(Exception):
-                job.kill(block=False)
 
 
 def get_active_bridge_count() -> int:
     """Return active bridge count for diagnostics and tests."""
     with _bridge_lock:
         return sum(len(bridges) for bridges in _active_bridges.values())
-
-
-def bridge_terminal_websocket(
-    terminal_id: str, browser_ws, remote_ws_url: str, remote_token: str
-) -> None:
-    """Forward messages bidirectionally between browser and remote terminal."""
-    parsed = urllib.parse.urlsplit(remote_ws_url)
-    query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
-    query["token"] = remote_token
-    upstream_url = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
-    state = TerminalBridgeConnection(terminal_id=terminal_id, browser_ws=browser_ws)
-    _register_bridge(state)
-
-    try:
-        with connect(
-            upstream_url,
-            subprotocols=["binary"],
-            close_timeout=5,
-            proxy=None,
-        ) as remote_ws:
-            state.remote_ws = remote_ws
-            logger.info("Connected backend bridge to remote terminal: %s", remote_ws_url)
-
-            def browser_to_remote() -> None:
-                try:
-                    while True:
-                        message = browser_ws.receive()
-                        if message is None:
-                            logger.info("Bridge B→R: browser_ws.receive() returned None, closing")
-                            break
-                        if isinstance(message, (str, bytes, bytearray, memoryview)):
-                            remote_ws.send(message)
-                        else:
-                            logger.debug(
-                                "Ignoring unsupported browser terminal message type: %s",
-                                type(message).__name__,
-                            )
-                except ConnectionClosed as e:
-                    logger.info("Bridge B→R: connection error: %s", e)
-                except Exception as e:
-                    logger.info("Browser to remote terminal bridge error: %s", e)
-                finally:
-                    with suppress(Exception):
-                        remote_ws.close()
-
-            def remote_to_browser() -> None:
-                try:
-                    while True:
-                        message = remote_ws.recv()
-                        browser_ws.send(message)
-                except ConnectionClosed as e:
-                    logger.info("Bridge R→B: connection error: %s", e)
-                except Exception as e:
-                    logger.debug("Remote terminal to browser bridge error: %s", e)
-                finally:
-                    with suppress(Exception):
-                        browser_ws.close()
-
-            state.jobs = [gevent.spawn(browser_to_remote), gevent.spawn(remote_to_browser)]
-            gevent.joinall(state.jobs)
-    finally:
-        _unregister_bridge(state)
 
 
 def bridge_terminal_websocket_raw(
