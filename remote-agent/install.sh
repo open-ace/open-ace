@@ -154,6 +154,7 @@ AGENT_FILES=(
     requirements.txt
     terminal_menu.py
     terminal_server.py
+    terminal_relay.py
     websocket_proxy.py
     session_sync.py
     openace_cli.py

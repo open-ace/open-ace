@@ -65,6 +65,7 @@ class RemoteAgent:
         self._terminal_tokens: dict[str, str] = {}
         self._terminal_ports: dict[str, int] = {}
         self._terminal_ws_urls: dict[str, str] = {}  # Store ws_url for attach
+        self._terminal_relays: dict[str, subprocess.Popen] = {}  # Relay subprocesses
         # VSCode (code-server) state
         self._vscode_processes: dict[str, subprocess.Popen] = {}
         self._vscode_tokens: dict[str, str] = {}
@@ -102,6 +103,11 @@ class RemoteAgent:
                                     terminal_id[:8],
                                     port,
                                 )
+                                # Restart relay for restored terminals that need it
+                                ws_url = info.get("ws_url", "")
+                                term_token = info.get("token", "")
+                                if ws_url and term_token:
+                                    self._start_terminal_relay(terminal_id, ws_url, term_token)
                             else:
                                 # Port not listening, remove stale info file
                                 logger.info(
@@ -706,6 +712,10 @@ class RemoteAgent:
 
                 # Save terminal info to file for persistence across agent restarts
                 self._save_terminal_info(terminal_id, port, term_token, ws_url)
+
+                # Start relay subprocess to connect backend to local terminal
+                # This solves the issue where backend can't reach private IPs
+                self._start_terminal_relay(terminal_id, ws_url, term_token)
 
                 self._http_send(
                     {
@@ -1601,6 +1611,58 @@ class RemoteAgent:
 
     # ── Terminal helpers ───────────────────────────────────────────────
 
+    def _start_terminal_relay(self, terminal_id: str, local_ws_url: str, token: str) -> None:
+        """Start relay subprocess to connect backend to local terminal.
+
+        This solves the issue where backend cannot directly reach remote machines
+        on private networks (e.g., ws://192.168.x.x:port). The relay connects
+        from this machine (which can reach both backend and local terminal_server)
+        and bridges them together.
+        """
+        # Stop existing relay for this terminal if any
+        existing = self._terminal_relays.pop(terminal_id, None)
+        if existing:
+            try:
+                existing.terminate()
+                existing.wait(timeout=2)
+            except Exception:
+                pass
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        relay_script = os.path.join(script_dir, "terminal_relay.py")
+
+        cmd = [
+            sys.executable,
+            relay_script,
+            "--backend-url",
+            self.config.server_url,
+            "--terminal-id",
+            terminal_id,
+            "--local-ws-url",
+            local_ws_url,
+        ]
+
+        env = os.environ.copy()
+        env["OPEN_ACE_RELAY_TOKEN"] = token
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+            )
+            self._terminal_relays[terminal_id] = proc
+            logger.info(
+                "Started relay subprocess for terminal %s (PID %d)",
+                terminal_id[:8],
+                proc.pid,
+            )
+        except Exception as e:
+            logger.warning("Failed to start relay subprocess: %s", e)
+            # Relay failure is non-critical; terminal still works if backend can reach it
+
     def _stop_terminal_process(self, terminal_id: str) -> None:
         """Stop a terminal server process."""
         proc = self._terminal_processes.pop(terminal_id, None)
@@ -1613,6 +1675,17 @@ class RemoteAgent:
                     proc.kill()
             except Exception as e:
                 logger.warning("Error stopping terminal process: %s", e)
+        # Also stop relay subprocess
+        relay_proc = self._terminal_relays.pop(terminal_id, None)
+        if relay_proc:
+            try:
+                relay_proc.terminate()
+                relay_proc.wait(timeout=2)
+            except Exception:
+                try:
+                    relay_proc.kill()
+                except Exception:
+                    pass
         self._terminal_tokens.pop(terminal_id, None)
         self._terminal_ports.pop(terminal_id, None)
         self._terminal_ws_urls.pop(terminal_id, None)
@@ -1688,6 +1761,17 @@ class RemoteAgent:
         logger.info("Shutting down agent...")
         self._session_sync.stop()
         self._executor.stop_all()
+        # Stop relay subprocesses
+        for terminal_id, proc in list(self._terminal_relays.items()):
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        self._terminal_relays.clear()
         # Clear terminal process tracking (but don't kill them - they persist)
         self._terminal_processes.clear()
         logger.info("Agent shutdown complete (terminal servers left running)")
