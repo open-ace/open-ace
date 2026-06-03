@@ -480,6 +480,24 @@ log_info "Registering with Open ACE server..."
 OS_TYPE=$(uname -s 2>/dev/null || echo "unknown")
 OS_VERSION=$(uname -r 2>/dev/null || echo "unknown")
 
+# Get local IP address (prefer non-loopback)
+LOCAL_IP=$("$PYTHON_PATH" -c "
+import socket
+try:
+    hostname = socket.gethostname()
+    ip = socket.gethostbyname(hostname)
+    if ip != '127.0.0.1':
+        print(ip)
+    else:
+        # Fallback: try to get IP from a socket connection
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        print(s.getsockname()[0])
+        s.close()
+except:
+    print('127.0.0.1')
+" 2>/dev/null || echo "127.0.0.1")
+
 CAPABILITIES=$("$PYTHON_PATH" -c "
 import json, os, platform, shutil
 caps = {
@@ -517,7 +535,8 @@ REGISTER_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/remote/agent/register" \
         \"os_type\": \"${OS_TYPE}\",
         \"os_version\": \"${OS_VERSION}\",
         \"capabilities\": ${CAPABILITIES},
-        \"agent_version\": \"${AGENT_VERSION}\"
+        \"agent_version\": \"${AGENT_VERSION}\",
+        \"ip_address\": \"${LOCAL_IP}\"
     }" 2>/dev/null || echo '{"success": false}')
 
 if echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('success') else 1)" 2>/dev/null; then

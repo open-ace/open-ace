@@ -804,6 +804,22 @@ class RemoteAgentManager:
             conn.commit()
             logger.info("Updated capabilities for machine %s", machine_id[:8])
 
+    def update_machine_ip(self, machine_id: str, ip_address: str) -> None:
+        """Update IP address for a remote machine."""
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            cursor.execute(
+                f"""
+                UPDATE remote_machines
+                SET ip_address = {_param()}, updated_at = {_param()}
+                WHERE machine_id = {_param()}
+            """,
+                (ip_address, now, machine_id),
+            )
+            conn.commit()
+            logger.info("Updated IP address for machine %s to %s", machine_id[:8], ip_address)
+
     # ==================== Machine Queries ====================
 
     def get_machine(self, machine_id: str) -> dict[str, Any] | None:
