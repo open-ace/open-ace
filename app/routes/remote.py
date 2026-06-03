@@ -1166,6 +1166,32 @@ def agent_message():
             total_output_tokens,
         )
 
+        # Resolve user_id from terminal session or machine assignment
+        sync_user_id = None
+        if terminal_id:
+            terminal_session = sync_session_mgr.get_session(terminal_id)
+            if terminal_session and terminal_session.user_id:
+                sync_user_id = terminal_session.user_id
+        if not sync_user_id:
+            try:
+                from app.repositories.database import adapt_sql, get_db_connection
+
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        adapt_sql(
+                            "SELECT user_id FROM machine_assignments "
+                            "WHERE machine_id = ? AND user_id IS NOT NULL "
+                            "ORDER BY granted_at DESC LIMIT 1"
+                        ),
+                        (machine_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        sync_user_id = row["user_id"]
+            except Exception as e:
+                logger.debug("Failed to resolve user_id from machine_assignments: %s", e)
+
         try:
             # Upsert the session record
             existing = sync_session_mgr.get_session(session_id)
@@ -1176,6 +1202,7 @@ def agent_message():
                     project_path=project_path or "",
                     model=model,
                     host_name=machine_id[:8],
+                    user_id=sync_user_id,
                     context={
                         "workspace_type": "terminal",
                         "remote_machine_id": machine_id,

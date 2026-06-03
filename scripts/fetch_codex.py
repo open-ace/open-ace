@@ -88,7 +88,7 @@ def find_all_codex_session_dirs() -> list:
 
         try:
             if codex_sessions.is_dir():
-                has_jsonl = any(codex_sessions.glob("*/*/*.jsonl"))
+                has_jsonl = any(codex_sessions.glob("*/*/*/*.jsonl"))
 
                 if has_jsonl:
                     results.append((system_account, codex_sessions))
