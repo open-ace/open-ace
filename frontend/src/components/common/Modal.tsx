@@ -96,7 +96,6 @@ export const Modal: React.FC<ModalProps> = ({
           backgroundColor: 'rgba(0, 0, 0, 0.5)',
           zIndex: 10040,
         }}
-        onClick={onClose}
       />
       {/* Modal */}
       <div
@@ -110,9 +109,6 @@ export const Modal: React.FC<ModalProps> = ({
           width: '100%',
           height: '100%',
           zIndex: 10050,
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
         }}
       >
         <div
