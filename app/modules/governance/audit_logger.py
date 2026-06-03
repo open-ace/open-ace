@@ -514,9 +514,12 @@ def get_ddl_statements() -> list[str]:
     to ensure the audit_logs table exists, regardless of whether Alembic
     migrations have been run.
     """
+    from app.repositories.database import is_postgresql
+
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
     return [
-        """CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        f"""CREATE TABLE IF NOT EXISTS audit_logs (
+            id {id_type},
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             user_id INTEGER,
             username TEXT,
