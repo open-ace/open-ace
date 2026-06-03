@@ -55,15 +55,19 @@ def _authenticate(token: str) -> tuple[bool, dict | None]:
 
 def _load_user_from_token(token: str) -> dict | None:
     """Validate token and set g.user. Returns user dict or None."""
-    valid, result = _authenticate(token)
-    if not valid or result is None:
+    try:
+        valid, result = _authenticate(token)
+        if not valid or result is None:
+            return None
+        return {
+            "id": result.get("user_id"),
+            "username": result.get("username"),
+            "email": result.get("email"),
+            "role": result.get("role"),
+        }
+    except Exception as e:
+        logger.error(f"Database error during authentication: {e}")
         return None
-    return {
-        "id": result.get("user_id"),
-        "username": result.get("username"),
-        "email": result.get("email"),
-        "role": result.get("role"),
-    }
 
 
 def _check_session_ownership(user_id: int, session_id: str) -> bool:
