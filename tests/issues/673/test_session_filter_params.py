@@ -11,11 +11,12 @@
 
 """
 
-import pytest
-import sys
 import os
-import uuid
+import sys
 import time
+import uuid
+
+import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
@@ -33,7 +34,7 @@ def db():
 def test_user_id(db):
     """Create a test user and return its ID"""
     test_email = f"test_filter_{uuid.uuid4().hex[:8]}@test.com"
-    
+
     # Create test user
     db.execute(
         """
@@ -42,15 +43,15 @@ def test_user_id(db):
         """,
         (test_email, "Test Filter User", time.strftime("%Y-%m-%d %H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S"))
     )
-    
+
     # Get user ID
     user = db.fetch_one(
         "SELECT id FROM users WHERE email = ?",
         (test_email,)
     )
-    
+
     yield user["id"]
-    
+
     # Cleanup: delete test user
     db.execute("DELETE FROM users WHERE email = ?", (test_email,))
 
@@ -67,24 +68,24 @@ def test_sessions(db, test_user_id):
         (f"test_error_agent_{uuid.uuid4().hex}", "error", "agent", "Test Error Agent"),
         (f"test_archived_chat_{uuid.uuid4().hex}", "archived", "chat", "Test Archived Chat"),
     ]
-    
+
     created_session_ids = []
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    
+
     for session_id, status, session_type, title in sessions_data:
         db.execute(
             """
-            INSERT INTO agent_sessions 
-            (session_id, user_id, status, session_type, title, tool_name, host_name, 
+            INSERT INTO agent_sessions
+            (session_id, user_id, status, session_type, title, tool_name, host_name,
              total_tokens, message_count, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 'qwen', 'test-host', 100, 5, ?, ?)
             """,
             (session_id, test_user_id, status, session_type, title, now, now)
         )
         created_session_ids.append(session_id)
-    
+
     yield created_session_ids
-    
+
     # Cleanup: delete test sessions
     for session_id in created_session_ids:
         db.execute("DELETE FROM agent_sessions WHERE session_id = ?", (session_id,))
@@ -110,7 +111,7 @@ def test_status_filter(db, test_user_id, test_sessions):
     # 验证找到预期的 active 会话（应该是 2 个）
     active_count = len([sid for sid in test_sessions if "active" in sid])
     assert len(sessions) == active_count, f"Expected {active_count} active sessions, got {len(sessions)}"
-    
+
     print(f"[PASS] status 过滤: 找到 {len(sessions)} 个 active 会话")
 
 
@@ -133,7 +134,7 @@ def test_session_type_filter(db, test_user_id, test_sessions):
     # 验证找到预期的 chat 会话（应该是 3 个）
     chat_count = len([sid for sid in test_sessions if "chat" in sid])
     assert len(sessions) == chat_count, f"Expected {chat_count} chat sessions, got {len(sessions)}"
-    
+
     print(f"[PASS] session_type 过滤: 找到 {len(sessions)} 个 chat 会话")
 
 
@@ -157,7 +158,7 @@ def test_combined_filter(db, test_user_id, test_sessions):
     # 验证找到预期的 active+chat 会话（应该是 1 个）
     active_chat_count = len([sid for sid in test_sessions if "active_chat" in sid])
     assert len(sessions) == active_chat_count, f"Expected {active_chat_count} active+chat sessions, got {len(sessions)}"
-    
+
     print(f"[PASS] 组合过滤: 找到 {len(sessions)} 个 active+chat 会话")
 
 
@@ -175,8 +176,8 @@ def test_invalid_status_filter(db, test_user_id, test_sessions):
 
     # 无效值应该返回 0 个结果
     assert len(sessions) == 0, f"Expected 0 sessions for invalid status, got {len(sessions)}"
-    
-    print(f"[PASS] 无效 status 过滤: 返回 0 个结果（符合预期）")
+
+    print("[PASS] 无效 status 过滤: 返回 0 个结果（符合预期）")
 
 
 def test_invalid_session_type_filter(db, test_user_id, test_sessions):
@@ -193,8 +194,8 @@ def test_invalid_session_type_filter(db, test_user_id, test_sessions):
 
     # 无效值应该返回 0 个结果
     assert len(sessions) == 0, f"Expected 0 sessions for invalid session_type, got {len(sessions)}"
-    
-    print(f"[PASS] 无效 session_type 过滤: 返回 0 个结果（符合预期）")
+
+    print("[PASS] 无效 session_type 过滤: 返回 0 个结果（符合预期）")
 
 
 def test_api_endpoint_integration():
@@ -241,7 +242,7 @@ def test_api_endpoint_integration():
     # 测试无效参数（API 应忽略无效值）
     resp = requests.get(f"{BASE_URL}/api/workspace/sessions", params={"status": "invalid_status"})
     assert resp.status_code == 200, f"API 返回 {resp.status_code}"
-    print(f"[PASS] API 无效参数处理: 返回 200")
+    print("[PASS] API 无效参数处理: 返回 200")
 
 
 if __name__ == "__main__":
@@ -257,8 +258,8 @@ if __name__ == "__main__":
     print("  pytest tests/issues/673/test_session_filter_params.py -v")
 
     # 简化测试（使用硬编码测试数据）
-    test_email = f"test_filter_direct@test.com"
-    
+    test_email = "test_filter_direct@test.com"
+
     # 创建测试用户
     try:
         db.execute(
@@ -270,7 +271,7 @@ if __name__ == "__main__":
         )
     except Exception:
         pass  # SQLite 使用 INSERT OR IGNORE
-    
+
     user = db.fetch_one("SELECT id FROM users WHERE email = ?", (test_email,))
     if not user:
         # PostgreSQL
@@ -283,7 +284,7 @@ if __name__ == "__main__":
             (test_email, "Test Filter User Direct", time.strftime("%Y-%m-%d %H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S"))
         )
         user = db.fetch_one("SELECT id FROM users WHERE email = ?", (test_email,))
-    
+
     user_id = user["id"] if user else 1
 
     print(f"\n使用测试用户 ID: {user_id}")
@@ -294,8 +295,8 @@ if __name__ == "__main__":
     try:
         db.execute(
             """
-            INSERT INTO agent_sessions 
-            (session_id, user_id, status, session_type, title, tool_name, host_name, 
+            INSERT INTO agent_sessions
+            (session_id, user_id, status, session_type, title, tool_name, host_name,
              total_tokens, message_count, created_at, updated_at)
             VALUES (?, ?, 'active', 'chat', 'Direct Test', 'qwen', 'test-host', 100, 5, ?, ?)
             """,
