@@ -1141,7 +1141,10 @@ def agent_message():
 
         # Resolve effective session_id: prefer terminal_id (shown in sidebar)
         # over claude_session_id (internal Claude Code JSONL UUID).
+        # Also capture user_id from the terminal session (authenticated web UI)
+        # to avoid a redundant get_session() call below.
         sync_session_mgr = get_remote_session_manager()._session_manager
+        terminal_session = None
         if terminal_id:
             terminal_session = sync_session_mgr.get_session(terminal_id)
             if terminal_session:
@@ -1166,31 +1169,42 @@ def agent_message():
             total_output_tokens,
         )
 
-        # Resolve user_id from terminal session or machine assignment
+        # Resolve user_id: terminal session (authenticated) > machine assignment
         sync_user_id = None
-        if terminal_id:
-            terminal_session = sync_session_mgr.get_session(terminal_id)
-            if terminal_session and terminal_session.user_id:
-                sync_user_id = terminal_session.user_id
+        if terminal_session and terminal_session.user_id:
+            sync_user_id = terminal_session.user_id
         if not sync_user_id:
-            try:
-                from app.repositories.database import adapt_sql, get_db_connection
+            # Verify machine has an active agent connection before trusting
+            # machine_id from the unauthenticated POST body.
+            agent_mgr = get_remote_agent_manager()
+            if not agent_mgr.is_connected(machine_id):
+                logger.warning(
+                    "session_sync: machine %s is not connected, skipping user_id resolution",
+                    machine_id[:8],
+                )
+            else:
+                try:
+                    from app.repositories.database import adapt_sql, get_db_connection
 
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        adapt_sql(
-                            "SELECT user_id FROM machine_assignments "
-                            "WHERE machine_id = ? AND user_id IS NOT NULL "
-                            "ORDER BY granted_at DESC LIMIT 1"
-                        ),
-                        (machine_id,),
+                    with get_db_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            adapt_sql(
+                                "SELECT user_id FROM machine_assignments "
+                                "WHERE machine_id = ? AND user_id IS NOT NULL "
+                                "ORDER BY granted_at DESC LIMIT 1"
+                            ),
+                            (machine_id,),
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            sync_user_id = row["user_id"]
+                except Exception as e:
+                    logger.warning(
+                        "Failed to resolve user_id from machine_assignments for machine=%s: %s",
+                        machine_id[:8],
+                        e,
                     )
-                    row = cursor.fetchone()
-                    if row:
-                        sync_user_id = row["user_id"]
-            except Exception as e:
-                logger.debug("Failed to resolve user_id from machine_assignments: %s", e)
 
         try:
             # Upsert the session record
@@ -1209,12 +1223,14 @@ def agent_message():
                     },
                 )
             else:
-                # Update model/project_path if missing on existing session
+                # Update model/project_path/user_id if missing on existing session
                 updates = {}
                 if model and not existing.model:
                     updates["model"] = model
                 if project_path and not existing.project_path:
                     updates["project_path"] = project_path
+                if sync_user_id and not existing.user_id:
+                    updates["user_id"] = sync_user_id
                 if updates:
                     sync_session_mgr.update_session_fields(session_id, updates)
 
