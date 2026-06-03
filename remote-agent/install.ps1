@@ -298,6 +298,17 @@ $osType = "Windows"
 $osVersion = [System.Environment]::OSVersion.Version.ToString()
 $hostname = $env:COMPUTERNAME
 
+# Get local IP address (prefer non-loopback)
+$localIp = "127.0.0.1"
+try {
+    $ipAddresses = [System.Net.Dns]::GetHostAddresses($hostname) | Where-Object { $_.AddressFamily -eq "InterNetwork" -and $_.ToString() -ne "127.0.0.1" }
+    if ($ipAddresses.Count -gt 0) {
+        $localIp = $ipAddresses[0].ToString()
+    }
+} catch {
+    # Fallback: use loopback
+}
+
 $capabilities = @{
     os = "windows"
     os_version = $osVersion
@@ -322,6 +333,7 @@ $body = @{
     os_version = $osVersion
     capabilities = $capabilities
     agent_version = "1.0.0"
+    ip_address = $localIp
 } | ConvertTo-Json
 
 try {

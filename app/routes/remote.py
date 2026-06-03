@@ -865,6 +865,14 @@ def agent_message():
         capabilities = data.get("capabilities", {})
         if capabilities:
             agent_mgr.update_capabilities(machine_id, capabilities)
+        # Update IP address if agent reports a valid one (not 127.0.0.1)
+        agent_reported_ip = data.get("ip_address")
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
+            agent_mgr.update_machine_ip(machine_id, agent_reported_ip)
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "register_ack", "pending_commands": pending})
 

@@ -364,3 +364,185 @@ class TestIPRegistrationIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ==================== Unit Tests: update_machine_ip() ====================
+
+
+class TestUpdateMachineIP(unittest.TestCase):
+    """Test the update_machine_ip method in RemoteAgentManager."""
+
+    def setUp(self):
+        """Set up test database and manager."""
+        import sqlite3
+        import tempfile
+
+        from app.modules.workspace.remote_agent_manager import (
+            RemoteAgentManager,
+            get_ddl_statements,
+        )
+
+        self.db_file = tempfile.mktemp(suffix=".db")
+        conn = sqlite3.connect(self.db_file)
+        for sql in get_ddl_statements():
+            conn.execute(sql)
+        conn.commit()
+        conn.close()
+
+        self.mgr = RemoteAgentManager(db_path=self.db_file)
+        # Register a test machine first
+        token = self.mgr.create_registration_token(tenant_id=1, created_by=1)
+        self.mgr.register_machine(
+            registration_token=token,
+            machine_id="test-ip-update-machine",
+            machine_name="Test IP Update",
+            hostname="testipupdate",
+            os_type="linux",
+            ip_address="127.0.0.1",  # Initial IP is loopback
+        )
+
+    def tearDown(self):
+        """Clean up test database."""
+        if os.path.exists(self.db_file):
+            os.remove(self.db_file)
+
+    def test_update_machine_ip_basic(self):
+        """update_machine_ip should update IP address correctly."""
+        self.mgr.update_machine_ip("test-ip-update-machine", "192.168.1.100")
+
+        machine = self.mgr.get_machine("test-ip-update-machine")
+        self.assertIsNotNone(machine)
+        self.assertEqual(machine.get("ip_address"), "192.168.1.100")
+
+    def test_update_machine_ip_ipv6(self):
+        """update_machine_ip should handle IPv6 addresses."""
+        self.mgr.update_machine_ip("test-ip-update-machine", "2001:db8::1")
+
+        machine = self.mgr.get_machine("test-ip-update-machine")
+        self.assertIsNotNone(machine)
+        self.assertEqual(machine.get("ip_address"), "2001:db8::1")
+
+    def test_update_machine_ip_nonexistent_machine(self):
+        """update_machine_ip should not fail for nonexistent machine."""
+        # Should silently do nothing (no exception raised)
+        self.mgr.update_machine_ip("nonexistent-machine-id", "10.0.0.1")
+
+    def test_update_machine_ip_overwrites_previous(self):
+        """update_machine_ip should overwrite previous IP."""
+        self.mgr.update_machine_ip("test-ip-update-machine", "10.0.0.1")
+        self.mgr.update_machine_ip("test-ip-update-machine", "172.16.0.1")
+
+        machine = self.mgr.get_machine("test-ip-update-machine")
+        self.assertEqual(machine.get("ip_address"), "172.16.0.1")
+
+
+# ==================== Route Tests: agent_message IP update ====================
+
+
+class TestAgentMessageRegisterLogic(unittest.TestCase):
+    """Test the IP update logic used in agent_message register handler."""
+
+    def setUp(self):
+        """Set up test database and manager."""
+        import sqlite3
+        import tempfile
+
+        from app.modules.workspace.remote_agent_manager import (
+            RemoteAgentManager,
+            get_ddl_statements,
+        )
+
+        self.db_file = tempfile.mktemp(suffix=".db")
+        conn = sqlite3.connect(self.db_file)
+        for sql in get_ddl_statements():
+            conn.execute(sql)
+        conn.commit()
+        conn.close()
+
+        self.mgr = RemoteAgentManager(db_path=self.db_file)
+        # Register a test machine
+        token = self.mgr.create_registration_token(tenant_id=1, created_by=1)
+        self.mgr.register_machine(
+            registration_token=token,
+            machine_id="test-register-logic-machine",
+            machine_name="Test Register Logic",
+            hostname="testreglogic",
+            os_type="linux",
+            ip_address="127.0.0.1",
+        )
+
+    def tearDown(self):
+        """Clean up test database."""
+        if os.path.exists(self.db_file):
+            os.remove(self.db_file)
+
+    def test_register_logic_updates_valid_ip(self):
+        """Valid non-loopback IP should be updated via register logic."""
+        from app.routes.remote import validate_ip
+
+        # Simulate the logic from agent_message register handler
+        agent_reported_ip = "192.168.1.200"
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
+            self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
+
+        machine = self.mgr.get_machine("test-register-logic-machine")
+        self.assertEqual(machine.get("ip_address"), "192.168.1.200")
+
+    def test_register_logic_skips_loopback(self):
+        """Loopback IP (127.0.0.1) should not trigger update."""
+        from app.routes.remote import validate_ip
+
+        # First set a valid IP
+        self.mgr.update_machine_ip("test-register-logic-machine", "10.0.0.1")
+
+        # Simulate register with loopback IP
+        agent_reported_ip = "127.0.0.1"
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
+            self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
+
+        # IP should remain unchanged
+        machine = self.mgr.get_machine("test-register-logic-machine")
+        self.assertEqual(machine.get("ip_address"), "10.0.0.1")
+
+    def test_register_logic_skips_invalid_format(self):
+        """Invalid IP format should not trigger update."""
+        from app.routes.remote import validate_ip
+
+        # First set a valid IP
+        self.mgr.update_machine_ip("test-register-logic-machine", "172.16.0.1")
+
+        # Simulate register with invalid IP format
+        agent_reported_ip = "invalid-ip-format"
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
+            self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
+
+        # IP should remain unchanged
+        machine = self.mgr.get_machine("test-register-logic-machine")
+        self.assertEqual(machine.get("ip_address"), "172.16.0.1")
+
+    def test_register_logic_handles_ipv6(self):
+        """Valid IPv6 should be updated."""
+        from app.routes.remote import validate_ip
+
+        agent_reported_ip = "2001:db8::1"
+        if (
+            agent_reported_ip
+            and agent_reported_ip != "127.0.0.1"
+            and validate_ip(agent_reported_ip)
+        ):
+            self.mgr.update_machine_ip("test-register-logic-machine", agent_reported_ip)
+
+        machine = self.mgr.get_machine("test-register-logic-machine")
+        self.assertEqual(machine.get("ip_address"), "2001:db8::1")
