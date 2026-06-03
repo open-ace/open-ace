@@ -29,8 +29,8 @@ def test_workspace_config_defaults():
     assert config.enabled is False
     assert config.url == "http://localhost"
     assert config.multi_user_mode is False
-    assert config.port_range_start == 9000
-    assert config.port_range_end == 9999
+    assert config.port_range_start == 3100
+    assert config.port_range_end == 3200
     assert config.max_instances == 30
     assert config.idle_timeout_minutes == 30
 
@@ -54,8 +54,8 @@ def test_workspace_config_from_dict():
         enabled=data.get("enabled", False),
         url=data.get("url", "http://localhost"),
         multi_user_mode=data.get("multi_user_mode", False),
-        port_range_start=data.get("port_range_start", 9000),
-        port_range_end=data.get("port_range_end", 9999),
+        port_range_start=data.get("port_range_start", 3100),
+        port_range_end=data.get("port_range_end", 3200),
         max_instances=data.get("max_instances", 30),
     )
 
@@ -102,8 +102,8 @@ def test_manager_port_allocation():
     config = WorkspaceConfig(
         enabled=True,
         multi_user_mode=True,
-        port_range_start=9000,
-        port_range_end=9010,  # Small range for testing
+        port_range_start=3100,
+        port_range_end=3110,  # Small range for testing
     )
 
     manager = WebUIManager(config)
@@ -112,12 +112,12 @@ def test_manager_port_allocation():
 
     # Allocate port for user 1
     port1 = manager.allocate_port(1)
-    assert 9000 <= port1 <= 9010
+    assert 3100 <= port1 <= 3110
     print(f"✓ Allocated port {port1} for user 1")
 
     # Allocate port for user 2
     port2 = manager.allocate_port(2)
-    assert 9000 <= port2 <= 9010
+    assert 3100 <= port2 <= 3110
     assert port2 != port1  # Should be different
     print(f"✓ Allocated port {port2} for user 2")
 
@@ -194,8 +194,8 @@ def test_manager_instance_limit():
         enabled=True,
         multi_user_mode=True,
         max_instances=2,
-        port_range_start=9000,
-        port_range_end=9010,
+        port_range_start=3100,
+        port_range_end=3110,
     )
 
     manager = WebUIManager(config)

@@ -134,8 +134,8 @@ class WorkspaceConfig:
     enabled: bool = False
     url: str = "http://localhost"
     multi_user_mode: bool = False
-    port_range_start: int = 9000
-    port_range_end: int = 9999
+    port_range_start: int = 3100
+    port_range_end: int = 3200
     max_instances: int = 30
     idle_timeout_minutes: int = 30
     cleanup_interval_minutes: int = 5
@@ -212,8 +212,8 @@ class WebUIManager:
                 enabled=workspace.get("enabled", False),
                 url=workspace.get("url", "http://localhost"),
                 multi_user_mode=workspace.get("multi_user_mode", False),
-                port_range_start=workspace.get("port_range_start", 9000),
-                port_range_end=workspace.get("port_range_end", 9999),
+                port_range_start=workspace.get("port_range_start", 3100),
+                port_range_end=workspace.get("port_range_end", 3200),
                 max_instances=workspace.get("max_instances", 30),
                 idle_timeout_minutes=workspace.get("idle_timeout_minutes", 30),
                 cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),

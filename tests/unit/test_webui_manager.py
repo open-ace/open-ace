@@ -60,8 +60,8 @@ class TestLoadConfig:
                 "workspace": {
                     "enabled": True,
                     "multi_user_mode": True,
-                    "port_range_start": 9000,
-                    "port_range_end": 9999,
+                    "port_range_start": 3100,
+                    "port_range_end": 3200,
                     "token_secret": "test-secret",
                     "webui_path": "/tmp/webui",
                 },
