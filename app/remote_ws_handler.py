@@ -511,9 +511,10 @@ class RemoteWSHandler(WSGIHandler):
                     self.close_connection = True
             else:
                 # Bridge was started by the store (or browser was rejected).
-                # Wait for bridge completion.
+                # Wait for bridge completion — no timeout, terminal sessions
+                # are long-lived and should only end when user disconnects.
                 try:
-                    bridge_done_event.wait(timeout=30.0)
+                    bridge_done_event.wait()
                 except Exception:
                     pass
                 self.close_connection = True
