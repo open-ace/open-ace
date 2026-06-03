@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>AI Computing Explorer</strong><br>
-  <em>自托管 AI 工作台 · 统一接入 Claude Code、Qwen Code、Codex 与 OpenClaw</em>
+  <em>自托管 AI Coding Agent 工作台与治理控制面</em>
 </p>
 
 <p align="center">
@@ -33,27 +33,30 @@
 
 ## 🎯 这是什么？
 
-**Open ACE** 是一个开源的**企业级 AI 工作平台**：一边给团队成员提供统一的 AI 工作入口，一边给管理员提供用量、成本、权限、合规和审计视图。
+**Open ACE** 是一个开源的**自托管 AI Coding Agent 工作台与治理控制面**：开发者可以在浏览器里统一使用 Claude Code、Qwen Code、Codex、OpenClaw 等 AI 编码工具，并把它们运行在团队自己的远程机器上；管理员可以集中管理 API Key、权限、成本、配额、审计和合规。
 
-它适合正在把 Claude Code、Qwen Code、Codex、OpenClaw 等 AI 工具引入团队的组织，尤其适合需要私有化部署、统一治理和可量化 ROI 的研发团队、IT 团队和 AI 平台团队。
+它适合已经把 AI Coding Agent 引入真实研发流程的组织，尤其适合需要私有化部署、内网远程机器、统一密钥代理、团队配额和可追溯审计的研发团队、IT 团队和 AI 平台团队。
 
 | 问题 | 解决方案 |
 |------|----------|
-| 🤔 **AI 用得好不好？** | Work 模式让员工高效使用 AI，提升生产力 |
-| 😰 **AI 管得住管不住？** | Manage 模式让管理者全面掌控 AI 使用情况 |
+| 🤖 **团队同时使用多个 AI Coding Agent** | 多 CLI 工作台统一 Claude Code、Qwen Code、Codex、OpenClaw 等工具 |
+| 🖥️ **Agent 需要跑在内网、测试机或 GPU 机器上** | Remote Agent 让 AI CLI 直接在目标机器执行 |
+| 🔑 **API Key 不该散落在个人电脑和远程机器上** | API Key Proxy 把真实密钥留在服务端，只下发短期代理令牌 |
+| 📊 **成本、配额、风险和审计需要可见** | Manage 模式提供用量、成本、配额、异常、审计和合规视图 |
 
 **你可以用 Open ACE 做什么：**
 
-- 给员工一个统一入口，管理本地/远程 AI 会话、提示词、历史记录和项目上下文
-- 通过 Remote Agent 把 AI CLI 跑在团队自己的开发机、测试机或 GPU 机器上
-- 给管理者一套治理面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
+- 给团队一个统一入口，管理本地/远程 AI coding 会话、提示词、历史记录和项目上下文
+- 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
 - 加密保存 LLM API Key，通过短期代理令牌给本地和远程会话安全调用模型
+- 给管理者一套控制面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
 - 在自己的网络里部署，保留企业数据边界，并逐步接入 SSO、飞书/钉钉和 Kubernetes
 
 ## 🔥 近期功能亮点
 
 | 功能 | 为什么重要 |
 |------|------------|
+| AI Coding Agent 控制面 | 把团队已在使用的多个 AI CLI 纳入统一入口、权限、成本和审计体系 |
 | 远程工作区与 Remote Agent | 用户在浏览器里选择远程机器，AI CLI 直接在目标机器运行，无需反复传 SSH 凭据 |
 | 多 CLI 适配器 | Claude Code、Qwen Code、Codex、OpenClaw 统一接入，包含会话恢复、权限模式和历史同步 |
 | API Key 代理 | API Key 加密存储在服务器，远程 Agent 只拿短期代理令牌，统一配额和用量统计 |
@@ -103,6 +106,7 @@
 | 特性 | 说明 |
 |------|------|
 | 🔒 **默认自托管** | 私有化部署，数据和 API Key 留在自己的网络与数据库里 |
+| 🎛️ **Agent 控制面** | 统一管理工具、用户、机器、密钥、配额、成本和审计，而不是替代每个 AI CLI |
 | 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、OpenClaw 统一入口、统一历史、统一治理 |
 | 🖥️ **远程执行** | Remote Agent 让 AI CLI 在目标机器运行，适合研发服务器、测试环境和 GPU 机器 |
 | 📊 **治理可观测** | Token、成本、配额、异常、审计、合规和 ROI 统一分析 |
@@ -316,8 +320,8 @@ open-ace/
 ---
 
 <p align="center">
-  <strong>把 AI 工具接进来，把成本和风险管起来</strong><br>
-  <em>Open ACE — self-hosted workspace and governance for real AI adoption</em>
+  <strong>把 AI Coding Agent 接进来，把密钥、成本和风险管起来</strong><br>
+  <em>Open ACE — self-hosted workspace and control plane for AI coding agents</em>
 </p>
 
 ---
@@ -326,27 +330,30 @@ open-ace/
 
 ## 🎯 What is This?
 
-**Open ACE** is an open-source **Enterprise AI Work Platform**: it gives employees a unified AI work entry point and gives administrators visibility into usage, cost, access control, compliance, and audit trails.
+**Open ACE** is an open-source **self-hosted workspace and control plane for AI coding agents**: developers can use Claude Code, Qwen Code, Codex, OpenClaw, and similar tools from one browser workspace while running them on the team's own remote machines; administrators can centralize API keys, access control, quotas, cost visibility, audit trails, and compliance.
 
-It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and OpenClaw, especially organizations that need self-hosted deployment, centralized governance, and measurable AI ROI.
+It is built for teams moving AI coding agents into real engineering workflows, especially organizations that need self-hosted deployment, private-network machines, centralized key proxying, team quotas, and traceable audit records.
 
 | Challenge | Solution |
 |-----------|----------|
-| 🤔 **Are we using AI effectively?** | Work Mode empowers employees to use AI efficiently and boost productivity |
-| 😰 **Is AI under control?** | Manage Mode gives administrators full visibility and control over AI usage |
+| 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, OpenClaw, and more |
+| 🖥️ **Agents need to run on internal, staging, or GPU machines** | Remote Agent runs AI CLIs directly on target machines |
+| 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived proxy tokens |
+| 📊 **Cost, quotas, risk, and audit need visibility** | Manage Mode tracks usage, cost, quotas, anomalies, audit trails, and compliance |
 
 **What you can do with Open ACE:**
 
-- Give employees one place for local/remote AI sessions, prompts, history, and project context
-- Run AI CLIs on your own development, staging, or GPU machines through the Remote Agent
-- Give administrators dashboards for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
+- Give teams one place for local/remote AI coding sessions, prompts, history, and project context
+- Run Claude Code, Qwen Code, Codex, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
 - Store LLM API keys centrally and issue short-lived proxy tokens to local and remote sessions
+- Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
 - Deploy inside your own network while integrating SSO, Feishu/DingTalk, and Kubernetes over time
 
 ## 🔥 Recent Highlights
 
 | Capability | Why it matters |
 |------------|----------------|
+| AI coding agent control plane | Bring the team's existing AI CLIs under one access, key, quota, cost, and audit model |
 | Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
 | Multi-CLI adapters | Claude Code, Qwen Code, Codex, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
 | API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived proxy tokens with unified quota and usage tracking |
@@ -396,6 +403,7 @@ It is built for teams adopting tools such as Claude Code, Qwen Code, Codex, and 
 | Feature | Description |
 |---------|-------------|
 | 🔒 **Self-hosted by default** | Keep data and API keys inside your own network and database |
+| 🎛️ **Agent control plane** | Manage tools, users, machines, keys, quotas, cost, and audit trails without replacing every AI CLI |
 | 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, and OpenClaw with unified access, history, and governance |
 | 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
 | 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
@@ -609,6 +617,6 @@ This project is licensed under the [Apache 2.0 License](LICENSE).
 ---
 
 <p align="center">
-  <strong>Bring AI tools in. Keep cost and risk under control.</strong><br>
-  <em>Open ACE — self-hosted workspace and governance for real AI adoption</em>
+  <strong>Bring AI coding agents in. Keep keys, cost, and risk under control.</strong><br>
+  <em>Open ACE — self-hosted workspace and control plane for AI coding agents</em>
 </p>
