@@ -685,8 +685,12 @@ const SessionCard: React.FC<SessionCardProps> = ({
           </span>
           {/* 完成时间列始终渲染，确保 Grid 列数一致 (Issue #700) */}
           <span style={{ visibility: session.completed_at ? 'visible' : 'hidden' }}>
-            <i className="bi bi-check-circle me-1" />
-            {session.completed_at ? formatDateTime(session.completed_at) : '-'}
+            {session.completed_at && (
+              <>
+                <i className="bi bi-check-circle me-1" />
+                {formatDateTime(session.completed_at)}
+              </>
+            )}
           </span>
         </div>
       </div>
