@@ -34,6 +34,10 @@ SECRET_KEY="${SECRET_KEY:-$(openssl rand -hex 32)}"
 UPLOAD_AUTH_KEY="${UPLOAD_AUTH_KEY:-$(openssl rand -hex 16)}"
 NON_INTERACTIVE=false
 
+# Docker installation mirror source (can be overridden by environment variable)
+# Empty = interactive selection, "official" = Docker official source, "aliyun" = Aliyun mirror
+DOCKER_INSTALL_MIRROR="${DOCKER_INSTALL_MIRROR:-}"
+
 # Config defaults (can be overridden by environment variables)
 HOST_NAME="${HOST_NAME:-}"
 WORKSPACE_ENABLED="${WORKSPACE_ENABLED:-true}"
@@ -145,6 +149,235 @@ prompt_yesno() {
     else
         eval "$var_name='no'"
     fi
+}
+
+# ============================================================================
+# Docker Hub Access Detection Functions
+# ============================================================================
+
+# List of domestic Docker image mirrors (China)
+DOMESTIC_DOCKER_MIRRORS=(
+    "docker.1ms.run"
+    "docker.xuanyuan.me"
+    "hub.rat.dev"
+    "docker.hlyun.org"
+    "dockerpull.org"
+    "docker.m.daocloud.io"
+)
+
+# Check if Docker Hub or configured mirrors are accessible
+# Returns: 0 if accessible, 1 if not accessible
+check_docker_image_access() {
+    local test_image="alpine:latest"
+    local timeout=15
+    
+    print_info "检测 Docker 镜像拉取能力..."
+    
+    # First check if test image already exists locally
+    if docker image inspect "$test_image" &>/dev/null; then
+        print_success "测试镜像已存在，跳过检测"
+        return 0
+    fi
+    
+    # Try pulling with timeout
+    print_info "尝试拉取测试镜像 (超时 ${timeout}s)..."
+    if timeout $timeout docker pull "$test_image" 2>&1 | grep -qE "Pulling from|Downloaded|Pull complete"; then
+        print_success "Docker Hub 可访问"
+        # Clean up test image
+        docker rmi "$test_image" &>/dev/null || true
+        return 0
+    fi
+    
+    # Check if any registry mirrors are configured
+    local mirrors=$(docker info 2>/dev/null | grep -A10 "Registry Mirrors" | grep "https://" | sed 's/.*https:\/\/\(.*\).*/\1/' | head -5)
+    if [ -n "$mirrors" ]; then
+        print_info "检测到已配置的镜像加速器:"
+        echo "$mirrors" | while read mirror; do
+            print_info "  - $mirror"
+        done
+        print_warning "镜像加速器可能不工作，尝试检测可用镜像源..."
+        
+        # Try each mirror
+        for mirror in $mirrors; do
+            print_info "尝试镜像源: $mirror"
+            if timeout $timeout docker pull "$mirror/library/$test_image" 2>&1 | grep -qE "Pulling from|Downloaded|Pull complete"; then
+                print_success "镜像源可用: $mirror"
+                # Clean up
+                docker rmi "$mirror/library/$test_image" &>/dev/null || true
+                return 0
+            fi
+        done
+    fi
+    
+    print_warning "Docker Hub 和已配置的镜像加速器均不可访问"
+    return 1
+}
+
+# Pull base image with retry from multiple mirrors
+# Args: image_name (e.g., "python:3.11-slim")
+pull_base_image_with_retry() {
+    local image_name="$1"
+    local timeout=300  # Increased timeout for large images
+    local max_retries=3
+    local retry_count=0
+    local pulled=false
+
+    print_info "拉取基础镜像: $image_name"
+
+    # Try direct pull with retries (uses configured registry mirrors)
+    while [ $retry_count -lt $max_retries ] && [ "$pulled" = false ]; do
+        if [ $retry_count -gt 0 ]; then
+            print_warning "重试第 $retry_count 次..."
+            sleep 5
+        fi
+        
+        print_info "尝试拉取 (超时 ${timeout}s)..."
+        if timeout $timeout docker pull "$image_name" 2>&1; then
+            print_success "镜像拉取成功: $image_name"
+            pulled=true
+        else
+            retry_count=$((retry_count + 1))
+        fi
+    done
+
+    if [ "$pulled" = true ]; then
+        return 0
+    fi
+
+    print_error "镜像拉取失败: $image_name (重试 $max_retries 次后仍失败)"
+    return 1
+}
+
+# Configure Docker daemon registry mirrors
+# Args: mirror_url (e.g., "https://docker.1ms.run")
+configure_docker_registry_mirror() {
+    local mirror_url="$1"
+    local daemon_json="/etc/docker/daemon.json"
+    
+    print_info "配置 Docker 镜像加速器: $mirror_url"
+    
+    # Create directory if not exists
+    sudo mkdir -p /etc/docker
+    
+    # Check existing config
+    if [ -f "$daemon_json" ]; then
+        local existing_config=$(cat "$daemon_json" 2>/dev/null || echo "{}")
+        # Check if mirror is already configured
+        if echo "$existing_config" | grep -q "$mirror_url"; then
+            print_success "镜像加速器已配置: $mirror_url"
+            return 0
+        fi
+        # Merge with existing config
+        print_info "更新现有 Docker 配置..."
+        if printf '%s\n' "$existing_config" | python3 -c "import json,sys; c=json.load(sys.stdin); c['registry-mirrors']=json.loads('["$mirror_url"]'); json.dump(c,sys.stdout,indent=2)" > /tmp/daemon.json.new 2>/dev/null; then
+            sudo mv /tmp/daemon.json.new "$daemon_json"
+        else
+            # Fallback: create new config
+            print_warning "无法合并配置，创建新配置文件..."
+            printf '%s\n' "{\"registry-mirrors\": [\"$mirror_url\"]}" | sudo tee "$daemon_json" > /dev/null
+        fi
+    else
+        # Create new config
+        printf '%s\n' "{\"registry-mirrors\": [\"$mirror_url\"]}" | sudo tee "$daemon_json" > /dev/null
+    fi
+    
+    # Restart Docker daemon to apply config
+    print_info "重启 Docker 服务以应用配置..."
+    sudo systemctl restart docker
+    
+    # Wait for Docker to be ready
+    sleep 5
+    if docker info &>/dev/null; then
+        print_success "Docker 镜像加速器配置完成"
+        print_info "配置内容:"
+        sudo cat "$daemon_json" 2>/dev/null | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin), indent=2))" || sudo cat "$daemon_json"
+        return 0
+    else
+        print_error "Docker 重启失败，请手动检查"
+        return 1
+    fi
+}
+
+# Interactive selection for Docker image source
+select_docker_image_source() {
+    echo ""
+    echo "Docker Hub 无法访问或镜像加速器不工作"
+    echo "请选择:"
+    echo "  1) 配置国内镜像加速器并重试（推荐）"
+    echo "  2) 手动输入镜像源地址配置"
+    echo "  3) 手动导入基础镜像文件"
+    echo "  4) 跳过镜像构建（稍后手动处理）"
+    echo ""
+
+    prompt_input "请选择" "1" source_choice
+
+    case "$source_choice" in
+        1)
+            print_info "将配置国内镜像加速器..."
+            # Select a mirror to configure
+            echo ""
+            echo "请选择镜像加速器:"
+            echo "  1) docker.1ms.run (推荐)"
+            echo "  2) hub.rat.dev"
+            echo "  3) docker.m.daocloud.io"
+            echo "  4) docker.hlyun.org"
+            echo ""
+            prompt_input "请选择" "1" mirror_choice
+            
+            local selected_mirror=""
+            case "$mirror_choice" in
+                1) selected_mirror="https://docker.1ms.run" ;;
+                2) selected_mirror="https://hub.rat.dev" ;;
+                3) selected_mirror="https://docker.m.daocloud.io" ;;
+                4) selected_mirror="https://docker.hlyun.org" ;;
+                *) selected_mirror="https://docker.1ms.run" ;;
+            esac
+            
+            print_info "选择镜像加速器: $selected_mirror"
+            if configure_docker_registry_mirror "$selected_mirror"; then
+                print_success "镜像加速器配置成功，后续拉取将使用加速器"
+                return 0
+            else
+                print_error "镜像加速器配置失败"
+                return 1
+            fi
+            ;;
+        2)
+            prompt_input "镜像源地址（如 docker.1ms.run，不带 https://）" "" custom_mirror
+            if [ -n "$custom_mirror" ]; then
+                local mirror_url="https://$custom_mirror"
+                print_info "将配置镜像加速器: $mirror_url"
+                if configure_docker_registry_mirror "$mirror_url"; then
+                    print_success "镜像加速器配置成功"
+                    return 0
+                else
+                    return 1
+                fi
+            else
+                print_error "未输入镜像源地址"
+                return 1
+            fi
+            ;;
+        3)
+            print_info "请手动导入基础镜像后重新运行"
+            print_info "导出命令（在有镜像的机器上）: docker save python:3.11-slim postgres:15-alpine | gzip > base-images.tar.gz"
+            print_info "导入命令: docker load < base-images.tar.gz"
+            return 2
+            ;;
+        4)
+            print_info "跳过镜像构建"
+            return 1
+            ;;
+        *)
+            # Default: configure recommended mirror
+            print_info "将配置推荐镜像加速器..."
+            if configure_docker_registry_mirror "https://docker.1ms.run"; then
+                return 0
+            else
+                return 1
+            fi
+            ;;
+    esac
 }
 
 # ============================================================================
@@ -619,35 +852,96 @@ install_docker_debian() {
         gnupg \
         lsb-release
 
-    # Try official Docker source first, fallback to Aliyun mirror
-    print_info "添加 Docker GPG 密钥..."
-    if ! curl -fsSL https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]')/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg 2>/dev/null; then
-        print_warning "官方源连接失败，尝试使用阿里云镜像..."
-        curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]')/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    # Determine which mirror to use
+    local distro=$(lsb_release -is | tr '[:upper:]' '[:lower:]')
+    local codename=$(lsb_release -cs)
+    local arch=$(dpkg --print-architecture)
+    local keyring_file="/usr/share/keyrings/docker-archive-keyring.gpg"
+    local sources_file="/etc/apt/sources.list.d/docker.list"
+    local official_gpg_url="https://download.docker.com/linux/${distro}/gpg"
+    local aliyun_gpg_url="https://mirrors.aliyun.com/docker-ce/linux/${distro}/gpg"
+    local official_repo_url="https://download.docker.com/linux/${distro}"
+    local aliyun_repo_url="https://mirrors.aliyun.com/docker-ce/linux/${distro}"
+    local use_mirror="${DOCKER_INSTALL_MIRROR:-}"
 
-        if [ $? -ne 0 ]; then
-            print_error "无法添加 Docker GPG 密钥"
-            print_info "请检查网络连接或手动安装 Docker"
-            return 1
-        fi
-
-        # Use Aliyun mirror for repository
-        print_info "添加 Docker 软件源 (阿里云镜像)..."
-        echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://mirrors.aliyun.com/docker-ce/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]') \
-            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    else
-        # Add Docker repository (official)
-        print_info "添加 Docker 软件源..."
-        echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]') \
-            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # If no explicit setting, ask user in interactive mode
+    if [ -z "$use_mirror" ] && [ "$NON_INTERACTIVE" = false ]; then
+        echo ""
+        echo "请选择 Docker 软件源:"
+        echo "  1) 官方源 (download.docker.com) - 海外网络推荐"
+        echo "  2) 阿里云镜像 (mirrors.aliyun.com) - 国内网络推荐"
+        echo ""
+        prompt_input "请选择" "2" mirror_choice
+        case "$mirror_choice" in
+            1) use_mirror="official" ;;
+            2|*) use_mirror="aliyun" ;;
+        esac
     fi
 
-    # Install Docker
+    # Default to aliyun for non-interactive mode if not specified
+    if [ -z "$use_mirror" ]; then
+        use_mirror="aliyun"
+    fi
+
+    # Remove existing files to avoid conflicts
+    sudo rm -f "$keyring_file"
+    sudo rm -f "$sources_file"
+
+    # Add Docker GPG key and repository
+    print_info "添加 Docker GPG 密钥..."
+    case "$use_mirror" in
+        official)
+            print_info "使用官方源..."
+            if ! curl -fsSL "$official_gpg_url" | sudo gpg --dearmor -o "$keyring_file" 2>/dev/null; then
+                print_warning "官方 GPG 密钥下载失败，切换到阿里云镜像..."
+                curl -fsSL "$aliyun_gpg_url" | sudo gpg --dearmor -o "$keyring_file"
+                echo "deb [arch=$arch signed-by=$keyring_file] $aliyun_repo_url $codename stable" | sudo tee "$sources_file" > /dev/null
+            else
+                echo "deb [arch=$arch signed-by=$keyring_file] $official_repo_url $codename stable" | sudo tee "$sources_file" > /dev/null
+            fi
+            ;;
+        aliyun|*)
+            print_info "使用阿里云镜像..."
+            curl -fsSL "$aliyun_gpg_url" | sudo gpg --dearmor -o "$keyring_file"
+            echo "deb [arch=$arch signed-by=$keyring_file] $aliyun_repo_url $codename stable" | sudo tee "$sources_file" > /dev/null
+            ;;
+    esac
+
+    # Install Docker with retry on SSL failure
     print_info "安装 Docker..."
     sudo apt-get update
-    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+    local install_output=""
+    local install_success=false
+    
+    install_output=$(sudo apt-get install -y $packages 2>&1) && install_success=true || install_success=false
+    
+    if [ "$install_success" = false ]; then
+        # Check if it's SSL/network error
+        if echo "$install_output" | grep -qE "SSL connect error|Curl error|连接被对方重设|Cannot download|Failed to fetch|404"; then
+            print_warning "检测到网络错误，切换到阿里云镜像重试..."
+            
+            # Clean up and switch to Aliyun mirror
+            sudo rm -f "$keyring_file"
+            sudo rm -f "$sources_file"
+            
+            print_info "添加阿里云镜像源..."
+            curl -fsSL "$aliyun_gpg_url" | sudo gpg --dearmor -o "$keyring_file"
+            echo "deb [arch=$arch signed-by=$keyring_file] $aliyun_repo_url $codename stable" | sudo tee "$sources_file" > /dev/null
+            
+            print_info "重新尝试安装..."
+            sudo apt-get update
+            if sudo apt-get install -y $packages; then
+                install_success=true
+            fi
+        fi
+    fi
+
+    if [ "$install_success" = false ]; then
+        print_error "Docker 安装失败，请检查网络或手动安装"
+        print_info "手动安装参考: https://docs.docker.com/engine/install/ubuntu/"
+        return 1
+    fi
 
     # Start Docker service
     print_info "启动 Docker 服务..."
@@ -670,26 +964,87 @@ install_docker_redhat() {
     print_info "安装依赖..."
     sudo yum install -y yum-utils
 
-    # Try to add Docker repository
+    # Determine which mirror to use
+    local repo_file="/etc/yum.repos.d/docker-ce.repo"
+    local official_repo="https://download.docker.com/linux/centos/docker-ce.repo"
+    local aliyun_repo="https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo"
+    local use_mirror="${DOCKER_INSTALL_MIRROR:-}"
+
+    # If no explicit setting, ask user in interactive mode
+    if [ -z "$use_mirror" ] && [ "$NON_INTERACTIVE" = false ]; then
+        echo ""
+        echo "请选择 Docker 软件源:"
+        echo "  1) 官方源 (download.docker.com) - 海外网络推荐"
+        echo "  2) 阿里云镜像 (mirrors.aliyun.com) - 国内网络推荐"
+        echo ""
+        prompt_input "请选择" "2" mirror_choice
+        case "$mirror_choice" in
+            1) use_mirror="official" ;;
+            2|*) use_mirror="aliyun" ;;
+        esac
+    fi
+
+    # Default to aliyun for non-interactive mode if not specified
+    if [ -z "$use_mirror" ]; then
+        use_mirror="aliyun"
+    fi
+
+    # Remove existing repo file to avoid conflicts
+    sudo rm -f "$repo_file"
+
+    # Add Docker repository
     print_info "添加 Docker 软件源..."
-    if ! sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null; then
-        print_warning "官方源添加失败，尝试使用阿里云镜像..."
+    case "$use_mirror" in
+        official)
+            print_info "使用官方源..."
+            if ! sudo yum-config-manager --add-repo "$official_repo" 2>/dev/null; then
+                print_warning "官方源添加失败，切换到阿里云镜像..."
+                sudo yum-config-manager --add-repo "$aliyun_repo"
+            fi
+            ;;
+        aliyun|*)
+            print_info "使用阿里云镜像..."
+            sudo yum-config-manager --add-repo "$aliyun_repo"
+            ;;
+    esac
 
-        # Use Aliyun mirror as fallback
-        sudo yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
-
-        if [ $? -ne 0 ]; then
-            print_error "无法添加 Docker 软件源"
-            print_info "请检查网络连接或手动安装 Docker"
-            return 1
+    # Install Docker with retry on SSL failure
+    print_info "安装 Docker..."
+    local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+    local install_output=""
+    local install_success=false
+    
+    install_output=$(sudo yum install -y $packages 2>&1) && install_success=true || install_success=false
+    
+    if [ "$install_success" = false ]; then
+        # Check if it's SSL/network error
+        if echo "$install_output" | grep -qE "SSL connect error|Curl error.*35|连接被对方重设|Cannot download|All mirrors were already tried"; then
+            print_warning "检测到 SSL 连接错误，切换到阿里云镜像重试..."
+            
+            # Clean up and switch to Aliyun mirror
+            sudo rm -f "$repo_file"
+            sudo yum clean all
+            
+            print_info "添加阿里云镜像源..."
+            sudo yum-config-manager --add-repo "$aliyun_repo"
+            
+            print_info "重新尝试安装..."
+            if sudo yum install -y --nogpgcheck $packages; then
+                install_success=true
+            fi
+        else
+            # Non-SSL error, try --nogpgcheck
+            print_warning "安装失败，尝试跳过 GPG 检查..."
+            if sudo yum install -y --nogpgcheck $packages; then
+                install_success=true
+            fi
         fi
     fi
 
-    # Install Docker (with --nogpgcheck in case of SSL issues)
-    print_info "安装 Docker..."
-    if ! sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
-        print_warning "安装失败，尝试跳过 GPG 检查..."
-        sudo yum install -y --nogpgcheck docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    if [ "$install_success" = false ]; then
+        print_error "Docker 安装失败，请检查网络或手动安装"
+        print_info "手动安装参考: https://docs.docker.com/engine/install/centos/"
+        return 1
     fi
 
     # Start Docker service
@@ -713,24 +1068,87 @@ install_docker_fedora() {
     print_info "安装依赖..."
     sudo dnf -y install dnf-plugins-core
 
-    # Try to add Docker repository
-    print_info "添加 Docker 软件源..."
-    if ! sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null; then
-        print_warning "官方源添加失败，尝试使用阿里云镜像..."
-        sudo dnf config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/fedora/docker-ce.repo
+    # Determine which mirror to use
+    local repo_file="/etc/yum.repos.d/docker-ce.repo"
+    local official_repo="https://download.docker.com/linux/fedora/docker-ce.repo"
+    local aliyun_repo="https://mirrors.aliyun.com/docker-ce/linux/fedora/docker-ce.repo"
+    local use_mirror="${DOCKER_INSTALL_MIRROR:-}"
 
-        if [ $? -ne 0 ]; then
-            print_error "无法添加 Docker 软件源"
-            print_info "请检查网络连接或手动安装 Docker"
-            return 1
+    # If no explicit setting, ask user in interactive mode
+    if [ -z "$use_mirror" ] && [ "$NON_INTERACTIVE" = false ]; then
+        echo ""
+        echo "请选择 Docker 软件源:"
+        echo "  1) 官方源 (download.docker.com) - 海外网络推荐"
+        echo "  2) 阿里云镜像 (mirrors.aliyun.com) - 国内网络推荐"
+        echo ""
+        prompt_input "请选择" "2" mirror_choice
+        case "$mirror_choice" in
+            1) use_mirror="official" ;;
+            2|*) use_mirror="aliyun" ;;
+        esac
+    fi
+
+    # Default to aliyun for non-interactive mode if not specified
+    if [ -z "$use_mirror" ]; then
+        use_mirror="aliyun"
+    fi
+
+    # Remove existing repo file to avoid conflicts
+    sudo rm -f "$repo_file"
+
+    # Add Docker repository
+    print_info "添加 Docker 软件源..."
+    case "$use_mirror" in
+        official)
+            print_info "使用官方源..."
+            if ! sudo dnf config-manager --add-repo "$official_repo" 2>/dev/null; then
+                print_warning "官方源添加失败，切换到阿里云镜像..."
+                sudo dnf config-manager --add-repo "$aliyun_repo"
+            fi
+            ;;
+        aliyun|*)
+            print_info "使用阿里云镜像..."
+            sudo dnf config-manager --add-repo "$aliyun_repo"
+            ;;
+    esac
+
+    # Install Docker with retry on SSL failure
+    print_info "安装 Docker..."
+    local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+    local install_output=""
+    local install_success=false
+    
+    install_output=$(sudo dnf install -y $packages 2>&1) && install_success=true || install_success=false
+    
+    if [ "$install_success" = false ]; then
+        # Check if it's SSL/network error
+        if echo "$install_output" | grep -qE "SSL connect error|Curl error.*35|连接被对方重设|Cannot download|All mirrors were already tried"; then
+            print_warning "检测到 SSL 连接错误，切换到阿里云镜像重试..."
+            
+            # Clean up and switch to Aliyun mirror
+            sudo rm -f "$repo_file"
+            sudo dnf clean all
+            
+            print_info "添加阿里云镜像源..."
+            sudo dnf config-manager --add-repo "$aliyun_repo"
+            
+            print_info "重新尝试安装..."
+            if sudo dnf install -y --nogpgcheck $packages; then
+                install_success=true
+            fi
+        else
+            # Non-SSL error, try --nogpgcheck
+            print_warning "安装失败，尝试跳过 GPG 检查..."
+            if sudo dnf install -y --nogpgcheck $packages; then
+                install_success=true
+            fi
         fi
     fi
 
-    # Install Docker
-    print_info "安装 Docker..."
-    if ! sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
-        print_warning "安装失败，尝试跳过 GPG 检查..."
-        sudo dnf install -y --nogpgcheck docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    if [ "$install_success" = false ]; then
+        print_error "Docker 安装失败，请检查网络或手动安装"
+        print_info "手动安装参考: https://docs.docker.com/engine/install/fedora/"
+        return 1
     fi
 
     # Start Docker service
@@ -1569,6 +1987,39 @@ build_docker_image() {
                 return 1
             fi
             print_success "前端构建完成"
+
+            # Check Docker Hub access before building
+            print_info "检测 Docker 镜像拉取能力..."
+            if ! check_docker_image_access; then
+                print_warning "Docker Hub 无法访问"
+                select_docker_image_source
+                local source_result=$?
+                if [ $source_result -eq 2 ]; then
+                    # User chose to manually import
+                    print_info "请导入以下基础镜像后重新运行:"
+                    print_info "  - python:3.11-slim"
+                    print_info "  - postgres:15-alpine"
+                    return 1
+                elif [ $source_result -ne 0 ]; then
+                    return 1
+                fi
+            fi
+
+            # Pre-pull base images with retry from domestic mirrors
+            local base_images=("python:3.11-slim" "postgres:15-alpine")
+            for base_image in "${base_images[@]}"; do
+                if ! docker image inspect "$base_image" &>/dev/null; then
+                    pull_base_image_with_retry "$base_image"
+                    if [ $? -ne 0 ]; then
+                        print_warning "基础镜像 $base_image 拉取失败，构建可能失败"
+                        print_info "您可以手动导入该镜像后继续"
+                        prompt_yesno "是否继续尝试构建?" "n" continue_build
+                        if [ "$continue_build" != "yes" ]; then
+                            return 1
+                        fi
+                    fi
+                fi
+            done
 
             # Build Docker image
             cd "$source_dir"
