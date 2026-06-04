@@ -239,8 +239,18 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
 
   return (
     <div className="session-list" ref={sessionListRef}>
+      {/* New Session Button */}
+      <button
+        className="btn btn-primary btn-sm w-100 mb-2"
+        onClick={handleNewSession}
+        data-testid="new-session-btn"
+      >
+        <i className="bi bi-plus-lg me-1" />
+        {t('newSession', language)}
+      </button>
+
       {/* Search */}
-      <div className="session-search mb-2">
+      <div className="session-search mb-3">
         <div className="input-group input-group-sm">
           <span className="input-group-text">
             <i className="bi bi-search" />
@@ -254,16 +264,6 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           />
         </div>
       </div>
-
-      {/* New Session Button */}
-      <button
-        className="btn btn-primary btn-sm w-100 mb-3"
-        onClick={handleNewSession}
-        data-testid="new-session-btn"
-      >
-        <i className="bi bi-plus-lg me-1" />
-        {t('newSession', language)}
-      </button>
 
       {/* Session Groups */}
       {isLoading ? (
