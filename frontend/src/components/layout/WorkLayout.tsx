@@ -31,7 +31,7 @@ interface NavItem {
 
 const workNavItems: NavItem[] = [
   { id: 'workspace', label: 'workspace', icon: 'bi-grid', path: '/work' },
-  { id: 'sessions', label: 'sessions', icon: 'bi-collection', path: '/work/sessions' },
+  { id: 'sessions', label: 'sessionHistory', icon: 'bi-collection', path: '/work/sessions' },
   { id: 'prompts', label: 'prompts', icon: 'bi-file-text', path: '/work/prompts' },
   { id: 'usage', label: 'myUsage', icon: 'bi-bar-chart', path: '/work/usage' },
   { id: 'insights', label: 'insights', icon: 'bi-lightbulb', path: '/work/insights' },
