@@ -42,9 +42,7 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
         return result.fetchone() is not None
     elif conn.dialect.name == "sqlite":
         result = conn.execute(
-            sa.text(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=:index_name"
-            ),
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='index' AND name=:index_name"),
             {"index_name": index_name},
         )
         return result.fetchone() is not None
@@ -59,9 +57,7 @@ def upgrade() -> None:
 
     if not _index_exists(conn, "agent_sessions", index_name):
         if conn.dialect.name == "postgresql" or conn.dialect.name == "sqlite":
-            op.execute(
-                sa.text(f"CREATE INDEX {index_name} ON agent_sessions(session_type)")
-            )
+            op.execute(sa.text(f"CREATE INDEX {index_name} ON agent_sessions(session_type)"))
 
 
 def downgrade() -> None:

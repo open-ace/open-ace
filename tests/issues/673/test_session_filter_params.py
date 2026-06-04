@@ -41,14 +41,16 @@ def test_user_id(db):
         INSERT INTO users (email, name, password_hash, is_active, created_at, updated_at)
         VALUES (?, ?, 'test_hash', 1, ?, ?)
         """,
-        (test_email, "Test Filter User", time.strftime("%Y-%m-%d %H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S"))
+        (
+            test_email,
+            "Test Filter User",
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
     )
 
     # Get user ID
-    user = db.fetch_one(
-        "SELECT id FROM users WHERE email = ?",
-        (test_email,)
-    )
+    user = db.fetch_one("SELECT id FROM users WHERE email = ?", (test_email,))
 
     yield user["id"]
 
@@ -64,7 +66,12 @@ def test_sessions(db, test_user_id):
         (f"test_active_chat_{uuid.uuid4().hex}", "active", "chat", "Test Active Chat"),
         (f"test_active_task_{uuid.uuid4().hex}", "active", "task", "Test Active Task"),
         (f"test_paused_chat_{uuid.uuid4().hex}", "paused", "chat", "Test Paused Chat"),
-        (f"test_completed_workflow_{uuid.uuid4().hex}", "completed", "workflow", "Test Completed Workflow"),
+        (
+            f"test_completed_workflow_{uuid.uuid4().hex}",
+            "completed",
+            "workflow",
+            "Test Completed Workflow",
+        ),
         (f"test_error_agent_{uuid.uuid4().hex}", "error", "agent", "Test Error Agent"),
         (f"test_archived_chat_{uuid.uuid4().hex}", "archived", "chat", "Test Archived Chat"),
     ]
@@ -80,7 +87,7 @@ def test_sessions(db, test_user_id):
              total_tokens, message_count, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 'qwen', 'test-host', 100, 5, ?, ?)
             """,
-            (session_id, test_user_id, status, session_type, title, now, now)
+            (session_id, test_user_id, status, session_type, title, now, now),
         )
         created_session_ids.append(session_id)
 
@@ -101,7 +108,7 @@ def test_status_filter(db, test_user_id, test_sessions):
         WHERE user_id = ? AND status = ?
         ORDER BY updated_at DESC
         """,
-        (test_user_id, "active")
+        (test_user_id, "active"),
     )
 
     # 验证所有返回的会话状态都是 active
@@ -110,7 +117,9 @@ def test_status_filter(db, test_user_id, test_sessions):
 
     # 验证找到预期的 active 会话（应该是 2 个）
     active_count = len([sid for sid in test_sessions if "active" in sid])
-    assert len(sessions) == active_count, f"Expected {active_count} active sessions, got {len(sessions)}"
+    assert (
+        len(sessions) == active_count
+    ), f"Expected {active_count} active sessions, got {len(sessions)}"
 
     print(f"[PASS] status 过滤: 找到 {len(sessions)} 个 active 会话")
 
@@ -124,12 +133,14 @@ def test_session_type_filter(db, test_user_id, test_sessions):
         WHERE user_id = ? AND session_type = ?
         ORDER BY updated_at DESC
         """,
-        (test_user_id, "chat")
+        (test_user_id, "chat"),
     )
 
     # 验证所有返回的会话类型都是 chat
     for s in sessions:
-        assert s["session_type"] == "chat", f"Expected session_type='chat', got '{s['session_type']}'"
+        assert (
+            s["session_type"] == "chat"
+        ), f"Expected session_type='chat', got '{s['session_type']}'"
 
     # 验证找到预期的 chat 会话（应该是 3 个）
     chat_count = len([sid for sid in test_sessions if "chat" in sid])
@@ -147,17 +158,21 @@ def test_combined_filter(db, test_user_id, test_sessions):
         WHERE user_id = ? AND status = ? AND session_type = ?
         ORDER BY updated_at DESC
         """,
-        (test_user_id, "active", "chat")
+        (test_user_id, "active", "chat"),
     )
 
     # 验证所有返回的会话都符合条件
     for s in sessions:
         assert s["status"] == "active", f"Expected status='active', got '{s['status']}'"
-        assert s["session_type"] == "chat", f"Expected session_type='chat', got '{s['session_type']}'"
+        assert (
+            s["session_type"] == "chat"
+        ), f"Expected session_type='chat', got '{s['session_type']}'"
 
     # 验证找到预期的 active+chat 会话（应该是 1 个）
     active_chat_count = len([sid for sid in test_sessions if "active_chat" in sid])
-    assert len(sessions) == active_chat_count, f"Expected {active_chat_count} active+chat sessions, got {len(sessions)}"
+    assert (
+        len(sessions) == active_chat_count
+    ), f"Expected {active_chat_count} active+chat sessions, got {len(sessions)}"
 
     print(f"[PASS] 组合过滤: 找到 {len(sessions)} 个 active+chat 会话")
 
@@ -171,7 +186,7 @@ def test_invalid_status_filter(db, test_user_id, test_sessions):
         WHERE user_id = ? AND status = ?
         ORDER BY updated_at DESC
         """,
-        (test_user_id, "invalid_status")
+        (test_user_id, "invalid_status"),
     )
 
     # 无效值应该返回 0 个结果
@@ -189,7 +204,7 @@ def test_invalid_session_type_filter(db, test_user_id, test_sessions):
         WHERE user_id = ? AND session_type = ?
         ORDER BY updated_at DESC
         """,
-        (test_user_id, "invalid_type")
+        (test_user_id, "invalid_type"),
     )
 
     # 无效值应该返回 0 个结果
@@ -223,20 +238,23 @@ def test_api_endpoint_integration():
     data = resp.json()
     if data.get("success") and data.get("data", {}).get("sessions"):
         for s in data["data"]["sessions"]:
-            assert s["session_type"] == "chat", f"Expected session_type='chat', got '{s['session_type']}'"
+            assert (
+                s["session_type"] == "chat"
+            ), f"Expected session_type='chat', got '{s['session_type']}'"
         print(f"[PASS] API session_type 过滤: 找到 {len(data['data']['sessions'])} 个 chat 会话")
 
     # 测试组合过滤
     resp = requests.get(
-        f"{BASE_URL}/api/workspace/sessions",
-        params={"status": "active", "session_type": "chat"}
+        f"{BASE_URL}/api/workspace/sessions", params={"status": "active", "session_type": "chat"}
     )
     assert resp.status_code == 200, f"API 返回 {resp.status_code}"
     data = resp.json()
     if data.get("success") and data.get("data", {}).get("sessions"):
         for s in data["data"]["sessions"]:
             assert s["status"] == "active", f"Expected status='active', got '{s['status']}'"
-            assert s["session_type"] == "chat", f"Expected session_type='chat', got '{s['session_type']}'"
+            assert (
+                s["session_type"] == "chat"
+            ), f"Expected session_type='chat', got '{s['session_type']}'"
         print(f"[PASS] API 组合过滤: 找到 {len(data['data']['sessions'])} 个 active+chat 会话")
 
     # 测试无效参数（API 应忽略无效值）
@@ -267,7 +285,12 @@ if __name__ == "__main__":
             INSERT OR IGNORE INTO users (email, name, password_hash, is_active, created_at, updated_at)
             VALUES (?, ?, 'test_hash', 1, ?, ?)
             """,
-            (test_email, "Test Filter User Direct", time.strftime("%Y-%m-%d %H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S"))
+            (
+                test_email,
+                "Test Filter User Direct",
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+            ),
         )
     except Exception:
         pass  # SQLite 使用 INSERT OR IGNORE
@@ -281,7 +304,12 @@ if __name__ == "__main__":
             VALUES (?, ?, 'test_hash', 1, ?, ?)
             ON CONFLICT (email) DO NOTHING
             """,
-            (test_email, "Test Filter User Direct", time.strftime("%Y-%m-%d %H:%M:%S"), time.strftime("%Y-%m-%d %H:%M:%S"))
+            (
+                test_email,
+                "Test Filter User Direct",
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+            ),
         )
         user = db.fetch_one("SELECT id FROM users WHERE email = ?", (test_email,))
 
@@ -300,7 +328,7 @@ if __name__ == "__main__":
              total_tokens, message_count, created_at, updated_at)
             VALUES (?, ?, 'active', 'chat', 'Direct Test', 'qwen', 'test-host', 100, 5, ?, ?)
             """,
-            (test_session_id, user_id, now, now)
+            (test_session_id, user_id, now, now),
         )
     except Exception as e:
         print(f"[WARN] 创建测试会话失败: {e}")
@@ -308,21 +336,21 @@ if __name__ == "__main__":
     print("\n[1] 测试 status 过滤...")
     sessions = db.fetch_all(
         "SELECT session_id, status FROM agent_sessions WHERE user_id = ? AND status = ?",
-        (user_id, "active")
+        (user_id, "active"),
     )
     print(f"  找到 {len(sessions)} 个 active 会话")
 
     print("\n[2] 测试 session_type 过滤...")
     sessions = db.fetch_all(
         "SELECT session_id, session_type FROM agent_sessions WHERE user_id = ? AND session_type = ?",
-        (user_id, "chat")
+        (user_id, "chat"),
     )
     print(f"  找到 {len(sessions)} 个 chat 会话")
 
     print("\n[3] 测试组合过滤...")
     sessions = db.fetch_all(
         "SELECT session_id, status, session_type FROM agent_sessions WHERE user_id = ? AND status = ? AND session_type = ?",
-        (user_id, "active", "chat")
+        (user_id, "active", "chat"),
     )
     print(f"  找到 {len(sessions)} 个 active+chat 会话")
 
