@@ -45,6 +45,7 @@ const translations: Record<Language, Translations> = {
     searchMessages: 'Search messages...',
 
     // Navigation
+    navigation: 'Navigation',
     dashboard: 'Dashboard',
     messages: 'Messages',
     analysis: 'Analysis',
@@ -908,11 +909,12 @@ const translations: Record<Language, Translations> = {
     searchMessages: '搜索消息...',
 
     // Navigation
+    navigation: '导航',
     dashboard: '仪表盘',
     messages: '消息',
     analysis: '分析',
     management: '管理',
-    sessions: '会话',
+    sessions: '会话历史',
     prompts: '提示词',
     report: '报告',
     workspace: '工作区',
@@ -1756,11 +1758,12 @@ const translations: Record<Language, Translations> = {
     searchMessages: 'メッセージを検索...',
 
     // Navigation
+    navigation: 'ナビゲーション',
     dashboard: 'ダッシュボード',
     messages: 'メッセージ',
     analysis: '分析',
     management: '管理',
-    sessions: 'セッション',
+    sessions: 'セッション履歴',
     prompts: 'プロンプト',
     report: 'レポート',
     workspace: 'ワークスペース',
@@ -2308,11 +2311,12 @@ const translations: Record<Language, Translations> = {
     searchMessages: '메시지 검색...',
 
     // Navigation
+    navigation: '네비게이션',
     dashboard: '대시보드',
     messages: '메시지',
     analysis: '분석',
     management: '관리',
-    sessions: '세션',
+    sessions: '세션 기록',
     prompts: '프롬프트',
     report: '보고서',
     workspace: '워크스페이스',

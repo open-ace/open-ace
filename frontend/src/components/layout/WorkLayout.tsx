@@ -117,7 +117,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         {/* Left Panel - Session List */}
         <aside className={cn('work-left-panel', leftPanelCollapsed && 'collapsed')}>
           <div className="panel-header">
-            <span className="panel-title">{t('sessions', language)}</span>
+            <span className="panel-title">{t('navigation', language)}</span>
             <button
               className="panel-toggle"
               onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
