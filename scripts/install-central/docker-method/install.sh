@@ -170,15 +170,15 @@ DOMESTIC_DOCKER_MIRRORS=(
 check_docker_image_access() {
     local test_image="alpine:latest"
     local timeout=15
-    
+
     print_info "检测 Docker 镜像拉取能力..."
-    
+
     # First check if test image already exists locally
     if docker image inspect "$test_image" &>/dev/null; then
         print_success "测试镜像已存在，跳过检测"
         return 0
     fi
-    
+
     # Try pulling with timeout
     print_info "尝试拉取测试镜像 (超时 ${timeout}s)..."
     if timeout $timeout docker pull "$test_image" 2>&1 | grep -qE "Pulling from|Downloaded|Pull complete"; then
@@ -187,7 +187,7 @@ check_docker_image_access() {
         docker rmi "$test_image" &>/dev/null || true
         return 0
     fi
-    
+
     # Check if any registry mirrors are configured
     local mirrors=$(docker info 2>/dev/null | grep -A10 "Registry Mirrors" | grep "https://" | sed 's/.*https:\/\/\(.*\).*/\1/' | head -5)
     if [ -n "$mirrors" ]; then
@@ -196,7 +196,7 @@ check_docker_image_access() {
             print_info "  - $mirror"
         done
         print_warning "镜像加速器可能不工作，尝试检测可用镜像源..."
-        
+
         # Try each mirror
         for mirror in $mirrors; do
             print_info "尝试镜像源: $mirror"
@@ -208,7 +208,7 @@ check_docker_image_access() {
             fi
         done
     fi
-    
+
     print_warning "Docker Hub 和已配置的镜像加速器均不可访问"
     return 1
 }
@@ -230,7 +230,7 @@ pull_base_image_with_retry() {
             print_warning "重试第 $retry_count 次..."
             sleep 5
         fi
-        
+
         print_info "尝试拉取 (超时 ${timeout}s)..."
         if timeout $timeout docker pull "$image_name" 2>&1; then
             print_success "镜像拉取成功: $image_name"
@@ -253,12 +253,12 @@ pull_base_image_with_retry() {
 configure_docker_registry_mirror() {
     local mirror_url="$1"
     local daemon_json="/etc/docker/daemon.json"
-    
+
     print_info "配置 Docker 镜像加速器: $mirror_url"
-    
+
     # Create directory if not exists
     sudo mkdir -p /etc/docker
-    
+
     # Check existing config
     if [ -f "$daemon_json" ]; then
         local existing_config=$(cat "$daemon_json" 2>/dev/null || echo "{}")
@@ -280,11 +280,11 @@ configure_docker_registry_mirror() {
         # Create new config
         printf '%s\n' "{\"registry-mirrors\": [\"$mirror_url\"]}" | sudo tee "$daemon_json" > /dev/null
     fi
-    
+
     # Restart Docker daemon to apply config
     print_info "重启 Docker 服务以应用配置..."
     sudo systemctl restart docker
-    
+
     # Wait for Docker to be ready
     sleep 5
     if docker info &>/dev/null; then
@@ -323,7 +323,7 @@ select_docker_image_source() {
             echo "  4) docker.hlyun.org"
             echo ""
             prompt_input "请选择" "1" mirror_choice
-            
+
             local selected_mirror=""
             case "$mirror_choice" in
                 1) selected_mirror="https://docker.1ms.run" ;;
@@ -332,7 +332,7 @@ select_docker_image_source() {
                 4) selected_mirror="https://docker.hlyun.org" ;;
                 *) selected_mirror="https://docker.1ms.run" ;;
             esac
-            
+
             print_info "选择镜像加速器: $selected_mirror"
             if configure_docker_registry_mirror "$selected_mirror"; then
                 print_success "镜像加速器配置成功，后续拉取将使用加速器"
@@ -913,25 +913,25 @@ install_docker_debian() {
     local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
     local install_output=""
     local install_success=false
-    
-    install_output=$(sudo apt-get install -y $packages 2>&1) && install_success=true || install_success=false
-    
+
+    install_output=$(sudo apt-get install -y "$packages" 2>&1) && install_success=true || install_success=false
+
     if [ "$install_success" = false ]; then
         # Check if it's SSL/network error
         if echo "$install_output" | grep -qE "SSL connect error|Curl error|连接被对方重设|Cannot download|Failed to fetch|404"; then
             print_warning "检测到网络错误，切换到阿里云镜像重试..."
-            
+
             # Clean up and switch to Aliyun mirror
             sudo rm -f "$keyring_file"
             sudo rm -f "$sources_file"
-            
+
             print_info "添加阿里云镜像源..."
             curl -fsSL "$aliyun_gpg_url" | sudo gpg --dearmor -o "$keyring_file"
             echo "deb [arch=$arch signed-by=$keyring_file] $aliyun_repo_url $codename stable" | sudo tee "$sources_file" > /dev/null
-            
+
             print_info "重新尝试安装..."
             sudo apt-get update
-            if sudo apt-get install -y $packages; then
+            if sudo apt-get install -y "$packages"; then
                 install_success=true
             fi
         fi
@@ -1013,29 +1013,29 @@ install_docker_redhat() {
     local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
     local install_output=""
     local install_success=false
-    
-    install_output=$(sudo yum install -y $packages 2>&1) && install_success=true || install_success=false
-    
+
+    install_output=$(sudo yum install -y "$packages" 2>&1) && install_success=true || install_success=false
+
     if [ "$install_success" = false ]; then
         # Check if it's SSL/network error
         if echo "$install_output" | grep -qE "SSL connect error|Curl error.*35|连接被对方重设|Cannot download|All mirrors were already tried"; then
             print_warning "检测到 SSL 连接错误，切换到阿里云镜像重试..."
-            
+
             # Clean up and switch to Aliyun mirror
             sudo rm -f "$repo_file"
             sudo yum clean all
-            
+
             print_info "添加阿里云镜像源..."
             sudo yum-config-manager --add-repo "$aliyun_repo"
-            
+
             print_info "重新尝试安装..."
-            if sudo yum install -y --nogpgcheck $packages; then
+            if sudo yum install -y --nogpgcheck "$packages"; then
                 install_success=true
             fi
         else
             # Non-SSL error, try --nogpgcheck
             print_warning "安装失败，尝试跳过 GPG 检查..."
-            if sudo yum install -y --nogpgcheck $packages; then
+            if sudo yum install -y --nogpgcheck "$packages"; then
                 install_success=true
             fi
         fi
@@ -1117,29 +1117,29 @@ install_docker_fedora() {
     local packages="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
     local install_output=""
     local install_success=false
-    
-    install_output=$(sudo dnf install -y $packages 2>&1) && install_success=true || install_success=false
-    
+
+    install_output=$(sudo dnf install -y "$packages" 2>&1) && install_success=true || install_success=false
+
     if [ "$install_success" = false ]; then
         # Check if it's SSL/network error
         if echo "$install_output" | grep -qE "SSL connect error|Curl error.*35|连接被对方重设|Cannot download|All mirrors were already tried"; then
             print_warning "检测到 SSL 连接错误，切换到阿里云镜像重试..."
-            
+
             # Clean up and switch to Aliyun mirror
             sudo rm -f "$repo_file"
             sudo dnf clean all
-            
+
             print_info "添加阿里云镜像源..."
             sudo dnf config-manager --add-repo "$aliyun_repo"
-            
+
             print_info "重新尝试安装..."
-            if sudo dnf install -y --nogpgcheck $packages; then
+            if sudo dnf install -y --nogpgcheck "$packages"; then
                 install_success=true
             fi
         else
             # Non-SSL error, try --nogpgcheck
             print_warning "安装失败，尝试跳过 GPG 检查..."
-            if sudo dnf install -y --nogpgcheck $packages; then
+            if sudo dnf install -y --nogpgcheck "$packages"; then
                 install_success=true
             fi
         fi
