@@ -31,7 +31,7 @@ interface NavItem {
 
 const workNavItems: NavItem[] = [
   { id: 'workspace', label: 'workspace', icon: 'bi-grid', path: '/work' },
-  { id: 'sessions', label: 'sessions', icon: 'bi-collection', path: '/work/sessions' },
+  { id: 'sessions', label: 'sessionHistory', icon: 'bi-collection', path: '/work/sessions' },
   { id: 'prompts', label: 'prompts', icon: 'bi-file-text', path: '/work/prompts' },
   { id: 'usage', label: 'myUsage', icon: 'bi-bar-chart', path: '/work/usage' },
   { id: 'insights', label: 'insights', icon: 'bi-lightbulb', path: '/work/insights' },
@@ -117,7 +117,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         {/* Left Panel - Session List */}
         <aside className={cn('work-left-panel', leftPanelCollapsed && 'collapsed')}>
           <div className="panel-header">
-            <span className="panel-title">{t('sessions', language)}</span>
+            <span className="panel-title">{t('navigation', language)}</span>
             <button
               className="panel-toggle"
               onClick={() => setLeftPanelCollapsed(!leftPanelCollapsed)}
