@@ -2,7 +2,7 @@
  * Prompts Component - Prompt template management with CRUD operations
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { cn, copyToClipboard } from '@/utils';
 import { promptsApi } from '@/api';
 import type { PromptTemplate, PromptVariable } from '@/api';
@@ -31,6 +31,7 @@ import {
 import type { BadgeVariant } from '@/components/common';
 
 const ITEMS_PER_PAGE = 20;
+const DEBOUNCE_DELAY = 300;
 
 // Category colors
 const categoryColors: Record<string, BadgeVariant> = {
@@ -46,7 +47,11 @@ const categoryColors: Record<string, BadgeVariant> = {
 export const Prompts: React.FC = () => {
   const language = useLanguage() as Language;
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<{ category?: string; search?: string }>({});
+  const [filters, setFilters] = useState<{ category?: string }>({});
+  // Debounce search input - separate UI state from query state
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -63,7 +68,8 @@ export const Prompts: React.FC = () => {
     refetch,
     error: queryError,
   } = usePrompts({
-    ...filters,
+    category: filters.category,
+    search: debouncedSearch || undefined,
     page,
     limit: ITEMS_PER_PAGE,
   });
@@ -73,11 +79,26 @@ export const Prompts: React.FC = () => {
   const total = promptsData?.total ?? 0;
   const error = actionError ?? queryError?.message ?? null;
 
-  // Reset page when filters change
+  // Reset page when filters or search change
   useEffect(() => {
     setPage(1);
     setSelectedTemplate(null);
-  }, [filters.category, filters.search]);
+  }, [filters.category, debouncedSearch]);
+
+  // Debounce search input
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, DEBOUNCE_DELAY);
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchInput]);
 
   // Category options
   const categoryOptions = useMemo(
@@ -96,11 +117,14 @@ export const Prompts: React.FC = () => {
     setFilters((prev) => ({ ...prev, [key]: value || undefined }));
   };
 
-  const handleSearch = (value: string) => {
-    setFilters((prev) => ({ ...prev, search: value || undefined }));
-  };
-
   const handleReset = () => {
+    // Clear debounce timer first to prevent race condition
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    setSearchInput('');
+    setDebouncedSearch('');
     setFilters({});
     setPage(1);
     setSelectedTemplate(null);
@@ -202,8 +226,8 @@ export const Prompts: React.FC = () => {
             className="form-control"
             style={{ maxWidth: '300px', height: '31px' }}
             placeholder={t('searchPrompts', language) || 'Search prompts...'}
-            value={filters.search ?? ''}
-            onChange={(e) => handleSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
           {/* Category Filter */}
           <Select
