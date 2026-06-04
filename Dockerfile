@@ -65,6 +65,18 @@ RUN groupadd -r open-ace && \
     mkdir -p /home/open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 
+# Pre-configure sudoers for multi-user workspace mode
+# This ensures environment variables are preserved when running sudo -u <user>
+# Support both open-ace (container user) and openace (workspace user synced from database)
+RUN echo '# Open ACE WebUI - Pre-configured sudoers for multi-user workspace\n\
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
+openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir, /usr/bin/chown\n\
+openace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir, /usr/bin/chown\n\
+Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"\n' \
+    > /etc/sudoers.d/open-ace-webui && \
+    chmod 440 /etc/sudoers.d/open-ace-webui
+
 WORKDIR /app
 
 # Copy virtual environment from builder
