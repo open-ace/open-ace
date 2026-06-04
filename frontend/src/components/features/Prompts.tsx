@@ -47,7 +47,7 @@ const categoryColors: Record<string, BadgeVariant> = {
 export const Prompts: React.FC = () => {
   const language = useLanguage() as Language;
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<{ category?: string; search?: string }>({});
+  const [filters, setFilters] = useState<{ category?: string }>({});
   // Debounce search input - separate UI state from query state
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -68,7 +68,8 @@ export const Prompts: React.FC = () => {
     refetch,
     error: queryError,
   } = usePrompts({
-    ...filters,
+    category: filters.category,
+    search: debouncedSearch || undefined,
     page,
     limit: ITEMS_PER_PAGE,
   });
@@ -78,11 +79,11 @@ export const Prompts: React.FC = () => {
   const total = promptsData?.total ?? 0;
   const error = actionError ?? queryError?.message ?? null;
 
-  // Reset page when filters change
+  // Reset page when filters or search change
   useEffect(() => {
     setPage(1);
     setSelectedTemplate(null);
-  }, [filters.category, filters.search]);
+  }, [filters.category, debouncedSearch]);
 
   // Debounce search input
   useEffect(() => {
@@ -98,11 +99,6 @@ export const Prompts: React.FC = () => {
       }
     };
   }, [searchInput]);
-
-  // Update filters when debouncedSearch changes
-  useEffect(() => {
-    setFilters((prev) => ({ ...prev, search: debouncedSearch || undefined }));
-  }, [debouncedSearch]);
 
   // Category options
   const categoryOptions = useMemo(
@@ -122,6 +118,11 @@ export const Prompts: React.FC = () => {
   };
 
   const handleReset = () => {
+    // Clear debounce timer first to prevent race condition
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     setSearchInput('');
     setDebouncedSearch('');
     setFilters({});
