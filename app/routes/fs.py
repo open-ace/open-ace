@@ -476,3 +476,93 @@ def api_get_home():
             "canCreate": dir_info["is_writable"],
         }
     )
+
+
+@fs_bp.route("/fs/create-directory", methods=["POST"])
+def api_create_directory():
+    """Create a directory on the local file system.
+
+    Used by qwen-code-webui to create project directories when user
+    selects "New Folder" in the project selector.
+
+    Expects JSON body with 'path' (full path of the directory to create).
+    Optionally 'system_account' to create as a specific user (admin only).
+    """
+    user = g.user
+
+    data = request.get_json() or {}
+    dir_path = data.get("path", "")
+
+    if not dir_path:
+        return jsonify({"success": False, "error": "Path is required"}), 400
+
+    if len(dir_path) > 4096:
+        return jsonify({"success": False, "error": "Path too long"}), 400
+
+    # Validate path format — restrict to workspace base dir
+    base_dir = get_workspace_base_dir()
+    if not is_valid_path(dir_path, allowed_prefixes=[base_dir]):
+        return jsonify({"success": False, "error": "Invalid path format"}), 400
+
+    dir_path = os.path.realpath(dir_path)
+
+    # Get system_account for sudo operations
+    system_account = user.get("system_account") if user else None
+
+    # Check if path already exists
+    dir_info = get_directory_info(dir_path, system_account)
+    if dir_info["exists"]:
+        if dir_info["is_dir"]:
+            return jsonify(
+                {
+                    "success": True,
+                    "path": dir_path,
+                    "message": "Directory already exists",
+                }
+            )
+        else:
+            return jsonify({"success": False, "error": "Path exists but is not a directory"}), 400
+
+    # Check if parent directory is writable
+    parent = str(Path(dir_path).parent)
+    parent_info = get_directory_info(parent, system_account)
+
+    if not parent_info["exists"]:
+        return jsonify({"success": False, "error": "Parent directory does not exist"}), 400
+
+    if not parent_info["is_writable"]:
+        return jsonify({"success": False, "error": "Parent directory is not writable"}), 403
+
+    # Create the directory
+    try:
+        if system_account:
+            # Use sudo to create directory as the specified user
+            result = run_as_user(system_account, ["mkdir", "-p", dir_path])
+            if result.returncode != 0:
+                logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
+                return (
+                    jsonify(
+                        {"success": False, "error": f"Failed to create directory: {result.stderr}"}
+                    ),
+                    403,
+                )
+            logger.info(f"Created directory as {system_account}: {dir_path}")
+        else:
+            # Fallback to process user's permissions
+            os.makedirs(dir_path, exist_ok=True)
+            logger.info(f"Created directory: {dir_path}")
+
+        return jsonify(
+            {
+                "success": True,
+                "path": dir_path,
+                "message": "Directory created successfully",
+            }
+        )
+    except PermissionError:
+        return jsonify({"success": False, "error": "Permission denied"}), 403
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Timeout creating directory"}), 500
+    except Exception as e:
+        logger.error(f"Error creating directory: {e}")
+        return jsonify({"success": False, "error": f"Failed to create directory: {e}"}), 500
