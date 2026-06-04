@@ -1297,6 +1297,8 @@ CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_i
 
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
 
+CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
+
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
 
 

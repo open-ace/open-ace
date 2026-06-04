@@ -530,6 +530,8 @@ def list_sessions():
         db = Database()
 
         tool_name = request.args.get("tool_name")
+        status = request.args.get("status")
+        session_type = request.args.get("session_type")
         host_name = request.args.get("host_name")
         search = request.args.get("search")
         search_days = request.args.get("search_days")
@@ -539,26 +541,46 @@ def list_sessions():
         # Get user_id from g.user to filter sessions
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
+        # Valid values for status and session_type (whitelist validation)
+        VALID_STATUS_VALUES = {"active", "paused", "completed", "archived", "error"}
+        VALID_SESSION_TYPE_VALUES = {"chat", "task", "workflow", "agent"}
+
+        # Validate status and session_type parameters
+        if status and status not in VALID_STATUS_VALUES:
+            status = None  # Invalid value, ignore filter
+        if session_type and session_type not in VALID_SESSION_TYPE_VALUES:
+            session_type = None  # Invalid value, ignore filter
+
+        # Get placeholder variable for consistent SQL style
+        p = get_param_placeholder()
+
         # Query agent_sessions table (user-created sessions)
         base_conditions = ["1=1"]
         base_params = []
 
         if user_id:
-            base_conditions.append("user_id = ?")
+            base_conditions.append(f"user_id = {p}")
             base_params.append(user_id)
 
         if tool_name:
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
-            placeholders = ",".join(["?" for _ in aliases])
+            placeholders = ",".join([p for _ in aliases])
             base_conditions.append(f"tool_name IN ({placeholders})")
             base_params.extend(aliases)
 
         if host_name:
-            base_conditions.append("host_name = ?")
+            base_conditions.append(f"host_name = {p}")
             base_params.append(host_name)
 
+        if status:
+            base_conditions.append(f"status = {p}")
+            base_params.append(status)
+
+        if session_type:
+            base_conditions.append(f"session_type = {p}")
+            base_params.append(session_type)
+
         base_where_clause = " AND ".join(base_conditions)
-        p = get_param_placeholder()
 
         if search:
             # Build time condition for messages
