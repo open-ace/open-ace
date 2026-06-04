@@ -50,7 +50,7 @@
 | `workspace.multi_user_mode` | 是否启用多用户模式（为每个用户启动独立进程） | `false` |
 | `workspace.port_range_start` | 多用户模式下端口池起始端口 | `3100` |
 | `workspace.port_range_end` | 多用户模式下端口池结束端口 | `3200` |
-| `workspace.max_instances` | 最大同时运行的 webui 实例数 | `20` |
+| `workspace.max_instances` | 最大同时运行的 webui 实例数 | `30` |
 | `workspace.idle_timeout_minutes` | 空闲实例自动关闭时间（分钟） | `30` |
 | `workspace.token_secret` | Token 签名密钥（建议使用强随机字符串） | `your-secret-key` |
 
@@ -81,7 +81,7 @@
     "multi_user_mode": true,
     "port_range_start": 3100,
     "port_range_end": 3200,
-    "max_instances": 20,
+    "max_instances": 30,
     "idle_timeout_minutes": 30,
     "token_secret": "generate-a-strong-random-secret-key-here"
   }

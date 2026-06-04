@@ -208,7 +208,7 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ### Workspace 实例数达到上限
 
-**问题现象：** 创建新会话时提示"Maximum instances (20) reached"
+**问题现象：** 创建新会话时提示"Maximum instances (30) reached"
 
 **解决步骤：**
 1. 等待空闲实例自动清理（默认 30 分钟超时）

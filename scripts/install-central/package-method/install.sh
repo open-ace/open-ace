@@ -1172,7 +1172,7 @@ config['workspace']['enabled'] = bash_to_bool(os.environ.get('_WS_ENABLED', 'fal
 config['workspace']['multi_user_mode'] = bash_to_bool(os.environ.get('_WS_MULTI_USER', 'false'))
 config['workspace']['port_range_start'] = int(os.environ.get('_WS_PORT_START', '3100'))
 config['workspace']['port_range_end'] = int(os.environ.get('_WS_PORT_END', '3200'))
-config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '20'))
+config['workspace']['max_instances'] = int(os.environ.get('_WS_MAX_INSTANCES', '30'))
 config['workspace']['idle_timeout_minutes'] = int(os.environ.get('_WS_IDLE_TIMEOUT', '30'))
 config['workspace']['webui_path'] = os.environ.get('_WS_WEBUI_PATH', '')
 
@@ -1228,7 +1228,7 @@ SERVICE_HOST="0.0.0.0" # Web server host
 WORKSPACE_MULTI_USER_MODE="true"
 WORKSPACE_PORT_RANGE_START="3100"
 WORKSPACE_PORT_RANGE_END="3200"
-WORKSPACE_MAX_INSTANCES="20"
+WORKSPACE_MAX_INSTANCES="30"
 WORKSPACE_IDLE_TIMEOUT="30"
 WORKSPACE_URL=""      # Workspace URL (will be set based on host_name or server_url)
 
@@ -3641,7 +3641,7 @@ show_help() {
     echo "  WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode"
     echo "  WORKSPACE_PORT_RANGE_START=3100  # Port pool start"
     echo "  WORKSPACE_PORT_RANGE_END=3200    # Port pool end"
-    echo "  WORKSPACE_MAX_INSTANCES=20       # Max concurrent instances"
+    echo "  WORKSPACE_MAX_INSTANCES=30       # Max concurrent instances"
     echo "  WORKSPACE_IDLE_TIMEOUT=30        # Idle timeout (minutes)"
     echo ""
     echo "Database Configuration:"

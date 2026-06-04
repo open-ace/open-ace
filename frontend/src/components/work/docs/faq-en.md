@@ -208,7 +208,7 @@ docker compose exec postgres psql -U ace -d ace -c "UPDATE users SET is_active=t
 
 ### Workspace instance limit reached
 
-**Symptom:** Creating new session shows "Maximum instances (20) reached"
+**Symptom:** Creating new session shows "Maximum instances (30) reached"
 
 **Solutions:**
 1. Wait for idle instances to auto-clean (default 30 min timeout)
