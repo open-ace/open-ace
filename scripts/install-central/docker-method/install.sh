@@ -2343,6 +2343,8 @@ $ports_section
       - SECRET_KEY=$SECRET_KEY
       - UPLOAD_AUTH_KEY=$UPLOAD_AUTH_KEY
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
+      - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
+      - WORKSPACE_BASE_DIR=/workspace
     volumes:
 $volumes_section
     depends_on:
