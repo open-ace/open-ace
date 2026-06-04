@@ -2679,10 +2679,10 @@ link[rel='dns-prefetch'] {
   flex-shrink: 0;
 }
 
-/* Row 2: meta info — grid aligned columns */
+/* Row 2: meta info — grid aligned columns with fixed widths */
 .session-card-meta {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto auto auto;
+  grid-template-columns: 90px 100px minmax(80px, 1fr) 90px 100px 130px auto;
   align-items: center;
   gap: 0.35rem 1rem;
   font-size: 0.8rem;
