@@ -2683,14 +2683,13 @@ link[rel='dns-prefetch'] {
 .session-card-meta {
   display: grid;
   grid-template-columns:
-    minmax(70px, 90px)   /* 工具名称 */
-    minmax(80px, 100px)  /* 主机名称 */
-    minmax(80px, 1fr)    /* 模型名称 */
-    minmax(70px, 90px)   /* 消息数 */
-    minmax(80px, 100px)  /* Token数 */
+    minmax(70px, 90px) /* 工具名称 */
+    minmax(80px, 100px) /* 主机名称 */
+    minmax(80px, 1fr) /* 模型名称 */
+    minmax(70px, 90px) /* 消息数 */
+    minmax(80px, 100px) /* Token数 */
     minmax(100px, 130px) /* 创建时间 */
-    minmax(100px, 130px) /* 完成时间 */
-  ;
+    minmax(100px, 130px) /* 完成时间 */;
   align-items: center;
   gap: 0.35rem 1rem;
   font-size: 0.8rem;
