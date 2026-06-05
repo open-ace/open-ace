@@ -1,6 +1,9 @@
 """Unit tests for AutonomousAgentRunner."""
 
 import json
+import queue
+import threading
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -57,12 +60,39 @@ class TestAgentRunnerRunTask:
         assert "not found" in result.error
 
     def test_run_local_success(self):
-        """Test successful local agent execution."""
+        """Test successful local agent execution — verify return value fields."""
         mock_adapter = MagicMock()
         mock_adapter.get_executable_name.return_value = "test-tool"
         mock_adapter.build_start_args.return_value = ["test-tool", "--model", "m1"]
         mock_cli_adapters = MagicMock()
         mock_cli_adapters.get_adapter.return_value = mock_adapter
+
+        # Build stdout lines that simulate a real agent session:
+        # assistant text -> tool_use -> result with usage
+        stdout_lines = [
+            json.dumps({"type": "assistant", "message": {"content": "Hello from agent"}}).encode(),
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "name": "read_file",
+                    "input": {"path": "/tmp/test.py"},
+                }
+            ).encode(),
+            json.dumps(
+                {
+                    "type": "result",
+                    "data": {
+                        "usage": {"input_tokens": 100, "output_tokens": 50},
+                    },
+                }
+            ).encode(),
+            b"",  # EOF
+        ]
+
+        mock_stdout = MagicMock()
+        mock_stdout.readline = MagicMock(side_effect=stdout_lines)
+        mock_stderr = MagicMock()
+        mock_stderr.readline = MagicMock(return_value=b"")
 
         with patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}):
             with patch("shutil.which", return_value="/usr/bin/test-tool"):
@@ -71,24 +101,27 @@ class TestAgentRunnerRunTask:
                     proc.returncode = 0
                     proc.pid = 12345
                     proc.stdin = MagicMock()
-                    proc.stdout = MagicMock()
-                    proc.stderr = MagicMock()
-                    # Simulate the process completing immediately
-                    proc.stdout.readline.return_value = b""
+                    proc.stdout = mock_stdout
+                    proc.stderr = mock_stderr
                     mock_popen.return_value = proc
 
-                    # Use a very short timeout
-                    self.runner.run_agent_task(
+                    result = self.runner.run_agent_task(
                         workflow_id="wf-1",
                         cli_tool="test-tool",
                         model="m1",
                         project_path="/tmp/test",
                         prompt="Do something",
-                        timeout=1,
+                        timeout=5,
                     )
 
-        # Process should have been started
-        assert mock_popen.called
+        # Verify return value — not just that Popen was called
+        assert result.success is True
+        assert "Hello from agent" in result.response_text
+        assert result.total_tokens == 150
+        assert result.total_input_tokens == 100
+        assert result.total_output_tokens == 50
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["name"] == "read_file"
 
     def test_run_remote_no_session_manager(self):
         """Remote execution without session manager should fail."""
@@ -192,93 +225,154 @@ class TestLocalSession:
 
 
 class TestStdoutParsing:
-    """Tests for stdout line parsing in _read_stdout."""
+    """Tests for _read_stdout — exercises the actual method, not json.loads()."""
 
     def setup_method(self):
         self.runner = AutonomousAgentRunner()
         self.mock_process = MagicMock()
 
-    def test_parse_assistant_text(self):
-        _LocalSession(session_id="s-1", process=self.mock_process)
-        line = json.dumps(
-            {
-                "type": "assistant",
-                "message": {"content": "Hello from AI"},
-            }
+    def _run_read_stdout(self, lines):
+        """Helper: create a session with mock stdout containing the given lines, then call _read_stdout."""
+        mock_stdout = MagicMock()
+        encoded_lines = [l.encode() if isinstance(l, str) else l for l in lines]
+        mock_stdout.readline = MagicMock(side_effect=encoded_lines)
+        self.mock_process.stdout = mock_stdout
+        self.mock_process.returncode = 0
+
+        session = _LocalSession(session_id="s-1", process=self.mock_process)
+        self.runner._read_stdout(session)
+        return session
+
+    def test_parse_assistant_text_string_content(self):
+        """_read_stdout accumulates assistant text from string content."""
+        session = self._run_read_stdout(
+            [
+                json.dumps({"type": "assistant", "message": {"content": "Hello from AI"}}),
+                "",
+            ]
         )
-        # Manually call the parsing logic
-        parsed = json.loads(line)
-        assert parsed["type"] == "assistant"
-        assert parsed["message"]["content"] == "Hello from AI"
+        assert "Hello from AI" in session.assistant_text
 
     def test_parse_assistant_content_blocks(self):
-        line = json.dumps(
-            {
-                "type": "assistant",
-                "message": {
-                    "content": [
-                        {"type": "text", "text": "Block 1"},
-                        {"type": "text", "text": " Block 2"},
-                    ]
-                },
-            }
+        """_read_stdout accumulates assistant text from content block arrays."""
+        session = self._run_read_stdout(
+            [
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "Block 1"},
+                                {"type": "text", "text": " Block 2"},
+                            ]
+                        },
+                    }
+                ),
+                "",
+            ]
         )
-        parsed = json.loads(line)
-        content = parsed["message"]["content"]
-        text = ""
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text += block.get("text", "")
-        assert text == "Block 1 Block 2"
+        assert session.assistant_text == "Block 1 Block 2"
 
     def test_parse_tool_use(self):
-        line = json.dumps(
-            {
-                "type": "tool_use",
-                "name": "read_file",
-                "input": {"path": "/tmp/test.py"},
-            }
+        """_read_stdout records tool_use messages in session.tool_calls."""
+        session = self._run_read_stdout(
+            [
+                json.dumps(
+                    {
+                        "type": "tool_use",
+                        "name": "read_file",
+                        "input": {"path": "/tmp/test.py"},
+                    }
+                ),
+                "",
+            ]
         )
-        parsed = json.loads(line)
-        assert parsed["type"] == "tool_use"
-        assert parsed["name"] == "read_file"
+        assert len(session.tool_calls) == 1
+        assert session.tool_calls[0]["name"] == "read_file"
+        assert session.tool_calls[0]["input"]["path"] == "/tmp/test.py"
 
     def test_parse_result_with_usage(self):
-        line = json.dumps(
-            {
-                "type": "result",
-                "data": {
-                    "usage": {
-                        "input_tokens": 100,
-                        "output_tokens": 50,
+        """_read_stdout extracts token usage from result messages and marks completed."""
+        session = self._run_read_stdout(
+            [
+                json.dumps(
+                    {
+                        "type": "result",
+                        "data": {
+                            "usage": {
+                                "input_tokens": 100,
+                                "output_tokens": 50,
+                            }
+                        },
                     }
-                },
-            }
+                ),
+                "",  # EOF sentinel
+            ]
         )
-        parsed = json.loads(line)
-        assert parsed["type"] == "result"
-        usage = parsed["data"]["usage"]
-        assert usage["input_tokens"] == 100
-        assert usage["output_tokens"] == 50
+        assert session.completed.is_set()
+        assert session.total_tokens == 150
+        assert session.total_input_tokens == 100
+        assert session.total_output_tokens == 50
 
     def test_parse_control_request_auto_approve(self):
-        line = json.dumps(
-            {
-                "type": "control_request",
-                "request_id": "req-123",
-                "request": {"subtype": "permission"},
-            }
+        """_read_stdout auto-approves control_request by writing a response to stdin."""
+        self.mock_process.returncode = None  # Process still running
+        mock_stdout = MagicMock()
+        mock_stdout.readline = MagicMock(
+            side_effect=[
+                json.dumps(
+                    {
+                        "type": "control_request",
+                        "request_id": "req-123",
+                        "request": {"subtype": "permission"},
+                    }
+                ).encode(),
+                b"",
+            ]
         )
-        parsed = json.loads(line)
-        assert parsed["type"] == "control_request"
-        assert parsed["request_id"] == "req-123"
-        # In autonomous mode, this would trigger an auto-approve response
+        self.mock_process.stdout = mock_stdout
+
+        session = _LocalSession(session_id="s-1", process=self.mock_process)
+        self.runner._read_stdout(session)
+
+        # Verify that a response was written to stdin
+        stdin_write_calls = self.mock_process.stdin.write.call_args_list
+        assert len(stdin_write_calls) > 0
+        written = stdin_write_calls[0][0][0]
+        response = json.loads(written)
+        assert response["type"] == "control_response"
+        assert response["response"]["request_id"] == "req-123"
+
+    def test_non_json_lines_ignored(self):
+        """_read_stdout silently ignores non-JSON output lines."""
+        session = self._run_read_stdout(
+            [
+                "Some plain text log line",
+                json.dumps({"type": "assistant", "message": {"content": "After noise"}}),
+                "",
+            ]
+        )
+        assert "After noise" in session.assistant_text
+        assert len(session.output_lines) == 2  # Both lines recorded
+
+    def test_empty_lines_skipped(self):
+        """_read_stdout skips blank/whitespace-only lines without processing."""
+        session = self._run_read_stdout(
+            [
+                "   ",  # whitespace-only: stripped to "" → skipped
+                json.dumps({"type": "assistant", "message": {"content": "Real content"}}),
+                "",  # EOF sentinel
+            ]
+        )
+        assert "Real content" in session.assistant_text
+        assert len(session.output_lines) == 1  # Only the non-empty JSON line
 
 
 class TestStopSession:
     """Tests for stop_session."""
 
     def test_stop_running_session(self):
+        """Stopping a session sets _stopped and completed events."""
         runner = AutonomousAgentRunner()
         mock_process = MagicMock()
         mock_process.returncode = None
@@ -291,8 +385,8 @@ class TestStopSession:
             with patch("os.getpgid", return_value=12345):
                 runner.stop_session("s-1")
 
-        session._stopped.is_set()
-        session.completed.is_set()
+        assert session._stopped.is_set(), "_stopped event should be set after stop"
+        assert session.completed.is_set(), "completed event should be set after stop"
 
     def test_stop_nonexistent_session(self):
         runner = AutonomousAgentRunner()

@@ -14,10 +14,15 @@ from app.repositories.database import Database
 @pytest.fixture
 def auto_db(tmp_path):
     """Create a temporary SQLite database with autonomous tables initialized."""
-    with patch.object(db_mod, "is_postgresql", return_value=False):
-        orig = db_mod.adapt_sql
-        db_mod.adapt_sql = lambda q: q
-        try:
+    orig_adapt_sql = db_mod.adapt_sql
+    db_mod.adapt_sql = lambda q: q
+    try:
+        # Patch is_postgresql in BOTH the database module AND the autonomous module
+        # (the latter does `from ... import is_postgresql` which creates a separate reference)
+        with (
+            patch.object(db_mod, "is_postgresql", return_value=False),
+            patch("app.modules.workspace.autonomous.is_postgresql", return_value=False),
+        ):
             db_path = str(tmp_path / "test_auto.db")
             db = Database(db_url=f"sqlite:///{db_path}")
 
@@ -56,12 +61,12 @@ def auto_db(tmp_path):
                 conn.close()
 
             yield db
-        finally:
-            db_mod.adapt_sql = orig
-            try:
-                os.unlink(db_path)
-            except OSError:
-                pass
+    finally:
+        db_mod.adapt_sql = orig_adapt_sql
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
 
 
 class TestWorkflowCRUD:
@@ -457,6 +462,7 @@ class TestMilestoneCRUD:
         assert updated["plan_content"] == "Final plan"
 
     def test_cancel_milestones_after(self, auto_db):
+        """Cancel milestones after a given milestone by creation order."""
         repo = AutonomousWorkflowRepository(auto_db)
         wf = self._create_workflow(repo)
         wf_id = wf["workflow_id"]
@@ -570,3 +576,134 @@ class TestEventCRUD:
         events = repo.list_events(wf_id)
         types = [e["event_type"] for e in events]
         assert types == ["first", "second", "third"]
+
+
+class TestAllowedFieldsFiltering:
+    """Tests for ALLOWED_WORKFLOW_FIELDS whitelist security filtering."""
+
+    def test_update_allows_only_whitelisted_fields(self, auto_db):
+        """Only fields in ALLOWED_WORKFLOW_FIELDS are persisted."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Whitelist Test",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+            }
+        )
+
+        # Attempt to update with both allowed and disallowed fields
+        repo.update_workflow(
+            wf["workflow_id"],
+            {
+                "title": "Updated Title",  # allowed
+                "status": "planning",  # allowed
+                "malicious_field": "HACKED",  # NOT in whitelist
+                "DROP TABLE": "sql_injection",  # NOT in whitelist
+            },
+        )
+
+        updated = repo.get_workflow(wf["workflow_id"])
+        assert updated["title"] == "Updated Title"
+        assert updated["status"] == "planning"
+        # Disallowed fields should NOT appear as columns
+        assert "malicious_field" not in updated
+        assert "DROP TABLE" not in updated
+
+    def test_update_filters_out_empty_update_set(self, auto_db):
+        """When all fields are non-allowed, no update occurs (returns current state)."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Original",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+            }
+        )
+
+        result = repo.update_workflow(
+            wf["workflow_id"],
+            {
+                "evil_column": "should_be_ignored",
+                "another_bad_field": "also_ignored",
+            },
+        )
+
+        # Title should remain unchanged
+        assert result["title"] == "Original"
+
+    def test_allowed_fields_set_completeness(self):
+        """Verify ALLOWED_WORKFLOW_FIELDS contains critical security fields."""
+        repo = AutonomousWorkflowRepository(MagicMock())
+        assert "status" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "title" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "error_message" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "current_phase" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "branch_name" in repo.ALLOWED_WORKFLOW_FIELDS
+        # These should NOT be in the whitelist
+        assert "user_id" not in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "workflow_id" not in repo.ALLOWED_WORKFLOW_FIELDS
+
+    def test_update_workflow_coerces_booleans(self, auto_db):
+        """Boolean fields are coerced properly via the whitelist."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Bool Coerce",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+                "is_new_project": False,
+            }
+        )
+
+        updated = repo.update_workflow(
+            wf["workflow_id"],
+            {"is_new_project": "true"},  # String 'true' should be coerced
+        )
+        # SQLite returns 1/0 for booleans, not True/False
+        assert updated["is_new_project"]  # truthy
+
+        updated = repo.update_workflow(
+            wf["workflow_id"],
+            {"is_private": 0},  # int 0 should be coerced to False
+        )
+        assert not updated["is_private"]  # falsy
+
+    def test_update_milestone_allowed_fields_filter(self, auto_db):
+        """Milestone updates also filter through ALLOWED_MILESTONE_FIELDS."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "MS Filter",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+            }
+        )
+        ms = repo.create_milestone(
+            {"workflow_id": wf["workflow_id"], "phase": "dev", "milestone_type": "test"}
+        )
+
+        updated = repo.update_milestone(
+            ms["milestone_id"],
+            {
+                "status": "completed",  # allowed
+                "plan_content": "Plan text",  # allowed
+                "malicious_column": "EVIL",  # NOT in whitelist
+            },
+        )
+
+        assert updated["status"] == "completed"
+        assert updated["plan_content"] == "Plan text"
+        assert "malicious_column" not in updated
+
+
+# Required import for TestAllowedFieldsFiltering
+from unittest.mock import MagicMock

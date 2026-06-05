@@ -2,6 +2,7 @@
 
 import json
 import os
+import queue
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -475,25 +476,27 @@ class TestGetModels:
     """Tests for GET /api/autonomous/models."""
 
     def test_get_models_with_tenant(self, client):
+        """Models endpoint returns models when tenant_id is set on g."""
         mock_proxy = MagicMock()
         mock_proxy.get_tool_model_pool.return_value = [
             {"name": "claude-sonnet-4-6"},
             {"name": "claude-opus-4-8"},
         ]
-        auth = _mock_auth()
-        with auth:
+        # Set g.tenant_id via a before_request hook on the test app
+        from flask import g as flask_g
+
+        def _set_tenant():
+            flask_g.tenant_id = 1
+
+        # Access the app from the client and register the hook
+        client.application.before_request(_set_tenant)
+
+        with _mock_auth():
             with patch(
                 "app.modules.workspace.api_key_proxy.APIKeyProxyService",
                 return_value=mock_proxy,
             ):
-                # Need to also set g.tenant_id before the route runs
-                with patch(
-                    "app.routes.autonomous.getattr",
-                    side_effect=lambda obj, name, default: (
-                        1 if name == "tenant_id" else getattr(obj, name, default)
-                    ),
-                ):
-                    resp = client.get("/api/autonomous/models?tool=claude-code")
+                resp = client.get("/api/autonomous/models?tool=claude-code")
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data["models"]) == 2
@@ -534,3 +537,149 @@ class TestAuthRequired:
     def test_tools_requires_auth(self, client):
         resp = client.get("/api/autonomous/tools")
         assert resp.status_code == 401
+
+
+# ── SSE Stream Tests ──────────────────────────────────────────────────────
+
+
+class TestStreamWorkflowEvents:
+    """Tests for GET /api/autonomous/workflows/<id>/events/stream (SSE)."""
+
+    def test_stream_returns_event_stream(self, client):
+        """SSE endpoint returns text/event-stream content type."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                with patch("app.routes.autonomous._get_event_emitter") as mock_emitter_fn:
+                    mock_emitter = MagicMock()
+                    mock_q = MagicMock()
+
+                    # Simulate one event then GeneratorExit (client disconnects)
+                    call_count = [0]
+
+                    def mock_get(timeout=30):
+                        call_count[0] += 1
+                        if call_count[0] == 1:
+                            return {
+                                "event_type": "status_change",
+                                "data": {"status": "planning"},
+                                "workflow_id": "wf-1",
+                            }
+                        raise queue.Empty
+
+                    mock_q.get = mock_get
+                    mock_q.get_timeout = mock_get
+                    mock_emitter.subscribe.return_value = mock_q
+                    mock_emitter.mark_read = MagicMock()
+                    mock_emitter.unsubscribe = MagicMock()
+                    mock_emitter_fn.return_value = mock_emitter
+
+                    resp = client.get("/api/autonomous/workflows/wf-1/events/stream")
+
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.content_type
+        assert resp.headers.get("Cache-Control") == "no-cache"
+
+    def test_stream_workflow_not_found(self, client):
+        """SSE endpoint returns 404 for nonexistent workflow."""
+        repo = _make_repo()
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/nonexistent/events/stream")
+        assert resp.status_code == 404
+
+    def test_stream_requires_ownership(self, client):
+        """SSE endpoint returns 403 for other user's workflow."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        with _mock_auth(user_id=2, role="user"):
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1/events/stream")
+        assert resp.status_code == 403
+
+
+class TestGetMilestoneSession:
+    """Tests for GET /api/autonomous/workflows/<id>/milestones/<mid>/session."""
+
+    def test_get_session_success(self, client):
+        """Returns session data for a milestone with a session_id."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.get_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": "wf-1",
+            "session_id": "sess-123",
+        }
+        mock_session_data = {
+            "session_id": "sess-123",
+            "status": "completed",
+            "messages": [{"role": "assistant", "content": "Done"}],
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                with patch("app.modules.workspace.session_manager.SessionManager") as mock_sm_cls:
+                    mock_sm = MagicMock()
+                    mock_sm.get_session.return_value = mock_session_data
+                    mock_sm_cls.return_value = mock_sm
+
+                    resp = client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/session")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["session"]["session_id"] == "sess-123"
+        mock_sm.get_session.assert_called_once_with("sess-123", include_messages=True)
+
+    def test_get_session_no_session_id(self, client):
+        """Returns null session when milestone has no session_id."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.get_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": "wf-1",
+            "session_id": "",
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/session")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["session"] is None
+
+    def test_get_session_workflow_not_found(self, client):
+        """Returns 404 when workflow doesn't exist."""
+        repo = _make_repo()
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/nonexistent/milestones/ms-1/session")
+
+        assert resp.status_code == 404
+
+    def test_get_session_milestone_not_found(self, client):
+        """Returns 404 when milestone doesn't exist or belongs to different workflow."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.get_milestone.return_value = None
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1/milestones/ms-999/session")
+
+        assert resp.status_code == 404
+
+    def test_get_session_wrong_workflow(self, client):
+        """Returns 404 when milestone belongs to a different workflow."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.get_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": "wf-OTHER",  # Different workflow
+            "session_id": "sess-123",
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/session")
+
+        assert resp.status_code == 404
