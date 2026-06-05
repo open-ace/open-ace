@@ -317,7 +317,7 @@ class GitHubOps:
 
     def merge_pr(self, number: int, strategy: str = "merge") -> dict:
         """Merge a PR."""
-        args = ["pr", "merge", str(number), "--json", "merged"]
+        args = ["pr", "merge", str(number)]
         if strategy == "squash":
             args.append("--squash")
         elif strategy == "rebase":
@@ -325,10 +325,9 @@ class GitHubOps:
         else:
             args.append("--merge")
 
-        result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
+        self._run_gh(args)
         logger.info("Merged PR #%s", number)
-        return data
+        return {"number": number, "merged": True}
 
     def list_pr_commits(self, number: int) -> list:
         """List commits in a PR."""
