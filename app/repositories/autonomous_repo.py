@@ -85,6 +85,20 @@ class AutonomousWorkflowRepository:
 
     # ── Workflow CRUD ──────────────────────────────────────────────
 
+    @staticmethod
+    def _coerce_bool(value, default: bool = False) -> bool:
+        """Coerce a value to Python bool for BOOLEAN columns.
+
+        Handles int (0/1), str ('0'/'1'/'true'/'false'), and bool values.
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return bool(value)
+        if isinstance(value, str):
+            return value.lower() in ("1", "true", "yes")
+        return default
+
     def create_workflow(self, data: dict) -> dict:
         """Create a new autonomous workflow. Returns the created record."""
         workflow_id = data.get("workflow_id") or str(uuid.uuid4())
@@ -113,8 +127,8 @@ class AutonomousWorkflowRepository:
                     data.get("requirements_issue_url", ""),
                     data.get("project_path", ""),
                     data.get("project_repo_url", ""),
-                    data.get("is_new_project", False),
-                    data.get("is_private", True),
+                    self._coerce_bool(data.get("is_new_project"), False),
+                    self._coerce_bool(data.get("is_private"), True),
                     data.get("cli_tool", ""),
                     data.get("model", ""),
                     data.get("permission_mode", "auto-edit"),
@@ -154,8 +168,8 @@ class AutonomousWorkflowRepository:
                     data.get("requirements_issue_url", ""),
                     data.get("project_path", ""),
                     data.get("project_repo_url", ""),
-                    data.get("is_new_project", False),
-                    data.get("is_private", True),
+                    self._coerce_bool(data.get("is_new_project"), False),
+                    self._coerce_bool(data.get("is_private"), True),
                     data.get("cli_tool", ""),
                     data.get("model", ""),
                     data.get("permission_mode", "auto-edit"),
@@ -245,11 +259,14 @@ class AutonomousWorkflowRepository:
         if not safe_updates:
             return self.get_workflow(workflow_id)
 
+        # Boolean columns — coerce to Python bool for PostgreSQL BOOLEAN type
+        _BOOL_COLS = {"is_new_project", "is_private"}
+
         set_clauses = []
         params = []
         for key, value in safe_updates.items():
             set_clauses.append(f"{key} = ?")
-            params.append(value)
+            params.append(self._coerce_bool(value) if key in _BOOL_COLS else value)
 
         params.append(workflow_id)
         self.db.execute(
@@ -282,19 +299,21 @@ class AutonomousWorkflowRepository:
 
     def delete_workflow(self, workflow_id: str) -> None:
         """Delete a workflow and its milestones/events in a single transaction."""
+        from app.repositories.database import adapt_sql
+
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM workflow_events WHERE workflow_id = ?",
+                adapt_sql("DELETE FROM workflow_events WHERE workflow_id = ?"),
                 (workflow_id,),
             )
             cursor.execute(
-                "DELETE FROM workflow_milestones WHERE workflow_id = ?",
+                adapt_sql("DELETE FROM workflow_milestones WHERE workflow_id = ?"),
                 (workflow_id,),
             )
             cursor.execute(
-                "DELETE FROM autonomous_workflows WHERE workflow_id = ?",
+                adapt_sql("DELETE FROM autonomous_workflows WHERE workflow_id = ?"),
                 (workflow_id,),
             )
             conn.commit()

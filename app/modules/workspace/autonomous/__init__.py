@@ -24,6 +24,9 @@ def get_ddl_statements():
     """
     use_pg = is_postgresql()
     pk_type = "SERIAL PRIMARY KEY" if use_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_type = "BOOLEAN" if use_pg else "INTEGER"
+    bool_false = "FALSE" if use_pg else "0"
+    bool_true = "TRUE" if use_pg else "1"
 
     return [
         f"""
@@ -37,8 +40,8 @@ def get_ddl_statements():
             requirements_issue_url TEXT DEFAULT '',
             project_path TEXT DEFAULT '',
             project_repo_url TEXT DEFAULT '',
-            is_new_project INTEGER DEFAULT 0,
-            is_private INTEGER DEFAULT 1,
+            is_new_project {bool_type} DEFAULT {bool_false},
+            is_private {bool_type} DEFAULT {bool_true},
             cli_tool TEXT DEFAULT '',
             model TEXT DEFAULT '',
             permission_mode TEXT DEFAULT 'auto-edit',

@@ -179,6 +179,13 @@ class AutonomousAgentRunner:
         timeout: int,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
+        import sys
+
+        _remote_agent_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "remote-agent")
+        )
+        if _remote_agent_dir not in sys.path:
+            sys.path.insert(0, _remote_agent_dir)
         from cli_adapters import get_adapter
 
         # Find executable

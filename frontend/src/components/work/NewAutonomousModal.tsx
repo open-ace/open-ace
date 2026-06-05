@@ -44,6 +44,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [maxPlanRounds, setMaxPlanRounds] = useState(3);
   const [maxPRReviewRounds, setMaxPRReviewRounds] = useState(5);
   const [title, setTitle] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   // Data
   const { data: toolsData } = useAvailableTools();
@@ -84,12 +85,16 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     };
 
     try {
+      setErrorMessage('');
       const result = await createWorkflow.mutateAsync(data);
       if (result.workflow) {
         onCreated(result.workflow);
       }
-    } catch {
-      // Error handled by mutation
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'message' in err
+        ? (err as { message: string }).message
+        : t('autoCreateFailed', language) || 'Failed to create task';
+      setErrorMessage(msg);
     }
   }, [
     title, requirementsMode, requirementsText, requirementsUrl, cliTool, model,
@@ -123,6 +128,16 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       }
     >
       <div className="row g-3">
+        {/* Error Alert */}
+        {errorMessage && (
+          <div className="col-12">
+            <div className="alert alert-danger d-flex align-items-center" role="alert">
+              <i className="bi bi-exclamation-triangle-fill me-2"></i>
+              {errorMessage}
+            </div>
+          </div>
+        )}
+
         {/* Title */}
         <div className="col-12">
           <label className="form-label fw-semibold">{t('autoTaskTitle', language)}</label>
