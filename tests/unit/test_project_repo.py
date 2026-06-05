@@ -88,6 +88,46 @@ class TestProjectRepository:
         result = self.repo.create_project(path="/test")
         assert result is None
 
+    def test_create_project_restore_soft_deleted_sqlite(self):
+        """Test restoring a soft-deleted project (SQLite)."""
+        # First fetch_one finds soft-deleted project
+        self.db.fetch_one.return_value = {"id": 5}
+        mock_cursor = MagicMock()
+        self.db.execute.return_value = mock_cursor
+
+        with patch.object(self.repo, "add_user_project", return_value=50) as mock_add:
+            result = self.repo.create_project(
+                path="/test/restored",
+                name="Restored Project",
+                description="Restored desc",
+                created_by=10,
+            )
+
+        # Should return the restored project ID
+        assert result == 5
+        # Should call add_user_project for restored project
+        mock_add.assert_called_once_with(10, 5)
+        # Should call execute for UPDATE
+        assert self.db.execute.call_count == 1
+
+    def test_create_project_restore_soft_deleted_postgresql(self):
+        """Test restoring a soft-deleted project (PostgreSQL)."""
+        self.db.is_postgresql = True
+        # First fetch_one finds soft-deleted project
+        self.db.fetch_one.return_value = {"id": 7}
+
+        with patch.object(self.repo, "add_user_project", return_value=70) as mock_add:
+            result = self.repo.create_project(
+                path="/test/pg-restored",
+                name="PG Restored",
+                created_by=12,
+            )
+
+        # Should return the restored project ID
+        assert result == 7
+        # Should call add_user_project for restored project
+        mock_add.assert_called_once_with(12, 7)
+
     # -------------------------------------------------------------------------
     # get_project_by_id
     # -------------------------------------------------------------------------

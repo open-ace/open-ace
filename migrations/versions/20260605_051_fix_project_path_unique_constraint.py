@@ -40,17 +40,13 @@ def _index_exists(conn, index_name: str, table_name: str) -> bool:
     """Check if an index exists."""
     if conn.dialect.name == "postgresql":
         result = conn.execute(
-            sa.text(
-                "SELECT EXISTS (SELECT FROM pg_indexes WHERE indexname = :index_name)"
-            ),
+            sa.text("SELECT EXISTS (SELECT FROM pg_indexes WHERE indexname = :index_name)"),
             {"index_name": index_name},
         )
         return result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text(
-                "SELECT name FROM sqlite_master WHERE type='index' AND name = :index_name"
-            ),
+            sa.text("SELECT name FROM sqlite_master WHERE type='index' AND name = :index_name"),
             {"index_name": index_name},
         )
         return result.fetchone() is not None
@@ -59,9 +55,7 @@ def _index_exists(conn, index_name: str, table_name: str) -> bool:
 def _trigger_exists(conn, trigger_name: str) -> bool:
     """Check if a trigger exists (SQLite only)."""
     result = conn.execute(
-        sa.text(
-            "SELECT name FROM sqlite_master WHERE type='trigger' AND name = :trigger_name"
-        ),
+        sa.text("SELECT name FROM sqlite_master WHERE type='trigger' AND name = :trigger_name"),
         {"trigger_name": trigger_name},
     )
     return result.fetchone() is not None

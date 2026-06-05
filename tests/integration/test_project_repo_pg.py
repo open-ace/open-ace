@@ -147,6 +147,54 @@ class TestProjectCRUD:
         all_rows = pg_db.fetch_all("SELECT * FROM projects WHERE path = ?", (original_path,))
         assert len(all_rows) == 1
 
+    def test_recreate_soft_deleted_project_user_project_association(self, pg_db):
+        """Test that user_projects association is created when restoring soft-deleted project."""
+        repo = ProjectRepository(db=pg_db)
+        user_id_original = _insert_user(pg_db, username="original_creator")
+        user_id_new = _insert_user(pg_db, username="new_creator")
+
+        # Create a project with original user
+        original_path = "/projects/recreate-user-test-pg"
+        project_id = repo.create_project(
+            path=original_path,
+            name="Original",
+            created_by=user_id_original,
+        )
+        assert project_id is not None
+
+        # Verify original user has user_projects association
+        up_original = pg_db.fetch_one(
+            "SELECT * FROM user_projects WHERE user_id = ? AND project_id = ?",
+            (user_id_original, project_id),
+        )
+        assert up_original is not None
+
+        # Soft delete the project
+        repo.delete_project(project_id, soft_delete=True)
+
+        # Restore with a new creator user
+        restored_id = repo.create_project(
+            path=original_path,
+            name="Restored",
+            created_by=user_id_new,
+        )
+
+        # Should return same project ID
+        assert restored_id == project_id
+
+        # Verify new user also has user_projects association
+        up_new = pg_db.fetch_one(
+            "SELECT * FROM user_projects WHERE user_id = ? AND project_id = ?",
+            (user_id_new, project_id),
+        )
+        assert up_new is not None
+
+        # Both users should have access to the restored project
+        project_users = repo.get_project_users(project_id)
+        user_ids = [up.user_id for up in project_users]
+        assert user_id_original in user_ids
+        assert user_id_new in user_ids
+
 
 class TestUserProject:
     """Tests for user-project via PostgreSQL ON CONFLICT path."""
