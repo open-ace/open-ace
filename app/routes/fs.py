@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 fs_bp = Blueprint("fs", __name__)
 user_repo = UserRepository()
 
+# System-sensitive directories blacklist (Linux/Mac)
+# These directories should never be writable by users to prevent system damage
+BLACKLISTED_PATHS = [
+    "/etc",  # System configuration
+    "/bin",  # Binary executables
+    "/sbin",  # System binaries
+    "/usr",  # All user system files (covers /usr/bin, /usr/sbin, /usr/lib, etc.)
+    "/usr/local",  # User-installed software
+    "/usr/share",  # Shared data files
+    "/root",  # Root user home
+    "/boot",  # Boot files
+    "/dev",  # Device files
+    "/proc",  # Process information
+    "/sys",  # System information
+    "/var",  # System variable data (covers /var/log, /var/lib, etc.)
+    "/opt",  # Optional software packages
+    "/tmp",  # Temporary files (security risk for arbitrary creation)
+    "/lib",  # Shared libraries
+    "/lib64",  # 64-bit libraries
+]
+
 
 @fs_bp.before_request
 def _authenticate_user():
@@ -117,6 +138,16 @@ def get_workspace_base_dir() -> str:
     return os.environ.get("WORKSPACE_BASE_DIR", "/home")
 
 
+def get_workspace_base_dirs() -> list[str]:
+    """Get list of workspace base directories. Supports comma-separated WORKSPACE_BASE_DIR.
+
+    Example: WORKSPACE_BASE_DIR=/workspace,/tools,/projects
+    Returns: ['/workspace', '/tools', '/projects']
+    """
+    base_dir = os.environ.get("WORKSPACE_BASE_DIR", "/home")
+    return [d.strip() for d in base_dir.split(",") if d.strip()]
+
+
 def get_home_directory(user=None):
     """Get user's home directory based on system_account."""
     base_dir = get_workspace_base_dir()
@@ -139,6 +170,9 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     Optionally restricts the resolved path to a list of allowed prefix
     directories (e.g. workspace base dir). If allowed_prefixes is None,
     no prefix restriction is applied (backward compatible).
+
+    Also checks against system-sensitive directory blacklist to prevent
+    users from writing to /etc, /bin, /root, etc.
     """
     if not path:
         return False
@@ -153,15 +187,6 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     if ".." in path:
         return False
 
-    # Restrict resolved path to allowed prefixes if provided.
-    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
-    if allowed_prefixes:
-        if not any(
-            abs_path == prefix or abs_path.startswith(prefix + os.sep)
-            for prefix in allowed_prefixes
-        ):
-            return False
-
     # Platform-specific validation
     system = platform.system()
     if system == "Windows":
@@ -171,6 +196,20 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     else:
         # Mac/Linux: must start with /
         if not abs_path.startswith("/"):
+            return False
+
+        # Blacklist check for Linux/Mac - protect system directories
+        for blocked in BLACKLISTED_PATHS:
+            if abs_path == blocked or abs_path.startswith(blocked + os.sep):
+                return False
+
+    # Restrict resolved path to allowed prefixes if provided.
+    # Ensure path-separator boundary to prevent /home/user_evil matching /home.
+    if allowed_prefixes:
+        if not any(
+            abs_path == prefix or abs_path.startswith(prefix + os.sep)
+            for prefix in allowed_prefixes
+        ):
             return False
 
     return True
@@ -254,10 +293,11 @@ def api_browse_directory():
     if not path or path.lower() == "home":
         path = get_home_directory(user)
     else:
-        # Validate and resolve path — restrict to workspace base dir
-        base_dir = get_workspace_base_dir()
-        if not is_valid_path(path, allowed_prefixes=[base_dir]):
-            return jsonify({"error": "Invalid path"}), 400
+        # Validate and resolve path — restrict to workspace base dirs
+        base_dirs = get_workspace_base_dirs()
+        if not is_valid_path(path, allowed_prefixes=base_dirs):
+            allowed_paths = ", ".join(base_dirs)
+            return jsonify({"error": f"Path must be under one of: {allowed_paths}"}), 400
 
         path = os.path.realpath(path)
 
@@ -392,14 +432,15 @@ def api_check_path():
     if not path:
         return jsonify({"error": "Path is required"}), 400
 
-    # Validate path format — restrict to workspace base dir
-    base_dir = get_workspace_base_dir()
-    if not is_valid_path(path, allowed_prefixes=[base_dir]):
+    # Validate path format — restrict to workspace base dirs
+    base_dirs = get_workspace_base_dirs()
+    if not is_valid_path(path, allowed_prefixes=base_dirs):
+        allowed_paths = ", ".join(base_dirs)
         return (
             jsonify(
                 {
                     "valid": False,
-                    "error": "Invalid path format",
+                    "error": f"Path must be under one of: {allowed_paths}. Provided path: {path}",
                 }
             ),
             400,
@@ -499,10 +540,20 @@ def api_create_directory():
     if len(dir_path) > 4096:
         return jsonify({"success": False, "error": "Path too long"}), 400
 
-    # Validate path format — restrict to workspace base dir
-    base_dir = get_workspace_base_dir()
-    if not is_valid_path(dir_path, allowed_prefixes=[base_dir]):
-        return jsonify({"success": False, "error": "Invalid path format"}), 400
+    # Validate path format — restrict to workspace base dir(s)
+    base_dirs = get_workspace_base_dirs()
+    if not is_valid_path(dir_path, allowed_prefixes=base_dirs):
+        # Provide specific error message with allowed paths
+        allowed_paths = ", ".join(base_dirs)
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Path must be under one of: {allowed_paths}. Provided path: {dir_path}",
+                }
+            ),
+            400,
+        )
 
     dir_path = os.path.realpath(dir_path)
 
