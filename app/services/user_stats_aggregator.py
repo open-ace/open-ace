@@ -145,7 +145,15 @@ class UserDailyStatsAggregator:
                             input_tokens = EXCLUDED.input_tokens,
                             output_tokens = EXCLUDED.output_tokens,
                             updated_at = CURRENT_TIMESTAMP""",
-                        (start_str, end_str, f"{escape_like(sender_prefix)}%", user_id, start_str, end_str, user_id),
+                        (
+                            start_str,
+                            end_str,
+                            f"{escape_like(sender_prefix)}%",
+                            user_id,
+                            start_str,
+                            end_str,
+                            user_id,
+                        ),
                     )
                 else:
                     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
@@ -189,7 +197,16 @@ class UserDailyStatsAggregator:
                         ) combined
                         GROUP BY combined.date
                     """,
-                        (user_id, now, start_str, end_str, f"{escape_like(sender_prefix)}%", user_id, start_str, end_str),
+                        (
+                            user_id,
+                            now,
+                            start_str,
+                            end_str,
+                            f"{escape_like(sender_prefix)}%",
+                            user_id,
+                            start_str,
+                            end_str,
+                        ),
                     )
 
                 conn.commit()
