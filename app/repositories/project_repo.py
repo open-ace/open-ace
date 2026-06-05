@@ -62,7 +62,7 @@ class ProjectRepository:
 
             if soft_deleted:
                 # Restore the soft-deleted project
-                project_id = int(soft_deleted["id"])
+                restored_id = int(soft_deleted["id"])
                 if self.db.is_postgresql:
                     self.db.execute(
                         """
@@ -71,7 +71,7 @@ class ProjectRepository:
                             is_active = TRUE, updated_at = ?
                         WHERE id = ?
                         """,
-                        (name, description, created_by, is_shared, now, project_id),
+                        (name, description, created_by, is_shared, now, restored_id),
                     )
                 else:
                     is_shared_int = adapt_boolean_value(is_shared)
@@ -90,16 +90,16 @@ class ProjectRepository:
                             is_shared_int,
                             is_active_int,
                             now,
-                            project_id,
+                            restored_id,
                         ),
                     )
-                logger.info(f"Restored soft-deleted project {project_id} with path {path}")
+                logger.info(f"Restored soft-deleted project {restored_id} with path {path}")
 
                 # Add user-project relationship if creator is specified
                 if created_by:
-                    self.add_user_project(created_by, project_id)
+                    self.add_user_project(created_by, restored_id)
 
-                return project_id
+                return restored_id
 
             # No soft-deleted project found, create a new one
             if self.db.is_postgresql:
