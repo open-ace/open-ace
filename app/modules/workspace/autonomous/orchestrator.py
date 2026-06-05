@@ -1027,7 +1027,11 @@ class AutonomousOrchestrator:
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
         """Resolve merge conflicts locally, push, and merge the PR."""
-        # Fetch latest main and merge into our branch
+        # Clean up any leftover git state (conflicts, uncommitted changes)
+        gh._run_git(["reset", "--hard", "HEAD"])
+        gh._run_git(["clean", "-fd"])
+
+        # Fetch latest main and checkout our branch
         gh._run_git(["fetch", "origin", "main"])
         gh._run_git(["checkout", branch_name])
         try:
