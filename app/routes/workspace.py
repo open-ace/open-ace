@@ -1938,6 +1938,9 @@ def get_workspace_config():
 
         config_path = os.path.join(CONFIG_DIR, "config.json")
 
+        # Get workspace base directory for path validation
+        base_dir = os.environ.get("WORKSPACE_BASE_DIR", "/home")
+
         workspace_config = {
             "enabled": False,
             "url": "",
@@ -1946,6 +1949,7 @@ def get_workspace_config():
             "port_range_end": 3200,
             "max_instances": 30,
             "idle_timeout_minutes": 30,
+            "base_dir": base_dir,  # For path validation in frontend
         }
 
         if os.path.exists(config_path):
@@ -1963,7 +1967,7 @@ def get_workspace_config():
         return jsonify(workspace_config)
     except Exception as e:
         logger.error(f"Error getting workspace config: {e}")
-        return jsonify({"enabled": False, "url": "", "multi_user_mode": False})
+        return jsonify({"enabled": False, "url": "", "multi_user_mode": False, "base_dir": "/home"})
 
 
 # ==================== Multi-User WebUI ====================
