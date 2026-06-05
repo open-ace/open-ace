@@ -577,6 +577,22 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round} completed",
         )
 
+        # Post development status to issue
+        issue_number = wf.get("github_issue_number")
+        if issue_number:
+            try:
+                branch = wf.get("branch_name", "")
+                status_msg = (
+                    f"## ✅ Development Round {dev_round} Completed\n\n"
+                    f"- **Status**: Development finished, tests passed\n"
+                    f"- **Branch**: `{branch}`\n"
+                    f"- **Next**: Creating PR and running code review\n\n"
+                    f"Progressing to PR review phase..."
+                )
+                gh.add_issue_comment(issue_number, status_msg)
+            except Exception:
+                pass
+
         # Move to PR review
         self._update_workflow(
             {
