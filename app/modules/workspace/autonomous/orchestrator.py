@@ -431,16 +431,30 @@ class AutonomousOrchestrator:
             except GitHubOpsError:
                 pass
 
-        # Step 3: Check if plan is approved or need more rounds
-        is_approved = (
-            "方案通过审查" in review_text
-            or "approved" in review_text.lower()
-            or "no major issues" in review_text.lower()
-        )
-
+        # Step 3: Check if all rounds are done
         self._update_workflow({"current_round": round_num})
 
-        if is_approved or round_num >= max_rounds:
+        if round_num >= max_rounds:
+            # All plan review rounds completed — post final plan to issue
+            final_plan = ""
+            all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
+            for ms in reversed(all_milestones):
+                if ms.get("plan_content"):
+                    final_plan = ms["plan_content"]
+                    break
+
+            issue_number = wf.get("github_issue_number")
+            if issue_number and final_plan:
+                try:
+                    final_comment = (
+                        f"## 📋 Final Implementation Plan\n\n"
+                        f"Plan review completed after {max_rounds} round(s).\n\n"
+                        f"{final_plan}"
+                    )
+                    gh.add_issue_comment(issue_number, final_comment)
+                except Exception:
+                    pass
+
             # Plan finalized, move to development
             self._update_workflow(
                 {
@@ -623,9 +637,15 @@ class AutonomousOrchestrator:
         # Create PR on first round
         if round_num == 1:
             try:
+                # Build PR body with issue linkage
+                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')[:500]}"
+                issue_number = wf.get("github_issue_number")
+                if issue_number:
+                    pr_body += f"\n\nCloses #{issue_number}"
+
                 pr_data = gh.create_pr(
                     title=f"[Auto] Dev round {dev_round}: {wf.get('title', 'Autonomous development')}",
-                    body=f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')[:500]}",
+                    body=pr_body,
                     head=branch_name,
                     base="main",
                 )
@@ -721,17 +741,11 @@ class AutonomousOrchestrator:
             except GitHubOpsError:
                 pass
 
-        # Check if approved
-        is_approved = (
-            "代码审查通过" in review_text
-            or "approved" in review_text.lower()
-            or "looks good" in review_text.lower()
-        )
-
+        # Check if all rounds done
         self._update_workflow({"current_round": round_num})
 
-        if is_approved or round_num >= max_rounds:
-            # Move to report
+        if round_num >= max_rounds:
+            # All PR review rounds completed — move to report
             self._update_workflow(
                 {
                     "current_phase": "report",
@@ -740,7 +754,7 @@ class AutonomousOrchestrator:
             )
             self._emit("phase_change", {"phase": "report"})
         else:
-            # Fix issues and re-submit
+            # Fix issues and continue to next round
             fix_ms = self._create_milestone(
                 phase="pr_review",
                 dev_round=dev_round,
