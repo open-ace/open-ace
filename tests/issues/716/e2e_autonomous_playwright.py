@@ -108,21 +108,15 @@ def step_navigate_to_autonomous(page):
     """Step 2: Navigate to the autonomous dev page."""
     log("NAV", "Navigating to /work/autonomous")
 
-    # Login via browser
+    # Login via the real login form UI
     page.goto(f"{BASE_URL}/login")
     page.wait_for_timeout(500)
 
-    page.evaluate(
-        """async (credentials) => {
-        const response = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(credentials)
-        });
-        return await response.json();
-    }""",
-        {"username": TEST_USER, "password": TEST_PASS},
-    )
+    # Fill in the login form using Playwright selectors (not fetch API)
+    page.fill("input#username", TEST_USER)
+    page.fill("input#password", TEST_PASS)
+    page.click("form.login-form button[type='submit']")
+    page.wait_for_timeout(1500)
 
     # Navigate to autonomous dev page
     page.goto(f"{BASE_URL}/work/autonomous")
