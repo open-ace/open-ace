@@ -3327,3 +3327,15 @@ link[rel='dns-prefetch'] {
 [data-theme='dark'] .context-menu-item.text-danger:hover:not(.disabled) {
   background: rgba(239, 68, 68, 0.2);
 }
+
+/* Keyboard navigation focus state */
+.context-menu-item.focused {
+  background: var(--bg-tertiary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+[data-theme='dark'] .context-menu-item.focused {
+  background: rgba(255, 255, 255, 0.1);
+  outline-color: var(--color-primary);
+}

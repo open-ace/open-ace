@@ -3,9 +3,14 @@
  *
  * Replaces browser's native right-click menu with custom business menu.
  * Implements smart menu items based on context:
- * - On links: Copy link, Open in new tab, Split screen open
+ * - On links: Copy link, Open in new tab
  * - On text selection: Copy selected text
- * - On blank area: Refresh, View details, etc.
+ * - On blank area: Refresh page
+ *
+ * Features:
+ * - Keyboard navigation (Arrow keys + Enter)
+ * - Clipboard API error handling with fallback
+ * - Input/Textarea whitelist for native menu
  */
 
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
@@ -82,12 +87,51 @@ const NewTabIcon = () => (
   </svg>
 );
 
-const SplitIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="3" y="3" width="18" height="18" rx="2" />
-    <line x1="12" y1="3" x2="12" y2="21" />
-  </svg>
-);
+/**
+ * Copy text to clipboard with error handling and fallback
+ */
+const copyToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    // Try modern clipboard API first
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    // Fallback for non-secure contexts or older browsers
+    console.warn('Clipboard API failed, using fallback:', err);
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return true;
+    } catch (fallbackErr) {
+      console.error('Failed to copy text:', fallbackErr);
+      return false;
+    }
+  }
+};
+
+/**
+ * Check if target element should use native context menu
+ * (input fields, textareas, etc.)
+ */
+export const shouldUseNativeMenu = (target: HTMLElement): boolean => {
+  const tagName = target.tagName.toLowerCase();
+  // Allow native menu for input and textarea elements
+  if (tagName === 'input' || tagName === 'textarea') {
+    return true;
+  }
+  // Allow native menu for editable elements
+  if (target.isContentEditable) {
+    return true;
+  }
+  return false;
+};
 
 /**
  * ContextMenuProvider - Provides global context menu state
@@ -131,13 +175,15 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
 /**
  * ContextMenuMenu - The actual menu component rendered at click position
+ * Supports keyboard navigation (Arrow keys + Enter + Escape)
  */
 const ContextMenuMenu: React.FC = () => {
   const { state, hideMenu } = useContextMenu();
   const menuRef = useRef<HTMLDivElement>(null);
+  const [focusedIndex, setFocusedIndex] = useState(0);
   const language = useAppStore((state) => state.language);
 
-  // Close on click outside
+  // Close on click outside and handle keyboard navigation
   useEffect(() => {
     if (!state.isOpen) return;
 
@@ -150,6 +196,29 @@ const ContextMenuMenu: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         hideMenu();
+        return;
+      }
+
+      // Get all focusable menu items (excluding dividers)
+      const menuItems = menuRef.current?.querySelectorAll('.context-menu-item:not(.disabled)');
+      if (!menuItems || menuItems.length === 0) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev + 1;
+          return next >= menuItems.length ? 0 : next;
+        });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev - 1;
+          return next < 0 ? menuItems.length - 1 : next;
+        });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        const focusedItem = menuItems[focusedIndex] as HTMLButtonElement;
+        focusedItem?.click();
       }
     };
 
@@ -164,7 +233,14 @@ const ContextMenuMenu: React.FC = () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [state.isOpen, hideMenu]);
+  }, [state.isOpen, hideMenu, focusedIndex]);
+
+  // Reset focused index when menu opens
+  useEffect(() => {
+    if (state.isOpen) {
+      setFocusedIndex(0);
+    }
+  }, [state.isOpen]);
 
   // Adjust position to stay within viewport
   const adjustedPosition = useCallback(() => {
@@ -196,9 +272,9 @@ const ContextMenuMenu: React.FC = () => {
       label: t('openInNewTab', language),
       icon: <NewTabIcon />,
       visible: !!state.linkUrl,
-      onClick: () => {
+      onClick: async () => {
         if (state.linkUrl) {
-          window.open(state.linkUrl, '_blank');
+          window.open(state.linkUrl, '_blank', 'noopener,noreferrer');
         }
         hideMenu();
       },
@@ -208,22 +284,9 @@ const ContextMenuMenu: React.FC = () => {
       label: t('copyLink', language),
       icon: <LinkIcon />,
       visible: !!state.linkUrl,
-      onClick: () => {
+      onClick: async () => {
         if (state.linkUrl) {
-          navigator.clipboard.writeText(state.linkUrl);
-        }
-        hideMenu();
-      },
-    },
-    {
-      id: 'split-open',
-      label: t('splitScreenOpen', language),
-      icon: <SplitIcon />,
-      visible: !!state.linkUrl,
-      onClick: () => {
-        // Split screen open - could be implemented with workspace tabs
-        if (state.linkUrl) {
-          window.open(state.linkUrl, '_blank', 'width=800,height=600');
+          await copyToClipboard(state.linkUrl);
         }
         hideMenu();
       },
@@ -240,9 +303,9 @@ const ContextMenuMenu: React.FC = () => {
       label: t('copySelectedText', language),
       icon: <CopyIcon />,
       visible: !!state.selectedText,
-      onClick: () => {
+      onClick: async () => {
         if (state.selectedText) {
-          navigator.clipboard.writeText(state.selectedText);
+          await copyToClipboard(state.selectedText);
         }
         hideMenu();
       },
@@ -253,7 +316,7 @@ const ContextMenuMenu: React.FC = () => {
       divider: true,
       visible: !!state.selectedText,
     },
-    // General items (always visible)
+    // General items (always visible when no specific context)
     {
       id: 'refresh',
       label: t('refresh', language),
@@ -274,6 +337,9 @@ const ContextMenuMenu: React.FC = () => {
 
   const position = adjustedPosition();
 
+  // Track actionable item index for keyboard focus
+  let actionableIndex = 0;
+
   return (
     <div
       ref={menuRef}
@@ -284,11 +350,17 @@ const ContextMenuMenu: React.FC = () => {
         top: position.y,
         zIndex: 9999,
       }}
+      role="menu"
+      aria-label="Context menu"
     >
       {visibleItems.map((item) => {
         if (item.divider) {
           return <hr key={item.id} className="context-menu-divider" />;
         }
+
+        const currentIndex = actionableIndex;
+        actionableIndex++;
+        const isFocused = currentIndex === focusedIndex;
 
         return (
           <button
@@ -297,10 +369,13 @@ const ContextMenuMenu: React.FC = () => {
             className={cn(
               'context-menu-item',
               item.disabled && 'disabled',
-              item.danger && 'text-danger'
+              item.danger && 'text-danger',
+              isFocused && 'focused'
             )}
             onClick={item.onClick}
             disabled={item.disabled}
+            role="menuitem"
+            tabIndex={isFocused ? 0 : -1}
           >
             {item.icon && <span className="context-menu-icon">{item.icon}</span>}
             <span className="context-menu-label">{item.label}</span>

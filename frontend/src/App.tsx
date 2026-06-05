@@ -11,7 +11,7 @@
  * - Lazy-loaded page components reduce initial bundle size
  */
 
-import React, { useEffect, Suspense, lazy, useRef } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
@@ -393,35 +393,35 @@ const AppContent: React.FC = () => {
 // Global ContextMenu Handler - intercepts browser's native right-click menu
 const GlobalContextMenuHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showMenu } = useContextMenu();
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Intercept contextmenu event globally
+  // Intercept contextmenu event globally on document
+  // This ensures the event listener is always bound regardless of ref timing
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Allow native context menu for input fields and editable elements
+      // (for spell check, undo, cut, copy, paste, etc.)
+      const tagName = target.tagName.toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea' || target.isContentEditable) {
+        return; // Don't prevent, allow native menu
+      }
+
       // Prevent browser's native context menu
       e.preventDefault();
       // Show custom context menu at click position
-      showMenu(e.clientX, e.clientY, e.target as HTMLElement);
+      showMenu(e.clientX, e.clientY, target);
     };
 
-    // Add event listener to the container
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('contextmenu', handleContextMenu);
-    }
+    // Add event listener directly to document for reliability
+    document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
-      if (container) {
-        container.removeEventListener('contextmenu', handleContextMenu);
-      }
+      document.removeEventListener('contextmenu', handleContextMenu);
     };
   }, [showMenu]);
 
-  return (
-    <div ref={containerRef} className="app-container" style={{ width: '100%', height: '100%' }}>
-      {children}
-    </div>
-  );
+  return <>{children}</>;
 };
 
 export const App: React.FC = () => {
