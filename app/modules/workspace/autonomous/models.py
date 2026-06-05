@@ -32,6 +32,7 @@ class AutonomousWorkflow:
     project_path: str = ""
     project_repo_url: str = ""
     is_new_project: bool = False
+    is_private: bool = True
     cli_tool: str = ""
     model: str = ""
     permission_mode: str = "auto-edit"
@@ -89,6 +90,7 @@ class AutonomousWorkflow:
             "project_path": self.project_path,
             "project_repo_url": self.project_repo_url,
             "is_new_project": self.is_new_project,
+            "is_private": self.is_private,
             "cli_tool": self.cli_tool,
             "model": self.model,
             "permission_mode": self.permission_mode,
@@ -131,6 +133,7 @@ class AutonomousWorkflow:
             project_path=data.get("project_path", ""),
             project_repo_url=data.get("project_repo_url", ""),
             is_new_project=bool(data.get("is_new_project", False)),
+            is_private=bool(data.get("is_private", True)),
             cli_tool=data.get("cli_tool", ""),
             model=data.get("model", ""),
             permission_mode=data.get("permission_mode", "auto-edit"),

@@ -1055,7 +1055,11 @@ class AutonomousOrchestrator:
         except GitHubOpsError:
             # There are conflicts — use AI agent to resolve them
             gh._run_git(["merge", "--abort"])  # Clean state first
-            gh._run_git(["merge", "origin/main"], check=False)
+            merge_result = gh._run_git(["merge", "origin/main"], check=False)
+            if merge_result.returncode != 0 and "CONFLICT" not in merge_result.stderr:
+                raise GitHubOpsError(
+                    f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
+                )
 
             # Ask AI agent to resolve conflicts
             conflict_prompt = (
