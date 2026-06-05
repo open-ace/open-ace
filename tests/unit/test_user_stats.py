@@ -60,6 +60,17 @@ CREATE TABLE user_daily_stats (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     UNIQUE(user_id, date)
 );
+
+CREATE TABLE agent_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    user_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    request_count INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    total_input_tokens INTEGER DEFAULT 0,
+    total_output_tokens INTEGER DEFAULT 0
+);
 """
 
 
@@ -99,6 +110,17 @@ def temp_db(tmp_path):
             """,
                 (date_str, f"bob-laptop-claude-{i}"),
             )
+
+    # Insert test agent_sessions for Alice (session data source)
+    for day_offset in range(3):
+        date_str = (today - timedelta(days=day_offset)).strftime("%Y-%m-%d")
+        conn.execute(
+            """
+            INSERT INTO agent_sessions (session_id, user_id, created_at, request_count, total_tokens, total_input_tokens, total_output_tokens)
+            VALUES (?, 1, ?, 5, 500, 400, 100)
+        """,
+            (f"session-alice-{day_offset}", f"{date_str} 10:00:00"),
+        )
     conn.commit()
     conn.close()
     return db_path
@@ -139,8 +161,9 @@ class TestAggregatorSQLite:
 
         assert len(rows) >= 3
         for row in rows:
-            assert row["requests"] == 3
-            assert row["tokens"] == 300  # 3 messages * 100 tokens
+            # Alice's data: daily_messages (3 requests, 300 tokens) + agent_sessions (5 requests, 500 tokens)
+            assert row["requests"] == 8  # 3 + 5
+            assert row["tokens"] == 800  # 300 + 500
 
     def test_aggregate_all_users(self, mock_db_instance, temp_db):
         """aggregate_all_users() should aggregate for all active users."""
