@@ -224,7 +224,7 @@ class GitHubOps:
         base: str = "main",
         draft: bool = False,
     ) -> dict:
-        """Create a pull request."""
+        """Create a pull request and return its details."""
         args = [
             "pr",
             "create",
@@ -234,8 +234,6 @@ class GitHubOps:
             body or "",
             "--base",
             base,
-            "--json",
-            "number,url,headRefName",
         ]
         if head:
             args.extend(["--head", head])
@@ -243,9 +241,17 @@ class GitHubOps:
             args.append("--draft")
 
         result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
-        logger.info("Created PR #%s", data.get("number"))
-        return data
+        # gh pr create doesn't support --json; parse URL from stdout
+        # e.g. "https://github.com/owner/repo/pull/123"
+        output = result.stdout.strip()
+        pr_url = output.split("\n")[-1].strip()
+
+        # Extract PR number from URL
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+        logger.info("Created PR #%s", pr_number)
+
+        # Fetch structured data via gh pr view
+        return self.get_pr(pr_number)
 
     def get_pr(self, number: int) -> dict:
         """Get PR details."""
@@ -262,10 +268,9 @@ class GitHubOps:
 
     def add_pr_comment(self, number: int, body: str) -> dict:
         """Add a comment to a PR."""
-        result = self._run_gh(["pr", "comment", str(number), "--body", body, "--json", "id,url"])
-        data = json.loads(result.stdout.strip())
+        self._run_gh(["pr", "comment", str(number), "--body", body])
         logger.info("Added comment to PR #%s", number)
-        return data
+        return {"number": number, "body": body}
 
     def list_pr_comments(self, number: int) -> list:
         """List review comments on a PR."""
