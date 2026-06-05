@@ -2679,16 +2679,30 @@ link[rel='dns-prefetch'] {
   flex-shrink: 0;
 }
 
-/* Row 2: meta info — grid aligned columns */
+/* Row 2: meta info — grid aligned columns with minmax for responsive */
 .session-card-meta {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto auto auto;
+  grid-template-columns:
+    minmax(70px, 90px) /* 工具名称 */
+    minmax(80px, 100px) /* 主机名称 */
+    minmax(80px, 1fr) /* 模型名称 */
+    minmax(70px, 90px) /* 消息数 */
+    minmax(80px, 100px) /* Token数 */
+    minmax(100px, 130px) /* 创建时间 */
+    minmax(100px, 130px) /* 完成时间 */;
   align-items: center;
   gap: 0.35rem 1rem;
   font-size: 0.8rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* 为所有列添加溢出处理 (Issue #700 评审意见) */
+.session-card-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .meta-model {
