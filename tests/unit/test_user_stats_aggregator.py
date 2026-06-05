@@ -99,8 +99,9 @@ class TestUserDailyStatsAggregator:
             )
             assert result == 3
             # Verify LIKE pattern uses system_account (with escaped underscore)
+            # SQLite params: user_id, now, start_str, end_str, sender_prefix%, user_id, start_str, end_str
             params = mock_cursor.execute.call_args[0][1]
-            assert params[-1] == "sys\\_account%"
+            assert params[4] == "sys\\_account%"  # sender_prefix% is the 5th parameter (index 4)
 
     def test_aggregate_user_db_error(self):
         agg, mock_db, mock_cursor, _, _ = self._make_aggregator()

@@ -69,6 +69,10 @@ class UserDailyStatsAggregator:
         """
         Aggregate usage data for a specific user.
 
+        Combines data from two sources:
+        1. daily_messages (non-Session data, filtered by agent_session_id)
+        2. agent_sessions (Session data)
+
         Args:
             user_id: User ID.
             username: Username (for logging).
@@ -93,41 +97,116 @@ class UserDailyStatsAggregator:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 if is_postgresql():
+                    # Combine data from daily_messages (non-Session) and agent_sessions (Session)
+                    # This replaces the previous filter that excluded all agent_session_id data
                     cursor.execute(
                         """
-                        INSERT INTO user_daily_stats (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
-                        SELECT %s, dm.date::date, COUNT(*), COALESCE(SUM(dm.tokens_used), 0),
-                               COALESCE(SUM(dm.input_tokens), 0), COALESCE(SUM(dm.output_tokens), 0), CURRENT_TIMESTAMP
-                        FROM daily_messages dm
-                        WHERE dm.date >= %s AND dm.date <= %s AND dm.sender_name LIKE %s AND dm.role = 'assistant'
+                        WITH daily_stats AS (
+                            -- Non-Session data from daily_messages (filtered)
+                            SELECT dm.date::date as date,
+                                   COUNT(*) as requests,
+                                   COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                                   COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
+                                   COALESCE(SUM(dm.output_tokens), 0) as output_tokens
+                            FROM daily_messages dm
+                            WHERE dm.date >= %s AND dm.date <= %s
+                              AND dm.sender_name LIKE %s
+                              AND dm.role = 'assistant'
                               AND (agent_session_id IS NULL OR agent_session_id = '')
-                        GROUP BY dm.date::date
-                        ON CONFLICT (user_id, date) DO UPDATE SET requests = EXCLUDED.requests, tokens = EXCLUDED.tokens,
-                            input_tokens = EXCLUDED.input_tokens, output_tokens = EXCLUDED.output_tokens, updated_at = CURRENT_TIMESTAMP""",
-                        (user_id, start_str, end_str, f"{escape_like(sender_prefix)}%"),
+                            GROUP BY dm.date::date
+                        ),
+                        session_stats AS (
+                            -- Session data from agent_sessions
+                            SELECT DATE(as2.created_at) as date,
+                                   COALESCE(as2.request_count, 0) as requests,
+                                   COALESCE(as2.total_tokens, 0) as tokens,
+                                   COALESCE(as2.total_input_tokens, 0) as input_tokens,
+                                   COALESCE(as2.total_output_tokens, 0) as output_tokens
+                            FROM agent_sessions as2
+                            WHERE as2.user_id = %s
+                              AND DATE(as2.created_at) >= %s AND DATE(as2.created_at) <= %s
+                        ),
+                        combined_stats AS (
+                            SELECT date, SUM(requests) as requests, SUM(tokens) as tokens,
+                                   SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens
+                            FROM (
+                                SELECT date, requests, tokens, input_tokens, output_tokens FROM daily_stats
+                                UNION ALL
+                                SELECT date, requests, tokens, input_tokens, output_tokens FROM session_stats
+                            ) all_stats
+                            GROUP BY date
+                        )
+                        INSERT INTO user_daily_stats (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
+                        SELECT %s, cs.date, cs.requests, cs.tokens, cs.input_tokens, cs.output_tokens, CURRENT_TIMESTAMP
+                        FROM combined_stats cs
+                        ON CONFLICT (user_id, date) DO UPDATE SET
+                            requests = EXCLUDED.requests,
+                            tokens = EXCLUDED.tokens,
+                            input_tokens = EXCLUDED.input_tokens,
+                            output_tokens = EXCLUDED.output_tokens,
+                            updated_at = CURRENT_TIMESTAMP""",
+                        (
+                            start_str,
+                            end_str,
+                            f"{escape_like(sender_prefix)}%",
+                            user_id,
+                            start_str,
+                            end_str,
+                            user_id,
+                        ),
                     )
                 else:
                     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                    # SQLite: Combine data from daily_messages and agent_sessions
+                    # SQLite supports CTEs since 3.8.3 (2014), but use subqueries for compatibility
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO user_daily_stats
                         (user_id, date, requests, tokens, input_tokens, output_tokens, updated_at)
                         SELECT
                             ? as user_id,
-                            dm.date,
-                            COUNT(*) as requests,
-                            COALESCE(SUM(dm.tokens_used), 0) as tokens,
-                            COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
-                            COALESCE(SUM(dm.output_tokens), 0) as output_tokens,
+                            combined.date,
+                            SUM(combined.requests) as requests,
+                            SUM(combined.tokens) as tokens,
+                            SUM(combined.input_tokens) as input_tokens,
+                            SUM(combined.output_tokens) as output_tokens,
                             ?
-                        FROM daily_messages dm
-                        WHERE dm.date >= ? AND dm.date <= ?
-                          AND dm.sender_name LIKE ?
-                          AND dm.role = 'assistant'
-                          AND (agent_session_id IS NULL OR agent_session_id = '')
-                        GROUP BY dm.date
+                        FROM (
+                            -- Non-Session data from daily_messages (filtered)
+                            SELECT dm.date as date,
+                                   COUNT(*) as requests,
+                                   COALESCE(SUM(dm.tokens_used), 0) as tokens,
+                                   COALESCE(SUM(dm.input_tokens), 0) as input_tokens,
+                                   COALESCE(SUM(dm.output_tokens), 0) as output_tokens
+                            FROM daily_messages dm
+                            WHERE dm.date >= ? AND dm.date <= ?
+                              AND dm.sender_name LIKE ?
+                              AND dm.role = 'assistant'
+                              AND (agent_session_id IS NULL OR agent_session_id = '')
+                            GROUP BY dm.date
+                            UNION ALL
+                            -- Session data from agent_sessions
+                            SELECT DATE(as2.created_at) as date,
+                                   COALESCE(as2.request_count, 0) as requests,
+                                   COALESCE(as2.total_tokens, 0) as tokens,
+                                   COALESCE(as2.total_input_tokens, 0) as input_tokens,
+                                   COALESCE(as2.total_output_tokens, 0) as output_tokens
+                            FROM agent_sessions as2
+                            WHERE as2.user_id = ?
+                              AND DATE(as2.created_at) >= ? AND DATE(as2.created_at) <= ?
+                        ) combined
+                        GROUP BY combined.date
                     """,
-                        (user_id, now, start_str, end_str, f"{escape_like(sender_prefix)}%"),
+                        (
+                            user_id,
+                            now,
+                            start_str,
+                            end_str,
+                            f"{escape_like(sender_prefix)}%",
+                            user_id,
+                            start_str,
+                            end_str,
+                        ),
                     )
 
                 conn.commit()
