@@ -76,6 +76,9 @@ const UsageOverview = lazy(() =>
 );
 const InsightsReport = lazy(() =>
   import('@/components/work/InsightsReport').then((m) => ({ default: m.InsightsReport }))
+)
+const AutonomousDev = lazy(() =>
+  import('@/components/features/AutonomousDev').then((m) => ({ default: m.AutonomousDev }))
 );
 const UserManagement = lazy(() =>
   import('@/components/features/management/UserManagement').then((m) => ({
@@ -258,6 +261,7 @@ const WorkRoutes: React.FC = () => {
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
+          <Route path="autonomous" element={<AutonomousDev />} />
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={null} />
           <Route path="*" element={<Navigate to="/work" replace />} />

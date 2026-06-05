@@ -1,0 +1,409 @@
+# mypy: disable-error-code="no-any-return,assignment,var-annotated"
+"""
+Open ACE - GitHub Operations
+
+Wraps the `gh` CLI for repo, issue, branch, worktree, and PR operations.
+All methods invoke gh/git via subprocess and return parsed results.
+"""
+
+import json
+import logging
+import subprocess
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+class GitHubOpsError(Exception):
+    """Error raised when a GitHub operation fails."""
+
+    pass
+
+
+class GitHubOps:
+    """GitHub operations using the gh CLI."""
+
+    def __init__(self, repo_path: str):
+        """
+        Args:
+            repo_path: Local path to the git repository (for cwd in gh commands).
+        """
+        self.repo_path = repo_path
+
+    def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+        """Run a gh CLI command."""
+        cmd = ["gh"] + args
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if check and result.returncode != 0:
+                raise GitHubOpsError(
+                    f"gh {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
+                )
+            return result
+        except subprocess.TimeoutExpired:
+            raise GitHubOpsError(f"gh {' '.join(args)} timed out after 120s")
+        except FileNotFoundError:
+            raise GitHubOpsError("gh CLI not found. Please install and authenticate gh.")
+
+    def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+        """Run a git command."""
+        cmd = ["git"] + args
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if check and result.returncode != 0:
+                raise GitHubOpsError(
+                    f"git {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
+                )
+            return result
+        except subprocess.TimeoutExpired:
+            raise GitHubOpsError(f"git {' '.join(args)} timed out after 120s")
+        except FileNotFoundError:
+            raise GitHubOpsError("git not found")
+
+    # ── Repo Operations ────────────────────────────────────────────
+
+    def create_repo(self, name: str, private: bool = True, description: str = "") -> dict:
+        """Create a new GitHub repository."""
+        args = ["repo", "create", name]
+        if private:
+            args.append("--private")
+        else:
+            args.append("--public")
+        if description:
+            args.extend(["--description", description])
+
+        result = self._run_gh(args)
+        # gh repo create doesn't support --json; parse URL from stdout
+        output = result.stdout.strip()
+        repo_url = output.split("\n")[-1].strip()
+        logger.info("Created repo: %s", name)
+        return {"name": name, "url": repo_url}
+
+    def get_repo_url(self) -> str:
+        """Get the remote origin URL of the current repo."""
+        result = self._run_git(["remote", "get-url", "origin"])
+        return result.stdout.strip()
+
+    def get_repo_name(self) -> str:
+        """Get the repo name in owner/repo format."""
+        result = self._run_gh(["repo", "view", "--json", "nameWithOwner"])
+        data = json.loads(result.stdout.strip())
+        return data.get("nameWithOwner", "")
+
+    # ── Issue Operations ────────────────────────────────────────────
+
+    def create_issue(self, title: str, body: str = "", labels: Optional[list[str]] = None) -> dict:
+        """Create a GitHub issue."""
+        args = ["issue", "create", "--title", title, "--body", body or ""]
+        if labels:
+            for label in labels:
+                args.extend(["--label", label])
+
+        result = self._run_gh(args)
+        # gh issue create doesn't support --json; parse URL from stdout
+        output = result.stdout.strip()
+        issue_url = output.split("\n")[-1].strip()
+        try:
+            issue_number = int(issue_url.rstrip("/").split("/")[-1])
+        except (ValueError, IndexError):
+            raise GitHubOpsError(f"Failed to parse issue number from output: {output}")
+        logger.info("Created issue #%s", issue_number)
+        return {"number": issue_number, "url": issue_url}
+
+    def get_issue(self, number: int) -> dict:
+        """Get issue details."""
+        result = self._run_gh(
+            ["issue", "view", str(number), "--json", "number,title,body,url,state,labels"]
+        )
+        return json.loads(result.stdout.strip())
+
+    def add_issue_comment(self, number: int, body: str) -> dict:
+        """Add a comment to an issue."""
+        self._run_gh(["issue", "comment", str(number), "--body", body])
+        logger.info("Added comment to issue #%s", number)
+        return {"number": number}
+
+    def list_issue_comments(self, number: int, since: Optional[str] = None) -> list:
+        """List comments on an issue, optionally since a timestamp."""
+        args = ["issue", "view", str(number), "--comments", "--json", "comments"]
+        result = self._run_gh(args)
+        data = json.loads(result.stdout.strip())
+        comments = data.get("comments", [])
+        if since:
+            comments = [c for c in comments if c.get("createdAt", "") > since]
+        return comments
+
+    def update_issue(
+        self, number: int, title: Optional[str] = None, body: Optional[str] = None
+    ) -> dict:
+        """Update an issue's title or body."""
+        args = ["issue", "edit", str(number)]
+        if title:
+            args.extend(["--title", title])
+        if body:
+            args.extend(["--body", body])
+        self._run_gh(args)
+        logger.info("Updated issue #%s", number)
+        return {"number": number}
+
+    # ── Branch Operations ───────────────────────────────────────────
+
+    def create_branch(self, name: str, base: str = "HEAD") -> dict:
+        """Create a new branch."""
+        self._run_git(
+            ["checkout", "-b", name] if base == "HEAD" else ["checkout", "-b", name, base]
+        )
+        # Push and set upstream
+        self._run_git(["push", "-u", "origin", name])
+        logger.info("Created branch: %s", name)
+        return {"branch": name}
+
+    def get_current_branch(self) -> str:
+        """Get the current branch name."""
+        result = self._run_git(["branch", "--show-current"])
+        return result.stdout.strip()
+
+    def get_current_commit(self) -> str:
+        """Get the current commit SHA."""
+        result = self._run_git(["rev-parse", "HEAD"])
+        return result.stdout.strip()
+
+    def checkout(self, ref: str) -> None:
+        """Checkout a branch or commit."""
+        self._run_git(["checkout", ref])
+
+    def delete_branch(self, name: str, remote: bool = True) -> None:
+        """Delete a branch locally and optionally remotely."""
+        self._run_git(["branch", "-D", name], check=False)
+        if remote:
+            self._run_git(["push", "origin", "--delete", name], check=False)
+
+    # ── Worktree Operations ─────────────────────────────────────────
+
+    def create_worktree(self, path: str, branch: str) -> dict:
+        """Create a git worktree with a new branch."""
+        self._run_git(["worktree", "add", "-b", branch, path, "HEAD"])
+        logger.info("Created worktree at %s on branch %s", path, branch)
+        return {"worktree_path": path, "branch": branch}
+
+    def remove_worktree(self, path: str) -> dict:
+        """Remove a git worktree."""
+        self._run_git(["worktree", "remove", path, "--force"])
+        logger.info("Removed worktree at %s", path)
+        return {"removed": path}
+
+    def list_worktrees(self) -> list:
+        """List all worktrees."""
+        result = self._run_git(["worktree", "list", "--porcelain"])
+        worktrees = []
+        current = {}
+        for line in result.stdout.strip().split("\n"):
+            if line.startswith("worktree "):
+                if current:
+                    worktrees.append(current)
+                current = {"path": line.split(" ", 1)[1]}
+            elif line.startswith("branch "):
+                current["branch"] = line.split(" ", 1)[1]
+            elif line == "bare":
+                current["bare"] = True
+        if current:
+            worktrees.append(current)
+        return worktrees
+
+    # ── PR Operations ───────────────────────────────────────────────
+
+    def create_pr(
+        self,
+        title: str,
+        body: str = "",
+        head: Optional[str] = None,
+        base: str = "main",
+        draft: bool = False,
+    ) -> dict:
+        """Create a pull request and return its details."""
+        args = [
+            "pr",
+            "create",
+            "--title",
+            title,
+            "--body",
+            body or "",
+            "--base",
+            base,
+        ]
+        if head:
+            args.extend(["--head", head])
+        if draft:
+            args.append("--draft")
+
+        result = self._run_gh(args)
+        # gh pr create doesn't support --json; parse URL from stdout
+        # e.g. "https://github.com/owner/repo/pull/123"
+        output = result.stdout.strip()
+        pr_url = output.split("\n")[-1].strip()
+
+        # Extract PR number from URL
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+        logger.info("Created PR #%s", pr_number)
+
+        # Fetch structured data via gh pr view
+        return self.get_pr(pr_number)
+
+    def get_pr(self, number: int) -> dict:
+        """Get PR details."""
+        result = self._run_gh(
+            [
+                "pr",
+                "view",
+                str(number),
+                "--json",
+                "number,title,body,url,state,headRefName,baseRefName,additions,deletions,changedFiles,commits",
+            ]
+        )
+        return json.loads(result.stdout.strip())
+
+    def add_pr_comment(self, number: int, body: str) -> dict:
+        """Add a comment to a PR."""
+        self._run_gh(["pr", "comment", str(number), "--body", body])
+        logger.info("Added comment to PR #%s", number)
+        return {"number": number, "body": body}
+
+    def list_pr_comments(self, number: int) -> list:
+        """List review comments on a PR."""
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            [
+                "api",
+                f"repos/{repo}/pulls/{number}/comments",
+                "--jq",
+                ".[] | {id, path, body, line, created_at, user: .user.login}",
+            ]
+        )
+        if not result.stdout.strip():
+            return []
+        # Parse NDJSON output
+        comments = []
+        for line in result.stdout.strip().split("\n"):
+            try:
+                comments.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        return comments
+
+    def list_pr_issue_comments(self, number: int) -> list:
+        """List issue-level comments on a PR."""
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            [
+                "api",
+                f"repos/{repo}/issues/{number}/comments",
+                "--jq",
+                ".[] | {id, body, created_at, user: .user.login}",
+            ]
+        )
+        if not result.stdout.strip():
+            return []
+        comments = []
+        for line in result.stdout.strip().split("\n"):
+            try:
+                comments.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        return comments
+
+    def merge_pr(self, number: int, strategy: str = "merge") -> dict:
+        """Merge a PR."""
+        args = ["pr", "merge", str(number)]
+        if strategy == "squash":
+            args.append("--squash")
+        elif strategy == "rebase":
+            args.append("--rebase")
+        else:
+            args.append("--merge")
+
+        self._run_gh(args)
+        logger.info("Merged PR #%s", number)
+        return {"number": number, "merged": True}
+
+    def list_pr_commits(self, number: int) -> list:
+        """List commits in a PR."""
+        result = self._run_gh(["pr", "view", str(number), "--json", "commits"])
+        data = json.loads(result.stdout.strip())
+        return data.get("commits", [])
+
+    # ── Diff Operations ─────────────────────────────────────────────
+
+    def get_diff(self, base: str = "HEAD~1", head: str = "HEAD") -> str:
+        """Get the diff between two refs."""
+        result = self._run_git(["diff", base, head])
+        return result.stdout
+
+    def get_diff_stats(self, base: str = "HEAD~1", head: str = "HEAD") -> dict:
+        """Get diff statistics between two refs."""
+        # Get numstat for additions/deletions per file
+        result = self._run_git(["diff", "--numstat", base, head])
+        total_additions = 0
+        total_deletions = 0
+        files = 0
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    total_additions += int(parts[0]) if parts[0] != "-" else 0
+                    total_deletions += int(parts[1]) if parts[1] != "-" else 0
+                    files += 1
+
+        # Get commit count
+        commit_result = self._run_git(["rev-list", "--count", f"{base}..{head}"])
+        commits = int(commit_result.stdout.strip()) if commit_result.stdout.strip() else 0
+
+        return {
+            "additions": total_additions,
+            "deletions": total_deletions,
+            "files": files,
+            "commits": commits,
+        }
+
+    def get_commit_diff(self, sha: str) -> str:
+        """Get the diff for a specific commit."""
+        result = self._run_git(["show", "--format=", sha])
+        return result.stdout
+
+    # ── Git Operations ──────────────────────────────────────────────
+
+    def git_add_all(self) -> None:
+        """Stage all changes."""
+        self._run_git(["add", "-A"])
+
+    def git_commit(self, message: str) -> dict:
+        """Create a git commit."""
+        self._run_git(["commit", "-m", message])
+        sha = self.get_current_commit()
+        return {"sha": sha, "message": message}
+
+    def git_push(self, remote: str = "origin", branch: Optional[str] = None) -> None:
+        """Push to remote."""
+        args = ["push", remote]
+        if branch:
+            args.append(branch)
+        self._run_git(args)
+
+    def git_init(self) -> None:
+        """Initialize a git repository."""
+        self._run_git(["init"])
+
+    def git_add_remote(self, name: str, url: str) -> None:
+        """Add a remote."""
+        self._run_git(["remote", "add", name, url])

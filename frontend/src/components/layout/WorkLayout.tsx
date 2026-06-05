@@ -31,6 +31,7 @@ interface NavItem {
 
 const workNavItems: NavItem[] = [
   { id: 'workspace', label: 'workspace', icon: 'bi-grid', path: '/work' },
+  { id: 'autonomous', label: 'autonomousDev', icon: 'bi-robot', path: '/work/autonomous' },
   { id: 'sessions', label: 'sessionHistory', icon: 'bi-collection', path: '/work/sessions' },
   { id: 'prompts', label: 'prompts', icon: 'bi-file-text', path: '/work/prompts' },
   { id: 'usage', label: 'myUsage', icon: 'bi-bar-chart', path: '/work/usage' },
@@ -61,6 +62,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     if (path.startsWith('/work/prompts')) return 'prompts';
     if (path.startsWith('/work/usage')) return 'usage';
     if (path.startsWith('/work/insights')) return 'insights';
+    if (path.startsWith('/work/autonomous')) return 'autonomous';
     return 'workspace';
   };
 
