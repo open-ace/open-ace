@@ -153,4 +153,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """No-op: tables may have been created by runtime DDL before this migration ran."""
+    """Drop autonomous workflow tables.
+
+    Note: This is intentionally non-destructive. Tables may have been created
+    by runtime DDL (get_ddl_statements) before this migration ran. Dropping
+    tables would lose production data. Enable manual downgrade if needed:
+
+        op.drop_index("idx_events_workflow_created")
+        op.drop_table("workflow_events")
+        op.drop_index("idx_milestones_workflow_round")
+        op.drop_index("idx_milestones_workflow_phase")
+        op.drop_table("workflow_milestones")
+        op.drop_index("idx_workflows_user_status")
+        op.drop_table("autonomous_workflows")
+    """

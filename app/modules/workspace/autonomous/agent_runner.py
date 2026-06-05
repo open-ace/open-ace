@@ -206,7 +206,7 @@ class AutonomousAgentRunner:
             model,
             permission_mode=permission_mode,
         )
-        cmd = [executable] + adapter_args[1:] if len(adapter_args) > 1 else [executable]
+        cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 

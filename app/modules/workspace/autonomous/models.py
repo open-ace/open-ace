@@ -2,6 +2,13 @@
 Open ACE - Autonomous Development Models
 
 Data models for the AI autonomous development workflow.
+
+These dataclass models serve as the canonical type definition for autonomous
+workflow data. While the repository layer currently uses raw dicts for DB
+compatibility, these models provide:
+- Type documentation and IDE autocompletion
+- Validation via from_dict() / to_dict() roundtrips
+- A migration path toward typed ORM in future iterations
 """
 
 from dataclasses import dataclass, field

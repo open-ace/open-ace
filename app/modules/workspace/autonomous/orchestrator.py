@@ -873,8 +873,19 @@ class AutonomousOrchestrator:
         if not comments:
             return  # No new comments
 
+        # Filter out bot's own comments (comments authored by the automation)
+        bot_author_keywords = ["open-ace-bot", "autonomous", "bot"]
+        user_comments = [
+            c
+            for c in comments
+            if not any(
+                kw in (c.get("author", {}).get("login", "") or "").lower()
+                for kw in bot_author_keywords
+            )
+        ]
+
         # Check for completion signals
-        for comment in reversed(comments):
+        for comment in reversed(user_comments):
             body = comment.get("body", "").lower()
             for keyword in COMPLETION_KEYWORDS:
                 if keyword.lower() in body:
@@ -887,8 +898,12 @@ class AutonomousOrchestrator:
                     self._emit("phase_change", {"phase": "merge"})
                     return
 
+        # No user comments left after filtering
+        if not user_comments:
+            return
+
         # New requirements detected
-        new_req_comment = comments[-1]  # Latest comment
+        new_req_comment = user_comments[-1]  # Latest user comment
         new_requirements = new_req_comment.get("body", "")
         comment_time = new_req_comment.get("created_at", "")
 

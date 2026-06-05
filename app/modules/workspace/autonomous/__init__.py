@@ -10,14 +10,25 @@ from app.modules.workspace.autonomous.models import (
     WorkflowEvent,
     WorkflowMilestone,
 )
+from app.repositories.database import is_postgresql
 
 
 def get_ddl_statements():
-    """Return DDL statements for autonomous workflow tables."""
+    """Return DDL statements for autonomous workflow tables.
+
+    Uses database-appropriate syntax based on is_postgresql().
+
+    Note: The canonical schema definition lives in the Alembic migration:
+    migrations/versions/20260605_050_add_autonomous_workflow_tables.py
+    Changes to the schema must be reflected in BOTH places.
+    """
+    use_pg = is_postgresql()
+    pk_type = "SERIAL PRIMARY KEY" if use_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
     return [
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS autonomous_workflows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_type},
             workflow_id TEXT NOT NULL UNIQUE,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             title TEXT DEFAULT '',
@@ -58,9 +69,9 @@ def get_ddl_statements():
         CREATE INDEX IF NOT EXISTS idx_workflows_user_status
             ON autonomous_workflows(user_id, status)
         """,
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS workflow_milestones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_type},
             workflow_id TEXT NOT NULL REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE,
             milestone_id TEXT NOT NULL UNIQUE,
             phase TEXT NOT NULL DEFAULT '',
@@ -98,9 +109,9 @@ def get_ddl_statements():
         CREATE INDEX IF NOT EXISTS idx_milestones_workflow_round
             ON workflow_milestones(workflow_id, dev_round)
         """,
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS workflow_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_type},
             workflow_id TEXT NOT NULL,
             milestone_id TEXT DEFAULT '',
             event_type TEXT NOT NULL DEFAULT '',

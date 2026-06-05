@@ -13,7 +13,14 @@ import React, { useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, Badge, Loading } from '@/components/common';
-import { useWorkflowTimeline, usePauseWorkflow, useResumeWorkflow, useStopWorkflow } from '@/hooks/useAutonomous';
+import {
+  useWorkflowTimeline,
+  usePauseWorkflow,
+  useResumeWorkflow,
+  useStopWorkflow,
+  useMarkDone,
+} from '@/hooks/useAutonomous';
+import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
 
@@ -55,15 +62,17 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
 export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) => {
   const language = useLanguage();
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
   const resumeMutation = useResumeWorkflow();
   const stopMutation = useStopWorkflow();
+  const markDoneMutation = useMarkDone();
 
   const milestones = timelineData?.milestones ?? [];
 
-  const isActive = ['pending', 'preparing', 'planning', 'developing', 'pr_review', 'reporting', 'waiting', 'merging'].includes(workflow.status);
+  const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const isPaused = workflow.status === 'paused';
   const isWaiting = workflow.current_phase === 'wait';
 
@@ -79,10 +88,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
 
   const handlePause = () => pauseMutation.mutate(workflow.workflow_id);
   const handleResume = () => resumeMutation.mutate(workflow.workflow_id);
-  const handleStop = () => {
-    if (window.confirm(t('autoConfirmStop', language))) {
-      stopMutation.mutate(workflow.workflow_id);
-    }
+  const handleStopConfirm = () => {
+    stopMutation.mutate(workflow.workflow_id);
+    setShowStopConfirm(false);
+  };
+  const handleMarkDone = () => {
+    markDoneMutation.mutate({ workflowId: workflow.workflow_id });
   };
 
   const toggleExpand = (milestoneId: string) => {
@@ -146,14 +157,24 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                 {t('autoResumeWorkflow', language)}
               </Button>
             )}
-            {(isActive || isPaused) && (
-              <Button size="sm" variant="danger" onClick={handleStop}>
+            {(isActive || isPaused) && !showStopConfirm && (
+              <Button size="sm" variant="danger" onClick={() => setShowStopConfirm(true)}>
                 <i className="bi bi-stop-fill me-1"></i>
                 {t('autoStopWorkflow', language)}
               </Button>
             )}
+            {showStopConfirm && (
+              <>
+                <Button size="sm" variant="danger" onClick={handleStopConfirm}>
+                  {t('confirm', language)}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setShowStopConfirm(false)}>
+                  {t('cancel', language)}
+                </Button>
+              </>
+            )}
             {isWaiting && (
-              <Button size="sm" variant="success">
+              <Button size="sm" variant="success" onClick={handleMarkDone}>
                 <i className="bi bi-check-circle me-1"></i>
                 {t('autoCompleteWorkflow', language)}
               </Button>

@@ -18,6 +18,67 @@ logger = logging.getLogger(__name__)
 class AutonomousWorkflowRepository:
     """Repository for autonomous workflow CRUD operations."""
 
+    # Allowed fields for dynamic UPDATE — prevents SQL injection via dict keys
+    ALLOWED_WORKFLOW_FIELDS = {
+        "title",
+        "status",
+        "requirements_text",
+        "requirements_issue_url",
+        "project_path",
+        "project_repo_url",
+        "is_new_project",
+        "cli_tool",
+        "model",
+        "permission_mode",
+        "branch_name",
+        "branch_strategy",
+        "workspace_type",
+        "remote_machine_id",
+        "worktree_path",
+        "github_issue_number",
+        "github_pr_number",
+        "github_pr_url",
+        "current_phase",
+        "current_round",
+        "dev_round",
+        "max_plan_rounds",
+        "max_pr_review_rounds",
+        "total_tokens",
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_requests",
+        "error_message",
+        "updated_at",
+        "completed_at",
+        "paused_at",
+    }
+    ALLOWED_MILESTONE_FIELDS = {
+        "phase",
+        "dev_round",
+        "round_number",
+        "milestone_type",
+        "status",
+        "title",
+        "description",
+        "session_id",
+        "review_session_id",
+        "github_issue_number",
+        "github_pr_number",
+        "github_comment_id",
+        "commit_shas",
+        "diff_stats",
+        "result_summary",
+        "plan_content",
+        "review_content",
+        "error_message",
+        "parent_milestone_id",
+        "fork_branch",
+        "metadata",
+        "started_at",
+        "completed_at",
+        "updated_at",
+    }
+
     def __init__(self, db: Optional[Database] = None):
         self.db = db or Database()
 
@@ -176,9 +237,14 @@ class AutonomousWorkflowRepository:
 
         updates["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+        # Filter to allowed fields only (prevents SQL injection)
+        safe_updates = {k: v for k, v in updates.items() if k in self.ALLOWED_WORKFLOW_FIELDS}
+        if not safe_updates:
+            return self.get_workflow(workflow_id)
+
         set_clauses = []
         params = []
-        for key, value in updates.items():
+        for key, value in safe_updates.items():
             set_clauses.append(f"{key} = ?")
             params.append(value)
 
@@ -212,19 +278,25 @@ class AutonomousWorkflowRepository:
         )
 
     def delete_workflow(self, workflow_id: str) -> None:
-        """Delete a workflow and its milestones/events."""
-        self.db.execute(
-            "DELETE FROM workflow_events WHERE workflow_id = ?",
-            (workflow_id,),
-        )
-        self.db.execute(
-            "DELETE FROM workflow_milestones WHERE workflow_id = ?",
-            (workflow_id,),
-        )
-        self.db.execute(
-            "DELETE FROM autonomous_workflows WHERE workflow_id = ?",
-            (workflow_id,),
-        )
+        """Delete a workflow and its milestones/events in a single transaction."""
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM workflow_events WHERE workflow_id = ?",
+                (workflow_id,),
+            )
+            cursor.execute(
+                "DELETE FROM workflow_milestones WHERE workflow_id = ?",
+                (workflow_id,),
+            )
+            cursor.execute(
+                "DELETE FROM autonomous_workflows WHERE workflow_id = ?",
+                (workflow_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     # ── Milestone CRUD ─────────────────────────────────────────────
 
@@ -363,9 +435,14 @@ class AutonomousWorkflowRepository:
 
         updates["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+        # Filter to allowed fields only (prevents SQL injection)
+        safe_updates = {k: v for k, v in updates.items() if k in self.ALLOWED_MILESTONE_FIELDS}
+        if not safe_updates:
+            return self.get_milestone(milestone_id)
+
         set_clauses = []
         params = []
-        for key, value in updates.items():
+        for key, value in safe_updates.items():
             set_clauses.append(f"{key} = ?")
             params.append(value)
 

@@ -2,7 +2,7 @@
  * useAutonomous Hook - Data fetching hooks for AI autonomous development
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
 import type { CreateWorkflowRequest } from '@/api/autonomous';
@@ -41,9 +41,25 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 
 // ── SSE Event Stream ───────────────────────────────────────────────
 
+/**
+ * Subscribe to SSE events for a workflow.
+ * Uses debounced invalidation (500ms) to avoid flooding queries on rapid events.
+ */
 export function useWorkflowEvents(workflowId: string, enabled = true) {
   const queryClient = useQueryClient();
   const eventSourceRef = useRef<EventSource | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const debouncedInvalidate = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    }, 500);
+  }, [workflowId, queryClient]);
 
   useEffect(() => {
     if (!enabled || !workflowId) return;
@@ -55,10 +71,7 @@ export function useWorkflowEvents(workflowId: string, enabled = true) {
     es.onmessage = (event) => {
       try {
         JSON.parse(event.data); // validate SSE data is JSON
-        // Invalidate queries to trigger refetch with fresh data
-        queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
-        queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
-        queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+        debouncedInvalidate();
       } catch {
         // Ignore parse errors (keepalive messages, etc.)
       }
@@ -72,8 +85,11 @@ export function useWorkflowEvents(workflowId: string, enabled = true) {
     return () => {
       es.close();
       eventSourceRef.current = null;
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
     };
-  }, [workflowId, enabled, queryClient]);
+  }, [workflowId, enabled, debouncedInvalidate]);
 }
 
 // ── Workflow Mutations ──────────────────────────────────────────────

@@ -97,6 +97,7 @@ export interface CreateWorkflowRequest {
   project_path?: string;
   project_repo_url?: string;
   is_new_project?: boolean;
+  is_private?: boolean;
   cli_tool: string;
   model?: string;
   permission_mode?: string;
@@ -169,7 +170,7 @@ export const autonomousApi = {
   async getMilestoneSession(
     workflowId: string,
     milestoneId: string
-  ): Promise<{ success: boolean; session: any }> {
+  ): Promise<{ success: boolean; session: Record<string, unknown> }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/session`);
   },
 
@@ -187,7 +188,7 @@ export const autonomousApi = {
     tool?: string;
     workspace_type?: string;
     machine_id?: string;
-  }): Promise<{ success: boolean; models: any[] }> {
+  }): Promise<{ success: boolean; models: { name: string }[] }> {
     return apiClient.get('/api/autonomous/models', params);
   },
 };

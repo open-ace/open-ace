@@ -2,12 +2,13 @@
 Open ACE - Autonomous Development Scheduler
 
 Background daemon thread that drives autonomous workflows forward.
-Follows the same singleton pattern as DataFetchScheduler and
-QuotaEnforcementScheduler.
+Uses ThreadPoolExecutor for concurrent workflow processing.
+Follows the same singleton pattern as DataFetchScheduler.
 """
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,24 @@ class AutonomousScheduler:
             # Wait 10 seconds between checks (or stop signal)
             self._stop_event.wait(10)
 
-    def _process_workflows(self):
-        """Find and process active workflows."""
+    def _advance_single(self, workflow_id: str) -> str:
+        """Advance a single workflow. Returns workflow_id for tracking."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        try:
+            orchestrator = AutonomousOrchestrator(workflow_id)
+            orchestrator.advance()
+        except Exception as e:
+            logger.error(
+                "Failed to advance workflow %s: %s",
+                workflow_id[:8],
+                e,
+                exc_info=True,
+            )
+        return workflow_id
+
+    def _process_workflows(self):
+        """Find and process active workflows using thread pool for concurrency."""
         from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
         repo = AutonomousWorkflowRepository()
@@ -87,24 +103,22 @@ class AutonomousScheduler:
         if not active:
             return
 
-        # Process workflows up to concurrency limit
-        processed = 0
-        for wf in active:
-            if processed >= MAX_CONCURRENT_WORKFLOWS:
-                break
-
-            workflow_id = wf.get("workflow_id", "")
-            try:
-                orchestrator = AutonomousOrchestrator(workflow_id)
-                orchestrator.advance()
-                processed += 1
-            except Exception as e:
-                logger.error(
-                    "Failed to advance workflow %s: %s",
-                    workflow_id[:8],
-                    e,
-                    exc_info=True,
-                )
+        # Process workflows concurrently up to the limit
+        to_process = active[:MAX_CONCURRENT_WORKFLOWS]
+        with ThreadPoolExecutor(
+            max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
+            thread_name_prefix="auto-wf",
+        ) as executor:
+            futures = {
+                executor.submit(self._advance_single, wf.get("workflow_id", "")): wf
+                for wf in to_process
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    wf = futures[future]
+                    logger.error("Workflow %s future error: %s", wf.get("workflow_id", "")[:8], e)
 
 
 def init_autonomous_scheduler():

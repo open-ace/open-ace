@@ -31,6 +31,12 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
   paused: { variant: 'warning', icon: 'bi-pause-circle', labelKey: 'autoStatusPaused' },
 };
 
+/** Shared active status set — used by both WorkflowList and WorkflowTimeline */
+export const ACTIVE_WORKFLOW_STATUSES = [
+  'pending', 'preparing', 'planning', 'developing',
+  'pr_review', 'reporting', 'waiting', 'merging',
+];
+
 export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   selectedId,
   onSelect,
@@ -52,7 +58,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     return (
       <div className="text-center text-muted p-4">
         <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-        <small>{t('noWorkflows', language)}</small>
+        <small>{t('autoNoWorkflows', language)}</small>
       </div>
     );
   }
@@ -62,7 +68,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       {workflows.map((workflow) => {
         const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
         const isSelected = selectedId === workflow.workflow_id;
-        const isActive = ['pending', 'preparing', 'planning', 'developing', 'pr_review', 'reporting', 'waiting', 'merging'].includes(workflow.status);
+        const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
 
         return (
           <button
@@ -77,7 +83,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   {workflow.title || workflow.requirements_text?.slice(0, 50) || `Workflow ${workflow.workflow_id.slice(0, 8)}`}
                 </div>
                 <div className="d-flex align-items-center gap-1 mt-1">
-                  <Badge variant={statusCfg.variant as any}>
+                  <Badge variant={statusCfg.variant as 'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'}>
                     <i className={`bi ${statusCfg.icon} me-1`}></i>
                     {t(statusCfg.labelKey, language)}
                   </Badge>

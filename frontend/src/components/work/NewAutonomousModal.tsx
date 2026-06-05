@@ -76,6 +76,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       project_path: isNewProject ? undefined : projectPath,
       is_new_project: isNewProject,
       project_repo_url: isNewProject ? repoName : undefined,
+      is_private: isNewProject ? isPrivate : undefined,
       branch_strategy: branchStrategy,
       branch_name: branchName || undefined,
       max_plan_rounds: maxPlanRounds,
@@ -152,7 +153,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               className={`btn btn-outline-primary ${requirementsMode === 'url' ? 'active' : ''}`}
               onClick={() => setRequirementsMode('url')}
             >
-              GitHub Issue
+              {t('autoGithubIssue', language)}
             </button>
           </div>
           {requirementsMode === 'text' ? (
@@ -200,9 +201,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
           <label className="form-label fw-semibold">{t('autoModel', language)}</label>
           <select className="form-select" value={model} onChange={(e) => setModel(e.target.value)}>
             <option value="">{t('autoDefaultModel', language)}</option>
-            {Array.isArray(models) && models.map((m: any) => (
-              <option key={typeof m === 'string' ? m : m.name} value={typeof m === 'string' ? m : m.name}>
-                {typeof m === 'string' ? m : m.name}
+            {Array.isArray(models) && models.map((m: { name: string }) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
               </option>
             ))}
           </select>
