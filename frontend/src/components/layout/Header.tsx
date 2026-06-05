@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import { cn } from '@/utils';
 import { useAuth, useTheme, useLanguage, useGlobalFetch, useAppMode } from '@/hooks';
 import { useAppStore } from '@/store';
-import { t } from '@/i18n';
+import { t, setLanguage as setI18nLanguage } from '@/i18n';
 import { Button, UserSettingsModal, Avatar } from '@/components/common';
 
 interface HeaderProps {
@@ -27,7 +27,13 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   };
 
   const handleLanguageChange = (newLanguage: string) => {
-    useAppStore.getState().setLanguage(newLanguage as 'en' | 'zh' | 'ja' | 'ko');
+    const lang = newLanguage as 'en' | 'zh' | 'ja' | 'ko';
+    // 1. Update Zustand store
+    useAppStore.getState().setLanguage(lang);
+    // 2. Sync i18n module
+    setI18nLanguage(lang);
+    // 3. Sync i18next for Workspace iframe WebUI
+    localStorage.setItem('i18nextLng', lang);
   };
 
   const handleRefresh = async () => {

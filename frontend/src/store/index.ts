@@ -148,7 +148,12 @@ export const useAppStore = create<AppState>()(
         document.documentElement.setAttribute('data-theme', theme);
         document.body.classList.toggle('dark-theme', theme === 'dark');
       },
-      setLanguage: (language) => set({ language }),
+      setLanguage: (language) => {
+        set({ language });
+        // Sync i18n module and i18next library
+        localStorage.setItem('language', language);
+        localStorage.setItem('i18nextLng', language);
+      },
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleMobileSidebar: () => set((state) => ({ sidebarMobileOpen: !state.sidebarMobileOpen })),
