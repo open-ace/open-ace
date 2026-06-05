@@ -11,13 +11,14 @@
  * - Lazy-loaded page components reduce initial bundle size
  */
 
-import React, { useEffect, Suspense, lazy } from 'react';
+import React, { useEffect, Suspense, lazy, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
 import { LoadingOverlay, PageSkeleton } from '@/components/common';
+import { ContextMenuProvider, useContextMenu } from '@/components/common/ContextMenu';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -389,6 +390,40 @@ const AppContent: React.FC = () => {
   );
 };
 
+// Global ContextMenu Handler - intercepts browser's native right-click menu
+const GlobalContextMenuHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { showMenu } = useContextMenu();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Intercept contextmenu event globally
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      // Prevent browser's native context menu
+      e.preventDefault();
+      // Show custom context menu at click position
+      showMenu(e.clientX, e.clientY, e.target as HTMLElement);
+    };
+
+    // Add event listener to the container
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('contextmenu', handleContextMenu);
+    }
+
+    return () => {
+      if (container) {
+        container.removeEventListener('contextmenu', handleContextMenu);
+      }
+    };
+  }, [showMenu]);
+
+  return (
+    <div ref={containerRef} className="app-container" style={{ width: '100%', height: '100%' }}>
+      {children}
+    </div>
+  );
+};
+
 export const App: React.FC = () => {
   const theme = useTheme();
 
@@ -400,21 +435,25 @@ export const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/logout" element={<LogoutSuccess />} />
+      <ContextMenuProvider>
+        <GlobalContextMenuHandler>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/logout" element={<LogoutSuccess />} />
 
-        {/* Protected routes */}
-        <Route
-          path="/*"
-          element={
-            <ProtectedRoute>
-              <AppContent />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+            {/* Protected routes */}
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <AppContent />
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </GlobalContextMenuHandler>
+      </ContextMenuProvider>
     </QueryClientProvider>
   );
 };
