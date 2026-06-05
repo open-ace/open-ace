@@ -67,17 +67,9 @@ describe('i18n', () => {
       expect(getLanguage()).toBe('zh');
     });
 
-    it('should use browser language if no saved language', () => {
+    it('should default to English if no saved language (browser language not auto-detected)', () => {
+      // PR #710: Removed browser language auto-detection to avoid conflict with user settings
       vi.stubGlobal('navigator', { language: 'ja-JP' });
-      vi.mocked(localStorage.getItem).mockReturnValue(null);
-
-      initLanguage();
-
-      expect(getLanguage()).toBe('ja');
-    });
-
-    it('should fallback to English for unsupported languages', () => {
-      vi.stubGlobal('navigator', { language: 'fr-FR' });
       vi.mocked(localStorage.getItem).mockReturnValue(null);
 
       initLanguage();

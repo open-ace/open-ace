@@ -2853,12 +2853,11 @@ export function t(key: string, language?: Language): string {
 
 export function initLanguage(): void {
   const savedLanguage = localStorage.getItem('language') as Language | null;
-  const browserLanguage = navigator.language.split('-')[0] as Language;
 
+  // Priority: saved language > default English
+  // Do NOT auto-detect browser language to avoid conflict with user settings
   if (savedLanguage && translations[savedLanguage]) {
     currentLanguage = savedLanguage;
-  } else if (translations[browserLanguage]) {
-    currentLanguage = browserLanguage;
   } else {
     currentLanguage = 'en';
   }
