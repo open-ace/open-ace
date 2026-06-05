@@ -47,7 +47,6 @@ const translations: Record<Language, Translations> = {
     // Context Menu (Issue #643)
     openInNewTab: 'Open in New Tab',
     copyLink: 'Copy Link',
-    splitScreenOpen: 'Split Screen Open',
     copySelectedText: 'Copy Selected Text',
 
     // Navigation
@@ -918,7 +917,6 @@ const translations: Record<Language, Translations> = {
     // Context Menu (Issue #643)
     openInNewTab: '新标签页打开',
     copyLink: '复制链接',
-    splitScreenOpen: '分屏打开',
     copySelectedText: '复制选中文本',
 
     // Navigation
@@ -1774,7 +1772,6 @@ const translations: Record<Language, Translations> = {
     // Context Menu (Issue #643)
     openInNewTab: '新規タブで開く',
     copyLink: 'リンクをコピー',
-    splitScreenOpen: '分割画面で開く',
     copySelectedText: '選択テキストをコピー',
 
     // Navigation
@@ -2334,7 +2331,6 @@ const translations: Record<Language, Translations> = {
     // Context Menu (Issue #643)
     openInNewTab: '새 탭에서 열기',
     copyLink: '링크 복사',
-    splitScreenOpen: '분할 화면 열기',
     copySelectedText: '선택한 텍스트 복사',
 
     // Navigation

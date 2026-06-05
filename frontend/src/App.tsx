@@ -18,7 +18,7 @@ import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
 import { LoadingOverlay, PageSkeleton } from '@/components/common';
-import { ContextMenuProvider, useContextMenu } from '@/components/common/ContextMenu';
+import { ContextMenuProvider, useContextMenu, shouldUseNativeMenu } from '@/components/common/ContextMenu';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -402,8 +402,7 @@ const GlobalContextMenuHandler: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Allow native context menu for input fields and editable elements
       // (for spell check, undo, cut, copy, paste, etc.)
-      const tagName = target.tagName.toLowerCase();
-      if (tagName === 'input' || tagName === 'textarea' || target.isContentEditable) {
+      if (shouldUseNativeMenu(target)) {
         return; // Don't prevent, allow native menu
       }
 

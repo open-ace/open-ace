@@ -11,12 +11,14 @@
  * - Keyboard navigation (Arrow keys + Enter)
  * - Clipboard API error handling with fallback
  * - Input/Textarea whitelist for native menu
+ * - Toast feedback for copy operations
  */
 
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { cn } from '@/utils';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
+import { useToast } from './Toast';
 
 // Context menu state
 interface ContextMenuState {
@@ -32,6 +34,10 @@ interface ContextMenuContextType {
   state: ContextMenuState;
   showMenu: (x: number, y: number, target: HTMLElement) => void;
   hideMenu: () => void;
+  showToast: {
+    success: (title: string, message?: string) => void;
+    error: (title: string, message?: string) => void;
+  };
 }
 
 const ContextMenuContext = createContext<ContextMenuContextType | null>(null);
@@ -146,6 +152,8 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
     selectedText: null,
   });
 
+  const { success, error, ToastContainer } = useToast();
+
   const showMenu = useCallback((x: number, y: number, target: HTMLElement) => {
     // Detect context
     const linkUrl = target.closest('a')?.href || null;
@@ -165,10 +173,13 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setState((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
+  const showToast = { success, error };
+
   return (
-    <ContextMenuContext.Provider value={{ state, showMenu, hideMenu }}>
+    <ContextMenuContext.Provider value={{ state, showMenu, hideMenu, showToast }}>
       {children}
       <ContextMenuMenu />
+      <ToastContainer />
     </ContextMenuContext.Provider>
   );
 };
@@ -178,7 +189,7 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
  * Supports keyboard navigation (Arrow keys + Enter + Escape)
  */
 const ContextMenuMenu: React.FC = () => {
-  const { state, hideMenu } = useContextMenu();
+  const { state, hideMenu, showToast } = useContextMenu();
   const menuRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const language = useAppStore((state) => state.language);
@@ -286,7 +297,12 @@ const ContextMenuMenu: React.FC = () => {
       visible: !!state.linkUrl,
       onClick: async () => {
         if (state.linkUrl) {
-          await copyToClipboard(state.linkUrl);
+          const success = await copyToClipboard(state.linkUrl);
+          if (success) {
+            showToast.success(t('copySuccess', language));
+          } else {
+            showToast.error(t('copyFailed', language));
+          }
         }
         hideMenu();
       },
@@ -305,7 +321,12 @@ const ContextMenuMenu: React.FC = () => {
       visible: !!state.selectedText,
       onClick: async () => {
         if (state.selectedText) {
-          await copyToClipboard(state.selectedText);
+          const success = await copyToClipboard(state.selectedText);
+          if (success) {
+            showToast.success(t('copySuccess', language));
+          } else {
+            showToast.error(t('copyFailed', language));
+          }
         }
         hideMenu();
       },
