@@ -170,7 +170,12 @@ export const Prompts: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  // Don't block UI with Loading on initial load - only show loading indicator
+  // when there's no data yet. This prevents focus loss when search changes.
+  // Note: isLoading is true only on initial fetch; isFetching is true on any fetch.
+  // Using (isLoading && templates.length === 0) allows us to keep the UI stable
+  // during search/filter changes while still showing loading for initial page load.
+  if (isLoading && templates.length === 0) {
     return <Loading size="lg" text={t('loading', language)} />;
   }
 
