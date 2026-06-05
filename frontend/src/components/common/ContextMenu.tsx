@@ -156,8 +156,8 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const showMenu = useCallback((x: number, y: number, target: HTMLElement) => {
     // Detect context
-    const linkUrl = target.closest('a')?.href || null;
-    const selectedText = window.getSelection()?.toString() || null;
+    const linkUrl = target.closest('a')?.href ?? null;
+    const selectedText = window.getSelection()?.toString() ?? null;
 
     setState({
       isOpen: true,

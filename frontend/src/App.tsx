@@ -18,7 +18,11 @@ import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
 import { LoadingOverlay, PageSkeleton } from '@/components/common';
-import { ContextMenuProvider, useContextMenu, shouldUseNativeMenu } from '@/components/common/ContextMenu';
+import {
+  ContextMenuProvider,
+  useContextMenu,
+  shouldUseNativeMenu,
+} from '@/components/common/ContextMenu';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
