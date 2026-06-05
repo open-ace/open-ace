@@ -577,13 +577,6 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round} completed",
         )
 
-        # Push branch to remote so PR can be created
-        branch_name = wf.get("branch_name", "")
-        try:
-            gh.git_push(branch=branch_name)
-        except Exception as e:
-            logger.warning("Failed to push branch %s: %s", branch_name, e)
-
         # Move to PR review
         self._update_workflow(
             {
@@ -604,6 +597,12 @@ class AutonomousOrchestrator:
         dev_round = wf.get("dev_round", 1)
         branch_name = wf.get("branch_name", "")
         gh = self._get_gh()
+
+        # Ensure branch is pushed to remote before PR creation
+        try:
+            gh.git_push(branch=branch_name)
+        except Exception as e:
+            logger.warning("Failed to push branch %s: %s", branch_name, e)
 
         # Create PR on first round
         if round_num == 1:
