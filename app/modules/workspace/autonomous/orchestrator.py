@@ -1027,10 +1027,26 @@ class AutonomousOrchestrator:
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
         """Resolve merge conflicts locally, push, and merge the PR."""
+        # Remove worktree if it's blocking checkout (must do before any git ops
+        # on the main repo, since removing worktree deletes its directory)
+        wf = self.workflow
+        worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
+        if worktree_path:
+            try:
+                # Use a separate GitHubOps for the main repo to remove worktree
+                main_gh = GitHubOps(project_path)
+                main_gh.remove_worktree(worktree_path)
+            except Exception:
+                pass
+            self._update_workflow({"worktree_path": ""})
+            # Reinitialize gh to point at project_path (worktree dir is gone)
+            self._gh = GitHubOps(project_path)
+            gh = self._gh
+
         # Clean up any leftover git state (conflicts, uncommitted changes)
         gh._run_git(["reset", "--hard", "HEAD"])
         gh._run_git(["clean", "-fd"])
-
         # Fetch latest main and checkout our branch
         gh._run_git(["fetch", "origin", "main"])
         gh._run_git(["checkout", branch_name])
