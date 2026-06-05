@@ -882,8 +882,8 @@ const translations: Record<Language, Translations> = {
     folderName: 'Folder name',
     createDirError: 'Failed to create directory.',
 
-    // Autonomous Development
-    autonomousDev: 'Autonomous Dev',
+    // AI Autonomous Development
+    autonomousDev: 'AI Autonomous Dev',
     autonomousDevEmpty: 'Create an autonomous development task to let AI develop independently.',
     autoNewTask: 'New Task',
     autoCreateFirstTask: 'Create First Task',
@@ -1808,8 +1808,8 @@ const translations: Record<Language, Translations> = {
     folderName: '文件夹名称',
     createDirError: '创建目录失败。',
 
-    // 自主开发
-    autonomousDev: '自主开发',
+    // AI自主开发
+    autonomousDev: 'AI自主开发',
     autonomousDevEmpty: '创建自主开发任务，让 AI 独立完成开发工作。',
     autoNewTask: '新建任务',
     autoCreateFirstTask: '创建首个任务',
@@ -2438,8 +2438,8 @@ const translations: Record<Language, Translations> = {
     folderName: 'フォルダ名',
     createDirError: 'ディレクトリの作成に失敗しました。',
 
-    // 自律開発
-    autonomousDev: '自律開発',
+    // AI自律開発
+    autonomousDev: 'AI自律開発',
     autonomousDevEmpty: '自律開発タスクを作成して、AIが独立して開発します。',
     autoNewTask: '新規タスク',
     autoCreateFirstTask: '最初のタスクを作成',
@@ -3066,8 +3066,8 @@ const translations: Record<Language, Translations> = {
     folderName: '폴더 이름',
     createDirError: '디렉토리 생성에 실패했습니다.',
 
-    // 자율 개발
-    autonomousDev: '자율 개발',
+    // AI 자율 개발
+    autonomousDev: 'AI 자율 개발',
     autonomousDevEmpty: '자율 개발 작업을 생성하여 AI가 독립적으로 개발합니다.',
     autoNewTask: '새 작업',
     autoCreateFirstTask: '첫 작업 생성',
