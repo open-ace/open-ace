@@ -26,8 +26,8 @@ class AutonomousScheduler:
     def __init__(self):
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._execution_lock = threading.Lock()
-        self._active_count = 0
+        self._in_progress_ids: set[str] = set()
+        self._in_progress_lock = threading.Lock()
 
     @classmethod
     def instance(cls) -> "AutonomousScheduler":
@@ -83,6 +83,9 @@ class AutonomousScheduler:
                 e,
                 exc_info=True,
             )
+        finally:
+            with self._in_progress_lock:
+                self._in_progress_ids.discard(workflow_id)
         return workflow_id
 
     def _process_workflows(self):
@@ -97,14 +100,31 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
-        # Filter out paused workflows
-        active = [wf for wf in workflows if wf.get("status") != "paused"]
+        # Filter out paused and already-in-progress workflows
+        with self._in_progress_lock:
+            active = [
+                wf
+                for wf in workflows
+                if wf.get("status") != "paused"
+                and wf.get("workflow_id", "") not in self._in_progress_ids
+            ]
 
         if not active:
             return
 
-        # Process workflows concurrently up to the limit
-        to_process = active[:MAX_CONCURRENT_WORKFLOWS]
+        # Limit to concurrency cap, accounting for already-running workflows
+        with self._in_progress_lock:
+            slots_available = MAX_CONCURRENT_WORKFLOWS - len(self._in_progress_ids)
+        to_process = active[: max(0, slots_available)]
+
+        if not to_process:
+            return
+
+        # Mark as in-progress and submit
+        with self._in_progress_lock:
+            for wf in to_process:
+                self._in_progress_ids.add(wf.get("workflow_id", ""))
+
         with ThreadPoolExecutor(
             max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
             thread_name_prefix="auto-wf",
@@ -118,7 +138,11 @@ class AutonomousScheduler:
                     future.result()
                 except Exception as e:
                     wf = futures[future]
-                    logger.error("Workflow %s future error: %s", wf.get("workflow_id", "")[:8], e)
+                    logger.error(
+                        "Workflow %s future error: %s",
+                        wf.get("workflow_id", "")[:8],
+                        e,
+                    )
 
 
 def init_autonomous_scheduler():

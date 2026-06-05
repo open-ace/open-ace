@@ -27,6 +27,7 @@ class AutonomousWorkflowRepository:
         "project_path",
         "project_repo_url",
         "is_new_project",
+        "is_private",
         "cli_tool",
         "model",
         "permission_mode",
@@ -95,12 +96,12 @@ class AutonomousWorkflowRepository:
                 INSERT INTO autonomous_workflows
                     (workflow_id, user_id, title, status, requirements_text,
                      requirements_issue_url, project_path, project_repo_url,
-                     is_new_project, cli_tool, model, permission_mode,
+                     is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -113,6 +114,7 @@ class AutonomousWorkflowRepository:
                     data.get("project_path", ""),
                     data.get("project_repo_url", ""),
                     data.get("is_new_project", False),
+                    data.get("is_private", True),
                     data.get("cli_tool", ""),
                     data.get("model", ""),
                     data.get("permission_mode", "auto-edit"),
@@ -136,12 +138,12 @@ class AutonomousWorkflowRepository:
                 INSERT INTO autonomous_workflows
                     (workflow_id, user_id, title, status, requirements_text,
                      requirements_issue_url, project_path, project_repo_url,
-                     is_new_project, cli_tool, model, permission_mode,
+                     is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -153,6 +155,7 @@ class AutonomousWorkflowRepository:
                     data.get("project_path", ""),
                     data.get("project_repo_url", ""),
                     data.get("is_new_project", False),
+                    data.get("is_private", True),
                     data.get("cli_tool", ""),
                     data.get("model", ""),
                     data.get("permission_mode", "auto-edit"),

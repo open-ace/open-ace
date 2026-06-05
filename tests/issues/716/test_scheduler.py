@@ -21,7 +21,8 @@ class TestSchedulerSingleton:
         s = AutonomousScheduler.instance()
         assert s is not None
         assert s._thread is None
-        assert s._active_count == 0
+        assert isinstance(s._in_progress_ids, set)
+        assert len(s._in_progress_ids) == 0
 
 
 class TestSchedulerStartStop:
@@ -38,15 +39,13 @@ class TestSchedulerStartStop:
 
     def test_start_creates_daemon_thread(self):
         scheduler = AutonomousScheduler()
-        # Mock _run_loop to avoid actual loop
-        with patch.object(scheduler, "_run_loop"):
-            scheduler.start()
-            try:
-                assert scheduler._thread is not None
-                assert scheduler._thread.daemon is True
-                assert scheduler._thread.name == "autonomous-scheduler"
-            finally:
-                scheduler.stop()
+        # Patch _process_workflows so _run_loop exits immediately after one iteration
+        scheduler._stop_event.set()
+        scheduler.start()
+        scheduler._thread.join(timeout=5)
+        assert scheduler._thread is not None
+        assert scheduler._thread.daemon is True
+        assert scheduler._thread.name == "autonomous-scheduler"
 
     def test_start_skips_if_already_alive(self):
         scheduler = AutonomousScheduler()
@@ -182,3 +181,31 @@ class TestSchedulerProcessWorkflows:
                 scheduler._process_workflows()
                 # Both should be attempted
                 assert mock_orch.advance.call_count == 2
+
+    def test_in_progress_ids_prevent_duplicate(self):
+        """Workflows already in progress should not be picked up again."""
+        scheduler = AutonomousScheduler()
+
+        mock_repo = MagicMock()
+        mock_repo.get_active_workflows.return_value = [
+            {"workflow_id": "wf-1", "status": "pending"},
+            {"workflow_id": "wf-2", "status": "planning"},
+        ]
+
+        # Mark wf-1 as already in progress
+        scheduler._in_progress_ids.add("wf-1")
+
+        with patch(
+            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            return_value=mock_repo,
+        ):
+            with patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls:
+                mock_orch = MagicMock()
+                mock_orch_cls.return_value = mock_orch
+
+                scheduler._process_workflows()
+
+                # Only wf-2 should be processed (wf-1 is in progress)
+                assert mock_orch.advance.call_count == 1

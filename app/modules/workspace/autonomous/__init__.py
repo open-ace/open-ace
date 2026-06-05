@@ -38,6 +38,7 @@ def get_ddl_statements():
             project_path TEXT DEFAULT '',
             project_repo_url TEXT DEFAULT '',
             is_new_project INTEGER DEFAULT 0,
+            is_private INTEGER DEFAULT 1,
             cli_tool TEXT DEFAULT '',
             model TEXT DEFAULT '',
             permission_mode TEXT DEFAULT 'auto-edit',

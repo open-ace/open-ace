@@ -56,6 +56,7 @@ def create_workflow():
         "project_path": data.get("project_path", ""),
         "project_repo_url": data.get("project_repo_url", ""),
         "is_new_project": data.get("is_new_project", False),
+        "is_private": data.get("is_private", True),
         "cli_tool": data.get("cli_tool", ""),
         "model": data.get("model", ""),
         "permission_mode": data.get("permission_mode", "auto-edit"),
@@ -421,9 +422,11 @@ def stream_workflow_events(workflow_id):
             while True:
                 try:
                     event_data = q.get(timeout=30)
+                    emitter.mark_read(workflow_id, q)
                     yield f"data: {json.dumps(event_data)}\n\n"
                 except queue.Empty:
-                    # Send keepalive
+                    # Send keepalive and refresh TTL
+                    emitter.mark_read(workflow_id, q)
                     yield ": keepalive\n\n"
         except GeneratorExit:
             emitter.unsubscribe(workflow_id, q)

@@ -151,7 +151,7 @@ class AutonomousOrchestrator:
                 gh = GitHubOps(project_path or ".")
                 repo_data = gh.create_repo(
                     name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
-                    private=True,
+                    private=wf.get("is_private", True),
                     description=wf.get("title", ""),
                 )
                 repo_url = repo_data.get("url", "")
@@ -293,11 +293,8 @@ class AutonomousOrchestrator:
         if round_num > 1:
             milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
             for ms in milestones:
-                if (
-                    ms.get("milestone_type") == "plan_refined"
-                    and ms.get("plan_content")
-                    or ms.get("milestone_type") == "plan_created"
-                    and ms.get("plan_content")
+                if ms.get("milestone_type") in ("plan_refined", "plan_created") and ms.get(
+                    "plan_content"
                 ):
                     existing_plan = ms["plan_content"]
 
