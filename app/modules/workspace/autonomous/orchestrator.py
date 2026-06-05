@@ -964,9 +964,10 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up."""
+        """Merge PR and clean up. Resolves merge conflicts automatically."""
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
+        branch_name = wf.get("branch_name", "")
 
         if pr_number:
             try:
@@ -977,15 +978,20 @@ class AutonomousOrchestrator:
                     status="completed",
                     title=f"PR #{pr_number} merged",
                 )
-            except GitHubOpsError as e:
-                self._create_milestone(
-                    phase="merge",
-                    milestone_type="merged",
-                    status="failed",
-                    title="PR merge failed",
-                    error_message=str(e),
-                )
-                raise
+            except GitHubOpsError:
+                # Merge conflict — resolve locally and retry
+                logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+                try:
+                    self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                except Exception as e:
+                    self._create_milestone(
+                        phase="merge",
+                        milestone_type="merged",
+                        status="failed",
+                        title="PR merge failed",
+                        error_message=f"Merge conflict resolution failed: {e}",
+                    )
+                    raise
 
         # Clean up branch/worktree
         branch_name = wf.get("branch_name", "")
@@ -1012,3 +1018,51 @@ class AutonomousOrchestrator:
             }
         )
         self._emit("phase_change", {"phase": "completed"})
+
+    def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
+        """Resolve merge conflicts locally, push, and merge the PR."""
+        # Fetch latest main and merge into our branch
+        gh._run_git(["fetch", "origin", "main"])
+        gh._run_git(["checkout", branch_name])
+        try:
+            gh._run_git(["merge", "origin/main"])
+        except GitHubOpsError:
+            # There are conflicts — use AI agent to resolve them
+            gh._run_git(["merge", "--abort"])  # Clean state first
+            gh._run_git(["merge", "origin/main"], check=False)
+
+            # Ask AI agent to resolve conflicts
+            conflict_prompt = (
+                "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
+                "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
+                "步骤：\n"
+                "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
+                "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
+                "3. git add 所有解决后的文件\n"
+                "4. git commit 完成合并"
+            )
+
+            wf = self.workflow
+            result = self._runner.run_agent_task(
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=conflict_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+            )
+
+            if not result.success:
+                raise RuntimeError(f"Conflict resolution failed: {result.error}")
+
+        # Push the merged branch and retry PR merge
+        gh.git_push(branch=branch_name)
+        gh.merge_pr(pr_number, strategy="merge")
+
+        self._create_milestone(
+            phase="merge",
+            milestone_type="merged",
+            status="completed",
+            title=f"PR #{pr_number} merged (conflicts resolved)",
+        )
