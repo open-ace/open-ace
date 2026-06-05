@@ -582,6 +582,12 @@ class AutonomousOrchestrator:
             },
         )
 
+        if not test_result.success:
+            self._update_workflow(
+                {"status": "failed", "error_message": f"Tests failed: {test_result.error}"}
+            )
+            return
+
         # Dev completed milestone
         self._create_milestone(
             phase="development",

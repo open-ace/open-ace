@@ -57,6 +57,7 @@ def upgrade() -> None:
         sa.Column("project_path", sa.Text, server_default=""),
         sa.Column("project_repo_url", sa.Text, server_default=""),
         sa.Column("is_new_project", sa.Boolean, server_default=sa.text("0")),
+        sa.Column("is_private", sa.Boolean, server_default=sa.text("1")),
         sa.Column("cli_tool", sa.Text, server_default=""),
         sa.Column("model", sa.Text, server_default=""),
         sa.Column("permission_mode", sa.Text, server_default="auto-edit"),

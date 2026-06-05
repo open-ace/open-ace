@@ -115,7 +115,10 @@ class GitHubOps:
         # gh issue create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         issue_url = output.split("\n")[-1].strip()
-        issue_number = int(issue_url.rstrip("/").split("/")[-1])
+        try:
+            issue_number = int(issue_url.rstrip("/").split("/")[-1])
+        except (ValueError, IndexError):
+            raise GitHubOpsError(f"Failed to parse issue number from output: {output}")
         logger.info("Created issue #%s", issue_number)
         return {"number": issue_number, "url": issue_url}
 

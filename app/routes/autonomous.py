@@ -20,6 +20,17 @@ autonomous_bp = Blueprint("autonomous", __name__)
 
 auto_repo = AutonomousWorkflowRepository()
 
+# Shared mapping from workflow phase to active status
+PHASE_TO_STATUS = {
+    "preparation": "preparing",
+    "planning": "planning",
+    "development": "developing",
+    "pr_review": "pr_review",
+    "report": "reporting",
+    "wait": "waiting",
+    "merge": "merging",
+}
+
 
 def _get_event_emitter():
     """Get or lazily create the event emitter singleton."""
@@ -192,18 +203,8 @@ def resume_workflow(workflow_id):
     if workflow.get("status") != "paused":
         return jsonify({"error": "Workflow is not paused"}), 400
 
-    # Determine the previous active status from the current_phase
-    phase_to_status = {
-        "preparation": "preparing",
-        "planning": "planning",
-        "development": "developing",
-        "pr_review": "pr_review",
-        "report": "reporting",
-        "wait": "waiting",
-        "merge": "merging",
-    }
     phase = workflow.get("current_phase", "preparation")
-    status = phase_to_status.get(phase, "pending")
+    status = PHASE_TO_STATUS.get(phase, "pending")
 
     auto_repo.update_workflow(
         workflow_id,
@@ -254,18 +255,8 @@ def retry_workflow(workflow_id):
     if workflow.get("status") != "failed":
         return jsonify({"error": "Only failed workflows can be retried"}), 400
 
-    # Map current_phase back to active status (same mapping as resume_workflow)
-    phase_to_status = {
-        "preparation": "preparing",
-        "planning": "planning",
-        "development": "developing",
-        "pr_review": "pr_review",
-        "report": "reporting",
-        "wait": "waiting",
-        "merge": "merging",
-    }
     phase = workflow.get("current_phase", "preparation")
-    status = phase_to_status.get(phase, "pending")
+    status = PHASE_TO_STATUS.get(phase, "pending")
 
     auto_repo.update_workflow(
         workflow_id,
