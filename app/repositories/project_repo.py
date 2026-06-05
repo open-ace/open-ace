@@ -35,7 +35,11 @@ class ProjectRepository:
         is_shared: bool = False,
     ) -> Optional[int]:
         """
-        Create a new project.
+        Create a new project or restore a soft-deleted one.
+
+        If a soft-deleted project with the same path exists, it will be restored
+        instead of creating a new one. This fixes Issue #119 where soft-deleted
+        projects blocked creating new projects with the same path.
 
         Args:
             path: Project absolute path.
@@ -50,6 +54,41 @@ class ProjectRepository:
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
 
+            # Check if a soft-deleted project with the same path exists
+            soft_deleted = self.db.fetch_one(
+                "SELECT id FROM projects WHERE path = ? AND is_active IS FALSE",
+                (path,),
+            )
+
+            if soft_deleted:
+                # Restore the soft-deleted project
+                project_id = soft_deleted["id"]
+                if self.db.is_postgresql:
+                    self.db.execute(
+                        """
+                        UPDATE projects SET
+                            name = ?, description = ?, created_by = ?, is_shared = ?,
+                            is_active = TRUE, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (name, description, created_by, is_shared, now, project_id),
+                    )
+                else:
+                    is_shared_int = adapt_boolean_value(is_shared)
+                    is_active_int = adapt_boolean_value(True)
+                    self.db.execute(
+                        """
+                        UPDATE projects SET
+                            name = ?, description = ?, created_by = ?, is_shared = ?,
+                            is_active = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (name, description, created_by, is_shared_int, is_active_int, now, project_id),
+                    )
+                logger.info(f"Restored soft-deleted project {project_id} with path {path}")
+                return project_id
+
+            # No soft-deleted project found, create a new one
             if self.db.is_postgresql:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(

@@ -25,6 +25,8 @@ class TestProjectRepository:
     # -------------------------------------------------------------------------
 
     def test_create_project_sqlite(self):
+        # First fetch_one checks for soft-deleted project (returns None)
+        self.db.fetch_one.return_value = None
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 1
         self.db.execute.return_value = mock_cursor
@@ -42,6 +44,8 @@ class TestProjectRepository:
 
     def test_create_project_sqlite_auto_adds_user_project(self):
         """When created_by is specified, add_user_project should be called."""
+        # First fetch_one checks for soft-deleted project (returns None)
+        self.db.fetch_one.return_value = None
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 10
         self.db.execute.return_value = mock_cursor
@@ -53,6 +57,8 @@ class TestProjectRepository:
 
     def test_create_project_no_creator(self):
         """Without created_by, add_user_project should NOT be called."""
+        # First fetch_one checks for soft-deleted project (returns None)
+        self.db.fetch_one.return_value = None
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 2
         self.db.execute.return_value = mock_cursor
@@ -64,14 +70,18 @@ class TestProjectRepository:
 
     def test_create_project_postgresql(self):
         self.db.is_postgresql = True
-        self.db.fetch_one.return_value = {"id": 3}
+        # First fetch_one checks for soft-deleted project (returns None)
+        # Second fetch_one returns the new project ID
+        self.db.fetch_one.side_effect = [None, {"id": 3}]
 
         with patch.object(self.repo, "add_user_project", return_value=1):
             result = self.repo.create_project(path="/test/pg", name="PG", created_by=1)
         assert result == 3
-        self.db.fetch_one.assert_called_once()
-        call_query = self.db.fetch_one.call_args[0][0]
-        assert "RETURNING id" in call_query
+        # fetch_one called twice: check soft-deleted, then insert with RETURNING
+        assert self.db.fetch_one.call_count == 2
+        # Check that second call has RETURNING id
+        second_call_query = self.db.fetch_one.call_args_list[1][0][0]
+        assert "RETURNING id" in second_call_query
 
     def test_create_project_exception(self):
         self.db.execute.side_effect = Exception("DB error")

@@ -166,6 +166,55 @@ class TestProjectCRUD:
         up = tmp_db.fetch_one("SELECT * FROM user_projects WHERE project_id = ?", (project_id,))
         assert up is None
 
+    def test_recreate_soft_deleted_project(self, tmp_db):
+        """Test recreating a project after soft delete (Issue #119 fix)."""
+        repo = ProjectRepository(db=tmp_db)
+        user_id = _insert_user(tmp_db)
+
+        # Create a project
+        original_path = "/projects/recreate-test"
+        project_id = repo.create_project(
+            path=original_path,
+            name="Original Project",
+            description="Original description",
+            created_by=user_id,
+            is_shared=True,
+        )
+        assert project_id is not None
+
+        # Soft delete the project
+        result = repo.delete_project(project_id, soft_delete=True)
+        assert result is True
+
+        # Verify project is no longer visible
+        assert repo.get_project_by_path(original_path) is None
+
+        # Recreate project with same path - should restore soft-deleted project
+        new_project_id = repo.create_project(
+            path=original_path,
+            name="New Project",
+            description="New description",
+            created_by=user_id,
+            is_shared=False,
+        )
+
+        # Should return the same project ID (restored)
+        assert new_project_id == project_id
+
+        # Project should now be visible again
+        restored_project = repo.get_project_by_id(new_project_id)
+        assert restored_project is not None
+        assert restored_project.path == original_path
+        assert restored_project.name == "New Project"
+        assert restored_project.description == "New description"
+        # SQLite uses 1/0 for boolean, PostgreSQL uses True/False
+        assert restored_project.is_active in (True, 1)
+        assert restored_project.is_shared in (False, 0)
+
+        # Verify there's only one record in database for this path
+        all_rows = tmp_db.fetch_all("SELECT * FROM projects WHERE path = ?", (original_path,))
+        assert len(all_rows) == 1
+
 
 class TestUserProject:
     """Tests for user-project relationship operations."""
