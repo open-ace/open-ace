@@ -76,7 +76,7 @@ class GitHubOps:
 
     def create_repo(self, name: str, private: bool = True, description: str = "") -> dict:
         """Create a new GitHub repository."""
-        args = ["repo", "create", name, "--json", "url,name,owner"]
+        args = ["repo", "create", name]
         if private:
             args.append("--private")
         else:
@@ -85,9 +85,11 @@ class GitHubOps:
             args.extend(["--description", description])
 
         result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
-        logger.info("Created repo: %s", data.get("name", name))
-        return data
+        # gh repo create doesn't support --json; parse URL from stdout
+        output = result.stdout.strip()
+        repo_url = output.split("\n")[-1].strip()
+        logger.info("Created repo: %s", name)
+        return {"name": name, "url": repo_url}
 
     def get_repo_url(self) -> str:
         """Get the remote origin URL of the current repo."""
@@ -104,15 +106,18 @@ class GitHubOps:
 
     def create_issue(self, title: str, body: str = "", labels: Optional[list[str]] = None) -> dict:
         """Create a GitHub issue."""
-        args = ["issue", "create", "--title", title, "--body", body or "", "--json", "number,url"]
+        args = ["issue", "create", "--title", title, "--body", body or ""]
         if labels:
             for label in labels:
                 args.extend(["--label", label])
 
         result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
-        logger.info("Created issue #%s", data.get("number"))
-        return data
+        # gh issue create doesn't support --json; parse URL from stdout
+        output = result.stdout.strip()
+        issue_url = output.split("\n")[-1].strip()
+        issue_number = int(issue_url.rstrip("/").split("/")[-1])
+        logger.info("Created issue #%s", issue_number)
+        return {"number": issue_number, "url": issue_url}
 
     def get_issue(self, number: int) -> dict:
         """Get issue details."""
@@ -123,10 +128,9 @@ class GitHubOps:
 
     def add_issue_comment(self, number: int, body: str) -> dict:
         """Add a comment to an issue."""
-        result = self._run_gh(["issue", "comment", str(number), "--body", body, "--json", "id,url"])
-        data = json.loads(result.stdout.strip())
+        self._run_gh(["issue", "comment", str(number), "--body", body])
         logger.info("Added comment to issue #%s", number)
-        return data
+        return {"number": number}
 
     def list_issue_comments(self, number: int, since: Optional[str] = None) -> list:
         """List comments on an issue, optionally since a timestamp."""
@@ -142,13 +146,14 @@ class GitHubOps:
         self, number: int, title: Optional[str] = None, body: Optional[str] = None
     ) -> dict:
         """Update an issue's title or body."""
-        args = ["issue", "edit", str(number), "--json", "number,url"]
+        args = ["issue", "edit", str(number)]
         if title:
             args.extend(["--title", title])
         if body:
             args.extend(["--body", body])
-        result = self._run_gh(args)
-        return json.loads(result.stdout.strip())
+        self._run_gh(args)
+        logger.info("Updated issue #%s", number)
+        return {"number": number}
 
     # ── Branch Operations ───────────────────────────────────────────
 
