@@ -3245,3 +3245,97 @@ link[rel='dns-prefetch'] {
     display: none;
   }
 }
+
+/* ===== Context Menu Styles (Issue #643) ===== */
+.context-menu {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  box-shadow: var(--shadow-lg);
+  min-width: 180px;
+  padding: 0.5rem 0;
+}
+
+.context-menu-divider {
+  margin: 0.5rem 0;
+  border: none;
+  border-top: 1px solid var(--border-color-light);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.context-menu-item:hover:not(.disabled) {
+  background: var(--bg-tertiary);
+}
+
+.context-menu-item.disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.context-menu-item.text-danger {
+  color: var(--color-danger);
+}
+
+.context-menu-item.text-danger:hover:not(.disabled) {
+  background: var(--color-danger-light, rgba(239, 68, 68, 0.1));
+}
+
+.context-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  margin-right: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.context-menu-item:hover:not(.disabled) .context-menu-icon {
+  color: var(--color-primary);
+}
+
+.context-menu-label {
+  flex: 1;
+  text-align: left;
+}
+
+/* Dark theme context menu */
+[data-theme='dark'] .context-menu {
+  background: var(--bg-elevated);
+  border-color: var(--border-color-dark);
+}
+
+[data-theme='dark'] .context-menu-divider {
+  border-top-color: var(--border-color);
+}
+
+[data-theme='dark'] .context-menu-item:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .context-menu-item.text-danger:hover:not(.disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* Keyboard navigation focus state */
+.context-menu-item.focused {
+  background: var(--bg-tertiary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+[data-theme='dark'] .context-menu-item.focused {
+  background: rgba(255, 255, 255, 0.1);
+  outline-color: var(--color-primary);
+}

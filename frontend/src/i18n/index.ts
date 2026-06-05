@@ -44,6 +44,11 @@ const translations: Record<Language, Translations> = {
     selectRole: 'Select Role',
     searchMessages: 'Search messages...',
 
+    // Context Menu (Issue #643)
+    openInNewTab: 'Open in New Tab',
+    copyLink: 'Copy Link',
+    copySelectedText: 'Copy Selected Text',
+
     // Navigation
     navigation: 'Navigation',
     dashboard: 'Dashboard',
@@ -444,6 +449,7 @@ const translations: Record<Language, Translations> = {
     generate: 'Generate',
     renderSuccess: 'Rendered successfully',
     renderFailed: 'Failed to render prompt',
+    copySuccess: 'Copied successfully',
     copyFailed: 'Failed to copy',
     fillRequiredFirst: 'Fill required fields first',
     result: 'Result',
@@ -909,6 +915,11 @@ const translations: Record<Language, Translations> = {
     selectRole: '选择角色',
     searchMessages: '搜索消息...',
 
+    // Context Menu (Issue #643)
+    openInNewTab: '新标签页打开',
+    copyLink: '复制链接',
+    copySelectedText: '复制选中文本',
+
     // Navigation
     navigation: '导航',
     dashboard: '仪表盘',
@@ -1304,6 +1315,7 @@ const translations: Record<Language, Translations> = {
     generate: '生成',
     renderSuccess: '渲染成功',
     renderFailed: '渲染提示词失败',
+    copySuccess: '复制成功',
     copyFailed: '复制失败',
     fillRequiredFirst: '请先填写必填字段',
     result: '结果',
@@ -1759,6 +1771,11 @@ const translations: Record<Language, Translations> = {
     selectRole: '役割を選択',
     searchMessages: 'メッセージを検索...',
 
+    // Context Menu (Issue #643)
+    openInNewTab: '新規タブで開く',
+    copyLink: 'リンクをコピー',
+    copySelectedText: '選択テキストをコピー',
+
     // Navigation
     navigation: 'ナビゲーション',
     dashboard: 'ダッシュボード',
@@ -2125,6 +2142,7 @@ const translations: Record<Language, Translations> = {
     generate: '生成',
     renderSuccess: 'レンダリング成功',
     renderFailed: 'プロンプトのレンダリングに失敗しました',
+    copySuccess: 'コピーが成功しました',
     copyFailed: 'コピーに失敗しました',
     fillRequiredFirst: '必須フィールドを先に入力してください',
     result: '結果',
@@ -2312,6 +2330,11 @@ const translations: Record<Language, Translations> = {
     role: '역할',
     selectRole: '역할 선택',
     searchMessages: '메시지 검색...',
+
+    // Context Menu (Issue #643)
+    openInNewTab: '새 탭에서 열기',
+    copyLink: '링크 복사',
+    copySelectedText: '선택한 텍스트 복사',
 
     // Navigation
     navigation: '네비게이션',
@@ -2679,6 +2702,7 @@ const translations: Record<Language, Translations> = {
     generate: '생성',
     renderSuccess: '렌더링 성공',
     renderFailed: '프롬프트 렌더링에 실패했습니다',
+    copySuccess: '복사 성공',
     copyFailed: '복사 실패',
     fillRequiredFirst: '필수 필드를 먼저 입력하세요',
     result: '결과',
