@@ -255,7 +255,10 @@ class GitHubOps:
         pr_url = output.split("\n")[-1].strip()
 
         # Extract PR number from URL
-        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+        try:
+            pr_number = int(pr_url.rstrip("/").split("/")[-1])
+        except (ValueError, IndexError):
+            raise GitHubOpsError(f"Failed to parse PR number from output: {output}")
         logger.info("Created PR #%s", pr_number)
 
         # Fetch structured data via gh pr view
