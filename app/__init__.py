@@ -193,6 +193,7 @@ def register_blueprints(app):
     from app.routes.analytics import analytics_bp
     from app.routes.api_keys import api_keys_bp
     from app.routes.auth import auth_bp
+    from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
@@ -235,6 +236,7 @@ def register_blueprints(app):
     app.register_blueprint(insights_bp, url_prefix="/api")
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
     app.register_blueprint(api_keys_bp, url_prefix="/api")
+    app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
@@ -255,5 +257,12 @@ def start_background_services():
         init_quota_enforcement()
     except Exception as e:
         logger.warning(f"Failed to start quota enforcement scheduler: {e}")
+
+    try:
+        from app.services.autonomous_scheduler import init_autonomous_scheduler
+
+        init_autonomous_scheduler()
+    except Exception as e:
+        logger.warning(f"Failed to start autonomous scheduler: {e}")
 
     logger.info("Background services started")
