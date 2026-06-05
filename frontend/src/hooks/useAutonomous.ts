@@ -149,6 +149,17 @@ export function useMarkDone() {
   });
 }
 
+export function useRetryWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => autonomousApi.retryWorkflow(workflowId),
+    onSuccess: (_, workflowId) => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
 // ── Milestone Mutations ─────────────────────────────────────────────
 
 export function useCancelMilestone() {

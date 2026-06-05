@@ -19,6 +19,7 @@ import {
   useResumeWorkflow,
   useStopWorkflow,
   useMarkDone,
+  useRetryWorkflow,
 } from '@/hooks/useAutonomous';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
@@ -69,6 +70,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const resumeMutation = useResumeWorkflow();
   const stopMutation = useStopWorkflow();
   const markDoneMutation = useMarkDone();
+  const retryMutation = useRetryWorkflow();
 
   const milestones = timelineData?.milestones ?? [];
 
@@ -95,6 +97,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const handleMarkDone = () => {
     markDoneMutation.mutate({ workflowId: workflow.workflow_id });
   };
+  const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
 
   const toggleExpand = (milestoneId: string) => {
     setExpandedMilestone(prev => prev === milestoneId ? null : milestoneId);
@@ -145,6 +148,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
             </div>
           </div>
           <div className="d-flex gap-2">
+            {workflow.status === 'failed' && (
+              <Button size="sm" variant="primary" onClick={handleRetry}>
+                <i className="bi bi-arrow-clockwise me-1"></i>
+                {t('autoRetryWorkflow', language)}
+              </Button>
+            )}
             {isActive && !isPaused && (
               <Button size="sm" variant="warning" onClick={handlePause}>
                 <i className="bi bi-pause-fill me-1"></i>

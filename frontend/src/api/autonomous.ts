@@ -148,6 +148,10 @@ export const autonomousApi = {
     });
   },
 
+  async retryWorkflow(workflowId: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`);
+  },
+
   // Milestone Operations
   async getTimeline(workflowId: string): Promise<{ success: boolean; milestones: WorkflowMilestone[] }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/timeline`);

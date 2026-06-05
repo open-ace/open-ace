@@ -241,6 +241,44 @@ def stop_workflow(workflow_id):
     return jsonify({"success": True})
 
 
+@autonomous_bp.route("/workflows/<workflow_id>/retry", methods=["POST"])
+@auth_required
+def retry_workflow(workflow_id):
+    """Retry a failed workflow from its current phase."""
+    workflow = auto_repo.get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    if workflow.get("status") != "failed":
+        return jsonify({"error": "Only failed workflows can be retried"}), 400
+
+    # Map current_phase back to active status (same mapping as resume_workflow)
+    phase_to_status = {
+        "preparation": "preparing",
+        "planning": "planning",
+        "development": "developing",
+        "pr_review": "pr_review",
+        "report": "reporting",
+        "wait": "waiting",
+        "merge": "merging",
+    }
+    phase = workflow.get("current_phase", "preparation")
+    status = phase_to_status.get(phase, "pending")
+
+    auto_repo.update_workflow(
+        workflow_id,
+        {
+            "status": status,
+            "error_message": "",
+        },
+    )
+
+    _emit_event_safe(workflow_id, "status_change", {"status": status, "phase": phase})
+    return jsonify({"success": True})
+
+
 @autonomous_bp.route("/workflows/<workflow_id>/done", methods=["POST"])
 @auth_required
 def mark_done(workflow_id):
