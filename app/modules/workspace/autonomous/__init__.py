@@ -66,7 +66,11 @@ def get_ddl_statements():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP,
-            paused_at TIMESTAMP
+            paused_at TIMESTAMP,
+            locked_at TIMESTAMP,
+            locked_by TEXT DEFAULT '',
+            retry_count INTEGER DEFAULT 0,
+            task_timeout INTEGER
         )
         """,
         """

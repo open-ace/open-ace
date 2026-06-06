@@ -7,7 +7,7 @@ Database operations for the AI autonomous development feature.
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.repositories.database import Database, is_postgresql
@@ -51,6 +51,8 @@ class AutonomousWorkflowRepository:
         "error_message",
         "retry_count",
         "task_timeout",
+        "locked_at",
+        "locked_by",
         "updated_at",
         "completed_at",
         "paused_at",
@@ -542,3 +544,63 @@ class AutonomousWorkflowRepository:
             "SELECT * FROM workflow_events WHERE workflow_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
             (workflow_id, limit, offset),
         )
+
+    # ── Distributed Lock ──────────────────────────────────────────────
+
+    # Lock timeout in seconds — stale locks are automatically cleared
+    LOCK_TIMEOUT_SECONDS = 1800  # 30 minutes
+
+    def acquire_lock(self, workflow_id: str, owner: str) -> bool:
+        """Atomically acquire a processing lock for a workflow.
+
+        Returns True if the lock was acquired, False if already locked.
+        Stale locks (older than LOCK_TIMEOUT_SECONDS) are broken automatically.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?, locked_by = ?
+                    WHERE workflow_id = ?
+                      AND (locked_at IS NULL OR locked_at < ?)
+                    """
+                ),
+                (now, owner, workflow_id, cutoff),
+            )
+            rowcount = cursor.rowcount
+            conn.commit()
+            return rowcount > 0
+        finally:
+            conn.close()
+
+    def release_lock(self, workflow_id: str, owner: str) -> None:
+        """Release the lock, but only if we are the owner."""
+        import app.repositories.database as _db_mod
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = NULL, locked_by = NULL
+                    WHERE workflow_id = ? AND locked_by = ?
+                    """
+                ),
+                (workflow_id, owner),
+            )
+            conn.commit()
+        finally:
+            conn.close()

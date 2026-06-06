@@ -495,9 +495,15 @@ class TestSchedulerOrchestratorRegistry:
         scheduler = AutonomousScheduler()
         wf_id = "wf-reg-test"
 
-        with patch(
-            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
-        ) as mock_orch_cls:
+        mock_repo = MagicMock()
+        mock_repo.acquire_lock.return_value = True
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls,
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+        ):
             mock_orch = MagicMock()
             mock_orch_cls.return_value = mock_orch
 
@@ -513,9 +519,15 @@ class TestSchedulerOrchestratorRegistry:
         scheduler = AutonomousScheduler()
         wf_id = "wf-error-test"
 
-        with patch(
-            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
-        ) as mock_orch_cls:
+        mock_repo = MagicMock()
+        mock_repo.acquire_lock.return_value = True
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls,
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+        ):
             mock_orch = MagicMock()
             mock_orch.advance.side_effect = RuntimeError("boom")
             mock_orch_cls.return_value = mock_orch
@@ -533,9 +545,15 @@ class TestSchedulerOrchestratorRegistry:
         wf_id = "wf-cleanup-test"
         scheduler._in_progress_ids.add(wf_id)
 
-        with patch(
-            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
-        ) as mock_orch_cls:
+        mock_repo = MagicMock()
+        mock_repo.acquire_lock.return_value = True
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls,
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+        ):
             mock_orch_cls.return_value = MagicMock()
             scheduler._advance_single(wf_id)
 
@@ -549,9 +567,15 @@ class TestSchedulerOrchestratorRegistry:
         wf_id = "wf-error-cleanup"
         scheduler._in_progress_ids.add(wf_id)
 
-        with patch(
-            "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
-        ) as mock_orch_cls:
+        mock_repo = MagicMock()
+        mock_repo.acquire_lock.return_value = True
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls,
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+        ):
             mock_orch = MagicMock()
             mock_orch.advance.side_effect = Exception("fail")
             mock_orch_cls.return_value = mock_orch

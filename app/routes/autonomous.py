@@ -16,7 +16,11 @@ import time
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import _load_user_from_token, auth_required
+from app.auth.decorators import (
+    auth_required,
+    check_machine_admin_permission,
+    validate_session_token,
+)
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
 logger = logging.getLogger(__name__)
@@ -99,6 +103,17 @@ def create_workflow():
     # Rate limit: max 10 workflows per user per hour
     if not _workflow_rate_limiter.is_allowed(user_id):
         return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
+
+    # Validate remote machine admin permission
+    workspace_type = data.get("workspace_type", "local")
+    remote_machine_id = data.get("remote_machine_id", "")
+    if workspace_type == "remote" and remote_machine_id:
+        if g.user_role != "admin":
+            if not check_machine_admin_permission(user_id, remote_machine_id):
+                return (
+                    jsonify({"error": "Machine admin permission required for remote workflows"}),
+                    403,
+                )
 
     # Validate required fields
     if not data.get("requirements_text") and not data.get("requirements_issue_url"):
@@ -582,7 +597,7 @@ def stream_workflow_events(workflow_id):
                     token = request.cookies.get("session_token") or request.headers.get(
                         "Authorization", ""
                     ).replace("Bearer ", "")
-                    if not token or not _load_user_from_token(token):
+                    if not token or not validate_session_token(token):
                         break  # Token invalid or revoked — close stream
                     emitter.mark_read(workflow_id, q)
                     yield ": keepalive\n\n"

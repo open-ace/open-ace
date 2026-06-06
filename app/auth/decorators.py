@@ -96,6 +96,27 @@ def _check_machine_admin(user_id: int, machine_id: str) -> bool:
         return False
 
 
+# ── Public API for cross-module use ──────────────────────────────────
+
+
+def validate_session_token(token: str) -> dict | None:
+    """Validate a session token and return the user dict, or None if invalid.
+
+    Public wrapper for _load_user_from_token — use this instead of
+    importing the private function directly.
+    """
+    return _load_user_from_token(token)
+
+
+def check_machine_admin_permission(user_id: int, machine_id: str) -> bool:
+    """Check if a user has admin permission on a remote machine.
+
+    Public wrapper for _check_machine_admin — use this instead of
+    importing the private function directly.
+    """
+    return _check_machine_admin(user_id, machine_id)
+
+
 def auth_required(f=None, *, ownership=None):
     """
     Decorator: require authentication, optionally with ownership check.
