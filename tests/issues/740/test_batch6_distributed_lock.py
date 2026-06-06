@@ -137,9 +137,7 @@ class TestSchedulerLockIntegration(unittest.TestCase):
         mock_repo = MagicMock()
         mock_repo.acquire_lock.return_value = False
 
-        with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository", return_value=mock_repo
-        ):
+        with patch("app.routes.autonomous._get_repo", return_value=mock_repo):
             scheduler._advance_single(wf_id)
 
         mock_repo.release_lock.assert_not_called()
@@ -158,10 +156,7 @@ class TestSchedulerLockIntegration(unittest.TestCase):
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch_cls.return_value = MagicMock()
             scheduler._advance_single(wf_id)
@@ -183,10 +178,7 @@ class TestSchedulerLockIntegration(unittest.TestCase):
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch = MagicMock()
             mock_orch.advance.side_effect = RuntimeError("boom")

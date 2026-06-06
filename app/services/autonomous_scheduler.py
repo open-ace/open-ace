@@ -85,11 +85,11 @@ class AutonomousScheduler:
     def _advance_single(self, workflow_id: str) -> str:
         """Advance a single workflow. Returns workflow_id for tracking."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.routes.autonomous import _get_repo
 
         # Unique lock owner: hostname + thread name
         lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
-        repo = AutonomousWorkflowRepository()
+        repo = _get_repo()
 
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
@@ -125,9 +125,9 @@ class AutonomousScheduler:
 
     def _process_workflows(self):
         """Find and process active workflows using thread pool for concurrency."""
-        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.routes.autonomous import _get_repo
 
-        repo = AutonomousWorkflowRepository()
+        repo = _get_repo()
 
         try:
             workflows = repo.get_active_workflows()
