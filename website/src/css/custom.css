@@ -1,0 +1,69 @@
+:root {
+  --ifm-color-primary: #b56b2e;
+  --ifm-color-primary-dark: #9f5d27;
+  --ifm-color-primary-darker: #935723;
+  --ifm-color-primary-darkest: #79471d;
+  --ifm-color-primary-light: #c47c3f;
+  --ifm-color-primary-lighter: #cb874d;
+  --ifm-color-primary-lightest: #daa676;
+  --ifm-background-color: #f7f4ec;
+  --ifm-background-surface-color: rgba(255, 255, 255, 0.84);
+  --ifm-navbar-background-color: rgba(247, 244, 236, 0.88);
+  --ifm-navbar-link-color: #18262b;
+  --ifm-font-family-base: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --ifm-heading-font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --ifm-font-color-base: #22343d;
+  --ifm-code-font-size: 0.95rem;
+  --ifm-footer-background-color: #18262b;
+  --docusaurus-highlighted-code-line-bg: rgba(181, 107, 46, 0.12);
+}
+
+html[data-theme='dark'] {
+  --ifm-color-primary: #f0ba79;
+  --ifm-color-primary-dark: #eca95b;
+  --ifm-color-primary-darker: #ea9f49;
+  --ifm-color-primary-darkest: #e1810d;
+  --ifm-color-primary-light: #f4cb97;
+  --ifm-color-primary-lighter: #f6d4a9;
+  --ifm-color-primary-lightest: #fae7ce;
+  --ifm-background-color: #101b20;
+  --ifm-background-surface-color: #18262b;
+  --ifm-navbar-background-color: rgba(16, 27, 32, 0.92);
+  --ifm-navbar-link-color: #f3e7d0;
+  --ifm-font-color-base: #dfd4c0;
+  --ifm-footer-background-color: #0b1418;
+  --docusaurus-highlighted-code-line-bg: rgba(240, 186, 121, 0.15);
+}
+
+body {
+  background:
+    radial-gradient(circle at top, rgba(240, 186, 121, 0.1), transparent 18%),
+    var(--ifm-background-color);
+}
+
+.navbar {
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(24, 38, 43, 0.08);
+}
+
+.footer {
+  border-top: 1px solid rgba(240, 186, 121, 0.18);
+}
+
+.button.button--primary {
+  border: none;
+}
+
+.button.button--secondary {
+  background: transparent;
+  color: currentColor;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid rgba(24, 38, 43, 0.08);
+}
+
+.pagination-nav__link {
+  border-radius: 1rem;
+}

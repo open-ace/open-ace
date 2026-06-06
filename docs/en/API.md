@@ -1656,4 +1656,4 @@ For real-time alerts, the application supports:
 
 Current API version: v1 (implicit in URL structure)
 
-For the latest version information, see the [CHANGELOG.md](../CHANGELOG.md).
+For the latest version information, see the [CHANGELOG.md](https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md).

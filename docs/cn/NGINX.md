@@ -334,7 +334,7 @@ curl -sk "https://your-domain/webui/3100/api/version?token=YOUR_TOKEN"
 
 **现象**：创建远程工作区时返回 "Failed to create remote session: Not Found"。
 
-**原因**：如果 nginx 配置中使用了 `sub_filter '`/api/'` 全局重写 API 路径，Open-ACE API 调用（如 `/api/remote/sessions/{id}`）也会被加上 `/webui/{port}` 前缀，被错误代理到 webui 端口。
+**原因**：如果 nginx 配置中使用了 `sub_filter '`/api/'` 全局重写 API 路径，Open-ACE API 调用（如 `/api/remote/sessions/123`）也会被加上 `/webui/3100` 前缀，被错误代理到 webui 端口。
 
 **解决**：使用 fetch/EventSource 拦截器代替 sub_filter 全局重写（见"问题 C"）。
 

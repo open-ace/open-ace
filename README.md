@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="https://www.open-ace.com">Website</a> ·
-  <a href="docs/README.md">Docs</a> ·
+  <a href="https://open-ace.github.io/open-ace/docs/intro">Docs</a> ·
   <a href="ROADMAP.md">Roadmap</a> ·
   <a href="https://github.com/open-ace/open-ace/discussions">Discussions</a>
 </p>
