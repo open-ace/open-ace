@@ -953,6 +953,10 @@ const translations: Record<Language, Translations> = {
     autoSelectBranchToMerge: 'Select branch to merge',
     autoMergeBranch: 'Merge Branch',
     autoTokenUsage: 'Token Usage',
+    autoCommits: 'Commits',
+    autoNoMessagesAvailable: 'No messages available',
+    autoNoSessionData: 'No session data available',
+    autoCurrent: 'current',
   },
   zh: {
     // Common
@@ -1881,6 +1885,10 @@ const translations: Record<Language, Translations> = {
     autoSelectBranchToMerge: '选择要合并的分支',
     autoMergeBranch: '合并分支',
     autoTokenUsage: 'Token 用量',
+    autoCommits: '提交',
+    autoNoMessagesAvailable: '暂无消息',
+    autoNoSessionData: '暂无会话数据',
+    autoCurrent: '当前',
   },
   ja: {
     // Common
@@ -2513,6 +2521,10 @@ const translations: Record<Language, Translations> = {
     autoSelectBranchToMerge: 'マージするブランチを選択',
     autoMergeBranch: 'ブランチをマージ',
     autoTokenUsage: 'トークン使用量',
+    autoCommits: 'コミット',
+    autoNoMessagesAvailable: 'メッセージがありません',
+    autoNoSessionData: 'セッションデータがありません',
+    autoCurrent: '現在',
   },
   ko: {
     // Common
@@ -3143,6 +3155,10 @@ const translations: Record<Language, Translations> = {
     autoSelectBranchToMerge: '병합할 브랜치 선택',
     autoMergeBranch: '브랜치 병합',
     autoTokenUsage: '토큰 사용량',
+    autoCommits: '커밋',
+    autoNoMessagesAvailable: '메시지가 없습니다',
+    autoNoSessionData: '세션 데이터가 없습니다',
+    autoCurrent: '현재',
   },
 };
 

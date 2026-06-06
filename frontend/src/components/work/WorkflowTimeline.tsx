@@ -12,7 +12,7 @@
 import React, { useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Button, Badge, Loading } from '@/components/common';
+import { Button, Badge, Loading, Modal } from '@/components/common';
 import {
   useWorkflowTimeline,
   usePauseWorkflow,
@@ -24,6 +24,7 @@ import {
   useForkMilestone,
   useMilestoneSession,
 } from '@/hooks/useAutonomous';
+import type { MilestoneSession } from '@/hooks/useAutonomous';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
@@ -69,7 +70,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [viewingSession, setViewingSession] = useState<{ milestoneId: string; sessionId: string } | null>(null);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
-  const [forkBranchName] = useState('');
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -138,7 +138,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     cancelMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId });
   };
   const handleForkMilestone = (milestoneId: string) => {
-    const branch = forkBranchName || `fork/from-${milestoneId.slice(0, 8)}`;
+    const branch = `fork/from-${milestoneId.slice(0, 8)}`;
     forkMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId, branchName: branch });
   };
 
@@ -154,6 +154,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
       return null;
     }
   };
+
+  // Extract typed session from query data
+  const session = sessionData?.session as MilestoneSession | undefined;
 
   if (isLoading) {
     return (
@@ -192,7 +195,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
           </div>
           <div className="d-flex gap-2">
             {workflow.status === 'failed' && (
-              <Button size="sm" variant="primary" onClick={handleRetry}>
+              <Button size="sm" variant="primary" onClick={handleRetry} disabled={retryMutation.isPending}>
                 <i className="bi bi-arrow-clockwise me-1"></i>
                 {t('autoRetryWorkflow', language)}
               </Button>
@@ -226,7 +229,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               </>
             )}
             {isWaiting && (
-              <Button size="sm" variant="success" onClick={handleMarkDone}>
+              <Button size="sm" variant="success" onClick={handleMarkDone} disabled={markDoneMutation.isPending}>
                 <i className="bi bi-check-circle me-1"></i>
                 {t('autoCompleteWorkflow', language)}
               </Button>
@@ -372,7 +375,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                           {/* Commit SHAs */}
                           {milestone.commit_shas && (
                             <div className="mb-2">
-                              <strong>Commits:</strong>
+                              <strong>{t('autoCommits', language)}:</strong>
                               <code className="d-block mt-1" style={{ fontSize: '0.75rem' }}>
                                 {milestone.commit_shas}
                               </code>
@@ -439,93 +442,71 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
         )}
       </div>
 
-      {/* Session Detail Modal */}
-      {viewingSession && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setViewingSession(null)}>
-          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <i className="bi bi-chat-square-text me-2"></i>
-                  {t('autoViewSession', language)}: {viewingSession.sessionId.slice(0, 8)}
-                </h5>
-                <button type="button" className="btn-close" onClick={() => setViewingSession(null)} />
-              </div>
-              <div className="modal-body" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-                {sessionLoading ? (
-                  <Loading />
-                ) : sessionData?.session ? (
-                  <div>
-                    <div className="mb-3">
-                      <strong>Status:</strong>{' '}
-                      <Badge variant={(sessionData.session as Record<string, unknown>).status === 'completed' ? 'success' : 'primary'}>
-                        {String((sessionData.session as Record<string, unknown>).status)}
-                      </Badge>
-                    </div>
-                    {Array.isArray((sessionData.session as Record<string, unknown>).messages) &&
-                      ((sessionData.session as Record<string, unknown>).messages as Array<Record<string, unknown>>).map((msg, idx) => (
-                        <div key={idx} className="mb-2">
-                          <Badge variant={msg.role === 'assistant' ? 'primary' : msg.role === 'user' ? 'success' : 'secondary'}>
-                            {String(msg.role)}
-                          </Badge>
-                          {typeof msg.content === 'string' ? (
-                            <pre className="bg-light p-2 rounded mt-1 mb-0" style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                              {(msg.content as string).slice(0, 2000)}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
-                    {!Array.isArray((sessionData.session as Record<string, unknown>).messages) && (
-                      <p className="text-muted">No messages available</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-muted">No session data available</p>
-                )}
-              </div>
+      {/* Session Detail Modal (shared Modal component) */}
+      <Modal
+        isOpen={!!viewingSession}
+        onClose={() => setViewingSession(null)}
+        title={viewingSession ? `${t('autoViewSession', language)}: ${viewingSession.sessionId.slice(0, 8)}` : ''}
+        size="lg"
+      >
+        {sessionLoading ? (
+          <Loading />
+        ) : session ? (
+          <div>
+            <div className="mb-3">
+              <strong>{t('status', language)}:</strong>{' '}
+              <Badge variant={session.status === 'completed' ? 'success' : 'primary'}>
+                {session.status}
+              </Badge>
             </div>
+            {Array.isArray(session.messages) && session.messages.map((msg, idx) => (
+              <div key={idx} className="mb-2">
+                <Badge variant={msg.role === 'assistant' ? 'primary' : msg.role === 'user' ? 'success' : 'secondary'}>
+                  {msg.role}
+                </Badge>
+                {typeof msg.content === 'string' ? (
+                  <pre className="bg-light p-2 rounded mt-1 mb-0" style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                    {msg.content.slice(0, 2000)}
+                  </pre>
+                ) : null}
+              </div>
+            ))}
+            {!Array.isArray(session.messages) && (
+              <p className="text-muted">{t('autoNoMessagesAvailable', language)}</p>
+            )}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-muted">{t('autoNoSessionData', language)}</p>
+        )}
+      </Modal>
 
-      {/* Branch Selector Modal */}
-      {showBranchSelector && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setShowBranchSelector(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <i className="bi bi-git-merge me-2"></i>
-                  {t('autoSelectBranchToMerge', language)}
-                </h5>
-                <button type="button" className="btn-close" onClick={() => setShowBranchSelector(false)} />
-              </div>
-              <div className="modal-body">
-                <div className="list-group">
-                  {availableBranches.map((branch) => (
-                    <button
-                      key={branch}
-                      className="list-group-item list-group-item-action d-flex align-items-center"
-                      onClick={() => handleBranchSelect(branch)}
-                    >
-                      <i className="bi bi-git me-2"></i>
-                      <code>{branch}</code>
-                      {branch === workflow.branch_name && (
-                        <Badge variant="primary" className="ms-2">current</Badge>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="modal-footer">
-                <Button variant="secondary" onClick={() => setShowBranchSelector(false)}>
-                  {t('cancel', language)}
-                </Button>
-              </div>
-            </div>
-          </div>
+      {/* Branch Selector Modal (shared Modal component) */}
+      <Modal
+        isOpen={showBranchSelector}
+        onClose={() => setShowBranchSelector(false)}
+        title={t('autoSelectBranchToMerge', language)}
+        footer={
+          <Button variant="secondary" onClick={() => setShowBranchSelector(false)}>
+            {t('cancel', language)}
+          </Button>
+        }
+      >
+        <div className="list-group">
+          {availableBranches.map((branch) => (
+            <button
+              key={branch}
+              className="list-group-item list-group-item-action d-flex align-items-center"
+              onClick={() => handleBranchSelect(branch)}
+            >
+              <i className="bi bi-git me-2"></i>
+              <code>{branch}</code>
+              {branch === workflow.branch_name && (
+                <Badge variant="primary" className="ms-2">{t('autoCurrent', language)}</Badge>
+              )}
+            </button>
+          ))}
         </div>
-      )}
+      </Modal>
     </div>
   );
 };
