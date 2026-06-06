@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "sync-docs": "node scripts/sync-docs.js",
-    "start": "npm run sync-docs && docusaurus start --host 0.0.0.0",
-    "build": "npm run sync-docs && docusaurus build",
+    "prepare-content": "node scripts/sync-docs.js && node scripts/generate-project-data.js",
+    "start": "npm run prepare-content && docusaurus start --host 0.0.0.0",
+    "build": "npm run prepare-content && docusaurus build",
     "serve": "docusaurus serve",
     "clear": "docusaurus clear"
   },

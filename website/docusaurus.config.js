@@ -65,6 +65,7 @@ const config = {
         items: [
           {to: '/', label: 'Home', position: 'left'},
           {to: '/docs/intro', label: 'Docs', position: 'left'},
+          {to: '/project', label: 'Project', position: 'left'},
           {to: '/docs/reference/INTRO', label: 'Product Guide', position: 'left'},
           {to: '/docs/reference/REMOTE-AGENT', label: 'Remote Agent', position: 'left'},
           {
@@ -99,15 +100,15 @@ const config = {
             items: [
               {
                 label: 'Roadmap',
-                href: 'https://github.com/open-ace/open-ace/blob/main/ROADMAP.md',
+                to: '/project/roadmap',
               },
               {
-                label: 'Changelog',
-                href: 'https://github.com/open-ace/open-ace/blob/main/CHANGELOG.md',
+                label: 'Releases',
+                to: '/project/releases',
               },
               {
-                label: 'Security',
-                href: 'https://github.com/open-ace/open-ace/security/policy',
+                label: 'Community',
+                to: '/project/community',
               },
             ],
           },
