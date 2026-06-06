@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Maximum retry count for failed workflows
 MAX_RETRY_COUNT = 5
 
+# Lazy repo — avoids creating DB connection at import time
+auto_repo = AutonomousWorkflowRepository()
+
 autonomous_bp = Blueprint("autonomous", __name__)
 
 auto_repo = AutonomousWorkflowRepository()
@@ -453,6 +456,58 @@ def get_milestone_session(workflow_id, milestone_id):
     session_data = sm.get_session(session_id, include_messages=True)
 
     return jsonify({"success": True, "session": session_data})
+
+
+@autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/diff", methods=["GET"])
+@auth_required
+def get_milestone_diff(workflow_id, milestone_id):
+    """Get the code diff for a milestone's commits."""
+    workflow = auto_repo.get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    milestone = auto_repo.get_milestone(milestone_id)
+    if not milestone or milestone.get("workflow_id") != workflow_id:
+        return jsonify({"error": "Milestone not found"}), 404
+
+    commit_shas_raw = milestone.get("commit_shas", "")
+    if not commit_shas_raw:
+        return jsonify({"success": True, "diff": ""})
+
+    # Parse commit SHAs (may be JSON array or comma-separated)
+    import json as _json
+
+    try:
+        shas = (
+            _json.loads(commit_shas_raw)
+            if commit_shas_raw.startswith("[")
+            else commit_shas_raw.split(",")
+        )
+    except (ValueError, TypeError):
+        shas = [commit_shas_raw]
+
+    shas = [s.strip().strip('"').strip("'") for s in shas if s.strip()]
+
+    if not shas:
+        return jsonify({"success": True, "diff": ""})
+
+    # Get diff for each commit
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    gh = GitHubOps(project_path)
+    diff_parts = []
+    for sha in shas:
+        try:
+            diff_text = gh.get_commit_diff(sha)
+            if diff_text:
+                diff_parts.append(f"--- Commit: {sha[:8]} ---\n{diff_text}")
+        except Exception as e:
+            logger.warning("Failed to get diff for %s: %s", sha[:8], e)
+
+    return jsonify({"success": True, "diff": "\n\n".join(diff_parts)})
 
 
 # ── Real-Time Events (SSE) ─────────────────────────────────────────

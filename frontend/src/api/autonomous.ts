@@ -178,6 +178,13 @@ export const autonomousApi = {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/session`);
   },
 
+  async getMilestoneDiff(
+    workflowId: string,
+    milestoneId: string
+  ): Promise<{ success: boolean; diff: string }> {
+    return apiClient.get(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/diff`);
+  },
+
   // SSE Event Stream URL
   getEventStreamUrl(workflowId: string): string {
     return `/api/autonomous/workflows/${workflowId}/events/stream`;

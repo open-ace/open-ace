@@ -23,6 +23,7 @@ import {
   useCancelMilestone,
   useForkMilestone,
   useMilestoneSession,
+  useMilestoneDiff,
 } from '@/hooks/useAutonomous';
 import type { MilestoneSession } from '@/hooks/useAutonomous';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
@@ -70,6 +71,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [viewingSession, setViewingSession] = useState<{ milestoneId: string; sessionId: string } | null>(null);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
+  const [viewingDiff, setViewingDiff] = useState<string | null>(null); // milestoneId
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -85,6 +87,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     workflow.workflow_id,
     viewingSession?.milestoneId ?? '',
     !!viewingSession,
+  );
+
+  // Diff query (only fetches when viewingDiff is set)
+  const { data: diffData, isLoading: diffLoading } = useMilestoneDiff(
+    workflow.workflow_id,
+    viewingDiff ?? '',
+    !!viewingDiff,
   );
 
   const milestones = timelineData?.milestones ?? [];
@@ -179,6 +188,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               <Badge variant={isActive ? 'primary' : isPaused ? 'warning' : 'secondary'}>
                 {workflow.status}
               </Badge>
+              {workflow.github_pr_url && (
+                <a href={workflow.github_pr_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
+                  <Badge variant="success"><i className="bi bi-git-pull-request me-1"></i>PR #{workflow.github_pr_number}</Badge>
+                </a>
+              )}
+              {workflow.requirements_issue_url && (
+                <a href={workflow.requirements_issue_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
+                  <Badge variant="light"><i className="bi bi-card-text me-1"></i>Issue</Badge>
+                </a>
+              )}
               {workflow.cli_tool && (
                 <small className="text-muted">
                   <i className="bi bi-tools me-1"></i>
@@ -379,6 +398,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               <code className="d-block mt-1" style={{ fontSize: '0.75rem' }}>
                                 {milestone.commit_shas}
                               </code>
+                              <div onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                variant="outline-dark"
+                                className="mt-1"
+                                onClick={() => setViewingDiff(milestone.milestone_id)}
+                              >
+                                <i className="bi bi-file-diff me-1"></i>
+                                View Changes
+                              </Button>
+                              </div>
                             </div>
                           )}
 
@@ -507,6 +537,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
           ))}
         </div>
       </Modal>
+
+      {/* Diff Viewer Modal */}
+      {viewingDiff && (
+        <Modal isOpen={true} onClose={() => setViewingDiff(null)} title={t('autoCodeChanges', language)} size="xl">
+          <div style={{ maxHeight: '80vh', overflow: 'auto' }}>
+            {diffLoading ? (
+              <Loading />
+            ) : diffData?.diff ? (
+              <pre className="bg-dark text-light p-3 rounded" style={{ fontSize: '0.75rem', maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                {diffData.diff.length > 50000
+                  ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
+                  : diffData.diff}
+              </pre>
+            ) : (
+              <p className="text-muted">{t('autoNoDiff', language)}</p>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
