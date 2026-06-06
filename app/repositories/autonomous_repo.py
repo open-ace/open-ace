@@ -342,8 +342,9 @@ class AutonomousWorkflowRepository:
                      commit_shas, diff_stats, result_summary,
                      plan_content, review_content,
                      parent_milestone_id, fork_branch, metadata,
+                     error_message,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -369,6 +370,7 @@ class AutonomousWorkflowRepository:
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
+                    data.get("error_message", ""),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,
@@ -387,8 +389,9 @@ class AutonomousWorkflowRepository:
                      commit_shas, diff_stats, result_summary,
                      plan_content, review_content,
                      parent_milestone_id, fork_branch, metadata,
+                     error_message,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("workflow_id", ""),
@@ -413,6 +416,7 @@ class AutonomousWorkflowRepository:
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
+                    data.get("error_message", ""),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,
