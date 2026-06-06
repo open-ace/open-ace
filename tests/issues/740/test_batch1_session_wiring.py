@@ -502,10 +502,7 @@ class TestSchedulerOrchestratorRegistry:
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch = MagicMock()
             mock_orch_cls.return_value = mock_orch
@@ -529,10 +526,7 @@ class TestSchedulerOrchestratorRegistry:
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch = MagicMock()
             mock_orch.advance.side_effect = RuntimeError("boom")
@@ -558,10 +552,7 @@ class TestSchedulerOrchestratorRegistry:
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch_cls.return_value = MagicMock()
             scheduler._advance_single(wf_id)
@@ -583,10 +574,7 @@ class TestSchedulerOrchestratorRegistry:
             patch(
                 "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
             ) as mock_orch_cls,
-            patch(
-                "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
-                return_value=mock_repo,
-            ),
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
         ):
             mock_orch = MagicMock()
             mock_orch.advance.side_effect = Exception("fail")
