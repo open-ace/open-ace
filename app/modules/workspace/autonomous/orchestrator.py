@@ -10,6 +10,7 @@ pr_review -> report -> wait -> (loop or merge).
 import json
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -65,6 +66,7 @@ class AutonomousOrchestrator:
         self.emitter = AutonomousEventEmitter.instance()
         self._workflow_id = workflow_id
         self._current_session_id: Optional[str] = None
+        self._session_lock = threading.Lock()
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -128,7 +130,7 @@ class AutonomousOrchestrator:
                 # Add truncation note and stop
                 result_parts.append(
                     f"\n... [Truncated: {len(chunks)} files total, "
-                    f"showing {len(result_parts) + 1} with {per_file_lines} lines each]\n"
+                    f"showing {len(result_parts)} with {per_file_lines} lines each]\n"
                 )
                 break
             result_parts.append(part)
@@ -186,30 +188,50 @@ class AutonomousOrchestrator:
             },
         )
 
-    def _run_agent(self, **kwargs) -> AgentTaskResult:
-        """Run an agent task with session tracking for cancellation support."""
+    def _run_agent(self, wf: dict = None, **kwargs) -> AgentTaskResult:
+        """Run an agent task with session tracking for cancellation support.
+
+        Args:
+            wf: Optional pre-fetched workflow dict to avoid extra DB queries.
+                If not provided, falls back to self.workflow (DB query).
+        """
+        # Pre-generate session_id so cancel_current_task() can access it
+        # before run_agent_task() returns
+        if "session_id" not in kwargs:
+            kwargs["session_id"] = str(uuid.uuid4())
+        session_id = kwargs["session_id"]
+
+        with self._session_lock:
+            self._current_session_id = session_id
+
         # Inject per-workflow timeout if specified
         if "timeout" not in kwargs:
-            wf = self.workflow
-            task_timeout = (wf or {}).get("task_timeout")
+            workflow_data = wf or self.workflow
+            task_timeout = (workflow_data or {}).get("task_timeout")
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
+
         result = self._runner.run_agent_task(**kwargs)
-        self._current_session_id = result.session_id
+
+        with self._session_lock:
+            self._current_session_id = result.session_id
         return result
 
     def cancel_current_task(self):
         """Cancel the currently running agent task (e.g. on pause/stop)."""
-        if self._current_session_id:
+        with self._session_lock:
+            session_id = self._current_session_id
+        if session_id:
             logger.info(
                 "Cancelling current agent task session=%s",
-                self._current_session_id[:8],
+                session_id[:8],
             )
             try:
-                self._runner.stop_session(self._current_session_id)
+                self._runner.stop_session(session_id)
             except Exception as e:
-                logger.warning("Failed to stop session %s: %s", self._current_session_id[:8], e)
-            self._current_session_id = None
+                logger.warning("Failed to stop session %s: %s", session_id[:8], e)
+            with self._session_lock:
+                self._current_session_id = None
 
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""

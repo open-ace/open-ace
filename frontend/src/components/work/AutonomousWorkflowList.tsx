@@ -146,7 +146,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                     >
                       <i className="bi bi-trash" style={{ fontSize: '0.75rem' }}></i>
                       {isConfirming && (
-                        <small className="ms-1">{t('confirm', language)}</small>
+                        <small className="ms-1">{t('autoDeleteConfirm', language)}</small>
                       )}
                     </button>
                   )}

@@ -188,12 +188,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               </Badge>
               {workflow.github_pr_url && (
                 <a href={workflow.github_pr_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
-                  <Badge variant="success"><i className="bi bi-git-pull-request me-1"></i>PR #{workflow.github_pr_number}</Badge>
+                  <Badge variant="success"><i className="bi bi-git-pull-request me-1"></i>{t('autoPrBadge', language)}{workflow.github_pr_number}</Badge>
                 </a>
               )}
               {workflow.requirements_issue_url && (
                 <a href={workflow.requirements_issue_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
-                  <Badge variant="light"><i className="bi bi-card-text me-1"></i>Issue</Badge>
+                  <Badge variant="light"><i className="bi bi-card-text me-1"></i>{t('autoIssueBadge', language)}</Badge>
                 </a>
               )}
               {workflow.cli_tool && (
