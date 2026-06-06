@@ -338,6 +338,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
           return sessionIdShort || 'Session';
         })()}
         size="lg"
+        scrollable={false}
       >
         {isLoadingDetail ? (
           <Loading size="sm" text={t('loading', language)} />

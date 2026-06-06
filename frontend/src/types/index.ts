@@ -277,6 +277,7 @@ export interface ModalProps extends BaseComponentProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   children: React.ReactNode;
   footer?: React.ReactNode;
+  scrollable?: boolean;
 }
 
 // Card types
