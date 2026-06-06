@@ -118,8 +118,24 @@ class AutonomousOrchestrator:
         return None
 
     def _create_milestone(self, **kwargs) -> dict:
-        """Create a milestone and emit event."""
+        """Create a milestone and emit event. Idempotent — returns existing if found."""
         kwargs.setdefault("workflow_id", self._workflow_id)
+
+        # Idempotency guard: skip creation if matching milestone already exists
+        existing = self._find_existing_milestone(
+            phase=kwargs.get("phase", ""),
+            milestone_type=kwargs.get("milestone_type", ""),
+            dev_round=kwargs.get("dev_round"),
+            round_number=kwargs.get("round_number"),
+        )
+        if existing:
+            logger.info(
+                "Milestone already exists (id=%s, type=%s), skipping creation",
+                existing.get("milestone_id", "")[:8],
+                kwargs.get("milestone_type", ""),
+            )
+            return existing
+
         ms = self.repo.create_milestone(kwargs)
         self._emit(
             "milestone_created",
@@ -148,31 +164,31 @@ class AutonomousOrchestrator:
             },
         )
 
-    def _run_agent(self, **kwargs) -> AgentTaskResult:
+    def _run_agent(self, wf: dict = None, **kwargs) -> AgentTaskResult:
         """Run an agent task with session tracking for cancellation support.
 
-        Generates session_id BEFORE calling run_agent_task so that
-        cancel_current_task() can stop the agent while it is running.
+        Args:
+            wf: Optional pre-fetched workflow dict to avoid extra DB queries.
+                If not provided, falls back to self.workflow (DB query).
         """
-
-        # Pre-generate session_id so we can cancel mid-execution
+        # Pre-generate session_id so cancel_current_task() can access it
+        # before run_agent_task() returns
         if "session_id" not in kwargs:
             kwargs["session_id"] = str(uuid.uuid4())
         session_id = kwargs["session_id"]
 
-        # Publish session_id atomically so cancel_current_task sees it
         with self._session_lock:
             self._current_session_id = session_id
 
-        # Inject per-workflow timeout if specified (avoid extra DB query)
+        # Inject per-workflow timeout if specified
         if "timeout" not in kwargs:
-            wf = self.workflow
-            task_timeout = (wf or {}).get("task_timeout")
+            workflow_data = wf or self.workflow
+            task_timeout = (workflow_data or {}).get("task_timeout")
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
 
         result = self._runner.run_agent_task(**kwargs)
-        # Update with the actual session_id returned (should be the same)
+
         with self._session_lock:
             self._current_session_id = result.session_id
         return result
@@ -180,16 +196,16 @@ class AutonomousOrchestrator:
     def cancel_current_task(self):
         """Cancel the currently running agent task (e.g. on pause/stop)."""
         with self._session_lock:
-            sid = self._current_session_id
-        if sid:
+            session_id = self._current_session_id
+        if session_id:
             logger.info(
                 "Cancelling current agent task session=%s",
-                sid[:8],
+                session_id[:8],
             )
             try:
-                self._runner.stop_session(sid)
+                self._runner.stop_session(session_id)
             except Exception as e:
-                logger.warning("Failed to stop session %s: %s", sid[:8], e)
+                logger.warning("Failed to stop session %s: %s", session_id[:8], e)
             with self._session_lock:
                 self._current_session_id = None
 
@@ -451,6 +467,7 @@ class AutonomousOrchestrator:
         )
 
         result = self._run_agent(
+            wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -513,6 +530,7 @@ class AutonomousOrchestrator:
         )
 
         review_result = self._run_agent(
+            wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -642,6 +660,7 @@ class AutonomousOrchestrator:
         )
 
         result = self._run_agent(
+            wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -749,6 +768,7 @@ class AutonomousOrchestrator:
         )
 
         test_result = self._run_agent(
+            wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -946,6 +966,7 @@ class AutonomousOrchestrator:
         )
 
         review_result = self._run_agent(
+            wf=wf,
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -1006,6 +1027,7 @@ class AutonomousOrchestrator:
             )
 
             fix_result = self._run_agent(
+                wf=wf,
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
                 model=wf.get("model", ""),
@@ -1319,6 +1341,7 @@ class AutonomousOrchestrator:
 
             wf = self.workflow
             result = self._run_agent(
+                wf=wf,
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
                 model=wf.get("model", ""),
