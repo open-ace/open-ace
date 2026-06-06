@@ -38,10 +38,10 @@ export const ACTIVE_WORKFLOW_STATUSES = [
 ];
 
 const STATUS_FILTER_TABS = [
-  { key: '', label: 'All' },
-  { key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused', label: 'Active' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'failed', label: 'Failed' },
+  { key: '', labelKey: 'autoFilterAll' },
+  { key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused', labelKey: 'autoFilterActive' },
+  { key: 'completed', labelKey: 'autoFilterCompleted' },
+  { key: 'failed', labelKey: 'autoFilterFailed' },
 ];
 
 export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
@@ -52,6 +52,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   const [statusFilter, setStatusFilter] = useState('');
   const { data, isLoading } = useWorkflows(statusFilter ? { status: statusFilter } : undefined);
   const deleteMutation = useDeleteWorkflow();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const workflows = data?.workflows ?? [];
 
@@ -62,6 +63,16 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       </div>
     );
   }
+
+  const handleDeleteClick = (e: React.MouseEvent, workflowId: string) => {
+    e.stopPropagation();
+    if (confirmDeleteId === workflowId) {
+      deleteMutation.mutate(workflowId);
+      setConfirmDeleteId(null);
+    } else {
+      setConfirmDeleteId(workflowId);
+    }
+  };
 
   return (
     <>
@@ -74,7 +85,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
             style={{ borderBottomWidth: '2px' }}
             onClick={() => setStatusFilter(tab.key)}
           >
-            {tab.label}
+            {t(tab.labelKey, language)}
           </button>
         ))}
       </div>
@@ -90,6 +101,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
             const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
             const isSelected = selectedId === workflow.workflow_id;
             const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
+            const isConfirming = confirmDeleteId === workflow.workflow_id;
 
             return (
               <div
@@ -127,16 +139,15 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   )}
                   {!isActive && (
                     <button
-                      className="btn btn-sm btn-outline-secondary border-0 p-0"
-                      title="Delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm('Delete this workflow?')) {
-                          deleteMutation.mutate(workflow.workflow_id);
-                        }
-                      }}
+                      className={`btn btn-sm border-0 p-0 ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
+                      title={t('autoDeleteWorkflow', language)}
+                      disabled={deleteMutation.isPending}
+                      onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
                     >
                       <i className="bi bi-trash" style={{ fontSize: '0.75rem' }}></i>
+                      {isConfirming && (
+                        <small className="ms-1">{t('confirm', language)}</small>
+                      )}
                     </button>
                   )}
                 </div>

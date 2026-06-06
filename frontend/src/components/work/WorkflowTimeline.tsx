@@ -7,6 +7,7 @@
  * - Controls bar (pause/resume/stop/complete)
  * - Token usage display
  * - Expandable milestone details
+ * - GitHub links, diff viewer, session detail modal
  */
 
 import React, { useState } from 'react';
@@ -82,14 +83,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const cancelMilestoneMutation = useCancelMilestone();
   const forkMilestoneMutation = useForkMilestone();
 
-  // Session detail query (only fetches when viewingSession is set)
+  // Session detail query
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
     workflow.workflow_id,
     viewingSession?.milestoneId ?? '',
     !!viewingSession,
   );
 
-  // Diff query (only fetches when viewingDiff is set)
+  // Diff query
   const { data: diffData, isLoading: diffLoading } = useMilestoneDiff(
     workflow.workflow_id,
     viewingDiff ?? '',
@@ -130,7 +131,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setShowStopConfirm(false);
   };
   const handleMarkDone = () => {
-    // If only one branch, skip selector
     if (availableBranches.length <= 1) {
       markDoneMutation.mutate({ workflowId: workflow.workflow_id, selectedBranch: availableBranches[0] });
     } else {
@@ -142,7 +142,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setShowBranchSelector(false);
   };
   const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
-
   const handleCancelMilestone = (milestoneId: string) => {
     cancelMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId });
   };
@@ -155,7 +154,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setExpandedMilestone(prev => prev === milestoneId ? null : milestoneId);
   };
 
-  // Parse diff stats JSON
   const parseDiffStats = (statsJson: string): { additions: number; deletions: number; files: number; commits: number } | null => {
     try {
       return statsJson ? JSON.parse(statsJson) : null;
@@ -292,7 +290,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
         ) : (
           sortedRounds.map((round) => (
             <div key={round} className="mb-4">
-              {/* Round Header */}
               <h6 className="text-muted border-bottom pb-2 mb-3">
                 <i className="bi bi-arrow-repeat me-1"></i>
                 {t('autoDevRoundLabel', language)} {round}
@@ -303,7 +300,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                 )}
               </h6>
 
-              {/* Milestones */}
               <div className="ps-3">
                 {groupedMilestones[round].map((milestone) => {
                   const isExpanded = expandedMilestone === milestone.milestone_id;
@@ -313,18 +309,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
 
                   return (
                     <div key={milestone.milestone_id} className="mb-2">
-                      {/* Milestone Card */}
                       <div
                         className={`d-flex align-items-start p-2 rounded ${isExpanded ? 'bg-light' : ''}`}
                         style={{ cursor: 'pointer' }}
                         onClick={() => toggleExpand(milestone.milestone_id)}
                       >
-                        {/* Timeline dot */}
                         <div className="me-3 mt-1">
                           <i className={`bi ${statusIcon} fs-6`} />
                         </div>
-
-                        {/* Content */}
                         <div className="flex-grow-1 min-width-0">
                           <div className="d-flex align-items-center gap-2">
                             <i className={`bi ${display.icon} text-${display.color}`}></i>
@@ -337,8 +329,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </Badge>
                             )}
                           </div>
-
-                          {/* Summary info */}
                           <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
                             {milestone.result_summary && (
                               <span className="me-2">{milestone.result_summary.slice(0, 100)}</span>
@@ -358,15 +348,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             )}
                           </div>
                         </div>
-
-                        {/* Expand indicator */}
                         <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-muted`}></i>
                       </div>
 
-                      {/* Expanded Detail */}
                       {isExpanded && (
                         <div className="ms-4 p-3 border-start border-3" style={{ borderColor: `var(--bs-${display.color})` }}>
-                          {/* Plan content */}
                           {milestone.plan_content && (
                             <div className="mb-2">
                               <strong>{t('autoPhasePlanning', language)}:</strong>
@@ -375,8 +361,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </pre>
                             </div>
                           )}
-
-                          {/* Review content */}
                           {milestone.review_content && (
                             <div className="mb-2">
                               <strong>{t('autoStatusPRReview', language)}:</strong>
@@ -385,13 +369,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </pre>
                             </div>
                           )}
-
-                          {/* Description */}
                           {milestone.description && (
                             <p className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>{milestone.description}</p>
                           )}
-
-                          {/* Commit SHAs */}
                           {milestone.commit_shas && (
                             <div className="mb-2">
                               <strong>{t('autoCommits', language)}:</strong>
@@ -399,20 +379,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                                 {milestone.commit_shas}
                               </code>
                               <div onClick={(e) => e.stopPropagation()}>
-                              <Button
-                                size="sm"
-                                variant="outline-dark"
-                                className="mt-1"
-                                onClick={() => setViewingDiff(milestone.milestone_id)}
-                              >
-                                <i className="bi bi-file-diff me-1"></i>
-                                View Changes
-                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline-dark"
+                                  className="mt-1"
+                                  onClick={() => setViewingDiff(milestone.milestone_id)}
+                                >
+                                  <i className="bi bi-file-diff me-1"></i>
+                                  {t('autoViewChanges', language)}
+                                </Button>
                               </div>
                             </div>
                           )}
-
-                          {/* Session link */}
                           {milestone.session_id && (
                             <small>
                               <i className="bi bi-chat-square-text me-1"></i>
@@ -428,8 +406,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </a>
                             </small>
                           )}
-
-                          {/* Milestone Actions (Fork / Cancel) */}
                           <div className="d-flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
                             {(milestone.status === 'completed' || milestone.status === 'in_progress') && (
                               <Button
@@ -454,8 +430,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </Button>
                             )}
                           </div>
-
-                          {/* Error */}
                           {milestone.error_message && (
                             <div className="alert alert-danger py-1 px-2 mt-2 mb-0" style={{ fontSize: '0.8rem' }}>
                               {milestone.error_message}
