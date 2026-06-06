@@ -330,6 +330,19 @@ class TestGitHubOpsWorktree:
         result = self.gh.create_worktree("/tmp/test-repo-wt", "feature/wt")
         assert result["worktree_path"] == "/tmp/test-repo-wt"
         assert result["branch"] == "feature/wt"
+        # Default base is HEAD
+        cmd = mock_run.call_args[0][0]
+        assert cmd[-1] == "HEAD"
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_worktree_with_base(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        result = self.gh.create_worktree("/tmp/test-repo-wt", "feature/wt", base="origin/main")
+        assert result["worktree_path"] == "/tmp/test-repo-wt"
+        assert result["branch"] == "feature/wt"
+        # Should use the provided base ref instead of HEAD
+        cmd = mock_run.call_args[0][0]
+        assert cmd[-1] == "origin/main"
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_remove_worktree(self, mock_run):

@@ -192,9 +192,9 @@ class GitHubOps:
 
     # ── Worktree Operations ─────────────────────────────────────────
 
-    def create_worktree(self, path: str, branch: str) -> dict:
+    def create_worktree(self, path: str, branch: str, base: str = "HEAD") -> dict:
         """Create a git worktree with a new branch."""
-        self._run_git(["worktree", "add", "-b", branch, path, "HEAD"])
+        self._run_git(["worktree", "add", "-b", branch, path, base])
         logger.info("Created worktree at %s on branch %s", path, branch)
         return {"worktree_path": path, "branch": branch}
 

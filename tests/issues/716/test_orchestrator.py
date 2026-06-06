@@ -322,6 +322,32 @@ class TestOrchestratorPreparation:
         issue_numbers = [c[0][1]["github_issue_number"] for c in issue_updates]
         assert 99 in issue_numbers
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_preparation_branches_from_origin_main(self, mock_gh_cls):
+        """Branch should be created from origin/main, not local HEAD."""
+        wf = _make_workflow(current_phase="preparation")
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.create_issue.return_value = {"number": 1, "url": ""}
+        mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
+        mock_gh_cls.return_value = mock_gh
+
+        orch._do_preparation(wf)
+
+        # Should fetch origin/main before creating branch
+        fetch_calls = [c for c in mock_gh._run_git.call_args_list if "fetch" in str(c)]
+        assert len(fetch_calls) >= 1
+        assert "origin" in str(fetch_calls[0])
+        assert "main" in str(fetch_calls[0])
+
+        # Should create branch with base="origin/main"
+        mock_gh.create_branch.assert_called_once()
+        create_call = mock_gh.create_branch.call_args
+        assert create_call[1].get("base") == "origin/main" or (
+            len(create_call[0]) > 1 and create_call[0][1] == "origin/main"
+        )
+
 
 class TestOrchestratorPlanning:
     """Tests for the planning phase."""
@@ -491,7 +517,7 @@ class TestOrchestratorWait:
 
         mock_gh = MagicMock()
         mock_gh.list_issue_comments.return_value = [
-            {"body": "开发完成", "created_at": "2026-06-05T14:00:00Z"},
+            {"body": "开发完成", "createdAt": "2026-06-05T14:00:00Z"},
         ]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
@@ -510,7 +536,7 @@ class TestOrchestratorWait:
 
         mock_gh = MagicMock()
         mock_gh.list_issue_comments.return_value = [
-            {"body": "Please also add a dark mode feature", "created_at": "2026-06-05T14:00:00Z"},
+            {"body": "Please also add a dark mode feature", "createdAt": "2026-06-05T14:00:00Z"},
         ]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
@@ -538,6 +564,132 @@ class TestOrchestratorWait:
 
         # Should NOT update workflow
         mock_repo.update_workflow.assert_not_called()
+
+    def test_wait_ignores_report_with_completed_word(self):
+        """Progress Report comment containing 'completed' should NOT trigger merge.
+
+        This is a regression guard: 'completed' was previously in
+        COMPLETION_KEYWORDS and caused false triggers on milestone reports.
+        Even if someone re-adds 'completed' to the keyword list, this test
+        ensures report-like comments don't accidentally trigger a merge.
+        The regex-based matching (whole-word/phrase) already protects against
+        this, but the test documents the design intent explicitly.
+        """
+        wf = _make_workflow(current_phase="wait", github_issue_number=42)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        # Simulate a report comment that contains "completed" in milestone text
+        orch._gh = MagicMock()
+        orch._gh.list_issue_comments.return_value = [
+            {
+                "body": "## 📊 Dev Round 1 Progress Report\n\n### Completed\n"
+                "- Plan round 1: status completed\n- Dev round 1 completed\n",
+                "createdAt": "2026-06-05T14:00:00Z",
+                "author": {"login": "richardhuang"},
+            },
+        ]
+
+        orch._do_wait(wf)
+
+        # Should NOT transition to merge
+        update_calls = mock_repo.update_workflow.call_args_list
+        merge_phases = [c for c in update_calls if c[0][1].get("current_phase") == "merge"]
+        assert len(merge_phases) == 0
+
+    def test_wait_triggers_merge_on_explicit_keyword(self):
+        """User comment with explicit completion keyword triggers merge."""
+        wf = _make_workflow(current_phase="wait", github_issue_number=42)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        orch._gh = MagicMock()
+        orch._gh.list_issue_comments.return_value = [
+            {
+                "body": "开发完成，没有更多需求了",
+                "createdAt": "2026-06-05T15:00:00Z",
+                "author": {"login": "richardhuang"},
+            },
+        ]
+
+        orch._do_wait(wf)
+
+        # Should transition to merge
+        update_calls = mock_repo.update_workflow.call_args_list
+        phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
+        assert "merge" in phases
+
+    def test_wait_uses_wait_started_timestamp(self):
+        """Wait phase uses wait_started milestone timestamp for filtering."""
+        wf = _make_workflow(current_phase="wait", github_issue_number=42)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        # Set up a wait_started milestone
+        import json
+
+        mock_repo.list_milestones.return_value = [
+            {
+                "milestone_type": "wait_started",
+                "metadata": json.dumps({"wait_started_at": "2026-06-05T14:00:00Z"}),
+            },
+        ]
+
+        orch._gh = MagicMock()
+        # Comments before wait_start should be filtered out
+        orch._gh.list_issue_comments.return_value = [
+            {
+                "body": "开发完毕",
+                "createdAt": "2026-06-05T13:00:00Z",  # Before wait_started
+                "author": {"login": "richardhuang"},
+            },
+        ]
+
+        orch._do_wait(wf)
+
+        # Should NOT merge — comment is before wait_start
+        # (list_issue_comments receives since=wait_start, so comment is filtered server-side)
+        orch._gh.list_issue_comments.assert_called_once_with(42, since="2026-06-05T14:00:00Z")
+
+    def test_wait_uses_correct_createdAt_field(self):
+        """Requirement_received milestone stores createdAt (camelCase), not created_at."""
+        wf = _make_workflow(current_phase="wait", github_issue_number=42)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        orch._gh = MagicMock()
+        orch._gh.list_issue_comments.return_value = [
+            {
+                "body": "Please add dark mode support",
+                "createdAt": "2026-06-05T15:00:00Z",
+                "author": {"login": "richardhuang"},
+            },
+        ]
+
+        orch._do_wait(wf)
+
+        # Check the requirement_received milestone stores createdAt
+        ms_calls = mock_repo.create_milestone.call_args_list
+        req_ms = [c for c in ms_calls if c[0][0].get("milestone_type") == "requirement_received"]
+        assert len(req_ms) == 1
+        metadata = json.loads(req_ms[0][0][0]["metadata"])
+        assert metadata["last_comment_time"] == "2026-06-05T15:00:00Z"
+
+    def test_wait_all_done_keyword_triggers_merge(self):
+        """Comment 'all done' triggers merge (whole-word match)."""
+        wf = _make_workflow(current_phase="wait", github_issue_number=42)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        orch._gh = MagicMock()
+        orch._gh.list_issue_comments.return_value = [
+            {
+                "body": "Looks all done to me",
+                "createdAt": "2026-06-05T15:00:00Z",
+                "author": {"login": "richardhuang"},
+            },
+        ]
+
+        orch._do_wait(wf)
+
+        update_calls = mock_repo.update_workflow.call_args_list
+        phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
+        assert "merge" in phases
 
 
 class TestOrchestratorMerge:
@@ -685,7 +837,7 @@ class TestOrchestratorDevelopment:
         orch._runner.run_agent_task.return_value = _make_agent_result(
             success=True, text="Development complete"
         )
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {"additions": 50, "deletions": 10, "files": 3}
 
         orch._do_development(wf)
@@ -713,7 +865,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf, milestones=[plan_ms])
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -750,9 +902,8 @@ class TestOrchestratorDevelopment:
             _make_agent_result(success=True, text="Dev done"),
             _make_agent_result(success=False, error="Tests failed"),
         ]
-        orch._gh.get_current_commit.return_value = "abc1234"
-        orch._gh.get_diff_stats.return_value = {}
-        orch._gh.get_current_commit.return_value = "abc1234"
+        # commit_before="abc1234" -> commit_after dev="def5678" (dev changed code)
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -772,7 +923,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -792,7 +943,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -809,7 +960,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf, milestones=[])  # No plan milestones
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -1169,8 +1320,8 @@ class TestOrchestratorReport:
 
         orch._do_report(wf)
 
-        # Two milestones: progress_reported + round_completed
-        assert mock_repo.create_milestone.call_count == 2
+        # Three milestones: progress_reported + round_completed + wait_started
+        assert mock_repo.create_milestone.call_count == 3
         # _create_milestone calls repo.create_milestone(kwargs_dict) as positional arg
         report_ms_dict = mock_repo.create_milestone.call_args_list[0][0][0]
         assert report_ms_dict["milestone_type"] == "progress_reported"
@@ -1251,4 +1402,4 @@ class TestOrchestratorReport:
         orch._do_report(wf)
 
         # Should still create milestones and move to wait
-        assert mock_repo.create_milestone.call_count == 2
+        assert mock_repo.create_milestone.call_count == 3

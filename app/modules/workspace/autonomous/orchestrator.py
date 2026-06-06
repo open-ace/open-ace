@@ -9,6 +9,7 @@ pr_review -> report -> wait -> (loop or merge).
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,12 +29,31 @@ COMPLETION_KEYWORDS = [
     "无新需求",
     "项目结束",
     "all done",
-    "completed",
     "no more requirements",
     "project finished",
     "开发完毕",
     "全部完成",
+    "workflow complete",
 ]
+
+# Pre-compiled patterns for completion keyword matching (avoids recompilation in loop)
+_COMPLETION_PATTERNS = [
+    re.compile(
+        rf"(?:^|\s){re.escape(kw)}(?:[\s,，。.!！?？、;；:：\n]|$)",
+        re.IGNORECASE,
+    )
+    for kw in COMPLETION_KEYWORDS
+]
+
+# Prefix added to all prompts to inform the agent it is running autonomously
+AUTONOMOUS_CONTEXT = (
+    "## 重要提示\n"
+    "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
+    "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
+    "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
+    "3. 直接执行文件修改、git 操作等，不要仅输出方案文本\n"
+    "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
+)
 
 
 class AutonomousOrchestrator:
@@ -252,14 +272,18 @@ class AutonomousOrchestrator:
             if not branch_name:
                 branch_name = f"auto-dev/{self._workflow_id[:8]}"
             try:
+                # Ensure we branch from latest origin/main
+                gh._run_git(["fetch", "origin", "main"])
+
                 if strategy == "worktree":
                     wt_data = gh.create_worktree(
                         path=f"{project_path}/../{branch_name.replace('/', '-')}",
                         branch=branch_name,
+                        base="origin/main",
                     )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                 else:
-                    gh.create_branch(branch_name)
+                    gh.create_branch(branch_name, base="origin/main")
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -320,16 +344,18 @@ class AutonomousOrchestrator:
                     break
 
             prompt = (
-                f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
+                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
-                f"请输出完善后的完整实现方案。"
+                f"请输出完善后的完整实现方案。\n\n"
+                f"重要约束：只输出高层设计方案和实现步骤描述，"
+                f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
             milestone_type = "plan_refined"
         else:
             prompt = (
-                f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
+                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
                 f"## 需求\n{requirements}\n\n"
                 f"## 项目路径\n{wf.get('project_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
@@ -337,7 +363,9 @@ class AutonomousOrchestrator:
                 f"2. 技术方案和架构设计\n"
                 f"3. 实现步骤（按优先级排序）\n"
                 f"4. 测试策略\n"
-                f"5. 潜在风险和缓解措施"
+                f"5. 潜在风险和缓解措施\n\n"
+                f"重要约束：只输出高层设计方案和实现步骤描述，"
+                f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
             milestone_type = "plan_created"
 
@@ -358,6 +386,7 @@ class AutonomousOrchestrator:
             prompt=prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(result)
@@ -392,7 +421,7 @@ class AutonomousOrchestrator:
 
         # Step 2: Review plan
         review_prompt = (
-            f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
+            AUTONOMOUS_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
             f"1. 遗漏的需求\n"
             f"2. 架构风险\n"
             f"3. 实现难度估计\n"
@@ -419,6 +448,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(review_result)
@@ -449,10 +479,18 @@ class AutonomousOrchestrator:
         if round_num >= max_rounds:
             # All plan review rounds completed — post final plan to issue
             final_plan = ""
+            last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
             for ms in reversed(all_milestones):
-                if ms.get("plan_content"):
+                if ms.get("plan_content") and not final_plan:
                     final_plan = ms["plan_content"]
+                if (
+                    ms.get("milestone_type") == "plan_reviewed"
+                    and ms.get("review_content")
+                    and not last_review
+                ):
+                    last_review = ms["review_content"]
+                if final_plan and last_review:
                     break
 
             issue_number = wf.get("github_issue_number")
@@ -463,6 +501,12 @@ class AutonomousOrchestrator:
                         f"Plan review completed after {max_rounds} round(s).\n\n"
                         f"{final_plan}"
                     )
+                    if last_review:
+                        final_comment += (
+                            f"\n\n---\n\n"
+                            f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
+                            f"{last_review[:2000]}"
+                        )
                     gh.add_issue_comment(issue_number, final_comment)
                 except Exception:
                     pass
@@ -506,8 +550,15 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round}",
         )
 
+        # Capture commit SHA before agent runs to verify code changes later
+        commit_before = ""
+        try:
+            commit_before = gh.get_current_commit()
+        except Exception:
+            pass
+
         dev_prompt = (
-            f"根据以下已审定的实现方案进行完整开发。\n\n"
+            AUTONOMOUS_CONTEXT + f"根据以下已审定的实现方案进行完整开发。\n\n"
             f"## 实现方案\n{final_plan}\n\n"
             f"## 要求\n"
             f"1. 严格按照方案实现所有功能\n"
@@ -526,18 +577,43 @@ class AutonomousOrchestrator:
             prompt=dev_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(result)
 
-        # Get diff stats
+        # Get diff stats and commit SHA independently so one failure
+        # does not discard the other
         diff_stats = {}
         commit_sha = ""
         try:
             commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+        try:
             diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
         except Exception:
             pass
+
+        # Verify agent actually produced code changes
+        if result.success and commit_before and commit_sha and commit_before == commit_sha:
+            logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
+            self.repo.update_milestone(
+                ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": result.session_id,
+                    "result_summary": result.response_text[:300] if result.response_text else "",
+                    "error_message": "Agent produced no code changes (commit SHA unchanged)",
+                },
+            )
+            self._update_workflow(
+                {
+                    "status": "failed",
+                    "error_message": "Development failed: agent produced no code changes",
+                }
+            )
+            return
 
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
@@ -567,7 +643,8 @@ class AutonomousOrchestrator:
         )
 
         test_prompt = (
-            "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
+            AUTONOMOUS_CONTEXT
+            + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
             "确保所有测试通过后再结束。"
         )
 
@@ -579,6 +656,7 @@ class AutonomousOrchestrator:
             prompt=test_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(test_result)
@@ -755,7 +833,7 @@ class AutonomousOrchestrator:
             pass
 
         review_prompt = (
-            f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
+            AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
             f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
             f"## 代码变更\n{diff_text[:8000]}\n\n"
             f"请检查：\n"
@@ -775,6 +853,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(review_result)
@@ -822,7 +901,7 @@ class AutonomousOrchestrator:
             )
 
             fix_prompt = (
-                f"根据以下代码审查意见修改代码：\n\n{review_text}\n\n"
+                AUTONOMOUS_CONTEXT + f"根据以下代码审查意见修改代码：\n\n{review_text}\n\n"
                 f"修改后提交 git commit 并推送。"
             )
 
@@ -834,6 +913,7 @@ class AutonomousOrchestrator:
                 prompt=fix_prompt,
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
             )
 
             self._accumulate_tokens(fix_result)
@@ -923,6 +1003,16 @@ class AutonomousOrchestrator:
             title=f"Dev round {dev_round} completed",
         )
 
+        # Record wait phase start time for comment filtering
+        self._create_milestone(
+            phase="report",
+            dev_round=dev_round,
+            milestone_type="wait_started",
+            status="completed",
+            title="Wait phase starting",
+            metadata=json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
+        )
+
         # Move to wait phase
         self._update_workflow(
             {
@@ -942,20 +1032,22 @@ class AutonomousOrchestrator:
         if not issue_number:
             return  # No issue to check
 
-        # Get last known comment timestamp from milestones
-        last_comment_time = ""
+        # Get the time when wait phase started (set by _do_report)
+        # This ensures only user comments AFTER the report are considered
+        wait_start = ""
         milestones = self.repo.list_milestones(self._workflow_id)
         for ms in reversed(milestones):
-            if ms.get("milestone_type") == "requirement_received" and ms.get("metadata"):
+            if ms.get("milestone_type") == "wait_started" and ms.get("metadata"):
                 try:
                     meta = json.loads(ms["metadata"])
-                    last_comment_time = meta.get("last_comment_time", "")
+                    wait_start = meta.get("wait_started_at", "")
                 except (json.JSONDecodeError, TypeError):
                     pass
+                break
 
         try:
             comments = gh.list_issue_comments(
-                issue_number, since=last_comment_time if last_comment_time else None
+                issue_number, since=wait_start if wait_start else None
             )
         except GitHubOpsError:
             return
@@ -974,11 +1066,11 @@ class AutonomousOrchestrator:
             )
         ]
 
-        # Check for completion signals
+        # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):
-            body = comment.get("body", "").lower()
-            for keyword in COMPLETION_KEYWORDS:
-                if keyword.lower() in body:
+            body = comment.get("body", "")
+            for pattern in _COMPLETION_PATTERNS:
+                if pattern.search(body):
                     self._update_workflow(
                         {
                             "current_phase": "merge",
@@ -995,7 +1087,8 @@ class AutonomousOrchestrator:
         # New requirements detected
         new_req_comment = user_comments[-1]  # Latest user comment
         new_requirements = new_req_comment.get("body", "")
-        comment_time = new_req_comment.get("created_at", "")
+        # Use correct field name from gh CLI (camelCase)
+        comment_time = new_req_comment.get("createdAt", "")
 
         self._create_milestone(
             phase="wait",
@@ -1114,7 +1207,8 @@ class AutonomousOrchestrator:
 
             # Ask AI agent to resolve conflicts
             conflict_prompt = (
-                "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
+                AUTONOMOUS_CONTEXT
+                + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
                 "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
                 "步骤：\n"
                 "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
@@ -1132,6 +1226,7 @@ class AutonomousOrchestrator:
                 prompt=conflict_prompt,
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
             )
 
             if not result.success:
