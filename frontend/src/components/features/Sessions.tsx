@@ -474,6 +474,7 @@ export const Sessions: React.FC = () => {
           return sessionIdShort || (t('sessionDetails', language) ?? 'Session Details');
         })()}
         size="lg"
+        scrollable={false}
       >
         {isLoadingDetail ? (
           <Loading size="sm" text={t('loading', language)} />

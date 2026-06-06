@@ -22,6 +22,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   footer,
   className,
+  scrollable = true,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -113,7 +114,8 @@ export const Modal: React.FC<ModalProps> = ({
       >
         <div
           className={cn(
-            'modal-dialog modal-dialog-centered modal-dialog-scrollable',
+            'modal-dialog modal-dialog-centered',
+            scrollable && 'modal-dialog-scrollable',
             sizeClasses[size],
             className
           )}
