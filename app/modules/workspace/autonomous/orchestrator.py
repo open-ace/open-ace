@@ -190,6 +190,18 @@ class AutonomousOrchestrator:
             except (ValueError, IndexError):
                 pass
 
+            # Persist parsed issue number to workflow and record milestone
+            if issue_number:
+                self._update_workflow({"github_issue_number": issue_number})
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="issue_linked",
+                    status="completed",
+                    title=f"Linked to issue #{issue_number}",
+                    github_issue_number=issue_number,
+                    result_summary=issue_url,
+                )
+
         if not issue_number and requirements_text:
             # Create issue from text
             try:
@@ -633,6 +645,45 @@ class AutonomousOrchestrator:
         dev_round = wf.get("dev_round", 1)
         branch_name = wf.get("branch_name", "")
         gh = self._get_gh()
+
+        # Check if branch has any changes vs main
+        has_changes = False
+        try:
+            diff_stats = gh.get_diff_stats("main", branch_name)
+            has_changes = diff_stats.get("commits", 0) > 0
+        except Exception:
+            pass
+
+        if not has_changes:
+            # No code changes produced — skip PR, post to issue, and mark completed
+            issue_number = wf.get("github_issue_number")
+            no_change_msg = (
+                f"## ℹ️ No Changes Detected\n\n"
+                f"Agent completed dev round {dev_round} without producing code changes. "
+                f"Skipping PR creation."
+            )
+            if issue_number:
+                try:
+                    gh.add_issue_comment(issue_number, no_change_msg)
+                except GitHubOpsError:
+                    pass
+            self._create_milestone(
+                phase="pr_review",
+                dev_round=dev_round,
+                milestone_type="no_changes",
+                status="completed",
+                title="No code changes produced",
+                result_summary="Agent did not produce any code changes. Skipping PR creation.",
+            )
+            self._update_workflow(
+                {
+                    "status": "completed",
+                    "current_phase": "completed",
+                    "error_message": "",
+                }
+            )
+            self._emit("phase_change", {"phase": "completed"})
+            return
 
         # Ensure branch is pushed to remote before PR creation
         try:
