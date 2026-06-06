@@ -130,7 +130,7 @@ class AutonomousOrchestrator:
                 # Add truncation note and stop
                 result_parts.append(
                     f"\n... [Truncated: {len(chunks)} files total, "
-                    f"showing {len(result_parts) + 1} with {per_file_lines} lines each]\n"
+                    f"showing {len(result_parts)} with {per_file_lines} lines each]\n"
                 )
                 break
             result_parts.append(part)

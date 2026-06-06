@@ -967,6 +967,8 @@ const translations: Record<Language, Translations> = {
     autoFilterFailed: 'Failed',
     autoDeleteWorkflow: 'Delete',
     autoDeleteConfirm: 'Delete this workflow?',
+    autoIssueBadge: 'Issue',
+    autoPrBadge: 'PR #',
   },
   zh: {
     // Common
@@ -1909,6 +1911,8 @@ const translations: Record<Language, Translations> = {
     autoFilterFailed: '失败',
     autoDeleteWorkflow: '删除',
     autoDeleteConfirm: '确定删除此工作流？',
+    autoIssueBadge: 'Issue',
+    autoPrBadge: 'PR #',
   },
   ja: {
     // Common
@@ -2555,6 +2559,8 @@ const translations: Record<Language, Translations> = {
     autoFilterFailed: '失敗',
     autoDeleteWorkflow: '削除',
     autoDeleteConfirm: 'このワークフローを削除しますか？',
+    autoIssueBadge: 'Issue',
+    autoPrBadge: 'PR #',
   },
   ko: {
     // Common
@@ -3199,6 +3205,8 @@ const translations: Record<Language, Translations> = {
     autoFilterFailed: '실패',
     autoDeleteWorkflow: '삭제',
     autoDeleteConfirm: '이 워크플로우를 삭제하시겠습니까?',
+    autoIssueBadge: 'Issue',
+    autoPrBadge: 'PR #',
   },
 };
 
