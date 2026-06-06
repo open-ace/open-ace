@@ -9,6 +9,7 @@ pr_review -> report -> wait -> (loop or merge).
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -28,11 +29,11 @@ COMPLETION_KEYWORDS = [
     "无新需求",
     "项目结束",
     "all done",
-    "completed",
     "no more requirements",
     "project finished",
     "开发完毕",
     "全部完成",
+    "workflow complete",
 ]
 
 # Prefix added to all prompts to inform the agent it is running autonomously
@@ -262,6 +263,9 @@ class AutonomousOrchestrator:
             if not branch_name:
                 branch_name = f"auto-dev/{self._workflow_id[:8]}"
             try:
+                # Ensure we branch from latest origin/main
+                gh._run_git(["fetch", "origin", "main"])
+
                 if strategy == "worktree":
                     wt_data = gh.create_worktree(
                         path=f"{project_path}/../{branch_name.replace('/', '-')}",
@@ -269,7 +273,7 @@ class AutonomousOrchestrator:
                     )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                 else:
-                    gh.create_branch(branch_name)
+                    gh.create_branch(branch_name, base="origin/main")
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -934,6 +938,16 @@ class AutonomousOrchestrator:
             title=f"Dev round {dev_round} completed",
         )
 
+        # Record wait phase start time for comment filtering
+        self._create_milestone(
+            phase="report",
+            dev_round=dev_round,
+            milestone_type="wait_started",
+            status="completed",
+            title="Wait phase starting",
+            metadata=json.dumps({"wait_started_at": datetime.now(timezone.utc).isoformat()}),
+        )
+
         # Move to wait phase
         self._update_workflow(
             {
@@ -953,20 +967,22 @@ class AutonomousOrchestrator:
         if not issue_number:
             return  # No issue to check
 
-        # Get last known comment timestamp from milestones
-        last_comment_time = ""
+        # Get the time when wait phase started (set by _do_report)
+        # This ensures only user comments AFTER the report are considered
+        wait_start = ""
         milestones = self.repo.list_milestones(self._workflow_id)
         for ms in reversed(milestones):
-            if ms.get("milestone_type") == "requirement_received" and ms.get("metadata"):
+            if ms.get("milestone_type") == "wait_started" and ms.get("metadata"):
                 try:
                     meta = json.loads(ms["metadata"])
-                    last_comment_time = meta.get("last_comment_time", "")
+                    wait_start = meta.get("wait_started_at", "")
                 except (json.JSONDecodeError, TypeError):
                     pass
+                break
 
         try:
             comments = gh.list_issue_comments(
-                issue_number, since=last_comment_time if last_comment_time else None
+                issue_number, since=wait_start if wait_start else None
             )
         except GitHubOpsError:
             return
@@ -985,11 +1001,17 @@ class AutonomousOrchestrator:
             )
         ]
 
-        # Check for completion signals
+        # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):
-            body = comment.get("body", "").lower()
+            body = comment.get("body", "")
             for keyword in COMPLETION_KEYWORDS:
-                if keyword.lower() in body:
+                # Match as standalone phrase: at line start or preceded by whitespace,
+                # followed by whitespace, punctuation, or end of string
+                pattern = re.compile(
+                    rf"(?:^|\s){re.escape(keyword)}(?:[\s,，。.!！?？、;；:：\n]|$)",
+                    re.IGNORECASE,
+                )
+                if pattern.search(body):
                     self._update_workflow(
                         {
                             "current_phase": "merge",
@@ -1006,7 +1028,8 @@ class AutonomousOrchestrator:
         # New requirements detected
         new_req_comment = user_comments[-1]  # Latest user comment
         new_requirements = new_req_comment.get("body", "")
-        comment_time = new_req_comment.get("created_at", "")
+        # Use correct field name from gh CLI (camelCase)
+        comment_time = new_req_comment.get("createdAt", "")
 
         self._create_milestone(
             phase="wait",
