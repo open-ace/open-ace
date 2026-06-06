@@ -7,7 +7,7 @@ Database operations for the AI autonomous development feature.
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.repositories.database import Database, is_postgresql
@@ -561,8 +561,7 @@ class AutonomousWorkflowRepository:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         cutoff = (
-            datetime.now(timezone.utc)
-            - __import__("datetime").timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
+            datetime.now(timezone.utc) - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
         ).strftime("%Y-%m-%d %H:%M:%S")
 
         conn = self.db.get_connection()
