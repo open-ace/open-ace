@@ -7,12 +7,13 @@
  * - Controls bar (pause/resume/stop/complete)
  * - Token usage display
  * - Expandable milestone details
+ * - GitHub links, diff viewer, session detail modal
  */
 
 import React, { useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Button, Badge, Loading } from '@/components/common';
+import { Button, Badge, Loading, Modal } from '@/components/common';
 import {
   useWorkflowTimeline,
   usePauseWorkflow,
@@ -25,6 +26,7 @@ import {
   useMilestoneSession,
   useMilestoneDiff,
 } from '@/hooks/useAutonomous';
+import type { MilestoneSession } from '@/hooks/useAutonomous';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
@@ -70,8 +72,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [viewingSession, setViewingSession] = useState<{ milestoneId: string; sessionId: string } | null>(null);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
-  const [forkBranchName] = useState('');
-  const [viewingDiff, setViewingDiff] = useState<string | null>(null); // milestoneId
+  const [viewingDiff, setViewingDiff] = useState<string | null>(null);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -82,14 +83,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const cancelMilestoneMutation = useCancelMilestone();
   const forkMilestoneMutation = useForkMilestone();
 
-  // Session detail query (only fetches when viewingSession is set)
+  // Session detail query
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
     workflow.workflow_id,
     viewingSession?.milestoneId ?? '',
     !!viewingSession,
   );
 
-  // Diff query (only fetches when viewingDiff is set)
+  // Diff query
   const { data: diffData, isLoading: diffLoading } = useMilestoneDiff(
     workflow.workflow_id,
     viewingDiff ?? '',
@@ -130,7 +131,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setShowStopConfirm(false);
   };
   const handleMarkDone = () => {
-    // If only one branch, skip selector
     if (availableBranches.length <= 1) {
       markDoneMutation.mutate({ workflowId: workflow.workflow_id, selectedBranch: availableBranches[0] });
     } else {
@@ -142,12 +142,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setShowBranchSelector(false);
   };
   const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
-
   const handleCancelMilestone = (milestoneId: string) => {
     cancelMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId });
   };
   const handleForkMilestone = (milestoneId: string) => {
-    const branch = forkBranchName || `fork/from-${milestoneId.slice(0, 8)}`;
+    const branch = `fork/from-${milestoneId.slice(0, 8)}`;
     forkMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId, branchName: branch });
   };
 
@@ -155,7 +154,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setExpandedMilestone(prev => prev === milestoneId ? null : milestoneId);
   };
 
-  // Parse diff stats JSON
   const parseDiffStats = (statsJson: string): { additions: number; deletions: number; files: number; commits: number } | null => {
     try {
       return statsJson ? JSON.parse(statsJson) : null;
@@ -163,6 +161,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
       return null;
     }
   };
+
+  // Extract typed session from query data
+  const session = sessionData?.session as MilestoneSession | undefined;
 
   if (isLoading) {
     return (
@@ -211,7 +212,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
           </div>
           <div className="d-flex gap-2">
             {workflow.status === 'failed' && (
-              <Button size="sm" variant="primary" onClick={handleRetry}>
+              <Button size="sm" variant="primary" onClick={handleRetry} disabled={retryMutation.isPending}>
                 <i className="bi bi-arrow-clockwise me-1"></i>
                 {t('autoRetryWorkflow', language)}
               </Button>
@@ -245,7 +246,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               </>
             )}
             {isWaiting && (
-              <Button size="sm" variant="success" onClick={handleMarkDone}>
+              <Button size="sm" variant="success" onClick={handleMarkDone} disabled={markDoneMutation.isPending}>
                 <i className="bi bi-check-circle me-1"></i>
                 {t('autoCompleteWorkflow', language)}
               </Button>
@@ -289,7 +290,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
         ) : (
           sortedRounds.map((round) => (
             <div key={round} className="mb-4">
-              {/* Round Header */}
               <h6 className="text-muted border-bottom pb-2 mb-3">
                 <i className="bi bi-arrow-repeat me-1"></i>
                 {t('autoDevRoundLabel', language)} {round}
@@ -300,7 +300,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                 )}
               </h6>
 
-              {/* Milestones */}
               <div className="ps-3">
                 {groupedMilestones[round].map((milestone) => {
                   const isExpanded = expandedMilestone === milestone.milestone_id;
@@ -310,18 +309,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
 
                   return (
                     <div key={milestone.milestone_id} className="mb-2">
-                      {/* Milestone Card */}
                       <div
                         className={`d-flex align-items-start p-2 rounded ${isExpanded ? 'bg-light' : ''}`}
                         style={{ cursor: 'pointer' }}
                         onClick={() => toggleExpand(milestone.milestone_id)}
                       >
-                        {/* Timeline dot */}
                         <div className="me-3 mt-1">
                           <i className={`bi ${statusIcon} fs-6`} />
                         </div>
-
-                        {/* Content */}
                         <div className="flex-grow-1 min-width-0">
                           <div className="d-flex align-items-center gap-2">
                             <i className={`bi ${display.icon} text-${display.color}`}></i>
@@ -334,8 +329,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </Badge>
                             )}
                           </div>
-
-                          {/* Summary info */}
                           <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
                             {milestone.result_summary && (
                               <span className="me-2">{milestone.result_summary.slice(0, 100)}</span>
@@ -355,15 +348,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             )}
                           </div>
                         </div>
-
-                        {/* Expand indicator */}
                         <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-muted`}></i>
                       </div>
 
-                      {/* Expanded Detail */}
                       {isExpanded && (
                         <div className="ms-4 p-3 border-start border-3" style={{ borderColor: `var(--bs-${display.color})` }}>
-                          {/* Plan content */}
                           {milestone.plan_content && (
                             <div className="mb-2">
                               <strong>{t('autoPhasePlanning', language)}:</strong>
@@ -372,8 +361,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </pre>
                             </div>
                           )}
-
-                          {/* Review content */}
                           {milestone.review_content && (
                             <div className="mb-2">
                               <strong>{t('autoStatusPRReview', language)}:</strong>
@@ -382,34 +369,28 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </pre>
                             </div>
                           )}
-
-                          {/* Description */}
                           {milestone.description && (
                             <p className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>{milestone.description}</p>
                           )}
-
-                          {/* Commit SHAs */}
                           {milestone.commit_shas && (
                             <div className="mb-2">
-                              <strong>Commits:</strong>
+                              <strong>{t('autoCommits', language)}:</strong>
                               <code className="d-block mt-1" style={{ fontSize: '0.75rem' }}>
                                 {milestone.commit_shas}
                               </code>
                               <div onClick={(e) => e.stopPropagation()}>
-                              <Button
-                                size="sm"
-                                variant="outline-dark"
-                                className="mt-1"
-                                onClick={() => setViewingDiff(milestone.milestone_id)}
-                              >
-                                <i className="bi bi-file-diff me-1"></i>
-                                View Changes
-                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline-dark"
+                                  className="mt-1"
+                                  onClick={() => setViewingDiff(milestone.milestone_id)}
+                                >
+                                  <i className="bi bi-file-diff me-1"></i>
+                                  {t('autoViewChanges', language)}
+                                </Button>
                               </div>
                             </div>
                           )}
-
-                          {/* Session link */}
                           {milestone.session_id && (
                             <small>
                               <i className="bi bi-chat-square-text me-1"></i>
@@ -425,8 +406,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </a>
                             </small>
                           )}
-
-                          {/* Milestone Actions (Fork / Cancel) */}
                           <div className="d-flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
                             {(milestone.status === 'completed' || milestone.status === 'in_progress') && (
                               <Button
@@ -451,8 +430,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               </Button>
                             )}
                           </div>
-
-                          {/* Error */}
                           {milestone.error_message && (
                             <div className="alert alert-danger py-1 px-2 mt-2 mb-0" style={{ fontSize: '0.8rem' }}>
                               {milestone.error_message}
@@ -469,123 +446,91 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
         )}
       </div>
 
-      {/* Session Detail Modal */}
-      {viewingSession && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setViewingSession(null)}>
-          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <i className="bi bi-chat-square-text me-2"></i>
-                  {t('autoViewSession', language)}: {viewingSession.sessionId.slice(0, 8)}
-                </h5>
-                <button type="button" className="btn-close" onClick={() => setViewingSession(null)} />
-              </div>
-              <div className="modal-body" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-                {sessionLoading ? (
-                  <Loading />
-                ) : sessionData?.session ? (
-                  <div>
-                    <div className="mb-3">
-                      <strong>Status:</strong>{' '}
-                      <Badge variant={(sessionData.session as Record<string, unknown>).status === 'completed' ? 'success' : 'primary'}>
-                        {String((sessionData.session as Record<string, unknown>).status)}
-                      </Badge>
-                    </div>
-                    {Array.isArray((sessionData.session as Record<string, unknown>).messages) &&
-                      ((sessionData.session as Record<string, unknown>).messages as Array<Record<string, unknown>>).map((msg, idx) => (
-                        <div key={idx} className="mb-2">
-                          <Badge variant={msg.role === 'assistant' ? 'primary' : msg.role === 'user' ? 'success' : 'secondary'}>
-                            {String(msg.role)}
-                          </Badge>
-                          {typeof msg.content === 'string' ? (
-                            <pre className="bg-light p-2 rounded mt-1 mb-0" style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                              {(msg.content as string).slice(0, 2000)}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
-                    {!Array.isArray((sessionData.session as Record<string, unknown>).messages) && (
-                      <p className="text-muted">No messages available</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-muted">No session data available</p>
-                )}
-              </div>
+      {/* Session Detail Modal (shared Modal) */}
+      <Modal
+        isOpen={!!viewingSession}
+        onClose={() => setViewingSession(null)}
+        title={viewingSession ? `${t('autoViewSession', language)}: ${viewingSession.sessionId.slice(0, 8)}` : ''}
+        size="lg"
+      >
+        {sessionLoading ? (
+          <Loading />
+        ) : session ? (
+          <div>
+            <div className="mb-3">
+              <strong>{t('status', language)}:</strong>{' '}
+              <Badge variant={session.status === 'completed' ? 'success' : 'primary'}>
+                {session.status}
+              </Badge>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Branch Selector Modal */}
-      {showBranchSelector && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setShowBranchSelector(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <i className="bi bi-git-merge me-2"></i>
-                  {t('autoSelectBranchToMerge', language)}
-                </h5>
-                <button type="button" className="btn-close" onClick={() => setShowBranchSelector(false)} />
-              </div>
-              <div className="modal-body">
-                <div className="list-group">
-                  {availableBranches.map((branch) => (
-                    <button
-                      key={branch}
-                      className="list-group-item list-group-item-action d-flex align-items-center"
-                      onClick={() => handleBranchSelect(branch)}
-                    >
-                      <i className="bi bi-git me-2"></i>
-                      <code>{branch}</code>
-                      {branch === workflow.branch_name && (
-                        <Badge variant="primary" className="ms-2">current</Badge>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="modal-footer">
-                <Button variant="secondary" onClick={() => setShowBranchSelector(false)}>
-                  {t('cancel', language)}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Diff Viewer Modal */}
-      {viewingDiff && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setViewingDiff(null)}>
-          <div className="modal-dialog modal-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <i className="bi bi-file-diff me-2"></i>
-                  Code Changes
-                </h5>
-                <button type="button" className="btn-close" onClick={() => setViewingDiff(null)} />
-              </div>
-              <div className="modal-body" style={{ maxHeight: '80vh', overflow: 'auto' }}>
-                {diffLoading ? (
-                  <Loading />
-                ) : diffData?.diff ? (
-                  <pre className="bg-dark text-light p-3 rounded" style={{ fontSize: '0.75rem', maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                    {diffData.diff.length > 50000
-                      ? diffData.diff.slice(0, 50000) + '\n\n--- Diff truncated at 50K characters ---'
-                      : diffData.diff}
+            {Array.isArray(session.messages) && session.messages.map((msg, idx) => (
+              <div key={idx} className="mb-2">
+                <Badge variant={msg.role === 'assistant' ? 'primary' : msg.role === 'user' ? 'success' : 'secondary'}>
+                  {msg.role}
+                </Badge>
+                {typeof msg.content === 'string' ? (
+                  <pre className="bg-light p-2 rounded mt-1 mb-0" style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                    {msg.content.slice(0, 2000)}
                   </pre>
-                ) : (
-                  <p className="text-muted">No diff available</p>
-                )}
+                ) : null}
               </div>
-            </div>
+            ))}
+            {!Array.isArray(session.messages) && (
+              <p className="text-muted">{t('autoNoMessagesAvailable', language)}</p>
+            )}
           </div>
+        ) : (
+          <p className="text-muted">{t('autoNoSessionData', language)}</p>
+        )}
+      </Modal>
+
+      {/* Branch Selector Modal (shared Modal) */}
+      <Modal
+        isOpen={showBranchSelector}
+        onClose={() => setShowBranchSelector(false)}
+        title={t('autoSelectBranchToMerge', language)}
+        footer={
+          <Button variant="secondary" onClick={() => setShowBranchSelector(false)}>
+            {t('cancel', language)}
+          </Button>
+        }
+      >
+        <div className="list-group">
+          {availableBranches.map((branch) => (
+            <button
+              key={branch}
+              className="list-group-item list-group-item-action d-flex align-items-center"
+              onClick={() => handleBranchSelect(branch)}
+            >
+              <i className="bi bi-git me-2"></i>
+              <code>{branch}</code>
+              {branch === workflow.branch_name && (
+                <Badge variant="primary" className="ms-2">{t('autoCurrent', language)}</Badge>
+              )}
+            </button>
+          ))}
         </div>
-      )}
+      </Modal>
+
+      {/* Diff Viewer Modal (shared Modal) */}
+      <Modal
+        isOpen={!!viewingDiff}
+        onClose={() => setViewingDiff(null)}
+        title={t('autoCodeChanges', language)}
+        size="xl"
+      >
+        {diffLoading ? (
+          <Loading />
+        ) : diffData?.diff ? (
+          <pre className="bg-dark text-light p-3 rounded" style={{ fontSize: '0.75rem', maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {diffData.diff.length > 50000
+              ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
+              : diffData.diff}
+          </pre>
+        ) : (
+          <p className="text-muted">{t('autoNoDiff', language)}</p>
+        )}
+      </Modal>
     </div>
   );
 };

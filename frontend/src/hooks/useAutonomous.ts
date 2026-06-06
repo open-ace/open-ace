@@ -7,6 +7,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
 import type { CreateWorkflowRequest } from '@/api/autonomous';
 
+/** Session message shape returned by milestone session API */
+export interface SessionMessage {
+  role: string;
+  content: string;
+}
+
+/** Session detail returned by milestone session API */
+export interface MilestoneSession {
+  status: string;
+  messages: SessionMessage[];
+}
+
 // ── Workflow Queries ───────────────────────────────────────────────
 
 export function useWorkflows(filters?: { status?: string }) {
