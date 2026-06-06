@@ -566,7 +566,15 @@ class TestOrchestratorWait:
         mock_repo.update_workflow.assert_not_called()
 
     def test_wait_ignores_report_with_completed_word(self):
-        """Progress Report comment containing 'completed' should NOT trigger merge."""
+        """Progress Report comment containing 'completed' should NOT trigger merge.
+
+        This is a regression guard: 'completed' was previously in
+        COMPLETION_KEYWORDS and caused false triggers on milestone reports.
+        Even if someone re-adds 'completed' to the keyword list, this test
+        ensures report-like comments don't accidentally trigger a merge.
+        The regex-based matching (whole-word/phrase) already protects against
+        this, but the test documents the design intent explicitly.
+        """
         wf = _make_workflow(current_phase="wait", github_issue_number=42)
         orch, mock_repo = self._make_orchestrator(wf)
 

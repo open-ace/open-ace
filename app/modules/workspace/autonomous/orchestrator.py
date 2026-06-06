@@ -36,6 +36,15 @@ COMPLETION_KEYWORDS = [
     "workflow complete",
 ]
 
+# Pre-compiled patterns for completion keyword matching (avoids recompilation in loop)
+_COMPLETION_PATTERNS = [
+    re.compile(
+        rf"(?:^|\s){re.escape(kw)}(?:[\s,，。.!！?？、;；:：\n]|$)",
+        re.IGNORECASE,
+    )
+    for kw in COMPLETION_KEYWORDS
+]
+
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
     "## 重要提示\n"
@@ -270,6 +279,7 @@ class AutonomousOrchestrator:
                     wt_data = gh.create_worktree(
                         path=f"{project_path}/../{branch_name.replace('/', '-')}",
                         branch=branch_name,
+                        base="origin/main",
                     )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                 else:
@@ -572,11 +582,15 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(result)
 
-        # Get diff stats
+        # Get diff stats and commit SHA independently so one failure
+        # does not discard the other
         diff_stats = {}
         commit_sha = ""
         try:
             commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+        try:
             diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
         except Exception:
             pass
@@ -1055,13 +1069,7 @@ class AutonomousOrchestrator:
         # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):
             body = comment.get("body", "")
-            for keyword in COMPLETION_KEYWORDS:
-                # Match as standalone phrase: at line start or preceded by whitespace,
-                # followed by whitespace, punctuation, or end of string
-                pattern = re.compile(
-                    rf"(?:^|\s){re.escape(keyword)}(?:[\s,，。.!！?？、;；:：\n]|$)",
-                    re.IGNORECASE,
-                )
+            for pattern in _COMPLETION_PATTERNS:
                 if pattern.search(body):
                     self._update_workflow(
                         {
