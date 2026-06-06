@@ -875,6 +875,10 @@ def agent_message():
         return jsonify({"error": "machine_id is required"}), 400
 
     if msg_type == "register":
+        # Validate machine exists in DB before allowing registration
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Unknown machine_id"}), 404
         # Agent re-registering on reconnect
         agent_mgr.register_connection(machine_id, None)
         capabilities = data.get("capabilities", {})

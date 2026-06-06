@@ -29,18 +29,6 @@ log "Starting daily token usage collection"
 log "Initializing database..."
 python3 "$BASE_DIR/cli.py" summary > /dev/null 2>&1 || true
 
-# Fetch OpenClaw data
-log "Fetching OpenClaw data..."
-python3 "$BASE_DIR/scripts/fetch_openclaw.py" --days 7 2>&1 | tee -a "$LOG_FILE"
-
-# Fetch Claude data
-log "Fetching Claude data..."
-python3 "$BASE_DIR/scripts/fetch_claude.py" --days 7 2>&1 | tee -a "$LOG_FILE"
-
-# Fetch Qwen data
-log "Fetching Qwen data..."
-python3 "$BASE_DIR/scripts/fetch_qwen.py" --days 7 2>&1 | tee -a "$LOG_FILE"
-
 # Send email report if configured
 # Check if email is enabled in config.json
 if python3 -c "
