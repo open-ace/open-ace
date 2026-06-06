@@ -7,6 +7,7 @@ API routes for AI autonomous development workflow management.
 
 import json
 import logging
+import os
 import queue
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -15,6 +16,9 @@ from app.auth.decorators import auth_required
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
 logger = logging.getLogger(__name__)
+
+# Maximum retry count for failed workflows
+MAX_RETRY_COUNT = 5
 
 autonomous_bp = Blueprint("autonomous", __name__)
 
@@ -58,6 +62,15 @@ def create_workflow():
 
     if not data.get("project_path") and not data.get("is_new_project"):
         return jsonify({"error": "project_path is required for existing projects"}), 400
+
+    # Validate project_path security
+    project_path = data.get("project_path", "")
+    if project_path:
+        # Check original path is absolute (before normalization)
+        if not os.path.isabs(project_path):
+            return jsonify({"error": "project_path must be an absolute path"}), 400
+        if ".." in project_path.split(os.sep):
+            return jsonify({"error": "project_path must not contain path traversal"}), 400
 
     workflow_data = {
         "user_id": user_id,
@@ -176,6 +189,9 @@ def pause_workflow(workflow_id):
     if workflow.get("status") == "paused":
         return jsonify({"error": "Workflow already paused"}), 400
 
+    # Signal running orchestrator to cancel its active agent task
+    _cancel_running_task(workflow_id)
+
     from datetime import datetime, timezone
 
     auto_repo.update_workflow(
@@ -228,6 +244,9 @@ def stop_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
+    # Signal running orchestrator to cancel its active agent task
+    _cancel_running_task(workflow_id)
+
     from datetime import datetime, timezone
 
     auto_repo.update_workflow(
@@ -255,6 +274,11 @@ def retry_workflow(workflow_id):
     if workflow.get("status") != "failed":
         return jsonify({"error": "Only failed workflows can be retried"}), 400
 
+    # Check retry count limit
+    retry_count = workflow.get("retry_count", 0) or 0
+    if retry_count >= MAX_RETRY_COUNT:
+        return jsonify({"error": f"Maximum retry count ({MAX_RETRY_COUNT}) exceeded"}), 400
+
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
@@ -263,6 +287,7 @@ def retry_workflow(workflow_id):
         {
             "status": status,
             "error_message": "",
+            "retry_count": retry_count + 1,
         },
     )
 
@@ -518,3 +543,16 @@ def _emit_event_safe(workflow_id: str, event_type: str, data: dict):
         _get_event_emitter().emit(workflow_id, event_type, data)
     except Exception:
         pass
+
+
+def _cancel_running_task(workflow_id: str):
+    """Signal a running orchestrator to cancel its current agent task."""
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.cancel_current_task()
+    except Exception as e:
+        logger.warning("Failed to cancel running task for %s: %s", workflow_id[:8], e)

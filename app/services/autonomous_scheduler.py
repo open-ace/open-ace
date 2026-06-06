@@ -6,10 +6,15 @@ Uses ThreadPoolExecutor for concurrent workflow processing.
 Follows the same singleton pattern as DataFetchScheduler.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +25,19 @@ MAX_CONCURRENT_WORKFLOWS = 3
 class AutonomousScheduler:
     """Singleton scheduler that advances autonomous workflows."""
 
-    _instance: Optional["AutonomousScheduler"] = None
+    _instance: AutonomousScheduler | None = None
     _lock = threading.Lock()
 
     def __init__(self):
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._in_progress_ids: set[str] = set()
         self._in_progress_lock = threading.Lock()
+        self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
+        self._orchestrator_lock = threading.Lock()
 
     @classmethod
-    def instance(cls) -> "AutonomousScheduler":
+    def instance(cls) -> AutonomousScheduler:
         """Get or create the singleton instance."""
         if cls._instance is None:
             with cls._lock:
@@ -58,6 +65,11 @@ class AutonomousScheduler:
             self._thread.join(timeout=10)
         logger.info("Autonomous scheduler stopped")
 
+    def get_running_orchestrator(self, workflow_id: str):
+        """Get the currently running orchestrator for a workflow, if any."""
+        with self._orchestrator_lock:
+            return self._running_orchestrators.get(workflow_id)
+
     def _run_loop(self):
         """Main loop: poll for active workflows and advance them."""
         while not self._stop_event.is_set():
@@ -73,8 +85,11 @@ class AutonomousScheduler:
         """Advance a single workflow. Returns workflow_id for tracking."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+        orchestrator = None
         try:
             orchestrator = AutonomousOrchestrator(workflow_id)
+            with self._orchestrator_lock:
+                self._running_orchestrators[workflow_id] = orchestrator
             orchestrator.advance()
         except Exception as e:
             logger.error(
@@ -84,6 +99,8 @@ class AutonomousScheduler:
                 exc_info=True,
             )
         finally:
+            with self._orchestrator_lock:
+                self._running_orchestrators.pop(workflow_id, None)
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
         return workflow_id
