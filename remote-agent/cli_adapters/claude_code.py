@@ -76,6 +76,19 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
         if model:
             args.extend(["--model", model])
 
+        # Map internal permission_mode to Claude CLI --permission-mode flag
+        # Choices: "acceptEdits", "auto", "bypassPermissions", "default"
+        if permission_mode:
+            mode_map = {
+                "auto-edit": "acceptEdits",
+                "auto": "auto",
+                "bypass": "bypassPermissions",
+                "full-auto": "bypassPermissions",
+            }
+            cli_mode = mode_map.get(permission_mode)
+            if cli_mode:
+                args.extend(["--permission-mode", cli_mode])
+
         return args
 
     def get_display_name(self) -> str:

@@ -35,6 +35,16 @@ COMPLETION_KEYWORDS = [
     "全部完成",
 ]
 
+# Prefix added to all prompts to inform the agent it is running autonomously
+AUTONOMOUS_CONTEXT = (
+    "## 重要提示\n"
+    "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
+    "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
+    "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
+    "3. 直接输出你的分析和方案，不要尝试执行需要权限的操作\n"
+    "4. 如果需要修改文件，直接输出修改方案即可\n\n"
+)
+
 
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
@@ -320,7 +330,7 @@ class AutonomousOrchestrator:
                     break
 
             prompt = (
-                f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
+                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
@@ -329,7 +339,7 @@ class AutonomousOrchestrator:
             milestone_type = "plan_refined"
         else:
             prompt = (
-                f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
+                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
                 f"## 需求\n{requirements}\n\n"
                 f"## 项目路径\n{wf.get('project_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
@@ -392,7 +402,7 @@ class AutonomousOrchestrator:
 
         # Step 2: Review plan
         review_prompt = (
-            f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
+            AUTONOMOUS_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
             f"1. 遗漏的需求\n"
             f"2. 架构风险\n"
             f"3. 实现难度估计\n"
@@ -507,7 +517,7 @@ class AutonomousOrchestrator:
         )
 
         dev_prompt = (
-            f"根据以下已审定的实现方案进行完整开发。\n\n"
+            AUTONOMOUS_CONTEXT + f"根据以下已审定的实现方案进行完整开发。\n\n"
             f"## 实现方案\n{final_plan}\n\n"
             f"## 要求\n"
             f"1. 严格按照方案实现所有功能\n"
@@ -567,7 +577,8 @@ class AutonomousOrchestrator:
         )
 
         test_prompt = (
-            "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
+            AUTONOMOUS_CONTEXT
+            + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
             "确保所有测试通过后再结束。"
         )
 
@@ -755,7 +766,7 @@ class AutonomousOrchestrator:
             pass
 
         review_prompt = (
-            f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
+            AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
             f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
             f"## 代码变更\n{diff_text[:8000]}\n\n"
             f"请检查：\n"
@@ -822,7 +833,7 @@ class AutonomousOrchestrator:
             )
 
             fix_prompt = (
-                f"根据以下代码审查意见修改代码：\n\n{review_text}\n\n"
+                AUTONOMOUS_CONTEXT + f"根据以下代码审查意见修改代码：\n\n{review_text}\n\n"
                 f"修改后提交 git commit 并推送。"
             )
 
@@ -1114,7 +1125,8 @@ class AutonomousOrchestrator:
 
             # Ask AI agent to resolve conflicts
             conflict_prompt = (
-                "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
+                AUTONOMOUS_CONTEXT
+                + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
                 "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
                 "步骤：\n"
                 "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
