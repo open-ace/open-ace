@@ -106,6 +106,9 @@ def _make_orchestrator(wf_data):
         }
         mock_gh.get_diff.return_value = "diff content"
         mock_gh.git_push.return_value = None
+        mock_gh.has_uncommitted_changes.return_value = False
+        mock_gh.git_add_all.return_value = None
+        mock_gh.git_commit.return_value = {"sha": "auto-sha", "message": "auto-commit"}
         mock_gh.create_pr.return_value = {"number": 99, "url": "https://github.com/pull/99"}
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
@@ -223,7 +226,7 @@ class TestDevelopmentCommitVerification:
         ]
 
     def test_detects_no_code_changes(self):
-        """When commit SHA is unchanged after agent run, workflow should fail."""
+        """When commit SHA unchanged and no uncommitted files, workflow should fail."""
         wf = _make_workflow(
             current_phase="development",
             status="developing",
@@ -233,8 +236,10 @@ class TestDevelopmentCommitVerification:
         orch._runner.run_agent_task.return_value = _make_agent_result(
             success=True, text="I have completed the implementation"
         )
-        # Same commit before and after = no changes
+        # Same commit before and after = no new commits
         orch._gh.get_current_commit.return_value = "abc123"
+        # No uncommitted changes either
+        orch._gh.has_uncommitted_changes.return_value = False
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
@@ -268,6 +273,63 @@ class TestDevelopmentCommitVerification:
 
         failed_updates = self._get_failed_updates(mock_repo)
         assert len(failed_updates) == 0
+
+    def test_auto_commits_uncommitted_changes(self):
+        """When commit SHA unchanged but files were modified, auto-commit and continue."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            dev_round=1,
+        )
+        orch, mock_repo = _make_orchestrator(wf)
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=True, text="Implementation done"
+        )
+        # Same commit before and after agent runs, then changes after auto-commit
+        orch._gh.get_current_commit.side_effect = ["abc123", "abc123", "def456"]
+        orch._gh.has_uncommitted_changes.return_value = True
+
+        mock_repo.list_milestones.return_value = [
+            {"milestone_type": "plan_created", "plan_content": "Build feature X"},
+        ]
+
+        orch._do_development(wf)
+
+        # Should have auto-committed
+        orch._gh.git_add_all.assert_called_once()
+        orch._gh.git_commit.assert_called_once()
+        assert "auto: development changes" in orch._gh.git_commit.call_args[0][0]
+        # Should NOT have failed
+        failed_updates = self._get_failed_updates(mock_repo)
+        assert len(failed_updates) == 0
+
+    def test_auto_commit_failure_falls_back_to_fail(self):
+        """When auto-commit fails, workflow should still be marked as failed."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            dev_round=1,
+        )
+        orch, mock_repo = _make_orchestrator(wf)
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=True, text="Implementation done"
+        )
+        orch._gh.get_current_commit.return_value = "abc123"
+        orch._gh.has_uncommitted_changes.return_value = True
+        orch._gh.git_commit.side_effect = Exception("pre-commit hook rejected")
+
+        mock_repo.list_milestones.return_value = [
+            {"milestone_type": "plan_created", "plan_content": "Build feature X"},
+        ]
+
+        orch._do_development(wf)
+
+        # Should have attempted auto-commit
+        orch._gh.git_commit.assert_called_once()
+        # Should have fallen back to failure
+        failed_updates = self._get_failed_updates(mock_repo)
+        assert len(failed_updates) >= 1
+        assert "no code changes" in failed_updates[-1][0][1]["error_message"].lower()
 
     def test_skip_check_when_commit_unavailable(self):
         """When commit SHA is empty, skip the verification gracefully."""
