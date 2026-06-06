@@ -7,6 +7,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
 import type { CreateWorkflowRequest } from '@/api/autonomous';
 
+/** Session message shape returned by milestone session API */
+export interface SessionMessage {
+  role: string;
+  content: string;
+}
+
+/** Session detail returned by milestone session API */
+export interface MilestoneSession {
+  status: string;
+  messages: SessionMessage[];
+}
+
 // ── Workflow Queries ───────────────────────────────────────────────
 
 export function useWorkflows(filters?: { status?: string }) {
@@ -189,6 +201,25 @@ export function useForkMilestone() {
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+    },
+  });
+}
+
+export function useMilestoneSession(workflowId: string, milestoneId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'session', workflowId, milestoneId],
+    queryFn: () => autonomousApi.getMilestoneSession(workflowId, milestoneId),
+    enabled: enabled && !!workflowId && !!milestoneId,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useDeleteWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => autonomousApi.deleteWorkflow(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
     },
   });
 }
