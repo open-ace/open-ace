@@ -597,23 +597,51 @@ class AutonomousOrchestrator:
 
         # Verify agent actually produced code changes
         if result.success and commit_before and commit_sha and commit_before == commit_sha:
-            logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
-            self.repo.update_milestone(
-                ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "session_id": result.session_id,
-                    "result_summary": result.response_text[:300] if result.response_text else "",
-                    "error_message": "Agent produced no code changes (commit SHA unchanged)",
-                },
-            )
-            self._update_workflow(
-                {
-                    "status": "failed",
-                    "error_message": "Development failed: agent produced no code changes",
-                }
-            )
-            return
+            # Commit SHA unchanged — check if agent left uncommitted changes
+            has_uncommitted = False
+            try:
+                has_uncommitted = gh.has_uncommitted_changes()
+            except Exception:
+                pass
+
+            if has_uncommitted:
+                # Agent modified files but didn't commit — auto-commit
+                logger.info("Agent left uncommitted changes, auto-committing")
+                try:
+                    gh.git_add_all()
+                    gh.git_commit(f"auto: development changes (round {dev_round})")
+                    commit_sha = gh.get_current_commit()
+                    # Re-calculate diff_stats now that auto-commit is done
+                    try:
+                        diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning("Auto-commit failed: %s", e)
+                    # Fall through to failure path below
+                    has_uncommitted = False
+
+            if not has_uncommitted:
+                # Truly no changes or auto-commit failed
+                logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
+                self.repo.update_milestone(
+                    ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "session_id": result.session_id,
+                        "result_summary": (
+                            result.response_text[:300] if result.response_text else ""
+                        ),
+                        "error_message": "Agent produced no code changes (commit SHA unchanged)",
+                    },
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": "Development failed: agent produced no code changes",
+                    }
+                )
+                return
 
         self.repo.update_milestone(
             ms.get("milestone_id", ""),

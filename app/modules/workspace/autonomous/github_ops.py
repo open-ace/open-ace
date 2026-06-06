@@ -386,6 +386,11 @@ class GitHubOps:
 
     # ── Git Operations ──────────────────────────────────────────────
 
+    def has_uncommitted_changes(self) -> bool:
+        """Check if there are uncommitted changes (staged or unstaged)."""
+        result = self._run_git(["status", "--porcelain"])
+        return bool(result.stdout.strip())
+
     def git_add_all(self) -> None:
         """Stage all changes."""
         self._run_git(["add", "-A"])
