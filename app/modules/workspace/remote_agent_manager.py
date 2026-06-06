@@ -170,6 +170,20 @@ class RemoteAgentManager:
             if updated > 0:
                 logger.info(f"Marked {updated} machines offline due to heartbeat timeout")
 
+            # Remove stale entries from _connections for machines offline
+            # beyond heartbeat timeout, so is_connected() stays accurate
+            cursor.execute(
+                "SELECT machine_id FROM remote_machines "
+                f"WHERE status = 'offline' AND last_heartbeat < {_param()}",
+                (heartbeat_cutoff.isoformat(),),
+            )
+            stale_machines = [r["machine_id"] for r in cursor.fetchall()]
+            if stale_machines:
+                with self._lock:
+                    for mid in stale_machines:
+                        self._connections.pop(mid, None)
+                logger.info(f"Pruned {len(stale_machines)} stale connections from _connections")
+
             # Clean up sessions on offline machines that exceed recovery window
             cursor.execute(
                 "SELECT s.session_id FROM agent_sessions s "
