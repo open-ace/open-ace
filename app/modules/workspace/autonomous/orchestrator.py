@@ -42,8 +42,8 @@ AUTONOMOUS_CONTEXT = (
     "你正在无人值守的自动化工作流中运行。请遵守以下规则：\n"
     "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
     "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
-    "3. 直接输出你的分析和方案，不要尝试执行需要权限的操作\n"
-    "4. 如果需要修改文件，直接输出修改方案即可\n\n"
+    "3. 直接执行文件修改、git 操作等，不要仅输出方案文本\n"
+    "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
 )
 
 
@@ -338,7 +338,9 @@ class AutonomousOrchestrator:
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
-                f"请输出完善后的完整实现方案。"
+                f"请输出完善后的完整实现方案。\n\n"
+                f"重要约束：只输出高层设计方案和实现步骤描述，"
+                f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
             milestone_type = "plan_refined"
         else:
@@ -351,7 +353,9 @@ class AutonomousOrchestrator:
                 f"2. 技术方案和架构设计\n"
                 f"3. 实现步骤（按优先级排序）\n"
                 f"4. 测试策略\n"
-                f"5. 潜在风险和缓解措施"
+                f"5. 潜在风险和缓解措施\n\n"
+                f"重要约束：只输出高层设计方案和实现步骤描述，"
+                f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
             milestone_type = "plan_created"
 
@@ -372,6 +376,7 @@ class AutonomousOrchestrator:
             prompt=prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(result)
@@ -433,6 +438,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(review_result)
@@ -463,10 +469,18 @@ class AutonomousOrchestrator:
         if round_num >= max_rounds:
             # All plan review rounds completed — post final plan to issue
             final_plan = ""
+            last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
             for ms in reversed(all_milestones):
-                if ms.get("plan_content"):
+                if ms.get("plan_content") and not final_plan:
                     final_plan = ms["plan_content"]
+                if (
+                    ms.get("milestone_type") == "plan_reviewed"
+                    and ms.get("review_content")
+                    and not last_review
+                ):
+                    last_review = ms["review_content"]
+                if final_plan and last_review:
                     break
 
             issue_number = wf.get("github_issue_number")
@@ -477,6 +491,12 @@ class AutonomousOrchestrator:
                         f"Plan review completed after {max_rounds} round(s).\n\n"
                         f"{final_plan}"
                     )
+                    if last_review:
+                        final_comment += (
+                            f"\n\n---\n\n"
+                            f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
+                            f"{last_review[:2000]}"
+                        )
                     gh.add_issue_comment(issue_number, final_comment)
                 except Exception:
                     pass
@@ -520,6 +540,13 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round}",
         )
 
+        # Capture commit SHA before agent runs to verify code changes later
+        commit_before = ""
+        try:
+            commit_before = gh.get_current_commit()
+        except Exception:
+            pass
+
         dev_prompt = (
             AUTONOMOUS_CONTEXT + f"根据以下已审定的实现方案进行完整开发。\n\n"
             f"## 实现方案\n{final_plan}\n\n"
@@ -540,6 +567,7 @@ class AutonomousOrchestrator:
             prompt=dev_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(result)
@@ -552,6 +580,26 @@ class AutonomousOrchestrator:
             diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
         except Exception:
             pass
+
+        # Verify agent actually produced code changes
+        if result.success and commit_before and commit_sha and commit_before == commit_sha:
+            logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
+            self.repo.update_milestone(
+                ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": result.session_id,
+                    "result_summary": result.response_text[:300] if result.response_text else "",
+                    "error_message": "Agent produced no code changes (commit SHA unchanged)",
+                },
+            )
+            self._update_workflow(
+                {
+                    "status": "failed",
+                    "error_message": "Development failed: agent produced no code changes",
+                }
+            )
+            return
 
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
@@ -594,6 +642,7 @@ class AutonomousOrchestrator:
             prompt=test_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(test_result)
@@ -790,6 +839,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
         )
 
         self._accumulate_tokens(review_result)
@@ -849,6 +899,7 @@ class AutonomousOrchestrator:
                 prompt=fix_prompt,
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
             )
 
             self._accumulate_tokens(fix_result)
@@ -1167,6 +1218,7 @@ class AutonomousOrchestrator:
                 prompt=conflict_prompt,
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
             )
 
             if not result.success:

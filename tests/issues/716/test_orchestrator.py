@@ -517,7 +517,7 @@ class TestOrchestratorWait:
 
         mock_gh = MagicMock()
         mock_gh.list_issue_comments.return_value = [
-            {"body": "开发完成", "created_at": "2026-06-05T14:00:00Z"},
+            {"body": "开发完成", "createdAt": "2026-06-05T14:00:00Z"},
         ]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
@@ -536,7 +536,7 @@ class TestOrchestratorWait:
 
         mock_gh = MagicMock()
         mock_gh.list_issue_comments.return_value = [
-            {"body": "Please also add a dark mode feature", "created_at": "2026-06-05T14:00:00Z"},
+            {"body": "Please also add a dark mode feature", "createdAt": "2026-06-05T14:00:00Z"},
         ]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
@@ -829,7 +829,7 @@ class TestOrchestratorDevelopment:
         orch._runner.run_agent_task.return_value = _make_agent_result(
             success=True, text="Development complete"
         )
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {"additions": 50, "deletions": 10, "files": 3}
 
         orch._do_development(wf)
@@ -857,7 +857,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf, milestones=[plan_ms])
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -894,9 +894,8 @@ class TestOrchestratorDevelopment:
             _make_agent_result(success=True, text="Dev done"),
             _make_agent_result(success=False, error="Tests failed"),
         ]
-        orch._gh.get_current_commit.return_value = "abc1234"
-        orch._gh.get_diff_stats.return_value = {}
-        orch._gh.get_current_commit.return_value = "abc1234"
+        # commit_before="abc1234" -> commit_after dev="def5678" (dev changed code)
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -916,7 +915,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -936,7 +935,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
@@ -953,7 +952,7 @@ class TestOrchestratorDevelopment:
         orch, _ = self._make_orchestrator(wf, milestones=[])  # No plan milestones
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
-        orch._gh.get_current_commit.return_value = "abc1234"
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
