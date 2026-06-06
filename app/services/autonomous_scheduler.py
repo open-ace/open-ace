@@ -9,6 +9,7 @@ Follows the same singleton pattern as DataFetchScheduler.
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
@@ -84,6 +85,18 @@ class AutonomousScheduler:
     def _advance_single(self, workflow_id: str) -> str:
         """Advance a single workflow. Returns workflow_id for tracking."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        # Unique lock owner: hostname + thread name
+        lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
+        repo = AutonomousWorkflowRepository()
+
+        # Acquire DB-level distributed lock
+        if not repo.acquire_lock(workflow_id, lock_owner):
+            logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
+            with self._in_progress_lock:
+                self._in_progress_ids.discard(workflow_id)
+            return workflow_id
 
         orchestrator = None
         try:
@@ -101,6 +114,11 @@ class AutonomousScheduler:
         finally:
             with self._orchestrator_lock:
                 self._running_orchestrators.pop(workflow_id, None)
+            # Release DB lock
+            try:
+                repo.release_lock(workflow_id, lock_owner)
+            except Exception:
+                logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
         return workflow_id

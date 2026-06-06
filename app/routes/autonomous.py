@@ -100,6 +100,19 @@ def create_workflow():
     if not _workflow_rate_limiter.is_allowed(user_id):
         return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
 
+    # Validate remote machine admin permission
+    workspace_type = data.get("workspace_type", "local")
+    remote_machine_id = data.get("remote_machine_id", "")
+    if workspace_type == "remote" and remote_machine_id:
+        if g.user_role != "admin":
+            from app.auth.decorators import _check_machine_admin
+
+            if not _check_machine_admin(user_id, remote_machine_id):
+                return (
+                    jsonify({"error": "Machine admin permission required for remote workflows"}),
+                    403,
+                )
+
     # Validate required fields
     if not data.get("requirements_text") and not data.get("requirements_issue_url"):
         return jsonify({"error": "requirements_text or requirements_issue_url is required"}), 400
