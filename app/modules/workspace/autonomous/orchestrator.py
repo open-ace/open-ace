@@ -96,6 +96,25 @@ class AutonomousOrchestrator:
             }
         )
 
+    def _find_existing_milestone(
+        self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
+    ) -> Optional[dict]:
+        """Check if a milestone of this type already exists (idempotency guard)."""
+        existing = self.repo.list_milestones(self._workflow_id, phase=phase, status="in_progress")
+        # Also check completed ones
+        completed = self.repo.list_milestones(self._workflow_id, phase=phase, status="completed")
+        candidates = existing + completed
+
+        for ms in candidates:
+            if ms.get("milestone_type") != milestone_type:
+                continue
+            if dev_round is not None and ms.get("dev_round") != dev_round:
+                continue
+            if round_number is not None and ms.get("round_number") != round_number:
+                continue
+            return ms
+        return None
+
     def _create_milestone(self, **kwargs) -> dict:
         """Create a milestone and emit event."""
         kwargs.setdefault("workflow_id", self._workflow_id)
@@ -129,6 +148,12 @@ class AutonomousOrchestrator:
 
     def _run_agent(self, **kwargs) -> AgentTaskResult:
         """Run an agent task with session tracking for cancellation support."""
+        # Inject per-workflow timeout if specified
+        if "timeout" not in kwargs:
+            wf = self.workflow
+            task_timeout = (wf or {}).get("task_timeout")
+            if task_timeout:
+                kwargs["timeout"] = int(task_timeout)
         result = self._runner.run_agent_task(**kwargs)
         self._current_session_id = result.session_id
         return result

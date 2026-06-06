@@ -49,6 +49,8 @@ class AutonomousWorkflowRepository:
         "total_output_tokens",
         "total_requests",
         "error_message",
+        "retry_count",
+        "task_timeout",
         "updated_at",
         "completed_at",
         "paused_at",

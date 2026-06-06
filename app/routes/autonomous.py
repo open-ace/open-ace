@@ -7,6 +7,7 @@ API routes for AI autonomous development workflow management.
 
 import json
 import logging
+import os
 import queue
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -15,6 +16,9 @@ from app.auth.decorators import auth_required
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
 logger = logging.getLogger(__name__)
+
+# Maximum retry count for failed workflows
+MAX_RETRY_COUNT = 5
 
 autonomous_bp = Blueprint("autonomous", __name__)
 
@@ -58,6 +62,15 @@ def create_workflow():
 
     if not data.get("project_path") and not data.get("is_new_project"):
         return jsonify({"error": "project_path is required for existing projects"}), 400
+
+    # Validate project_path security
+    project_path = data.get("project_path", "")
+    if project_path:
+        # Check original path is absolute (before normalization)
+        if not os.path.isabs(project_path):
+            return jsonify({"error": "project_path must be an absolute path"}), 400
+        if ".." in project_path.split(os.sep):
+            return jsonify({"error": "project_path must not contain path traversal"}), 400
 
     workflow_data = {
         "user_id": user_id,
@@ -261,6 +274,11 @@ def retry_workflow(workflow_id):
     if workflow.get("status") != "failed":
         return jsonify({"error": "Only failed workflows can be retried"}), 400
 
+    # Check retry count limit
+    retry_count = workflow.get("retry_count", 0) or 0
+    if retry_count >= MAX_RETRY_COUNT:
+        return jsonify({"error": f"Maximum retry count ({MAX_RETRY_COUNT}) exceeded"}), 400
+
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
@@ -269,6 +287,7 @@ def retry_workflow(workflow_id):
         {
             "status": status,
             "error_message": "",
+            "retry_count": retry_count + 1,
         },
     )
 

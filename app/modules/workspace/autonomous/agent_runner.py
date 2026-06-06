@@ -23,8 +23,8 @@ from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
 
-# Default timeout for agent tasks (30 minutes)
-DEFAULT_TASK_TIMEOUT = 1800
+# Default timeout for agent tasks — configurable via env var (default 1 hour)
+DEFAULT_TASK_TIMEOUT = int(os.environ.get("AUTONOMOUS_TASK_TIMEOUT", "3600"))
 
 
 @dataclass
