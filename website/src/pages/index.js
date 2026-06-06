@@ -150,6 +150,10 @@ export default function Home() {
               <span>Remote Agent</span>
               <strong>Learn how CLI agents are executed on controlled remote machines</strong>
             </Link>
+            <Link className={styles.linkCard} to="/project">
+              <span>Project Status</span>
+              <strong>View roadmap, release history, and contribution entry points from the site</strong>
+            </Link>
           </div>
         </section>
       </main>
