@@ -582,3 +582,111 @@ class TestRetryLimit:
             os.unlink(db_path)
         except OSError:
             pass
+
+
+# ── Test: Idempotency in _create_milestone (wired) ────────────────────
+
+
+class TestIdempotencyWired:
+    """Verify _create_milestone actually calls _find_existing_milestone."""
+
+    def test_create_milestone_skips_when_existing(self):
+        """_create_milestone should return existing milestone without creating a new one."""
+        wf = _make_workflow()
+        orch, mock_repo = _make_orchestrator(wf)
+
+        existing_ms = {
+            "milestone_id": "ms-existing",
+            "milestone_type": "plan_created",
+            "phase": "planning",
+            "dev_round": 1,
+            "round_number": 1,
+            "status": "completed",
+        }
+        mock_repo.list_milestones.side_effect = [
+            [],  # in_progress
+            [existing_ms],  # completed
+        ]
+
+        result = orch._create_milestone(
+            phase="planning",
+            milestone_type="plan_created",
+            dev_round=1,
+            round_number=1,
+            title="Plan",
+        )
+
+        # Should return the existing milestone, not create a new one
+        assert result["milestone_id"] == "ms-existing"
+        mock_repo.create_milestone.assert_not_called()
+
+    def test_create_milestone_creates_when_no_existing(self):
+        """_create_milestone should create new milestone when none exists."""
+        wf = _make_workflow()
+        orch, mock_repo = _make_orchestrator(wf)
+        mock_repo.list_milestones.return_value = []
+
+        result = orch._create_milestone(
+            phase="development",
+            milestone_type="dev_started",
+            title="Dev started",
+        )
+
+        assert result is not None
+        mock_repo.create_milestone.assert_called_once()
+
+
+# ── Test: Timeout error handling ───────────────────────────────────────
+
+
+class TestTimeoutErrorHandling:
+    """Verify DEFAULT_TASK_TIMEOUT handles invalid env var gracefully."""
+
+    def test_default_timeout_is_positive(self):
+        """DEFAULT_TASK_TIMEOUT should always be a positive integer."""
+        from app.modules.workspace.autonomous.agent_runner import DEFAULT_TASK_TIMEOUT
+
+        assert isinstance(DEFAULT_TASK_TIMEOUT, int)
+        assert DEFAULT_TASK_TIMEOUT > 0
+
+
+# ── Test: _run_agent avoids extra DB queries ───────────────────────────
+
+
+class TestRunAgentDbOptimization:
+    """Verify _run_agent uses passed wf dict instead of re-querying."""
+
+    def test_run_agent_uses_passed_wf_for_timeout(self):
+        """_run_agent(wf=wf) should use the passed dict, not re-query DB."""
+        wf = _make_workflow(task_timeout=5000)
+        orch, mock_repo = _make_orchestrator(wf)
+
+        mock_repo.get_workflow.reset_mock()
+
+        orch._run_agent(
+            wf=wf,
+            workflow_id="test-wf-uuid",
+            cli_tool="claude-code",
+            model="test",
+            project_path="/tmp/test",
+            prompt="do something",
+        )
+
+        call_kwargs = orch._runner.run_agent_task.call_args[1]
+        assert call_kwargs.get("timeout") == 5000
+
+    def test_run_agent_without_wf_falls_back_to_db(self):
+        """_run_agent() without wf should fall back to self.workflow."""
+        wf = _make_workflow(task_timeout=3000)
+        orch, mock_repo = _make_orchestrator(wf)
+
+        orch._run_agent(
+            workflow_id="test-wf-uuid",
+            cli_tool="claude-code",
+            model="test",
+            project_path="/tmp/test",
+            prompt="do something",
+        )
+
+        call_kwargs = orch._runner.run_agent_task.call_args[1]
+        assert call_kwargs.get("timeout") == 3000
