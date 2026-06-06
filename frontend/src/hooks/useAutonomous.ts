@@ -212,6 +212,15 @@ export function useDeleteWorkflow() {
   });
 }
 
+export function useMilestoneDiff(workflowId: string, milestoneId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'diff', workflowId, milestoneId],
+    queryFn: () => autonomousApi.getMilestoneDiff(workflowId, milestoneId),
+    enabled: enabled && !!workflowId && !!milestoneId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ── Auxiliary Queries ──────────────────────────────────────────────
 
 export function useAvailableTools() {

@@ -2,7 +2,7 @@
  * AutonomousDev Component - AI Autonomous Development page
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, Loading, EmptyState } from '@/components/common';
@@ -17,6 +17,26 @@ export const AutonomousDev: React.FC = () => {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
 
+  // Deep linking: read workflow ID from URL query param on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const wfId = params.get('workflow');
+    if (wfId) {
+      setSelectedWorkflowId(wfId);
+    }
+  }, []);
+
+  // Update URL when selection changes
+  const updateUrl = useCallback((workflowId: string | null) => {
+    const url = new URL(window.location.href);
+    if (workflowId) {
+      url.searchParams.set('workflow', workflowId);
+    } else {
+      url.searchParams.delete('workflow');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }, []);
+
   const { data: workflowData, isLoading: workflowLoading } = useWorkflow(
     selectedWorkflowId || '',
     !!selectedWorkflowId
@@ -28,12 +48,14 @@ export const AutonomousDev: React.FC = () => {
 
   const handleSelectWorkflow = useCallback((workflow: AutonomousWorkflow) => {
     setSelectedWorkflowId(workflow.workflow_id);
-  }, []);
+    updateUrl(workflow.workflow_id);
+  }, [updateUrl]);
 
   const handleWorkflowCreated = useCallback((workflow: AutonomousWorkflow) => {
     setSelectedWorkflowId(workflow.workflow_id);
+    updateUrl(workflow.workflow_id);
     setShowNewModal(false);
-  }, []);
+  }, [updateUrl]);
 
   return (
     <div className="d-flex h-100">
