@@ -341,6 +341,13 @@ class AutonomousAgentRunner:
             # Poll until session completes
             import time
 
+            if not self.session_manager:
+                return AgentTaskResult(
+                    session_id=session_id,
+                    success=False,
+                    error="Session manager not available for remote session polling",
+                )
+
             start_time = time.time()
             while time.time() - start_time < timeout:
                 session_data = self.session_manager.get_session(session_id)

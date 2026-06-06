@@ -64,7 +64,13 @@ class AutonomousOrchestrator:
         self.repo = AutonomousWorkflowRepository(self.db)
         self.emitter = AutonomousEventEmitter.instance()
         self._workflow_id = workflow_id
-        self._runner = AutonomousAgentRunner()
+        self._current_session_id: Optional[str] = None
+
+        # Wire session_manager so agent sessions are persisted to DB
+        from app.modules.workspace.session_manager import SessionManager
+
+        session_manager = SessionManager()
+        self._runner = AutonomousAgentRunner(session_manager=session_manager)
         self._gh: Optional[GitHubOps] = None
 
     @property
@@ -120,6 +126,25 @@ class AutonomousOrchestrator:
                 "total_requests": 1,
             },
         )
+
+    def _run_agent(self, **kwargs) -> AgentTaskResult:
+        """Run an agent task with session tracking for cancellation support."""
+        result = self._runner.run_agent_task(**kwargs)
+        self._current_session_id = result.session_id
+        return result
+
+    def cancel_current_task(self):
+        """Cancel the currently running agent task (e.g. on pause/stop)."""
+        if self._current_session_id:
+            logger.info(
+                "Cancelling current agent task session=%s",
+                self._current_session_id[:8],
+            )
+            try:
+                self._runner.stop_session(self._current_session_id)
+            except Exception as e:
+                logger.warning("Failed to stop session %s: %s", self._current_session_id[:8], e)
+            self._current_session_id = None
 
     def advance(self):
         """Advance the workflow one step. Called by the scheduler."""
@@ -378,7 +403,7 @@ class AutonomousOrchestrator:
             title=f"Plan round {round_num}: {milestone_type.replace('_', ' ')}",
         )
 
-        result = self._runner.run_agent_task(
+        result = self._run_agent(
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -440,7 +465,7 @@ class AutonomousOrchestrator:
             title=f"Plan review round {round_num}",
         )
 
-        review_result = self._runner.run_agent_task(
+        review_result = self._run_agent(
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -569,7 +594,7 @@ class AutonomousOrchestrator:
             f"6. 所有修改完成后，提交 git commit"
         )
 
-        result = self._runner.run_agent_task(
+        result = self._run_agent(
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -676,7 +701,7 @@ class AutonomousOrchestrator:
             "确保所有测试通过后再结束。"
         )
 
-        test_result = self._runner.run_agent_task(
+        test_result = self._run_agent(
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -873,7 +898,7 @@ class AutonomousOrchestrator:
             f"如果没有重大问题，请明确说明'代码审查通过'。"
         )
 
-        review_result = self._runner.run_agent_task(
+        review_result = self._run_agent(
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
@@ -933,7 +958,7 @@ class AutonomousOrchestrator:
                 f"修改后提交 git commit 并推送。"
             )
 
-            fix_result = self._runner.run_agent_task(
+            fix_result = self._run_agent(
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
                 model=wf.get("model", ""),
@@ -1246,7 +1271,7 @@ class AutonomousOrchestrator:
             )
 
             wf = self.workflow
-            result = self._runner.run_agent_task(
+            result = self._run_agent(
                 workflow_id=self._workflow_id,
                 cli_tool=wf.get("cli_tool", "claude-code"),
                 model=wf.get("model", ""),

@@ -176,6 +176,9 @@ def pause_workflow(workflow_id):
     if workflow.get("status") == "paused":
         return jsonify({"error": "Workflow already paused"}), 400
 
+    # Signal running orchestrator to cancel its active agent task
+    _cancel_running_task(workflow_id)
+
     from datetime import datetime, timezone
 
     auto_repo.update_workflow(
@@ -227,6 +230,9 @@ def stop_workflow(workflow_id):
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
+
+    # Signal running orchestrator to cancel its active agent task
+    _cancel_running_task(workflow_id)
 
     from datetime import datetime, timezone
 
@@ -518,3 +524,16 @@ def _emit_event_safe(workflow_id: str, event_type: str, data: dict):
         _get_event_emitter().emit(workflow_id, event_type, data)
     except Exception:
         pass
+
+
+def _cancel_running_task(workflow_id: str):
+    """Signal a running orchestrator to cancel its current agent task."""
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.cancel_current_task()
+    except Exception as e:
+        logger.warning("Failed to cancel running task for %s: %s", workflow_id[:8], e)
