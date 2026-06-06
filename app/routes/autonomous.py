@@ -602,7 +602,7 @@ def stream_workflow_events(workflow_id):
                     emitter.mark_read(workflow_id, q)
                     yield ": keepalive\n\n"
         except GeneratorExit:
-            emitter.unsubscribe(workflow_id, q)
+            pass  # cleanup handled by finally
         finally:
             emitter.unsubscribe(workflow_id, q)
 
