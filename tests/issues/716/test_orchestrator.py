@@ -262,6 +262,66 @@ class TestOrchestratorPreparation:
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
         assert "planning" in phases
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_preparation_persists_issue_number_from_url(self, mock_gh_cls):
+        """When requirements_issue_url is set with non-empty requirements_text,
+        the parsed issue number is persisted to the workflow."""
+        wf = _make_workflow(
+            current_phase="preparation",
+            requirements_text="请处理该issue：https://github.com/user/repo/issues/718",
+            requirements_issue_url="https://github.com/user/repo/issues/728",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
+        mock_gh_cls.return_value = mock_gh
+
+        orch._do_preparation(wf)
+
+        # github_issue_number should be persisted via _update_workflow
+        update_calls = mock_repo.update_workflow.call_args_list
+        issue_updates = [c for c in update_calls if "github_issue_number" in c[0][1]]
+        assert len(issue_updates) == 1
+        assert issue_updates[0][0][1]["github_issue_number"] == 728
+
+        # Should also create a milestone for traceability
+        # _create_milestone passes a single dict positional arg to repo.create_milestone
+        milestone_calls = mock_repo.create_milestone.call_args_list
+        linked_milestones = [
+            c for c in milestone_calls if c[0][0].get("milestone_type") == "issue_linked"
+        ]
+        assert len(linked_milestones) == 1
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_preparation_issue_url_no_text_reads_issue(self, mock_gh_cls):
+        """When requirements_issue_url is set with empty requirements_text,
+        the issue body is read and issue number is persisted."""
+        wf = _make_workflow(
+            current_phase="preparation",
+            requirements_text="",
+            requirements_issue_url="https://github.com/user/repo/issues/99",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.get_issue.return_value = {
+            "number": 99,
+            "title": "Test Issue",
+            "body": "Issue body content",
+        }
+        mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
+        mock_gh_cls.return_value = mock_gh
+
+        orch._do_preparation(wf)
+
+        # Should persist issue number from URL
+        update_calls = mock_repo.update_workflow.call_args_list
+        issue_updates = [c for c in update_calls if "github_issue_number" in c[0][1]]
+        # Both the URL parse persist and the elif block should set it
+        issue_numbers = [c[0][1]["github_issue_number"] for c in issue_updates]
+        assert 99 in issue_numbers
+
 
 class TestOrchestratorPlanning:
     """Tests for the planning phase."""
@@ -793,8 +853,14 @@ class TestOrchestratorPrReview:
             orch._gh = MagicMock()
             # Default safe return values for GitHub ops
             orch._gh.get_current_commit.return_value = ""
-            orch._gh.get_diff_stats.return_value = {}
-            orch._gh.get_diff.return_value = ""
+            # Default: branch has changes (most tests expect PR creation to proceed)
+            orch._gh.get_diff_stats.return_value = {
+                "additions": 10,
+                "deletions": 2,
+                "files": 3,
+                "commits": 1,
+            }
+            orch._gh.get_diff.return_value = "diff content"
             orch._gh.git_push.return_value = None
             orch._gh.create_pr.return_value = {"number": 99, "url": "https://github.com/pull/99"}
 
@@ -940,6 +1006,107 @@ class TestOrchestratorPrReview:
         orch._do_pr_review(wf)
 
         orch._gh.git_push.assert_called()
+
+    def test_pr_review_no_changes_marks_completed(self):
+        """When branch has no commits vs main, workflow completes gracefully."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            branch_name="auto-dev/test",
+            github_issue_number=42,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        # No commits on branch vs main
+        orch._gh.get_diff_stats.return_value = {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
+        }
+
+        orch._do_pr_review(wf)
+
+        # Should NOT create a PR
+        orch._gh.create_pr.assert_not_called()
+        # Should NOT push
+        orch._gh.git_push.assert_not_called()
+        # Should post comment to issue
+        orch._gh.add_issue_comment.assert_called_once()
+        comment = orch._gh.add_issue_comment.call_args[0]
+        assert comment[0] == 42
+        assert "No Changes Detected" in comment[1]
+        # Should mark workflow as completed (not failed)
+        update_calls = mock_repo.update_workflow.call_args_list
+        final_update = update_calls[-1][0][1]
+        assert final_update["status"] == "completed"
+        assert final_update["current_phase"] == "completed"
+
+    def test_pr_review_no_changes_creates_milestone(self):
+        """A 'no_changes' milestone is created when branch is empty."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            branch_name="auto-dev/test",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._gh.get_diff_stats.return_value = {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
+        }
+
+        orch._do_pr_review(wf)
+
+        # _create_milestone passes a single dict positional arg to repo.create_milestone
+        milestone_calls = mock_repo.create_milestone.call_args_list
+        no_change_ms = [c for c in milestone_calls if c[0][0].get("milestone_type") == "no_changes"]
+        assert len(no_change_ms) == 1
+        assert no_change_ms[0][0][0]["status"] == "completed"
+
+    def test_pr_review_no_changes_no_issue_no_comment(self):
+        """When no issue_number and no changes, skip issue comment gracefully."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            branch_name="auto-dev/test",
+            github_issue_number=None,
+        )
+        orch, _ = self._make_orchestrator(wf)
+        orch._gh.get_diff_stats.return_value = {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
+        }
+
+        # Should not raise
+        orch._do_pr_review(wf)
+
+        orch._gh.add_issue_comment.assert_not_called()
+
+    def test_pr_review_diff_stats_error_treats_as_no_changes(self):
+        """When get_diff_stats raises, treat as no changes and complete gracefully."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            branch_name="auto-dev/test",
+            github_issue_number=10,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._gh.get_diff_stats.side_effect = Exception("git error")
+
+        orch._do_pr_review(wf)
+
+        # Should still complete gracefully
+        update_calls = mock_repo.update_workflow.call_args_list
+        final_update = update_calls[-1][0][1]
+        assert final_update["status"] == "completed"
 
 
 # ── _do_report Tests ──────────────────────────────────────────────────
