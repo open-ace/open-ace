@@ -193,6 +193,25 @@ export function useForkMilestone() {
   });
 }
 
+export function useMilestoneSession(workflowId: string, milestoneId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'session', workflowId, milestoneId],
+    queryFn: () => autonomousApi.getMilestoneSession(workflowId, milestoneId),
+    enabled: enabled && !!workflowId && !!milestoneId,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useDeleteWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => autonomousApi.deleteWorkflow(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
 // ── Auxiliary Queries ──────────────────────────────────────────────
 
 export function useAvailableTools() {
