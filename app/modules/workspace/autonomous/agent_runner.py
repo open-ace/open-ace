@@ -75,6 +75,7 @@ class AutonomousAgentRunner:
         permission_mode: str = "auto-edit",
         session_type: str = "workflow",
         timeout: int = DEFAULT_TASK_TIMEOUT,
+        session_id: str = None,
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -90,11 +91,12 @@ class AutonomousAgentRunner:
             permission_mode: Permission mode for the agent.
             session_type: Session type record.
             timeout: Maximum wait time in seconds.
+            session_id: Optional pre-generated session_id (for cancellation tracking).
 
         Returns:
             AgentTaskResult with response text, messages, tokens, etc.
         """
-        session_id = str(uuid.uuid4())
+        session_id = session_id or str(uuid.uuid4())
 
         # Create session record
         if self.session_manager:
@@ -316,6 +318,12 @@ class AutonomousAgentRunner:
             )
 
         try:
+            # Register a tracker so orchestrator can signal cancellation
+            self._local_sessions[session_id] = _LocalSession(
+                session_id=session_id,
+                process=None,  # type: ignore[arg-type]
+            )
+
             # Create remote session
             result = self.remote_session_manager.create_remote_session(
                 machine_id=remote_machine_id,
@@ -350,6 +358,15 @@ class AutonomousAgentRunner:
 
             start_time = time.time()
             while time.time() - start_time < timeout:
+                # Check if the session has been cancelled externally
+                local_session = self._local_sessions.get(session_id)
+                if local_session and local_session._stopped.is_set():
+                    return AgentTaskResult(
+                        session_id=session_id,
+                        success=False,
+                        error="Remote session cancelled by orchestrator",
+                    )
+
                 session_data = self.session_manager.get_session(session_id)
                 if session_data:
                     status = session_data.get("status", "active")
@@ -391,6 +408,9 @@ class AutonomousAgentRunner:
                 success=False,
                 error=f"Remote execution error: {e}",
             )
+        finally:
+            # Clean up the remote session tracker
+            self._local_sessions.pop(session_id, None)
 
     # ── Local helpers ──────────────────────────────────────────────
 

@@ -220,6 +220,51 @@ class TestRunAgentWrapper:
         # Should track the last session_id
         assert orch._current_session_id == "sess-review-1"
 
+    def test_session_id_available_before_run_agent_task_returns(self):
+        """session_id must be set BEFORE run_agent_task returns (Critical fix).
+
+        This verifies that cancel_current_task() can see the session_id
+        while the agent is still executing.
+        """
+        wf = _make_workflow()
+        orch, mock_repo = _make_orchestrator(wf)
+
+        captured_session_id = None
+
+        def fake_run_agent_task(**kwargs):
+            nonlocal captured_session_id
+            # Simulate: during execution, the session_id should already be set
+            captured_session_id = orch._current_session_id
+            return _make_agent_result(session_id=kwargs.get("session_id", "default"))
+
+        orch._runner.run_agent_task.side_effect = fake_run_agent_task
+        mock_repo.list_milestones.return_value = [
+            {"milestone_type": "plan_created", "plan_content": "X"},
+        ]
+
+        orch._do_development(wf)
+
+        # session_id was available DURING execution, not just after
+        assert captured_session_id is not None
+        assert orch._current_session_id == captured_session_id
+
+    def test_run_agent_passes_pre_generated_session_id(self):
+        """_run_agent should pass the pre-generated session_id to run_agent_task."""
+        wf = _make_workflow()
+        orch, mock_repo = _make_orchestrator(wf)
+
+        orch._runner.run_agent_task.return_value = _make_agent_result()
+        mock_repo.list_milestones.return_value = [
+            {"milestone_type": "plan_created", "plan_content": "X"},
+        ]
+
+        orch._do_development(wf)
+
+        # Verify session_id was passed as a parameter
+        call_kwargs = orch._runner.run_agent_task.call_args[1]
+        assert "session_id" in call_kwargs
+        assert call_kwargs["session_id"] is not None
+
 
 # ── Test: cancel_current_task ────────────────────────────────────────
 
@@ -368,6 +413,52 @@ class TestRemoteNullGuard:
 
         assert result.success is False
         assert "remote session manager" in result.error.lower()
+
+    def test_remote_session_can_be_cancelled_via_stop_session(self):
+        """stop_session should signal cancellation to remote sessions."""
+        import threading
+        import time
+
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        mock_sm = MagicMock()
+
+        # Session stays active so the loop keeps running
+        mock_sm.get_session.return_value = {"status": "active"}
+
+        runner = AutonomousAgentRunner(
+            session_manager=mock_sm,
+            remote_session_manager=MagicMock(),
+        )
+
+        runner.remote_session_manager.create_remote_session.return_value = {
+            "success": True,
+            "session_id": "remote-sess-cancel",
+        }
+        runner.remote_session_manager.send_message.return_value = None
+
+        # Schedule cancellation after _run_remote has registered its tracker
+        def cancel_later():
+            time.sleep(0.2)
+            tracker = runner._local_sessions.get("remote-sess-cancel")
+            if tracker:
+                tracker._stopped.set()
+
+        threading.Thread(target=cancel_later, daemon=True).start()
+
+        result = runner._run_remote(
+            session_id="remote-sess-cancel",
+            cli_tool="claude-code",
+            model="test-model",
+            project_path="/tmp/test",
+            prompt="Do something",
+            remote_machine_id="machine-1",
+            permission_mode="auto-edit",
+            timeout=10,
+        )
+
+        assert result.success is False
+        assert "cancelled" in result.error.lower()
 
 
 # ── Test: Scheduler orchestrator registry ────────────────────────────
