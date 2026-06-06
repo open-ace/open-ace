@@ -5,14 +5,18 @@ Open ACE - Autonomous Development Routes
 API routes for AI autonomous development workflow management.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 import queue
+import threading
+import time
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import auth_required
+from app.auth.decorators import _load_user_from_token, auth_required
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
 logger = logging.getLogger(__name__)
@@ -20,9 +24,48 @@ logger = logging.getLogger(__name__)
 # Maximum retry count for failed workflows
 MAX_RETRY_COUNT = 5
 
+# Lazy repo — avoids creating DB connection at import time
+auto_repo: AutonomousWorkflowRepository | None = None
+
+
+def _get_repo() -> AutonomousWorkflowRepository:
+    """Lazy-initialize the repository to avoid DB connection at import time."""
+    global auto_repo
+    if auto_repo is None:
+        auto_repo = AutonomousWorkflowRepository()
+    return auto_repo
+
+
 autonomous_bp = Blueprint("autonomous", __name__)
 
-auto_repo = AutonomousWorkflowRepository()
+# ── Rate Limiter ─────────────────────────────────────────────────────
+
+
+class _RateLimiter:
+    """Simple in-memory rate limiter: max *max_count* actions per user per *window* seconds."""
+
+    def __init__(self, max_count: int = 10, window: int = 3600) -> None:
+        self._max_count = max_count
+        self._window = window
+        self._hits: dict[int, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def is_allowed(self, user_id: int) -> bool:
+        """Return True if the user is within the rate limit."""
+        now = time.time()
+        with self._lock:
+            timestamps = self._hits.get(user_id, [])
+            # Prune expired entries
+            timestamps = [ts for ts in timestamps if now - ts < self._window]
+            if len(timestamps) >= self._max_count:
+                self._hits[user_id] = timestamps
+                return False
+            timestamps.append(now)
+            self._hits[user_id] = timestamps
+            return True
+
+
+_workflow_rate_limiter = _RateLimiter(max_count=10, window=3600)
 
 # Shared mapping from workflow phase to active status
 PHASE_TO_STATUS = {
@@ -52,6 +95,10 @@ def create_workflow():
     """Create a new autonomous development workflow."""
     data = request.get_json(silent=True) or {}
     user_id = g.user_id
+
+    # Rate limit: max 10 workflows per user per hour
+    if not _workflow_rate_limiter.is_allowed(user_id):
+        return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
 
     # Validate required fields
     if not data.get("requirements_text") and not data.get("requirements_issue_url"):
@@ -93,7 +140,7 @@ def create_workflow():
     }
 
     try:
-        workflow = auto_repo.create_workflow(workflow_data)
+        workflow = _get_repo().create_workflow(workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
 
@@ -127,7 +174,7 @@ def list_workflows():
     offset = int(request.args.get("offset", 0))
 
     try:
-        workflows = auto_repo.list_workflows(
+        workflows = _get_repo().list_workflows(
             user_id=filter_user_id,
             status=status,
             limit=limit,
@@ -143,7 +190,7 @@ def list_workflows():
 @auth_required
 def get_workflow(workflow_id):
     """Get a workflow by ID."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
 
@@ -158,7 +205,7 @@ def get_workflow(workflow_id):
 @auth_required
 def delete_workflow(workflow_id):
     """Cancel and delete a workflow."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
 
@@ -166,7 +213,7 @@ def delete_workflow(workflow_id):
         return jsonify({"error": "Access denied"}), 403
 
     try:
-        auto_repo.delete_workflow(workflow_id)
+        _get_repo().delete_workflow(workflow_id)
         return jsonify({"success": True})
     except Exception as e:
         logger.error("Failed to delete workflow: %s", e)
@@ -180,7 +227,7 @@ def delete_workflow(workflow_id):
 @auth_required
 def pause_workflow(workflow_id):
     """Pause a running workflow."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -194,7 +241,7 @@ def pause_workflow(workflow_id):
 
     from datetime import datetime, timezone
 
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "status": "paused",
@@ -210,7 +257,7 @@ def pause_workflow(workflow_id):
 @auth_required
 def resume_workflow(workflow_id):
     """Resume a paused workflow."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -222,7 +269,7 @@ def resume_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "status": status,
@@ -238,7 +285,7 @@ def resume_workflow(workflow_id):
 @auth_required
 def stop_workflow(workflow_id):
     """Gracefully stop a workflow."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -249,7 +296,7 @@ def stop_workflow(workflow_id):
 
     from datetime import datetime, timezone
 
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "status": "cancelled",
@@ -265,7 +312,7 @@ def stop_workflow(workflow_id):
 @auth_required
 def retry_workflow(workflow_id):
     """Retry a failed workflow from its current phase."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -282,7 +329,7 @@ def retry_workflow(workflow_id):
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "status": status,
@@ -299,7 +346,7 @@ def retry_workflow(workflow_id):
 @auth_required
 def mark_done(workflow_id):
     """Mark workflow as complete, triggering merge phase."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -313,7 +360,7 @@ def mark_done(workflow_id):
     if data.get("selected_branch"):
         updates["branch_name"] = data["selected_branch"]
 
-    auto_repo.update_workflow(workflow_id, updates)
+    _get_repo().update_workflow(workflow_id, updates)
 
     _emit_event_safe(workflow_id, "status_change", {"status": "merging", "phase": "merge"})
     return jsonify({"success": True})
@@ -326,13 +373,13 @@ def mark_done(workflow_id):
 @auth_required
 def get_timeline(workflow_id):
     """Get all milestones for a workflow (timeline)."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestones = auto_repo.list_milestones(workflow_id)
+    milestones = _get_repo().list_milestones(workflow_id)
     return jsonify({"success": True, "milestones": milestones})
 
 
@@ -340,20 +387,20 @@ def get_timeline(workflow_id):
 @auth_required
 def cancel_milestone(workflow_id, milestone_id):
     """Cancel a milestone and all subsequent milestones."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestone = auto_repo.get_milestone(milestone_id)
+    milestone = _get_repo().get_milestone(milestone_id)
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
-    cancelled = auto_repo.cancel_milestones_after(workflow_id, milestone_id)
+    cancelled = _get_repo().cancel_milestones_after(workflow_id, milestone_id)
 
     # Set workflow to waiting state for user to provide new requirements
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "current_phase": "wait",
@@ -377,13 +424,13 @@ def cancel_milestone(workflow_id, milestone_id):
 @auth_required
 def fork_milestone(workflow_id, milestone_id):
     """Fork from a milestone, creating a new branch."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestone = auto_repo.get_milestone(milestone_id)
+    milestone = _get_repo().get_milestone(milestone_id)
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
@@ -401,13 +448,13 @@ def fork_milestone(workflow_id, milestone_id):
         "parent_milestone_id": milestone_id,
         "fork_branch": fork_branch,
     }
-    fork_milestone = auto_repo.create_milestone(fork_data)
+    fork_milestone = _get_repo().create_milestone(fork_data)
 
     # Cancel milestones after the fork point
-    auto_repo.cancel_milestones_after(workflow_id, milestone_id)
+    _get_repo().cancel_milestones_after(workflow_id, milestone_id)
 
     # Update workflow with new branch and reset to planning
-    auto_repo.update_workflow(
+    _get_repo().update_workflow(
         workflow_id,
         {
             "branch_name": fork_branch,
@@ -432,13 +479,13 @@ def fork_milestone(workflow_id, milestone_id):
 @auth_required
 def get_milestone_session(workflow_id, milestone_id):
     """Get the agent session associated with a milestone."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestone = auto_repo.get_milestone(milestone_id)
+    milestone = _get_repo().get_milestone(milestone_id)
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
@@ -455,6 +502,58 @@ def get_milestone_session(workflow_id, milestone_id):
     return jsonify({"success": True, "session": session_data})
 
 
+@autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/diff", methods=["GET"])
+@auth_required
+def get_milestone_diff(workflow_id, milestone_id):
+    """Get the code diff for a milestone's commits."""
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    milestone = _get_repo().get_milestone(milestone_id)
+    if not milestone or milestone.get("workflow_id") != workflow_id:
+        return jsonify({"error": "Milestone not found"}), 404
+
+    commit_shas_raw = milestone.get("commit_shas", "")
+    if not commit_shas_raw:
+        return jsonify({"success": True, "diff": ""})
+
+    # Parse commit SHAs (may be JSON array or comma-separated)
+    import json as _json
+
+    try:
+        shas = (
+            _json.loads(commit_shas_raw)
+            if commit_shas_raw.startswith("[")
+            else commit_shas_raw.split(",")
+        )
+    except (ValueError, TypeError):
+        shas = [commit_shas_raw]
+
+    shas = [s.strip().strip('"').strip("'") for s in shas if s.strip()]
+
+    if not shas:
+        return jsonify({"success": True, "diff": ""})
+
+    # Get diff for each commit
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    gh = GitHubOps(project_path)
+    diff_parts = []
+    for sha in shas:
+        try:
+            diff_text = gh.get_commit_diff(sha)
+            if diff_text:
+                diff_parts.append(f"--- Commit: {sha[:8]} ---\n{diff_text}")
+        except Exception as e:
+            logger.warning("Failed to get diff for %s: %s", sha[:8], e)
+
+    return jsonify({"success": True, "diff": "\n\n".join(diff_parts)})
+
+
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
 
 
@@ -462,7 +561,7 @@ def get_milestone_session(workflow_id, milestone_id):
 @auth_required
 def stream_workflow_events(workflow_id):
     """SSE stream for real-time workflow events."""
-    workflow = auto_repo.get_workflow(workflow_id)
+    workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
@@ -479,10 +578,17 @@ def stream_workflow_events(workflow_id):
                     emitter.mark_read(workflow_id, q)
                     yield f"data: {json.dumps(event_data)}\n\n"
                 except queue.Empty:
-                    # Send keepalive and refresh TTL
+                    # Re-validate auth on keepalive to detect revoked tokens
+                    token = request.cookies.get("session_token") or request.headers.get(
+                        "Authorization", ""
+                    ).replace("Bearer ", "")
+                    if not token or not _load_user_from_token(token):
+                        break  # Token invalid or revoked — close stream
                     emitter.mark_read(workflow_id, q)
                     yield ": keepalive\n\n"
         except GeneratorExit:
+            pass  # cleanup handled by finally
+        finally:
             emitter.unsubscribe(workflow_id, q)
 
     return Response(

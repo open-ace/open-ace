@@ -98,6 +98,46 @@ class AutonomousOrchestrator:
             }
         )
 
+    @staticmethod
+    def _smart_truncate_diff(
+        diff_text: str, max_chars: int = 32000, per_file_lines: int = 200
+    ) -> str:
+        """Smart diff truncation that preserves all file headers.
+
+        Keeps ``diff --git a/...`` lines intact and truncates each file's
+        content to *per_file_lines* lines.  If the total still exceeds
+        *max_chars* an explanatory note is appended.
+        """
+        if not diff_text or len(diff_text) <= max_chars:
+            return diff_text
+
+        import re
+
+        # Split into per-file chunks (each starts with a diff --git line)
+        chunks = re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE)
+        result_parts: list[str] = []
+        total = 0
+
+        for chunk in chunks:
+            if not chunk:
+                continue
+            lines = chunk.split("\n")
+            header = lines[0] if lines else ""
+            body = "\n".join(lines[1 : per_file_lines + 1])
+
+            part = header + "\n" + body
+            if total + len(part) > max_chars:
+                # Add truncation note and stop
+                result_parts.append(
+                    f"\n... [Truncated: {len(chunks)} files total, "
+                    f"showing {len(result_parts)} with {per_file_lines} lines each]\n"
+                )
+                break
+            result_parts.append(part)
+            total += len(part)
+
+        return "\n".join(result_parts)
+
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
     ) -> Optional[dict]:
@@ -955,7 +995,7 @@ class AutonomousOrchestrator:
         review_prompt = (
             AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
             f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
-            f"## 代码变更\n{diff_text[:8000]}\n\n"
+            f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
             f"请检查：\n"
             f"1. 代码质量和可读性\n"
             f"2. 潜在 bug 和安全问题\n"
