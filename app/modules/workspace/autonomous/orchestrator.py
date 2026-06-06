@@ -172,7 +172,7 @@ class AutonomousOrchestrator:
                 If not provided, falls back to self.workflow (DB query).
         """
         # Pre-generate session_id so cancel_current_task() can access it
-        # before run_agent_task() returns (from PR #741 fix)
+        # before run_agent_task() returns
         if "session_id" not in kwargs:
             kwargs["session_id"] = str(uuid.uuid4())
         session_id = kwargs["session_id"]
