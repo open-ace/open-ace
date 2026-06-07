@@ -74,7 +74,6 @@ class SessionProcess:
         from cli_adapters.usage_parser import extract_stream_usage
 
         self._extract_stream_usage = extract_stream_usage
-        self._restart_lock = threading.Lock()  # Prevents concurrent restarts
         self._paused = False
         self._pause_lock = threading.Lock()
 
