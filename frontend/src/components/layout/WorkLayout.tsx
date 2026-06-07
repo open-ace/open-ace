@@ -18,7 +18,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
-import { ModeSwitcher, useToast } from '@/components/common';
+import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
 import { SessionList, AssistPanel, StatusBar } from '@/components/work';
 import { workspaceApi } from '@/api/workspace';
@@ -59,7 +59,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     autonomousEnabled,
     setAutonomousEnabled,
   } = useAppStore();
-  const toast = useToast();
 
   // Load workspace config on mount to determine feature flags
   useEffect(() => {
@@ -73,17 +72,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     };
     loadConfig();
   }, [setAutonomousEnabled]);
-
-  // Redirect away from /work/autonomous when feature is disabled
-  useEffect(() => {
-    if (
-      !autonomousEnabled &&
-      location.pathname.startsWith('/work/autonomous')
-    ) {
-      toast.error(t('autoFeatureDisabled', language));
-      navigate('/work', { replace: true });
-    }
-  }, [autonomousEnabled, location.pathname, navigate, language, toast]);
 
   // Filter nav items based on feature flags
   const visibleNavItems = autonomousEnabled

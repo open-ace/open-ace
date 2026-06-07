@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
-import { LoadingOverlay, PageSkeleton } from '@/components/common';
+import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
 import {
   ContextMenuProvider,
   useContextMenu,
@@ -229,6 +229,20 @@ const LegacyAppContent: React.FC = () => {
   );
 };
 
+// Redirect component shown when autonomous feature is disabled
+const AutonomousDisabledRedirect: React.FC = () => {
+  const navigate = useNavigate();
+  const language = useAppStore((state) => state.language);
+  const toast = useToast();
+
+  useEffect(() => {
+    toast.error(t('autoFeatureDisabled', language));
+    navigate('/work', { replace: true });
+  }, [navigate, language, toast]);
+
+  return null;
+};
+
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
   const location = useLocation();
@@ -262,7 +276,11 @@ const WorkRoutes: React.FC = () => {
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
-          {autonomousEnabled && <Route path="autonomous" element={<AutonomousDev />} />}
+          {autonomousEnabled ? (
+            <Route path="autonomous" element={<AutonomousDev />} />
+          ) : (
+            <Route path="autonomous" element={<AutonomousDisabledRedirect />} />
+          )}
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={null} />
           <Route path="*" element={<Navigate to="/work" replace />} />
