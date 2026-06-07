@@ -232,6 +232,7 @@ const LegacyAppContent: React.FC = () => {
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
   const location = useLocation();
+  const autonomousEnabled = useAppStore((state) => state.autonomousEnabled);
   const isWorkspaceRoute =
     location.pathname === '/work' ||
     location.pathname === '/work/' ||
@@ -261,7 +262,7 @@ const WorkRoutes: React.FC = () => {
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
-          <Route path="autonomous" element={<AutonomousDev />} />
+          {autonomousEnabled && <Route path="autonomous" element={<AutonomousDev />} />}
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={null} />
           <Route path="*" element={<Navigate to="/work" replace />} />

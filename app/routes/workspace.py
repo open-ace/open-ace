@@ -1950,6 +1950,7 @@ def get_workspace_config():
             "max_instances": 30,
             "idle_timeout_minutes": 30,
             "base_dir": base_dir,  # For path validation in frontend
+            "autonomous_enabled": False,
         }
 
         if os.path.exists(config_path):
@@ -1964,10 +1965,22 @@ def get_workspace_config():
                 workspace_config["max_instances"] = workspace.get("max_instances", 30)
                 workspace_config["idle_timeout_minutes"] = workspace.get("idle_timeout_minutes", 30)
 
+            # Expose autonomous feature status
+            autonomous_config = config.get("autonomous", {})
+            workspace_config["autonomous_enabled"] = autonomous_config.get("enabled", False)
+
         return jsonify(workspace_config)
     except Exception as e:
         logger.error(f"Error getting workspace config: {e}")
-        return jsonify({"enabled": False, "url": "", "multi_user_mode": False, "base_dir": "/home"})
+        return jsonify(
+            {
+                "enabled": False,
+                "url": "",
+                "multi_user_mode": False,
+                "base_dir": "/home",
+                "autonomous_enabled": False,
+            }
+        )
 
 
 # ==================== Multi-User WebUI ====================

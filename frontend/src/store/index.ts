@@ -68,6 +68,9 @@ interface AppState {
   // File changes panel visibility setting (Issue #144)
   showFileChangesPanel: boolean;
 
+  // Feature flags
+  autonomousEnabled: boolean;
+
   // Actions
   setUser: (user: User | null) => void;
   setAuthenticated: (isAuthenticated: boolean) => void;
@@ -105,6 +108,9 @@ interface AppState {
   // File changes panel actions (Issue #144)
   setShowFileChangesPanel: (enabled: boolean) => void;
   toggleFileChangesPanel: () => void;
+
+  // Feature flag actions
+  setAutonomousEnabled: (enabled: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -137,6 +143,9 @@ export const useAppStore = create<AppState>()(
 
       // File changes panel visibility (Issue #144)
       showFileChangesPanel: true,
+
+      // Feature flags
+      autonomousEnabled: false,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -241,6 +250,9 @@ export const useAppStore = create<AppState>()(
       setShowFileChangesPanel: (enabled) => set({ showFileChangesPanel: enabled }),
       toggleFileChangesPanel: () =>
         set((state) => ({ showFileChangesPanel: !state.showFileChangesPanel })),
+
+      // Feature flag actions
+      setAutonomousEnabled: (enabled) => set({ autonomousEnabled: enabled }),
     }),
     {
       name: 'open-ace-store',

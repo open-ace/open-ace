@@ -22,6 +22,9 @@
     "token_secret": "",
     "webui_path": ""
   },
+  "autonomous": {
+    "enabled": false
+  },
   "tools": {
     "openclaw": {
       "enabled": true,

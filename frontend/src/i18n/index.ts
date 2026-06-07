@@ -885,6 +885,7 @@ const translations: Record<Language, Translations> = {
     // AI Autonomous Development
     autonomousDev: 'AI Autonomous Dev',
     autonomousDevEmpty: 'Create an autonomous development task to let AI develop independently.',
+    autoFeatureDisabled: 'Autonomous development feature is not enabled',
     autoNewTask: 'New Task',
     autoCreateFirstTask: 'Create First Task',
     autoNoWorkflows: 'No autonomous tasks yet',
@@ -1829,6 +1830,7 @@ const translations: Record<Language, Translations> = {
     // AI自主开发
     autonomousDev: 'AI自主开发',
     autonomousDevEmpty: '创建自主开发任务，让 AI 独立完成开发工作。',
+    autoFeatureDisabled: '自主开发功能未启用',
     autoNewTask: '新建任务',
     autoCreateFirstTask: '创建首个任务',
     autoNoWorkflows: '暂无自主开发任务',
@@ -2477,6 +2479,7 @@ const translations: Record<Language, Translations> = {
     // AI自律開発
     autonomousDev: 'AI自律開発',
     autonomousDevEmpty: '自律開発タスクを作成して、AIが独立して開発します。',
+    autoFeatureDisabled: '自律開発機能が有効ではありません',
     autoNewTask: '新規タスク',
     autoCreateFirstTask: '最初のタスクを作成',
     autoNoWorkflows: '自律開発タスクはまだありません',
@@ -3123,6 +3126,7 @@ const translations: Record<Language, Translations> = {
     // AI 자율 개발
     autonomousDev: 'AI 자율 개발',
     autonomousDevEmpty: '자율 개발 작업을 생성하여 AI가 독립적으로 개발합니다.',
+    autoFeatureDisabled: '자율 개발 기능이 활성화되지 않았습니다',
     autoNewTask: '새 작업',
     autoCreateFirstTask: '첫 작업 생성',
     autoNoWorkflows: '자율 개발 작업이 없습니다',

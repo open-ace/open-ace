@@ -259,9 +259,14 @@ def start_background_services():
         logger.warning(f"Failed to start quota enforcement scheduler: {e}")
 
     try:
-        from app.services.autonomous_scheduler import init_autonomous_scheduler
+        from app.utils.config import is_autonomous_enabled
 
-        init_autonomous_scheduler()
+        if is_autonomous_enabled():
+            from app.services.autonomous_scheduler import init_autonomous_scheduler
+
+            init_autonomous_scheduler()
+        else:
+            logger.info("Autonomous scheduler disabled by configuration")
     except Exception as e:
         logger.warning(f"Failed to start autonomous scheduler: {e}")
 

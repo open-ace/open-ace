@@ -13,6 +13,7 @@ export interface WorkspaceConfig {
   port_range_end: number;
   max_instances: number;
   idle_timeout_minutes: number;
+  autonomous_enabled: boolean;
 }
 
 export interface UserWebUIResponse {
@@ -76,6 +77,7 @@ export const workspaceApi = {
         port_range_end: 3200,
         max_instances: 30,
         idle_timeout_minutes: 30,
+        autonomous_enabled: false,
       };
     }
   },
