@@ -169,18 +169,11 @@ class SessionProcess:
 
                         # Handle result messages — extract token usage
                         if msg_type == "result" and self.usage_callback:
-                            data = parsed.get("data", {})
-                            usage = data.get("usage")
-                            if not usage:
-                                msg = data.get("message", {})
-                                usage = msg.get("usage")
-                            if usage and isinstance(usage, dict):
-                                tokens = {
-                                    "input": usage.get("input_tokens", usage.get("input", 0)),
-                                    "output": usage.get("output_tokens", usage.get("output", 0)),
-                                }
-                                if tokens["input"] or tokens["output"]:
-                                    self.usage_callback(self.session_id, tokens)
+                            from cli_adapters.usage_parser import extract_claude_stream_usage
+
+                            tokens = extract_claude_stream_usage(parsed)
+                            if tokens and (tokens["input"] or tokens["output"]):
+                                self.usage_callback(self.session_id, tokens)
                     except (json.JSONDecodeError, ValueError):
                         pass
 
