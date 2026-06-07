@@ -393,6 +393,8 @@ class SessionManager:
         project_id: Optional[int] = None,
         project_path: Optional[str] = None,
         session_id: Optional[str] = None,
+        workspace_type: str = "local",
+        remote_machine_id: Optional[str] = None,
     ) -> AgentSession:
         """
         Create a new agent session.
@@ -450,6 +452,8 @@ class SessionManager:
             expires_at=expires_at,
             created_at=now,
             updated_at=now,
+            workspace_type=workspace_type,
+            remote_machine_id=remote_machine_id,
         )
 
         conn = self._get_connection()
@@ -460,8 +464,9 @@ class SessionManager:
             INSERT INTO agent_sessions
             (session_id, session_type, title, tool_name, host_name, user_id, project_id,
              project_path, status, context, settings, model, expires_at, created_at, updated_at,
-             request_count, total_tokens, total_input_tokens, total_output_tokens, message_count)
-            VALUES ({_params(20)})
+             request_count, total_tokens, total_input_tokens, total_output_tokens, message_count,
+             workspace_type, remote_machine_id)
+            VALUES ({_params(22)})
         """,
             (
                 session.session_id,
@@ -484,6 +489,8 @@ class SessionManager:
                 session.total_input_tokens or 0,
                 session.total_output_tokens or 0,
                 session.message_count or 0,
+                session.workspace_type or "local",
+                session.remote_machine_id,
             ),
         )
 

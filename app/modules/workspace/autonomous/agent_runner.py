@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # mypy: disable-error-code="assignment,arg-type,union-attr,var-annotated"
 """
 Open ACE - Autonomous Agent Runner
@@ -17,11 +19,25 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
+
+
+# Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
+_extract_stream_usage: Any = None
+
+
+def _ensure_usage_parser():
+    """Import extract_stream_usage once remote-agent is on sys.path."""
+    global _extract_stream_usage
+    if _extract_stream_usage is None:
+        from cli_adapters.usage_parser import extract_stream_usage
+
+        _extract_stream_usage = extract_stream_usage
+
 
 # Default timeout for agent tasks — configurable via env var (default 1 hour)
 try:
@@ -37,6 +53,7 @@ class _LocalSession:
 
     session_id: str
     process: subprocess.Popen
+    cli_tool: str = "claude-code"
     output_lines: list[str] = field(default_factory=list)
     assistant_text: str = ""
     tool_calls: list[dict] = field(default_factory=list)
@@ -44,10 +61,10 @@ class _LocalSession:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
-    error: Optional[str] = None
+    error: str | None = None
     _stopped: threading.Event = field(default_factory=threading.Event)
-    _stdout_thread: Optional[threading.Thread] = None
-    _stderr_thread: Optional[threading.Thread] = None
+    _stdout_thread: threading.Thread | None = None
+    _stderr_thread: threading.Thread | None = None
 
 
 class AutonomousAgentRunner:
@@ -194,6 +211,9 @@ class AutonomousAgentRunner:
             sys.path.insert(0, _remote_agent_dir)
         from cli_adapters import get_adapter
 
+        # Cache the usage parser now that remote-agent is on sys.path
+        _ensure_usage_parser()
+
         # Find executable
         adapter = get_adapter(cli_tool)
         exe_name = adapter.get_executable_name()
@@ -240,7 +260,7 @@ class AutonomousAgentRunner:
                 error=f"Failed to start process: {e}",
             )
 
-        session = _LocalSession(session_id=session_id, process=process)
+        session = _LocalSession(session_id=session_id, process=process, cli_tool=cli_tool)
         self._local_sessions[session_id] = session
 
         # Start output reader threads
@@ -482,16 +502,11 @@ class AutonomousAgentRunner:
                         session.tool_calls.append(parsed)
 
                     elif msg_type == "result":
-                        # End of turn - extract usage
-                        data = parsed.get("data", {})
-                        usage = data.get("usage") or data.get("message", {}).get("usage", {})
-                        if isinstance(usage, dict):
-                            session.total_input_tokens += usage.get(
-                                "input_tokens", usage.get("input", 0)
-                            )
-                            session.total_output_tokens += usage.get(
-                                "output_tokens", usage.get("output", 0)
-                            )
+                        # End of turn - extract usage via shared parser
+                        usage = _extract_stream_usage(session.cli_tool, parsed)
+                        if usage:
+                            session.total_input_tokens += usage["input"]
+                            session.total_output_tokens += usage["output"]
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )
