@@ -21,6 +21,7 @@ import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
 import { SessionList, AssistPanel, StatusBar } from '@/components/work';
+import { workspaceApi } from '@/api/workspace';
 
 interface NavItem {
   id: string;
@@ -51,8 +52,31 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
 
   // Fullscreen state from global store
   const workspaceFullscreen = useWorkspaceFullscreen();
-  const { exitWorkspaceFullscreen, previousLeftPanelCollapsed, previousRightPanelCollapsed } =
-    useAppStore();
+  const {
+    exitWorkspaceFullscreen,
+    previousLeftPanelCollapsed,
+    previousRightPanelCollapsed,
+    autonomousEnabled,
+    setAutonomousEnabled,
+  } = useAppStore();
+
+  // Load workspace config on mount to determine feature flags
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const config = await workspaceApi.getConfig();
+        setAutonomousEnabled(config.autonomous_enabled);
+      } catch {
+        // Config fetch failed, keep defaults (autonomousEnabled = false)
+      }
+    };
+    loadConfig();
+  }, [setAutonomousEnabled]);
+
+  // Filter nav items based on feature flags
+  const visibleNavItems = autonomousEnabled
+    ? workNavItems
+    : workNavItems.filter((item) => item.id !== 'autonomous');
 
   // Get active nav item from path
   const getActiveNavItem = () => {
@@ -62,7 +86,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     if (path.startsWith('/work/prompts')) return 'prompts';
     if (path.startsWith('/work/usage')) return 'usage';
     if (path.startsWith('/work/insights')) return 'insights';
-    if (path.startsWith('/work/autonomous')) return 'autonomous';
+    if (path.startsWith('/work/autonomous')) return autonomousEnabled ? 'autonomous' : 'workspace';
     return 'workspace';
   };
 
@@ -133,7 +157,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
 
           {/* Work Navigation */}
           <nav className="work-nav">
-            {workNavItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <button
                 key={item.id}
                 className={cn('work-nav-item', activeNavItem === item.id && 'active')}

@@ -42,6 +42,22 @@ def _get_repo() -> AutonomousWorkflowRepository:
 
 autonomous_bp = Blueprint("autonomous", __name__)
 
+
+# ── Feature Toggle Guard ─────────────────────────────────────────────
+
+
+@autonomous_bp.before_request
+def check_autonomous_enabled():
+    """Reject all requests if autonomous development feature is disabled."""
+    from app.utils.config import is_autonomous_enabled
+
+    if not is_autonomous_enabled():
+        return (
+            jsonify({"error": "Autonomous development feature is disabled", "disabled": True}),
+            403,
+        )
+
+
 # ── Rate Limiter ─────────────────────────────────────────────────────
 
 
