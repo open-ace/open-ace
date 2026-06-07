@@ -89,7 +89,7 @@ $files = @(
     "openace_cli.py",
     "cli_settings.py"
 )
-$adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py")
+$adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py")
 
 foreach ($file in $files) {
     $downloaded = $false

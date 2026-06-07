@@ -157,6 +157,8 @@ class RemoteSessionManager:
             model=model,
             project_path=project_path,
             session_id=session_id,
+            workspace_type="remote",
+            remote_machine_id=machine_id,
         )
 
         # Generate proxy token for this session

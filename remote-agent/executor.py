@@ -69,6 +69,12 @@ class SessionProcess:
         self._stderr_thread: threading.Thread | None = None
         self._stopped = threading.Event()
         self._restart_lock = threading.Lock()  # Prevents concurrent restarts
+
+        # Cache the usage parser at init time (avoids per-message import)
+        from cli_adapters.usage_parser import extract_stream_usage
+
+        self._extract_stream_usage = extract_stream_usage
+        self._restart_lock = threading.Lock()  # Prevents concurrent restarts
         self._paused = False
         self._pause_lock = threading.Lock()
 
@@ -169,9 +175,7 @@ class SessionProcess:
 
                         # Handle result messages — extract token usage
                         if msg_type == "result" and self.usage_callback:
-                            from cli_adapters.usage_parser import extract_stream_usage
-
-                            tokens = extract_stream_usage(self.cli_tool, parsed)
+                            tokens = self._extract_stream_usage(self.cli_tool, parsed)
                             if tokens and (tokens["input"] or tokens["output"]):
                                 self.usage_callback(self.session_id, tokens)
                     except (json.JSONDecodeError, ValueError):
