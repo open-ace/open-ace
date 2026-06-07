@@ -455,24 +455,9 @@ else
     fi
 fi
 
-# Step 6: Generate machine ID and save config
+# Step 6: Generate machine ID
 log_info "Generating configuration..."
 MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
-
-cat > "${INSTALL_DIR}/config.json" << EOF
-{
-    "server_url": "${SERVER_URL}",
-    "machine_id": "${MACHINE_ID}",
-    "machine_name": "${MACHINE_NAME}",
-    "registration_token": "${REGISTRATION_TOKEN}",
-    "cli_tool": "${INSTALL_CLI}",
-    "python_path": "${PYTHON_PATH}",
-    "heartbeat_interval": 60,
-    "reconnect_backoff_max": 60
-}
-EOF
-
-log_success "Configuration saved"
 
 # Step 7: Register with server
 log_info "Registering with Open ACE server..."
@@ -546,6 +531,24 @@ else
     log_error "Please check your registration token and server URL."
     exit 1
 fi
+
+# Extract agent_token from registration response and save config
+AGENT_TOKEN=$(echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "import sys,json; d=json.load(sys.stdin); print(d.get('agent_token', ''))" 2>/dev/null || echo "")
+
+cat > "${INSTALL_DIR}/config.json" << EOF
+{
+    "server_url": "${SERVER_URL}",
+    "machine_id": "${MACHINE_ID}",
+    "machine_name": "${MACHINE_NAME}",
+    "agent_token": "${AGENT_TOKEN}",
+    "cli_tool": "${INSTALL_CLI}",
+    "python_path": "${PYTHON_PATH}",
+    "heartbeat_interval": 60,
+    "reconnect_backoff_max": 60
+}
+EOF
+
+log_success "Configuration saved"
 
 # Step 8: Install as system service
 log_info "Installing as system service..."

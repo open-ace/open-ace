@@ -315,6 +315,18 @@ class RemoteAgent:
             )
             if resp.status_code == 200:
                 return resp.json()
+            elif resp.status_code == 401:
+                logger.error(
+                    "Agent token rejected by server (401). "
+                    "Token may be revoked or invalid. Re-registration required."
+                )
+                return None
+            elif resp.status_code == 403:
+                logger.error(
+                    "Agent token does not match machine_id (403). "
+                    "Check config.json for correct machine_id and agent_token."
+                )
+                return None
             else:
                 logger.warning(
                     "HTTP %d from %s: %s",

@@ -274,22 +274,9 @@ if ($SkipCodeServer) {
     }
 }
 
-# Step 6: Generate machine ID and save config
+# Step 6: Generate machine ID
 Write-Host "[INFO] Generating configuration..." -ForegroundColor Cyan
 $machineId = [guid]::NewGuid().ToString()
-
-$config = @{
-    server_url = $ServerUrl
-    machine_id = $machineId
-    machine_name = $MachineName
-    registration_token = $RegistrationToken
-    cli_tool = $InstallCli
-    heartbeat_interval = 60
-    reconnect_backoff_max = 60
-}
-
-$config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
-Write-Host "[OK] Configuration saved" -ForegroundColor Green
 
 # Step 7: Register with server
 Write-Host "[INFO] Registering with Open ACE server..." -ForegroundColor Cyan
@@ -368,6 +355,24 @@ try {
     Write-Host "[ERROR] Registration failed: $_" -ForegroundColor Red
     exit 1
 }
+
+# Save config with agent_token from registration response
+$agentToken = ""
+if ($response.agent_token) {
+    $agentToken = $response.agent_token
+}
+$config = @{
+    server_url = $ServerUrl
+    machine_id = $machineId
+    machine_name = $MachineName
+    agent_token = $agentToken
+    cli_tool = $InstallCli
+    heartbeat_interval = 60
+    reconnect_backoff_max = 60
+}
+
+$config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
+Write-Host "[OK] Configuration saved" -ForegroundColor Green
 
 # Step 8: Set up auto-start via Windows Task Scheduler
 Write-Host "[INFO] Setting up auto-start..." -ForegroundColor Cyan

@@ -21,6 +21,7 @@ import uuid
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
+from app.modules.workspace.agent_token import hash_agent_token
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
@@ -257,6 +258,49 @@ def deregister_machine(machine_id):
     if success:
         return jsonify({"success": True, "message": "Machine deregistered"})
     return jsonify({"error": "Machine not found"}), 404
+
+
+@remote_bp.route("/machines/<machine_id>/rotate-token", methods=["POST"])
+@admin_required
+def rotate_agent_token(machine_id):
+    """Rotate the agent token for a machine. System admin only.
+
+    Generates a new agent token and invalidates the old one.
+    The new plaintext token must be securely delivered to the agent machine
+    (e.g., by updating config.json on the remote machine).
+    """
+    agent_mgr = get_remote_agent_manager()
+
+    # Verify the machine exists
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    new_token = agent_mgr.rotate_agent_token(machine_id, rotated_by=g.user.get("id"))
+    if new_token:
+        return jsonify({"success": True, "agent_token": new_token})
+    return jsonify({"error": "Failed to rotate agent token"}), 500
+
+
+@remote_bp.route("/machines/<machine_id>/revoke-token", methods=["POST"])
+@admin_required
+def revoke_agent_token(machine_id):
+    """Revoke the agent token for a machine. System admin only.
+
+    The agent will receive 401 on its next message and need to
+    re-register with a new registration token.
+    """
+    agent_mgr = get_remote_agent_manager()
+
+    # Verify the machine exists
+    machine = agent_mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    success = agent_mgr.revoke_agent_token(machine_id, revoked_by=g.user.get("id"))
+    if success:
+        return jsonify({"success": True, "message": "Agent token revoked"})
+    return jsonify({"error": "No active agent token to revoke"}), 404
 
 
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
@@ -773,6 +817,37 @@ def get_client_ip_from_request() -> str:
     return request.remote_addr or "127.0.0.1"
 
 
+def _validate_agent_bearer():
+    """Validate the Bearer token for agent message endpoints.
+
+    Extracts the Authorization: Bearer <token> header, hashes it,
+    and validates against the agent_tokens table.
+
+    Returns:
+        Tuple of (authenticated_machine_id, None) on success,
+        or (None, error_response) on failure.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, None  # No Bearer token; caller decides legacy handling
+
+    token = auth_header[7:]  # Strip "Bearer " prefix
+    if not token:
+        return None, (jsonify({"error": "Empty bearer token"}), 401)
+
+    token_hash = hash_agent_token(token)
+    agent_mgr = get_remote_agent_manager()
+    machine_id = agent_mgr.validate_agent_bearer(token_hash)
+
+    if not machine_id:
+        logger.warning(
+            "Agent auth failure: invalid token hash=%s...%s", token_hash[:8], token_hash[-8:]
+        )
+        return None, (jsonify({"error": "Invalid or revoked agent token"}), 401)
+
+    return machine_id, None
+
+
 @remote_bp.route("/agent/register", methods=["POST"])
 def agent_register():
     """
@@ -818,7 +893,13 @@ def agent_register():
     if result:
         if result.get("error") == "hostname_conflict":
             return jsonify({"error": result["message"]}), 409
-        return jsonify({"success": True, "machine": result})
+        return jsonify(
+            {
+                "success": True,
+                "machine": {k: v for k, v in result.items() if k != "agent_token"},
+                "agent_token": result.get("agent_token"),
+            }
+        )
     return jsonify({"error": "Invalid or expired registration token"}), 401
 
 
@@ -873,6 +954,38 @@ def agent_message():
 
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # === Agent Bearer token authentication ===
+    bearer_machine_id, bearer_error = _validate_agent_bearer()
+
+    if bearer_error:
+        # Token was present but invalid — reject
+        return bearer_error
+
+    if bearer_machine_id:
+        # Valid Bearer token: ensure it matches the claimed machine_id
+        if bearer_machine_id != machine_id:
+            logger.warning(
+                "Agent token bound to %s but request claims %s",
+                bearer_machine_id[:8],
+                machine_id[:8],
+            )
+            return jsonify({"error": "Token does not match machine_id"}), 403
+        # Clear legacy mode if the machine had it set
+        agent_mgr.clear_legacy_mode(machine_id)
+    else:
+        # No Bearer token: check legacy mode for backward compatibility
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Authentication required"}), 401
+        if not machine.get("legacy_mode"):
+            return jsonify({"error": "Authentication required"}), 401
+        # Legacy agent allowed — log warning
+        logger.warning(
+            "Legacy agent (no Bearer token): machine_id=%s ip=%s",
+            machine_id[:8],
+            get_client_ip_from_request(),
+        )
 
     if msg_type == "register":
         # Validate machine exists in DB before allowing registration
