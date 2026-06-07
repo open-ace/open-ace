@@ -53,3 +53,18 @@ def extract_qwen_stream_usage(parsed: dict[str, Any]) -> dict[str, int] | None:
         input_t = max(0, input_t - cached)
         return {"input": input_t, "output": output_t}
     return None
+
+
+# Known tools that use the Qwen usage format
+_QWEN_TOOLS = {"qwen-code-cli"}
+
+
+def extract_stream_usage(cli_tool: str, parsed: dict[str, Any]) -> dict[str, int] | None:
+    """Dispatch to the correct usage extractor based on *cli_tool*.
+
+    This is the single entry-point that both ``executor.py`` and
+    ``agent_runner.py`` should use.
+    """
+    if cli_tool in _QWEN_TOOLS:
+        return extract_qwen_stream_usage(parsed)
+    return extract_claude_stream_usage(parsed)

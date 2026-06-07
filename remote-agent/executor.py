@@ -169,9 +169,9 @@ class SessionProcess:
 
                         # Handle result messages — extract token usage
                         if msg_type == "result" and self.usage_callback:
-                            from cli_adapters.usage_parser import extract_claude_stream_usage
+                            from cli_adapters.usage_parser import extract_stream_usage
 
-                            tokens = extract_claude_stream_usage(parsed)
+                            tokens = extract_stream_usage(self.cli_tool, parsed)
                             if tokens and (tokens["input"] or tokens["output"]):
                                 self.usage_callback(self.session_id, tokens)
                     except (json.JSONDecodeError, ValueError):

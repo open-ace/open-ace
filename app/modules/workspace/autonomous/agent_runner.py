@@ -19,21 +19,24 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_usage(cli_tool: str, parsed: dict) -> dict[str, int] | None:
-    """Dispatch to the correct usage extractor based on cli_tool."""
-    from cli_adapters.usage_parser import extract_claude_stream_usage, extract_qwen_stream_usage
+# Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
+_extract_stream_usage: Any = None
 
-    if cli_tool == "qwen-code-cli":
-        result: dict[str, int] | None = extract_qwen_stream_usage(parsed)  # type: ignore[no-any-return]
-        return result
-    result2: dict[str, int] | None = extract_claude_stream_usage(parsed)  # type: ignore[no-any-return]
-    return result2
+
+def _ensure_usage_parser():
+    """Import extract_stream_usage once remote-agent is on sys.path."""
+    global _extract_stream_usage
+    if _extract_stream_usage is None:
+        from cli_adapters.usage_parser import extract_stream_usage
+
+        _extract_stream_usage = extract_stream_usage
 
 
 # Default timeout for agent tasks — configurable via env var (default 1 hour)
@@ -207,6 +210,9 @@ class AutonomousAgentRunner:
         if _remote_agent_dir not in sys.path:
             sys.path.insert(0, _remote_agent_dir)
         from cli_adapters import get_adapter
+
+        # Cache the usage parser now that remote-agent is on sys.path
+        _ensure_usage_parser()
 
         # Find executable
         adapter = get_adapter(cli_tool)
@@ -497,7 +503,7 @@ class AutonomousAgentRunner:
 
                     elif msg_type == "result":
                         # End of turn - extract usage via shared parser
-                        usage = _extract_usage(session.cli_tool, parsed)
+                        usage = _extract_stream_usage(session.cli_tool, parsed)
                         if usage:
                             session.total_input_tokens += usage["input"]
                             session.total_output_tokens += usage["output"]

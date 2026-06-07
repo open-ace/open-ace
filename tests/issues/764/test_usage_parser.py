@@ -8,7 +8,11 @@ import pytest
 # Add remote-agent to path so we can import cli_adapters
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
 
-from cli_adapters.usage_parser import extract_claude_stream_usage, extract_qwen_stream_usage
+from cli_adapters.usage_parser import (
+    extract_claude_stream_usage,
+    extract_qwen_stream_usage,
+    extract_stream_usage,
+)
 
 
 class TestExtractClaudeStreamUsage:
@@ -135,3 +139,28 @@ class TestExtractQwenStreamUsage:
         assert result is not None
         assert result["input"] == 100
         assert result["output"] == 10
+
+
+class TestExtractStreamUsageDispatch:
+    """Test the dispatch function that routes by cli_tool."""
+
+    def test_dispatches_to_claude_by_default(self):
+        parsed = {"type": "result", "usage": {"input_tokens": 100, "output_tokens": 10}}
+        result = extract_stream_usage("claude-code", parsed)
+        assert result is not None
+        assert result["input"] == 100
+
+    def test_dispatches_to_qwen_for_qwen_tool(self):
+        parsed = {
+            "type": "result",
+            "usageMetadata": {"promptTokenCount": 4000, "candidatesTokenCount": 200},
+        }
+        result = extract_stream_usage("qwen-code-cli", parsed)
+        assert result is not None
+        assert result["input"] == 4000
+
+    def test_dispatches_to_claude_for_unknown_tool(self):
+        parsed = {"type": "result", "usage": {"input_tokens": 50, "output_tokens": 5}}
+        result = extract_stream_usage("some-unknown-tool", parsed)
+        assert result is not None
+        assert result["input"] == 50
