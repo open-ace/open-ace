@@ -54,6 +54,14 @@
 | `workspace.idle_timeout_minutes` | 空闲实例自动关闭时间（分钟） | `30` |
 | `workspace.token_secret` | Token 签名密钥（建议使用强随机字符串） | `your-secret-key` |
 
+### Autonomous（AI 自主开发）
+
+> ⚠️ 修改此配置后需要重启服务器才能生效。
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `autonomous.enabled` | 是否启用 AI 自主开发功能 | `false` |
+
 **多用户模式说明：**
 
 多用户模式下，Open ACE 会为每个用户启动独立的 `qwen-code-webui` 进程，以该用户的 `system_account` 身份运行。这确保了：
