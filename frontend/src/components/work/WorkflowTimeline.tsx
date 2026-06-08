@@ -469,7 +469,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             </div>
                           )}
                           {/* Real-time agent activity for in_progress milestones */}
-                          {milestone.status === 'in_progress' && activities.length > 0 && (
+                          {milestone.status === 'in_progress' && (() => {
+                            // Filter activities by this milestone's session_id to avoid
+                            // cross-contamination when multiple milestones run concurrently
+                            const milestoneActivities = milestone.session_id
+                              ? activities.filter(a => a.session_id === milestone.session_id)
+                              : activities;
+                            return milestoneActivities.length > 0 && (
                             <div
                               className="mt-2 p-2 rounded"
                               style={{ backgroundColor: 'var(--bs-gray-100)', maxHeight: '200px', overflowY: 'auto', fontSize: '0.75rem', fontFamily: 'monospace' }}
@@ -478,7 +484,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                                 <span className="spinner-border spinner-border-sm text-primary" style={{ width: '0.8rem', height: '0.8rem' }}></span>
                                 <strong className="text-primary">Agent Activity</strong>
                               </div>
-                              {activities.slice(-15).map((act, idx) => (
+                              {milestoneActivities.slice(-15).map((act, idx) => (
                                 <div key={idx} className="text-muted" style={{ lineHeight: '1.4' }}>
                                   {act.type === 'tool_use' && (
                                     <span>
@@ -506,7 +512,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                                 </div>
                               ))}
                             </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
