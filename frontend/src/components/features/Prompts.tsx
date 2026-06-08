@@ -79,11 +79,16 @@ export const Prompts: React.FC = () => {
   const total = promptsData?.total ?? 0;
   const error = actionError ?? queryError?.message ?? null;
 
-  // Reset page when filters or search change
+  // Reset page when filters change
   useEffect(() => {
     setPage(1);
     setSelectedTemplate(null);
-  }, [filters.category, debouncedSearch]);
+  }, [filters.category]);
+
+  // Reset page when search changes (but keep selected template to avoid focus loss)
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   // Debounce search input
   useEffect(() => {
