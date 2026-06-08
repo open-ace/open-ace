@@ -2,7 +2,7 @@
  * useAutonomous Hook - Data fetching hooks for AI autonomous development
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
 import type { CreateWorkflowRequest } from '@/api/autonomous';
@@ -52,6 +52,59 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 }
 
 // ── SSE Event Stream ───────────────────────────────────────────────
+
+/** A single agent activity event from the SSE stream */
+export interface AgentActivity {
+  session_id: string;
+  type: 'assistant' | 'tool_use' | 'usage';
+  text?: string;
+  tool_name?: string;
+  tool_input?: string;
+  total_tokens?: number;
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+}
+
+/**
+ * Subscribe to SSE agent_activity events for a workflow.
+ * Returns the latest activity items (max 50) for real-time display
+ * in in-progress milestone cards.
+ */
+export function useWorkflowActivity(workflowId: string, enabled = true) {
+  const [activities, setActivities] = useState<AgentActivity[]>([]);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !workflowId) return;
+
+    const url = autonomousApi.getEventStreamUrl(workflowId);
+    const es = new EventSource(url);
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.event_type === 'agent_activity') {
+          setActivities((prev) => [...prev.slice(-49), data]);
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
+
+    return () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
+  }, [workflowId, enabled]);
+
+  return activities;
+}
 
 /**
  * Subscribe to SSE events for a workflow.

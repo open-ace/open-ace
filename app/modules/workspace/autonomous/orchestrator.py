@@ -116,7 +116,10 @@ class AutonomousOrchestrator:
         from app.modules.workspace.session_manager import SessionManager
 
         session_manager = SessionManager()
-        self._runner = AutonomousAgentRunner(session_manager=session_manager)
+        self._runner = AutonomousAgentRunner(
+            session_manager=session_manager,
+            activity_callback=self._on_agent_activity,
+        )
         self._gh: Optional[GitHubOps] = None
 
     @property
@@ -248,6 +251,46 @@ class AutonomousOrchestrator:
             },
         )
 
+    def _on_agent_activity(self, session_id: str, activity: dict):
+        """Forward agent activity to the SSE event stream and update tokens."""
+        self.emitter.emit(
+            self._workflow_id,
+            "agent_activity",
+            {
+                "session_id": session_id,
+                **activity,
+            },
+        )
+        # Real-time token update (only on usage events to avoid DB thrashing)
+        if activity.get("type") == "usage":
+            try:
+                self.repo.update_workflow_tokens(
+                    self._workflow_id,
+                    {
+                        "total_tokens": activity.get("total_tokens", 0),
+                        "total_input_tokens": activity.get("total_input_tokens", 0),
+                        "total_output_tokens": activity.get("total_output_tokens", 0),
+                        "total_requests": 1,
+                    },
+                )
+            except Exception:
+                logger.warning("Failed to update workflow tokens in real-time", exc_info=True)
+
+    def _link_session_to_current_milestone(self, session_id: str):
+        """Write session_id to the latest in_progress milestone immediately."""
+        try:
+            milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
+            if milestones:
+                ms = milestones[-1]  # most recent
+                self.repo.update_milestone(
+                    ms.get("milestone_id", ""),
+                    {
+                        "session_id": session_id,
+                    },
+                )
+        except Exception:
+            logger.warning("Failed to link session to milestone", exc_info=True)
+
     def _run_agent(self, wf: dict = None, **kwargs) -> AgentTaskResult:
         """Run an agent task with session tracking for cancellation support.
 
@@ -263,6 +306,10 @@ class AutonomousOrchestrator:
 
         with self._session_lock:
             self._current_session_id = session_id
+
+        # Immediately link session to in_progress milestone so frontend
+        # can show session details while the agent is still running
+        self._link_session_to_current_milestone(session_id)
 
         # Inject per-workflow timeout if specified
         if "timeout" not in kwargs:

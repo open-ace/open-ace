@@ -71,18 +71,28 @@ class _LocalSession:
 class AutonomousAgentRunner:
     """Runs agent tools autonomously and returns results."""
 
-    def __init__(self, session_manager=None, remote_session_manager=None, server_url: str = ""):
+    def __init__(
+        self,
+        session_manager=None,
+        remote_session_manager=None,
+        server_url: str = "",
+        activity_callback=None,
+    ):
         """
         Args:
             session_manager: SessionManager for creating session records.
             remote_session_manager: RemoteSessionManager for remote execution.
             server_url: Open ACE server URL for proxy config.
+            activity_callback: Optional callback ``(session_id, activity_dict)``
+                invoked for each assistant/tool_use/usage event, enabling
+                real-time streaming of agent activity to the frontend.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
         self.server_url = server_url or os.environ.get(
             "OPENACE_SERVER_URL", "http://localhost:5000"
         )
+        self._activity_callback = activity_callback
         self._local_sessions: dict[str, _LocalSession] = {}
 
     def run_agent_task(
@@ -504,15 +514,38 @@ class AutonomousAgentRunner:
                         # Accumulate assistant text
                         msg = parsed.get("message", {})
                         content = msg.get("content", "")
+                        text_delta = ""
                         if isinstance(content, list):
                             for block in content:
                                 if isinstance(block, dict) and block.get("type") == "text":
-                                    session.assistant_text += block.get("text", "")
+                                    text_delta = block.get("text", "")
+                                    session.assistant_text += text_delta
                         elif isinstance(content, str):
+                            text_delta = content
                             session.assistant_text += content
+                        # Emit activity for real-time frontend display
+                        if self._activity_callback and text_delta:
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "assistant",
+                                    "text": text_delta[:500],  # truncate for SSE
+                                },
+                            )
 
                     elif msg_type == "tool_use":
                         session.tool_calls.append(parsed)
+                        # Emit tool call activity
+                        if self._activity_callback:
+                            tool_info = parsed.get("tool", {})
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "tool_use",
+                                    "tool_name": tool_info.get("name", "unknown"),
+                                    "tool_input": str(tool_info.get("input", ""))[:200],
+                                },
+                            )
 
                     elif msg_type == "result":
                         # End of turn - extract usage via shared parser
@@ -524,6 +557,17 @@ class AutonomousAgentRunner:
                             session.total_input_tokens + session.total_output_tokens
                         )
                         session.completed.set()
+                        # Emit usage activity for real-time token display
+                        if self._activity_callback:
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "usage",
+                                    "total_tokens": session.total_tokens,
+                                    "total_input_tokens": session.total_input_tokens,
+                                    "total_output_tokens": session.total_output_tokens,
+                                },
+                            )
 
                     elif msg_type == "control_request":
                         # Auto-approve permissions in autonomous mode,
