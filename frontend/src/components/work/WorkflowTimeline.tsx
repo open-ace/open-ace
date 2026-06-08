@@ -72,7 +72,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const language = useLanguage();
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [viewingSession, setViewingSession] = useState<{ milestoneId: string; sessionId: string } | null>(null);
+  const [viewingSession, setViewingSession] = useState<{
+    milestoneId: string;
+    sessionId: string;
+  } | null>(null);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null); // milestoneId
 
@@ -90,14 +93,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
     workflow.workflow_id,
     viewingSession?.milestoneId ?? '',
-    !!viewingSession,
+    !!viewingSession
   );
 
   // Diff query
   const { data: diffData, isLoading: diffLoading } = useMilestoneDiff(
     workflow.workflow_id,
     viewingDiff ?? '',
-    !!viewingDiff,
+    !!viewingDiff
   );
 
   // Real-time agent activity (only when workflow is active)
@@ -113,7 +116,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   // Collect available branches for merge selection
   const availableBranches = React.useMemo(() => {
     const branches = [workflow.branch_name].filter(Boolean);
-    milestones.forEach(ms => {
+    milestones.forEach((ms) => {
       if (ms.fork_branch && !branches.includes(ms.fork_branch)) {
         branches.push(ms.fork_branch);
       }
@@ -129,7 +132,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     return acc;
   }, {});
 
-  const sortedRounds = Object.keys(groupedMilestones).map(Number).sort((a, b) => a - b);
+  const sortedRounds = Object.keys(groupedMilestones)
+    .map(Number)
+    .sort((a, b) => a - b);
 
   const handlePause = () => pauseMutation.mutate(workflow.workflow_id);
   const handleResume = () => resumeMutation.mutate(workflow.workflow_id);
@@ -139,7 +144,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   };
   const handleMarkDone = () => {
     if (availableBranches.length <= 1) {
-      markDoneMutation.mutate({ workflowId: workflow.workflow_id, selectedBranch: availableBranches[0] });
+      markDoneMutation.mutate({
+        workflowId: workflow.workflow_id,
+        selectedBranch: availableBranches[0],
+      });
     } else {
       setShowBranchSelector(true);
     }
@@ -154,14 +162,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   };
   const handleForkMilestone = (milestoneId: string) => {
     const branch = `fork/from-${milestoneId.slice(0, 8)}`;
-    forkMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId, branchName: branch });
+    forkMilestoneMutation.mutate({
+      workflowId: workflow.workflow_id,
+      milestoneId,
+      branchName: branch,
+    });
   };
 
   const toggleExpand = (milestoneId: string) => {
-    setExpandedMilestone(prev => prev === milestoneId ? null : milestoneId);
+    setExpandedMilestone((prev) => (prev === milestoneId ? null : milestoneId));
   };
 
-  const parseDiffStats = (statsJson: string): { additions: number; deletions: number; files: number; commits: number } | null => {
+  const parseDiffStats = (
+    statsJson: string
+  ): { additions: number; deletions: number; files: number; commits: number } | null => {
     try {
       return statsJson ? JSON.parse(statsJson) : null;
     } catch {
@@ -194,13 +208,30 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                 {workflow.status}
               </Badge>
               {workflow.github_pr_url && (
-                <a href={workflow.github_pr_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
-                  <Badge variant="success"><i className="bi bi-git-pull-request me-1"></i>{t('autoPrBadge', language)}{workflow.github_pr_number}</Badge>
+                <a
+                  href={workflow.github_pr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-decoration-none"
+                >
+                  <Badge variant="success">
+                    <i className="bi bi-git-pull-request me-1"></i>
+                    {t('autoPrBadge', language)}
+                    {workflow.github_pr_number}
+                  </Badge>
                 </a>
               )}
               {workflow.requirements_issue_url && (
-                <a href={workflow.requirements_issue_url} target="_blank" rel="noopener noreferrer" className="text-decoration-none">
-                  <Badge variant="light"><i className="bi bi-card-text me-1"></i>{t('autoIssueBadge', language)}</Badge>
+                <a
+                  href={workflow.requirements_issue_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-decoration-none"
+                >
+                  <Badge variant="light">
+                    <i className="bi bi-card-text me-1"></i>
+                    {t('autoIssueBadge', language)}
+                  </Badge>
                 </a>
               )}
               {workflow.cli_tool && (
@@ -234,18 +265,19 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                   <i className="bi bi-clock-history me-1"></i>
                   {t('autoExtendPlanning', language)} (+10min)
                 </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => setShowStopConfirm(true)}
-                >
+                <Button size="sm" variant="danger" onClick={() => setShowStopConfirm(true)}>
                   <i className="bi bi-stop-fill me-1"></i>
                   {t('autoStopWorkflow', language)}
                 </Button>
               </>
             )}
             {workflow.status === 'failed' && (
-              <Button size="sm" variant="primary" onClick={handleRetry} disabled={retryMutation.isPending}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={handleRetry}
+                disabled={retryMutation.isPending}
+              >
                 <i className="bi bi-arrow-clockwise me-1"></i>
                 {t('autoRetryWorkflow', language)}
               </Button>
@@ -279,7 +311,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               </>
             )}
             {isWaiting && (
-              <Button size="sm" variant="success" onClick={handleMarkDone} disabled={markDoneMutation.isPending}>
+              <Button
+                size="sm"
+                variant="success"
+                onClick={handleMarkDone}
+                disabled={markDoneMutation.isPending}
+              >
                 <i className="bi bi-check-circle me-1"></i>
                 {t('autoCompleteWorkflow', language)}
               </Button>
@@ -336,7 +373,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               <div className="ps-3">
                 {groupedMilestones[round].map((milestone) => {
                   const isExpanded = expandedMilestone === milestone.milestone_id;
-                  const display = MILESTONE_DISPLAY[milestone.milestone_type] || { icon: 'bi-circle', color: 'secondary' };
+                  const display = MILESTONE_DISPLAY[milestone.milestone_type] || {
+                    icon: 'bi-circle',
+                    color: 'secondary',
+                  };
                   const statusIcon = STATUS_ICONS[milestone.status] || STATUS_ICONS.pending;
                   const diffStats = parseDiffStats(milestone.diff_stats);
 
@@ -368,7 +408,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             )}
                             {diffStats && (
                               <span className="me-2">
-                                +{diffStats.additions}/-{diffStats.deletions} ({diffStats.files} files)
+                                +{diffStats.additions}/-{diffStats.deletions} ({diffStats.files}{' '}
+                                files)
                               </span>
                             )}
                             {milestone.started_at && (
@@ -381,15 +422,23 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             )}
                           </div>
                         </div>
-                        <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-muted`}></i>
+                        <i
+                          className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} text-muted`}
+                        ></i>
                       </div>
 
                       {isExpanded && (
-                        <div className="ms-4 p-3 border-start border-3" style={{ borderColor: `var(--bs-${display.color})` }}>
+                        <div
+                          className="ms-4 p-3 border-start border-3"
+                          style={{ borderColor: `var(--bs-${display.color})` }}
+                        >
                           {milestone.plan_content && (
                             <div className="mb-2">
                               <strong>{t('autoPhasePlanning', language)}:</strong>
-                              <pre className="bg-dark text-light p-2 rounded mt-1" style={{ fontSize: '0.8rem', maxHeight: '300px', overflow: 'auto' }}>
+                              <pre
+                                className="bg-dark text-light p-2 rounded mt-1"
+                                style={{ fontSize: '0.8rem', maxHeight: '300px', overflow: 'auto' }}
+                              >
                                 {milestone.plan_content}
                               </pre>
                             </div>
@@ -397,13 +446,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                           {milestone.review_content && (
                             <div className="mb-2">
                               <strong>{t('autoStatusPRReview', language)}:</strong>
-                              <pre className="bg-dark text-light p-2 rounded mt-1" style={{ fontSize: '0.8rem', maxHeight: '300px', overflow: 'auto' }}>
+                              <pre
+                                className="bg-dark text-light p-2 rounded mt-1"
+                                style={{ fontSize: '0.8rem', maxHeight: '300px', overflow: 'auto' }}
+                              >
                                 {milestone.review_content}
                               </pre>
                             </div>
                           )}
                           {milestone.description && (
-                            <p className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>{milestone.description}</p>
+                            <p className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>
+                              {milestone.description}
+                            </p>
                           )}
                           {milestone.commit_shas && (
                             <div className="mb-2">
@@ -432,15 +486,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                                 className="text-decoration-none"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setViewingSession({ milestoneId: milestone.milestone_id, sessionId: milestone.session_id });
+                                  setViewingSession({
+                                    milestoneId: milestone.milestone_id,
+                                    sessionId: milestone.session_id,
+                                  });
                                 }}
                               >
-                                {t('autoViewSession', language)}: <code>{milestone.session_id.slice(0, 8)}</code>
+                                {t('autoViewSession', language)}:{' '}
+                                <code>{milestone.session_id.slice(0, 8)}</code>
                               </a>
                             </small>
                           )}
                           <div className="d-flex gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
-                            {(milestone.status === 'completed' || milestone.status === 'in_progress') && (
+                            {(milestone.status === 'completed' ||
+                              milestone.status === 'in_progress') && (
                               <Button
                                 size="sm"
                                 variant="outline-info"
@@ -464,56 +523,79 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                             )}
                           </div>
                           {milestone.error_message && (
-                            <div className="alert alert-danger py-1 px-2 mt-2 mb-0" style={{ fontSize: '0.8rem' }}>
+                            <div
+                              className="alert alert-danger py-1 px-2 mt-2 mb-0"
+                              style={{ fontSize: '0.8rem' }}
+                            >
                               {milestone.error_message}
                             </div>
                           )}
                           {/* Real-time agent activity for in_progress milestones */}
-                          {milestone.status === 'in_progress' && (() => {
-                            // Filter activities by this milestone's session_id to avoid
-                            // cross-contamination when multiple milestones run concurrently
-                            const milestoneActivities = milestone.session_id
-                              ? activities.filter(a => a.session_id === milestone.session_id)
-                              : activities;
-                            return milestoneActivities.length > 0 && (
-                            <div
-                              className="mt-2 p-2 rounded"
-                              style={{ backgroundColor: 'var(--bs-gray-100)', maxHeight: '200px', overflowY: 'auto', fontSize: '0.75rem', fontFamily: 'monospace' }}
-                            >
-                              <div className="d-flex align-items-center gap-1 mb-1">
-                                <span className="spinner-border spinner-border-sm text-primary" style={{ width: '0.8rem', height: '0.8rem' }}></span>
-                                <strong className="text-primary">Agent Activity</strong>
-                              </div>
-                              {milestoneActivities.slice(-15).map((act, idx) => (
-                                <div key={idx} className="text-muted" style={{ lineHeight: '1.4' }}>
-                                  {act.type === 'tool_use' && (
-                                    <span>
-                                      <i className="bi bi-tools me-1 text-warning"></i>
-                                      <strong>{act.tool_name}</strong>
-                                      {act.tool_input && (
-                                        <span className="ms-1" style={{ opacity: 0.7 }}>
-                                          {act.tool_input.length > 60 ? act.tool_input.slice(0, 60) + '...' : act.tool_input}
-                                        </span>
-                                      )}
-                                    </span>
-                                  )}
-                                  {act.type === 'assistant' && (
-                                    <span>
-                                      <i className="bi bi-chat-text me-1 text-info"></i>
-                                      {act.text && act.text.length > 80 ? act.text.slice(0, 80) + '...' : act.text}
-                                    </span>
-                                  )}
-                                  {act.type === 'usage' && (
-                                    <span>
-                                      <i className="bi bi-lightning me-1"></i>
-                                      Token: {formatTokens(act.total_tokens || 0)}
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                            );
-                          })()}
+                          {milestone.status === 'in_progress' &&
+                            (() => {
+                              // Filter activities by this milestone's session_id to avoid
+                              // cross-contamination when multiple milestones run concurrently
+                              const milestoneActivities = milestone.session_id
+                                ? activities.filter((a) => a.session_id === milestone.session_id)
+                                : activities;
+                              return (
+                                milestoneActivities.length > 0 && (
+                                  <div
+                                    className="mt-2 p-2 rounded"
+                                    style={{
+                                      backgroundColor: 'var(--bs-gray-100)',
+                                      maxHeight: '200px',
+                                      overflowY: 'auto',
+                                      fontSize: '0.75rem',
+                                      fontFamily: 'monospace',
+                                    }}
+                                  >
+                                    <div className="d-flex align-items-center gap-1 mb-1">
+                                      <span
+                                        className="spinner-border spinner-border-sm text-primary"
+                                        style={{ width: '0.8rem', height: '0.8rem' }}
+                                      ></span>
+                                      <strong className="text-primary">Agent Activity</strong>
+                                    </div>
+                                    {milestoneActivities.slice(-15).map((act, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="text-muted"
+                                        style={{ lineHeight: '1.4' }}
+                                      >
+                                        {act.type === 'tool_use' && (
+                                          <span>
+                                            <i className="bi bi-tools me-1 text-warning"></i>
+                                            <strong>{act.tool_name}</strong>
+                                            {act.tool_input && (
+                                              <span className="ms-1" style={{ opacity: 0.7 }}>
+                                                {act.tool_input.length > 60
+                                                  ? act.tool_input.slice(0, 60) + '...'
+                                                  : act.tool_input}
+                                              </span>
+                                            )}
+                                          </span>
+                                        )}
+                                        {act.type === 'assistant' && (
+                                          <span>
+                                            <i className="bi bi-chat-text me-1 text-info"></i>
+                                            {act.text && act.text.length > 80
+                                              ? act.text.slice(0, 80) + '...'
+                                              : act.text}
+                                          </span>
+                                        )}
+                                        {act.type === 'usage' && (
+                                          <span>
+                                            <i className="bi bi-lightning me-1"></i>
+                                            Token: {formatTokens(act.total_tokens ?? 0)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              );
+                            })()}
                         </div>
                       )}
                     </div>
@@ -529,7 +611,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
       <Modal
         isOpen={!!viewingSession}
         onClose={() => setViewingSession(null)}
-        title={viewingSession ? `${t('autoViewSession', language)}: ${viewingSession.sessionId.slice(0, 8)}` : ''}
+        title={
+          viewingSession
+            ? `${t('autoViewSession', language)}: ${viewingSession.sessionId.slice(0, 8)}`
+            : ''
+        }
         size="lg"
       >
         {sessionLoading ? (
@@ -542,18 +628,35 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                 {session.status}
               </Badge>
             </div>
-            {Array.isArray(session.messages) && session.messages.map((msg, idx) => (
-              <div key={idx} className="mb-2">
-                <Badge variant={msg.role === 'assistant' ? 'primary' : msg.role === 'user' ? 'success' : 'secondary'}>
-                  {msg.role}
-                </Badge>
-                {typeof msg.content === 'string' ? (
-                  <pre className="bg-light p-2 rounded mt-1 mb-0" style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                    {msg.content.slice(0, 2000)}
-                  </pre>
-                ) : null}
-              </div>
-            ))}
+            {Array.isArray(session.messages) &&
+              session.messages.map((msg, idx) => (
+                <div key={idx} className="mb-2">
+                  <Badge
+                    variant={
+                      msg.role === 'assistant'
+                        ? 'primary'
+                        : msg.role === 'user'
+                          ? 'success'
+                          : 'secondary'
+                    }
+                  >
+                    {msg.role}
+                  </Badge>
+                  {typeof msg.content === 'string' ? (
+                    <pre
+                      className="bg-light p-2 rounded mt-1 mb-0"
+                      style={{
+                        fontSize: '0.8rem',
+                        maxHeight: '200px',
+                        overflow: 'auto',
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {msg.content.slice(0, 2000)}
+                    </pre>
+                  ) : null}
+                </div>
+              ))}
             {!Array.isArray(session.messages) && (
               <p className="text-muted">{t('autoNoMessagesAvailable', language)}</p>
             )}
@@ -584,7 +687,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
               <i className="bi bi-git me-2"></i>
               <code>{branch}</code>
               {branch === workflow.branch_name && (
-                <Badge variant="primary" className="ms-2">{t('autoCurrent', language)}</Badge>
+                <Badge variant="primary" className="ms-2">
+                  {t('autoCurrent', language)}
+                </Badge>
               )}
             </button>
           ))}
@@ -593,12 +698,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
 
       {/* Diff Viewer Modal */}
       {viewingDiff && (
-        <Modal isOpen={true} onClose={() => setViewingDiff(null)} title={t('autoCodeChanges', language)} size="xl">
+        <Modal
+          isOpen={true}
+          onClose={() => setViewingDiff(null)}
+          title={t('autoCodeChanges', language)}
+          size="xl"
+        >
           <div style={{ maxHeight: '80vh', overflow: 'auto' }}>
             {diffLoading ? (
               <Loading />
             ) : diffData?.diff ? (
-              <pre className="bg-dark text-light p-3 rounded" style={{ fontSize: '0.75rem', maxHeight: '70vh', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+              <pre
+                className="bg-dark text-light p-3 rounded"
+                style={{
+                  fontSize: '0.75rem',
+                  maxHeight: '70vh',
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
                 {diffData.diff.length > 50000
                   ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
                   : diffData.diff}
