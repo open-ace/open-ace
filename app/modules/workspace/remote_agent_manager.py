@@ -1071,7 +1071,7 @@ class RemoteAgentManager:
         with self._lock:
             self._pending_requests.pop(request_id, None)
 
-        return result
+        return cast(dict | None, result)
 
     def handle_command_response(self, data: dict) -> None:
         """
