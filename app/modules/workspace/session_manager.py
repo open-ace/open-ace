@@ -37,7 +37,6 @@ class SessionStatus(Enum):
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETED = "completed"
-    ARCHIVED = "archived"
     ERROR = "error"
 
 
@@ -895,38 +894,6 @@ class SessionManager:
             logger.info(f"Completed session: {session_id}")
         return success
 
-    def archive_session(self, session_id: str) -> bool:
-        """
-        Archive a session.
-
-        Args:
-            session_id: Session ID to archive.
-
-        Returns:
-            bool: True if successful.
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-
-        cursor.execute(
-            f"""
-            UPDATE agent_sessions
-            SET status = {_param()}, updated_at = {_param()}
-            WHERE session_id = {_param()}
-        """,
-            (SessionStatus.ARCHIVED.value, now, session_id),
-        )
-
-        success = cursor.rowcount > 0
-        conn.commit()
-        conn.close()
-
-        if success:
-            logger.info(f"Archived session: {session_id}")
-        return success
-
     def delete_session(self, session_id: str) -> bool:
         """
         Delete a session and its messages.
@@ -1093,10 +1060,6 @@ class SessionManager:
             logger.warning(f"Cannot recover expired session: {session_id}")
             return None
 
-        if session.status == SessionStatus.ARCHIVED.value:
-            logger.warning(f"Cannot recover archived session: {session_id}")
-            return None
-
         # Update status to active
         session.status = SessionStatus.ACTIVE.value
         self.update_session(session)
@@ -1123,10 +1086,9 @@ class SessionManager:
         cursor.execute(
             f"""
             SELECT session_id FROM agent_sessions
-            WHERE (expires_at < {_param()} OR updated_at < {_param()})
-            AND status != {_param()}
+            WHERE expires_at < {_param()} OR updated_at < {_param()}
         """,
-            (cutoff.isoformat(), cutoff.isoformat(), SessionStatus.ARCHIVED.value),
+            (cutoff.isoformat(), cutoff.isoformat()),
         )
 
         session_ids = [row["session_id"] for row in cursor.fetchall()]
