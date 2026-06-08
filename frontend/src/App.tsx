@@ -18,11 +18,6 @@ import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
 import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
-import {
-  ContextMenuProvider,
-  useContextMenu,
-  shouldUseNativeMenu,
-} from '@/components/common/ContextMenu';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -423,39 +418,6 @@ const AppContent: React.FC = () => {
   );
 };
 
-// Global ContextMenu Handler - intercepts browser's native right-click menu
-const GlobalContextMenuHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { showMenu } = useContextMenu();
-
-  // Intercept contextmenu event globally on document
-  // This ensures the event listener is always bound regardless of ref timing
-  useEffect(() => {
-    const handleContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-
-      // Allow native context menu for input fields and editable elements
-      // (for spell check, undo, cut, copy, paste, etc.)
-      if (shouldUseNativeMenu(target)) {
-        return; // Don't prevent, allow native menu
-      }
-
-      // Prevent browser's native context menu
-      e.preventDefault();
-      // Show custom context menu at click position
-      showMenu(e.clientX, e.clientY, target);
-    };
-
-    // Add event listener directly to document for reliability
-    document.addEventListener('contextmenu', handleContextMenu);
-
-    return () => {
-      document.removeEventListener('contextmenu', handleContextMenu);
-    };
-  }, [showMenu]);
-
-  return <>{children}</>;
-};
-
 export const App: React.FC = () => {
   const theme = useTheme();
 
@@ -467,25 +429,21 @@ export const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ContextMenuProvider>
-        <GlobalContextMenuHandler>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/logout" element={<LogoutSuccess />} />
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/logout" element={<LogoutSuccess />} />
 
-            {/* Protected routes */}
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <AppContent />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </GlobalContextMenuHandler>
-      </ContextMenuProvider>
+        {/* Protected routes */}
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <AppContent />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
     </QueryClientProvider>
   );
 };
