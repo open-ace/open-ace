@@ -108,10 +108,13 @@ class TestAiAgentSettingsRepoUpdateSettings:
         mock_db.connection.return_value = mock_conn
 
         repo = AiAgentSettingsRepo(db=mock_db)
-        result = repo.update_ai_agent_settings({"ai_github_token": "new_token"})
+        result = repo.update_ai_agent_settings(
+            {"ai_github_token": "new_token", "ai_github_author_name": "Bot"}
+        )
 
         assert result is True
-        assert mock_cursor.execute.call_count == 1
+        # 2 keys → 2 execute calls
+        assert mock_cursor.execute.call_count == 2
 
     def test_returns_false_on_db_error(self):
         from app.repositories.ai_agent_settings_repo import AiAgentSettingsRepo
@@ -414,6 +417,8 @@ class TestApiGetSettings:
                 data = _get_json(resp)
                 assert data["ai_github_token"] == "ghp_****7890"
                 assert data["ai_github_author_name"] == "Bot"
+                # Verify mask_token=True was passed (not False)
+                mock_repo.get_ai_agent_settings.assert_called_once_with(mask_token=True)
 
 
 class TestApiUpdateSettings:
@@ -437,6 +442,24 @@ class TestApiUpdateSettings:
                 call_args = mock_repo.update_ai_agent_settings.call_args[0][0]
                 assert "evil_key" not in call_args
                 assert "ai_github_author_name" in call_args
+
+    @patch("app.utils.config.invalidate_ai_github_env_cache")
+    @patch("app.routes.ai_agent_settings.audit_logger")
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_invalidates_cache_after_update(self, mock_repo, mock_audit, mock_invalidate):
+        from app.routes.ai_agent_settings import api_update_ai_agent_settings
+
+        mock_repo.update_ai_agent_settings.return_value = True
+
+        app = _make_app()
+        with app.test_request_context(json={"ai_github_author_name": "New Bot"}):
+            with app.app_context():
+                flask_g.user_id = 1
+                flask_g.user = {"username": "admin"}
+                resp = _unwrap(api_update_ai_agent_settings)()
+                assert _get_json(resp).get("success") is True
+                # Verify cache was invalidated
+                mock_invalidate.assert_called_once()
 
     @patch("app.routes.ai_agent_settings.audit_logger")
     @patch("app.routes.ai_agent_settings.repo")
@@ -520,8 +543,50 @@ class TestApiValidateToken:
                 assert data["username"] == "test-user"
                 call_env = mock_run.call_args[1]["env"]
                 assert call_env["GH_TOKEN"] == "ghp_new_token"
-            data = json.loads(resp.data)
-            assert data["valid"] is True
-            assert data["username"] == "test-user"
-            call_env = mock_run.call_args[1]["env"]
-            assert call_env["GH_TOKEN"] == "ghp_new_token"
+
+    @patch("app.routes.ai_agent_settings.subprocess.run")
+    def test_invalid_token_returns_failure(self, mock_run):
+        """Verify invalid token returns valid=False with error message."""
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="HTTP 401: Bad credentials"
+        )
+
+        app = _make_app()
+        with app.test_request_context(json={"token": "ghp_expired_token"}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                data = _get_json(resp)
+                assert data["valid"] is False
+                assert data["error"]  # Has error message
+
+    def test_empty_token_returns_400(self):
+        """Verify empty token returns 400 status code."""
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        app = _make_app()
+        with app.test_request_context(json={"token": ""}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                assert isinstance(resp, tuple)
+                assert resp[1] == 400
+                data = _get_json(resp)
+                assert data["valid"] is False
+
+    @patch("app.routes.ai_agent_settings.subprocess.run")
+    def test_gh_timeout(self, mock_run):
+        """Verify gh CLI timeout returns failure."""
+        import subprocess
+
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=15)
+
+        app = _make_app()
+        with app.test_request_context(json={"token": "ghp_test"}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                data = _get_json(resp)
+                assert data["valid"] is False
+                assert "timed out" in data["error"].lower()
