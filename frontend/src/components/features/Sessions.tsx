@@ -141,6 +141,7 @@ export const Sessions: React.FC = () => {
       { value: 'openclaw', label: 'OpenClaw' },
       { value: 'claude', label: 'Claude' },
       { value: 'qwen', label: 'Qwen' },
+      { value: 'codex', label: 'Codex' },
     ],
     [language]
   );
