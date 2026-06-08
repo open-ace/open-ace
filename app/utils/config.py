@@ -74,3 +74,42 @@ def get_config_value(section: str, key: str, default=None):
 def is_autonomous_enabled() -> bool:
     """Check whether the autonomous development feature is enabled."""
     return bool(get_config_value("autonomous", "enabled", False))
+
+
+# ── AI GitHub Account env cache ───────────────────────────────────
+# Avoids a DB query on every subprocess.run() inside GitHubOps.
+
+_ai_github_env_cache: dict[str, tuple[float, dict[str, str] | None]] = {}
+_ai_github_env_ttl: float = 60.0  # seconds
+
+
+def get_ai_github_env() -> dict[str, str] | None:
+    """Return env overrides for the AI GitHub account, or None if not configured.
+
+    Results are cached for up to 60 seconds so that repeated GitHubOps
+    subprocess calls do not hit the database each time.
+
+    Returns:
+        Dict with GH_TOKEN, GIT_AUTHOR_NAME/EMAIL, GIT_COMMITTER_NAME/EMAIL,
+        or None if no AI GitHub token is configured.
+    """
+    now = time.time()
+    with _cache_lock:
+        entry = _ai_github_env_cache.get("_ai_env")
+        if entry is not None:
+            ts, data = entry
+            if now - ts < _ai_github_env_ttl:
+                return data
+
+    # Cache miss — read from DB
+    try:
+        from app.repositories.ai_agent_settings_repo import AiAgentSettingsRepo
+
+        result = AiAgentSettingsRepo().get_ai_github_env()
+    except Exception as e:
+        logger.debug("Failed to read AI GitHub env: %s", e)
+        result = None
+
+    with _cache_lock:
+        _ai_github_env_cache["_ai_env"] = (now, result)
+    return result

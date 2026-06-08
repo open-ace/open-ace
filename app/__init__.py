@@ -188,6 +188,7 @@ def register_error_handlers(app):
 def register_blueprints(app):
     """Register all application blueprints."""
     from app.routes.admin import admin_bp
+    from app.routes.ai_agent_settings import ai_agent_settings_bp
     from app.routes.alerts import alerts_bp
     from app.routes.analysis import analysis_bp
     from app.routes.analytics import analytics_bp
@@ -237,6 +238,7 @@ def register_blueprints(app):
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
     app.register_blueprint(api_keys_bp, url_prefix="/api")
     app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
+    app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")

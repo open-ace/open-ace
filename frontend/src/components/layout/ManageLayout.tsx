@@ -171,6 +171,13 @@ const navSections: NavSection[] = [
         path: '/manage/settings/api-keys',
         adminOnly: true,
       },
+      {
+        id: 'ai-agent',
+        label: 'aiAgentSettings',
+        icon: 'bi-robot',
+        path: '/manage/settings/ai-agent',
+        adminOnly: true,
+      },
     ],
   },
 ];
