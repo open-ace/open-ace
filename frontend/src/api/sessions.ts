@@ -208,6 +208,7 @@ export const sessionsApi = {
     can_resume?: boolean;
     project_path?: string;
     model?: string;
+    tool_name?: string;
     remote_machine_id?: string;
   }> {
     const response = await apiClient.post<{
@@ -223,6 +224,7 @@ export const sessionsApi = {
       can_resume?: boolean;
       project_path?: string;
       model?: string;
+      tool_name?: string;
       remote_machine_id?: string;
     }>(`/api/workspace/sessions/${sessionId}/restore`, {});
     return response;
