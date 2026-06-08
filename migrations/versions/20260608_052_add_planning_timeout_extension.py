@@ -1,7 +1,7 @@
 """Add planning_timeout_extension column to autonomous_workflows
 
 Revision ID: 052_planning_timeout_extension
-Revises: 051_fix_project_path_unique
+Revises: 050_autonomous_workflows
 Create Date: 2026-06-08
 
 Stores accumulated user-requested timeout extensions for the planning
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "052_planning_timeout_extension"
-down_revision: str = "051_fix_project_path_unique"
+down_revision: str = "050_autonomous_workflows"
 branch_labels = None
 depends_on = None
 
