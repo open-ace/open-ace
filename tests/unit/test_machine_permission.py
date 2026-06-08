@@ -176,9 +176,7 @@ def make_manager():
         "rotated_at TIMESTAMP)"
     )
     # Add legacy_mode column to remote_machines if not exists
-    conn.execute(
-        "ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0"
-    )
+    conn.execute("ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
 
