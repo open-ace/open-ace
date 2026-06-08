@@ -113,15 +113,21 @@ export interface CreateWorkflowRequest {
 
 export const autonomousApi = {
   // Workflow CRUD
-  async createWorkflow(data: CreateWorkflowRequest): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
+  async createWorkflow(
+    data: CreateWorkflowRequest
+  ): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
     return apiClient.post('/api/autonomous/workflows', data);
   },
 
-  async listWorkflows(params?: Record<string, string>): Promise<{ success: boolean; workflows: AutonomousWorkflow[] }> {
+  async listWorkflows(
+    params?: Record<string, string>
+  ): Promise<{ success: boolean; workflows: AutonomousWorkflow[] }> {
     return apiClient.get('/api/autonomous/workflows', params);
   },
 
-  async getWorkflow(workflowId: string): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
+  async getWorkflow(
+    workflowId: string
+  ): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}`);
   },
 
@@ -162,12 +168,19 @@ export const autonomousApi = {
   },
 
   // Milestone Operations
-  async getTimeline(workflowId: string): Promise<{ success: boolean; milestones: WorkflowMilestone[] }> {
+  async getTimeline(
+    workflowId: string
+  ): Promise<{ success: boolean; milestones: WorkflowMilestone[] }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/timeline`);
   },
 
-  async cancelMilestone(workflowId: string, milestoneId: string): Promise<{ success: boolean; cancelled: number }> {
-    return apiClient.post(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/cancel`);
+  async cancelMilestone(
+    workflowId: string,
+    milestoneId: string
+  ): Promise<{ success: boolean; cancelled: number }> {
+    return apiClient.post(
+      `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/cancel`
+    );
   },
 
   async forkMilestone(
@@ -175,16 +188,21 @@ export const autonomousApi = {
     milestoneId: string,
     branchName?: string
   ): Promise<{ success: boolean; fork_milestone: WorkflowMilestone }> {
-    return apiClient.post(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/fork`, {
-      branch_name: branchName,
-    });
+    return apiClient.post(
+      `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/fork`,
+      {
+        branch_name: branchName,
+      }
+    );
   },
 
   async getMilestoneSession(
     workflowId: string,
     milestoneId: string
   ): Promise<{ success: boolean; session: Record<string, unknown> }> {
-    return apiClient.get(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/session`);
+    return apiClient.get(
+      `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/session`
+    );
   },
 
   async getMilestoneDiff(

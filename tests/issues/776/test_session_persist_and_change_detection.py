@@ -324,10 +324,9 @@ class TestChangeDetectionAutoCommit:
         commit_before = "abc123"
         commit_sha = "def456"
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
-        _has_uncommitted = False  # noqa: F841 - simulated state, not used in this test
 
         if not sha_changed:
-            _has_uncommitted = gh.has_uncommitted_changes()  # noqa: F841
+            _ = gh.has_uncommitted_changes()  # noqa: F841
 
         # SHA already changed, so has_uncommitted branch was not entered
         assert sha_changed
@@ -347,8 +346,6 @@ class TestChangeDetectionBranchLevelCheck:
             "commits": 3,
         }
 
-        _sha_changed = False  # noqa: F841 - simulated state, not used in this test
-        _has_uncommitted = False  # noqa: F841 - simulated state, not used in this test
         branch_has_changes = False
         base_diff_stats = {}
         branch_name = "auto-dev/wf-2"
@@ -370,8 +367,6 @@ class TestChangeDetectionBranchLevelCheck:
             "commits": 0,
         }
 
-        _sha_changed = False  # noqa: F841 - simulated state, not used in this test
-        _has_uncommitted = False  # noqa: F841 - simulated state, not used in this test
         branch_has_changes = False
         base_diff_stats = {}
         branch_name = "auto-dev/wf-3"
@@ -387,8 +382,6 @@ class TestChangeDetectionBranchLevelCheck:
         gh = MagicMock()
         gh.get_diff_stats.side_effect = Exception("git error")
 
-        _sha_changed = False  # noqa: F841 - simulated state, not used in this test
-        _has_uncommitted = False  # noqa: F841 - simulated state, not used in this test
         branch_has_changes = False
         branch_name = "auto-dev/wf-4"
 

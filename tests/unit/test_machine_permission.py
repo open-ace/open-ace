@@ -152,14 +152,14 @@ def make_manager():
         "completed_at TIMESTAMP, "
         "expires_at TIMESTAMP)"
     )
-    # Agent identity tables (PR #760 / PR #775)
+    # Agent identity tables (PR #754)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS registration_tokens ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "token_hash TEXT NOT NULL UNIQUE, "
         "tenant_id INTEGER NOT NULL, "
         "created_by INTEGER NOT NULL, "
-        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+        "created_at TIMESTAMP, "
         "expires_at TIMESTAMP, "
         "is_consumed INTEGER DEFAULT 0, "
         "consumed_at TIMESTAMP)"
@@ -169,17 +169,12 @@ def make_manager():
         "id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "token_hash TEXT NOT NULL UNIQUE, "
         "machine_id TEXT NOT NULL, "
-        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+        "created_at TIMESTAMP, "
         "is_revoked INTEGER DEFAULT 0, "
         "revoked_at TIMESTAMP, "
         "revoked_by INTEGER, "
         "rotated_at TIMESTAMP)"
     )
-    # Add legacy_mode column to remote_machines if it doesn't exist
-    try:
-        conn.execute("ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0")
-    except Exception:
-        pass  # Column already exists
     conn.commit()
     conn.close()
 

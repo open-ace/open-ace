@@ -691,14 +691,11 @@ class RemoteAgentManager:
             return False
 
         # Check machine_id binding
-        if row["machine_id"] != machine_id:
-            return False
-
-        return True
+        return bool(row["machine_id"] == machine_id)
 
     def rotate_agent_token(
         self, machine_id: str, rotated_by: int | None = None
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, str | bool] | None:
         """Rotate the agent token for a machine.
 
         Revokes all existing tokens for the machine and issues a new one.
@@ -711,7 +708,7 @@ class RemoteAgentManager:
             rotated_by: User ID who initiated the rotation.
 
         Returns:
-            dict with 'new_token' and 'unrevoked' keys, or None if machine not found.
+            New plaintext agent token, or None if machine not found.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -852,13 +849,11 @@ class RemoteAgentManager:
         if not row:
             return False
 
-        legacy_mode = row["legacy_mode"]
+        raw_legacy = row["legacy_mode"]
         if is_postgresql():
-            legacy_mode_val = bool(legacy_mode) if legacy_mode is not None else False
+            return bool(raw_legacy) if raw_legacy is not None else False
         else:
-            legacy_mode_val = bool(legacy_mode)
-
-        return bool(legacy_mode_val)
+            return bool(raw_legacy)
 
     def cleanup_expired_registration_tokens(self) -> int:
         """Remove expired registration tokens that have NOT been consumed.
@@ -884,13 +879,12 @@ class RemoteAgentManager:
             """,
                 (adapt_boolean_value(False), now.isoformat()),
             )
-            removed = cursor.rowcount
+            removed = int(cursor.rowcount)
             conn.commit()
 
-        removed_count = int(removed)
-        if removed_count:
-            logger.info("Cleaned up %d expired unconsumed registration tokens", removed_count)
-        return removed_count
+        if removed:
+            logger.info("Cleaned up %d expired unconsumed registration tokens", removed)
+        return removed
 
     def _start_token_cleanup(self) -> None:
         """Start the registration token cleanup timer (lazy, daemon thread)."""

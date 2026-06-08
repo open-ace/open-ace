@@ -76,6 +76,7 @@ class TestScenario01_MissingBearerToken:
             hostname="testhost",
         )
         assert result is not None
+        _ = result["agent_token"]  # Token generated but not used in this test
 
         # Validate with no token → should fail (simulated: empty string)
         assert manager.validate_agent_token("", machine_id) is False
