@@ -524,6 +524,19 @@ class RemoteAgent:
             self._cmd_stop_vscode(data)
         elif command == "attach_vscode":
             self._cmd_attach_vscode(data)
+        elif command == "get_session_info":
+            # Query session process status (Issue #669)
+            info = self._executor.get_session_info(session_id)
+            request_id = data.get("request_id")
+            if request_id:
+                self._http_send(
+                    {
+                        "type": "command_response",
+                        "machine_id": self.config.machine_id,
+                        "request_id": request_id,
+                        "result": info or {"error": "Session not found"},
+                    }
+                )
         else:
             logger.warning("Unknown command: %s", command)
 

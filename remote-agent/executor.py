@@ -1392,6 +1392,7 @@ class ProcessExecutor:
             "pid": session.pid,
             "is_running": session.is_running,
             "paused": session._paused,
+            "cli_session_id": session._cli_session_id,
         }
 
     def cleanup_stopped(self) -> list[str]:

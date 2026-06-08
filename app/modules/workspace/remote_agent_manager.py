@@ -11,11 +11,13 @@ import json
 import logging
 import threading
 import time
+import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 import gevent
+from gevent.event import Event
 from gevent.lock import Semaphore
 
 from app.modules.workspace.agent_token import (
@@ -84,6 +86,9 @@ class RemoteAgentManager:
         self._last_heartbeat_db_write: dict[str, float] = {}
         # Browse results: {request_id: result} for directory browsing
         self._browse_results: dict[str, dict] = {}
+        # Pending command requests: {request_id: {"event": Event, "result": dict}}
+        # Used for synchronous command-response pattern (Issue #669)
+        self._pending_requests: dict[str, dict] = {}
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
         # Token cleanup lazy-start flag
@@ -1005,6 +1010,90 @@ class RemoteAgentManager:
         """Get and clear pending commands for an HTTP-mode agent."""
         with self._lock:
             return self._command_queues.pop(machine_id, [])
+
+    def send_command_with_response(
+        self,
+        machine_id: str,
+        command: str,
+        session_id: str,
+        timeout: float = 5.0,
+    ) -> dict | None:
+        """
+        Send a command to an agent and wait for a response.
+
+        This implements a synchronous command-response pattern using gevent Event
+        for coroutine-safe waiting. Used for commands like get_session_info that
+        need to query agent state before proceeding (Issue #669).
+
+        Args:
+            machine_id: Target machine ID.
+            command: Command name (e.g., "get_session_info").
+            session_id: Target session ID.
+            timeout: Maximum wait time in seconds.
+
+        Returns:
+            Response dict if received within timeout, None otherwise.
+        """
+        request_id = str(uuid.uuid4())
+
+        # Register pending request with gevent Event
+        with self._lock:
+            self._pending_requests[request_id] = {
+                "event": Event(),
+                "result": None,
+            }
+
+        # Send the command
+        self.send_command(
+            machine_id,
+            {
+                "type": "command",
+                "command": command,
+                "session_id": session_id,
+                "request_id": request_id,
+            },
+        )
+
+        # Wait for response (gevent Event.wait is coroutine-safe)
+        pending = self._pending_requests[request_id]
+        if pending["event"].wait(timeout):
+            result = pending["result"]
+        else:
+            result = None  # Timeout
+            logger.warning(
+                "Timeout waiting for %s response from agent %s (session %s)",
+                command,
+                machine_id,
+                session_id[:8],
+            )
+
+        # Cleanup
+        with self._lock:
+            self._pending_requests.pop(request_id, None)
+
+        return cast(Optional[dict], result)
+
+    def handle_command_response(self, data: dict) -> None:
+        """
+        Handle command_response from an agent.
+
+        Matches the response to a pending request and signals the waiting coroutine.
+
+        Args:
+            data: Response dict with request_id and result.
+        """
+        request_id = data.get("request_id")
+        if request_id and request_id in self._pending_requests:
+            with self._lock:
+                pending = self._pending_requests.get(request_id)
+                if pending:
+                    pending["result"] = data.get("result")
+                    pending["event"].set()
+                    logger.debug("Received response for request %s", request_id[:8])
+        else:
+            logger.warning(
+                "Received response for unknown request %s", request_id[:8] if request_id else "N/A"
+            )
 
     def store_browse_result(self, request_id: str, result: dict) -> None:
         """Store browse result from agent for later retrieval."""

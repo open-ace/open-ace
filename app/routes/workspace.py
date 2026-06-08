@@ -1394,6 +1394,48 @@ def restore_session(session_id):
                 }
             )
 
+        # Issue #669: For CLI sessions (qwen/claude/codex), check remote process status
+        # Terminal sessions have their own handling in frontend (not_found check)
+        if workspace_type == "remote" and remote_machine_id:
+            normalized_tool = normalize_tool_name(tool_name)
+            if normalized_tool in ["qwen", "claude", "codex"]:
+                from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+                agent_mgr = get_remote_agent_manager()
+                info = agent_mgr.send_command_with_response(
+                    machine_id=remote_machine_id,
+                    command="get_session_info",
+                    session_id=session_id,
+                    timeout=5.0,
+                )
+
+                # Process terminated or query failed
+                if info is None or not info.get("is_running"):
+                    logger.info(
+                        "Session %s process terminated (is_running=%s)",
+                        session_id[:8],
+                        info.get("is_running") if info else "unknown",
+                    )
+
+                    # Return status for frontend to guide user decision
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Session process has terminated",
+                                "can_recreate": True,
+                                "can_resume": (
+                                    info.get("cli_session_id") is not None if info else False
+                                ),
+                                "project_path": project_path,
+                                "model": session_data.get("model"),
+                                "tool_name": tool_name,
+                                "remote_machine_id": remote_machine_id,
+                            }
+                        ),
+                        400,
+                    )
+
         # Generate encodedProjectName based on tool
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:
             # project_path may be actual path or encoded name

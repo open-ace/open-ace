@@ -88,6 +88,10 @@ export function useRestoreSession() {
         console.log('Restoring session:', data.data);
         // Use window.location.href for a full page reload to ensure URL parameters are processed
         window.location.href = data.data.url;
+      } else if (data.can_recreate) {
+        // Issue #669: Session process terminated, show recreation options
+        // Return data for caller to display modal - mutation result will contain can_recreate info
+        console.log('Session terminated, can recreate:', data);
       } else if (data.error) {
         console.error('Restore failed:', data.error);
       }
