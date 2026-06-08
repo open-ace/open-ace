@@ -109,6 +109,11 @@ const TenantManagement = lazy(() =>
 const SSOSettings = lazy(() =>
   import('@/components/features/settings/SSOSettings').then((m) => ({ default: m.SSOSettings }))
 );
+const AiAgentSettings = lazy(() =>
+  import('@/components/features/settings/AiAgentSettings').then((m) => ({
+    default: m.AiAgentSettings,
+  }))
+);
 const ProjectManagement = lazy(() =>
   import('@/components/features/management/ProjectManagement').then((m) => ({
     default: m.ProjectManagement,
@@ -327,6 +332,7 @@ const ManageRoutes: React.FC = () => {
           {/* Settings */}
           <Route path="/settings/sso" element={<SSOSettings />} />
           <Route path="/settings/api-keys" element={<APIKeyManagement />} />
+          <Route path="/settings/ai-agent" element={<AiAgentSettings />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />

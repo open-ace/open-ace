@@ -37,6 +37,9 @@ export {
   useUpdateSecuritySettings,
   useAuditThresholds,
   useUpdateAuditThresholds,
+  useAiAgentSettings,
+  useUpdateAiAgentSettings,
+  useValidateGithubToken,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

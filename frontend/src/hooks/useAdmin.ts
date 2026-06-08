@@ -4,6 +4,11 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, governanceApi, complianceApi } from '@/api';
+import {
+  aiAgentSettingsApi,
+  type AiAgentSettings,
+  type TokenValidationRequest,
+} from '@/api/aiAgentSettings';
 import type {
   CreateUserRequest,
   UpdateUserRequest,
@@ -169,5 +174,31 @@ export function useUpdateAuditThresholds() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'audit-thresholds'] });
     },
+  });
+}
+
+// AI Agent Settings Hooks
+export function useAiAgentSettings() {
+  return useQuery({
+    queryKey: ['admin', 'ai-agent-settings'],
+    queryFn: () => aiAgentSettingsApi.getSettings(),
+  });
+}
+
+export function useUpdateAiAgentSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Partial<AiAgentSettings>) => aiAgentSettingsApi.updateSettings(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'ai-agent-settings'] });
+    },
+  });
+}
+
+export function useValidateGithubToken() {
+  return useMutation({
+    mutationFn: (payload: TokenValidationRequest) =>
+      aiAgentSettingsApi.validateGithubToken(payload),
   });
 }

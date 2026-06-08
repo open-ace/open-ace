@@ -8,6 +8,7 @@ All methods invoke gh/git via subprocess and return parsed results.
 
 import json
 import logging
+import os
 import subprocess
 from typing import Optional
 
@@ -30,17 +31,43 @@ class GitHubOps:
         """
         self.repo_path = repo_path
 
+    def _get_env(self) -> Optional[dict[str, str]]:
+        """Get environment overrides for AI GitHub account.
+
+        Delegates to ``config.get_ai_github_env()`` which has a 60-second
+        TTL cache.  Token updates propagate to all GitHubOps instances
+        within ~60 seconds automatically (or immediately if the admin API
+        invalidates the cache).
+
+        Returns None if:
+          - No token is configured in the database
+          - Loading failed (exception caught)
+        """
+        try:
+            from app.utils.config import get_ai_github_env
+
+            return get_ai_github_env()
+        except Exception:
+            return None
+
+    def _build_subprocess_kwargs(self) -> dict:
+        """Build subprocess.run kwargs, injecting AI env if configured."""
+        kwargs = {
+            "cwd": self.repo_path,
+            "capture_output": True,
+            "text": True,
+            "timeout": 120,
+        }
+        ai_env = self._get_env()
+        if ai_env is not None:
+            kwargs["env"] = {**os.environ, **ai_env}
+        return kwargs
+
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a gh CLI command."""
         cmd = ["gh"] + args
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=self.repo_path,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            result = subprocess.run(cmd, **self._build_subprocess_kwargs())
             if check and result.returncode != 0:
                 raise GitHubOpsError(
                     f"gh {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
@@ -55,13 +82,7 @@ class GitHubOps:
         """Run a git command."""
         cmd = ["git"] + args
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=self.repo_path,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            result = subprocess.run(cmd, **self._build_subprocess_kwargs())
             if check and result.returncode != 0:
                 raise GitHubOpsError(
                     f"git {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
