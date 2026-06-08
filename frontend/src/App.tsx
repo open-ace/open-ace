@@ -76,7 +76,7 @@ const UsageOverview = lazy(() =>
 );
 const InsightsReport = lazy(() =>
   import('@/components/work/InsightsReport').then((m) => ({ default: m.InsightsReport }))
-)
+);
 const AutonomousDev = lazy(() =>
   import('@/components/features/AutonomousDev').then((m) => ({ default: m.AutonomousDev }))
 );

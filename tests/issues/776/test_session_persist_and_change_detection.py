@@ -12,10 +12,9 @@ Tests exercise actual method paths via mock subprocess where possible.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-
 
 # ── Bug 1: Session message persistence ────────────────────────────────
 
@@ -24,9 +23,7 @@ class TestPersistSessionMessagesWithEventLog:
     """Verify _persist_local_session_messages writes ordered events."""
 
     def _make_runner(self):
-        from app.modules.workspace.autonomous.agent_runner import (
-            AutonomousAgentRunner,
-        )
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
         runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
         runner.session_manager = MagicMock()
@@ -39,16 +36,16 @@ class TestPersistSessionMessagesWithEventLog:
     def _make_result(self, **overrides):
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
-        defaults = dict(
-            session_id="sess-1",
-            success=True,
-            response_text="Done",
-            total_tokens=100,
-            total_input_tokens=80,
-            total_output_tokens=20,
-            tool_calls=[],
-            event_log=[],
-        )
+        defaults = {
+            "session_id": "sess-1",
+            "success": True,
+            "response_text": "Done",
+            "total_tokens": 100,
+            "total_input_tokens": 80,
+            "total_output_tokens": 20,
+            "tool_calls": [],
+            "event_log": [],
+        }
         defaults.update(overrides)
         return AgentTaskResult(**defaults)
 
@@ -61,7 +58,11 @@ class TestPersistSessionMessagesWithEventLog:
                 {"type": "assistant", "text": "Let me read the file first."},
                 {"type": "tool_use", "tool_name": "Read", "tool_input": {"file_path": "/tmp/a.py"}},
                 {"type": "assistant", "text": "Now I will edit it."},
-                {"type": "tool_use", "tool_name": "Edit", "tool_input": {"file_path": "/tmp/a.py", "old": "x", "new": "y"}},
+                {
+                    "type": "tool_use",
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": "/tmp/a.py", "old": "x", "new": "y"},
+                },
             ],
         )
 
@@ -82,9 +83,11 @@ class TestPersistSessionMessagesWithEventLog:
     def test_tool_input_serialized_as_json(self):
         """Tool input dict is serialized to JSON in content field."""
         runner = self._make_runner()
-        result = self._make_result(event_log=[
-            {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "git add -A"}},
-        ])
+        result = self._make_result(
+            event_log=[
+                {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "git add -A"}},
+            ]
+        )
 
         runner._persist_local_session_messages("sess-1", result)
 
@@ -124,11 +127,13 @@ class TestPersistSessionMessagesWithEventLog:
     def test_usage_events_not_persisted_as_messages(self):
         """Usage events in event_log are metadata-only, not written as messages."""
         runner = self._make_runner()
-        result = self._make_result(event_log=[
-            {"type": "assistant", "text": "Working..."},
-            {"type": "usage", "total_tokens": 5000},
-            {"type": "assistant", "text": "Done."},
-        ])
+        result = self._make_result(
+            event_log=[
+                {"type": "assistant", "text": "Working..."},
+                {"type": "usage", "total_tokens": 5000},
+                {"type": "assistant", "text": "Done."},
+            ]
+        )
 
         runner._persist_local_session_messages("sess-1", result)
 
@@ -168,19 +173,19 @@ class TestReadStdoutPopulatesEventLog:
 
     def test_assistant_message_appends_to_event_log(self):
         """assistant JSON message is recorded in event_log."""
-        from app.modules.workspace.autonomous.agent_runner import (
-            AutonomousAgentRunner,
-        )
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
         runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
         runner._activity_callback = None
         runner._local_sessions = {}
 
         session = self._make_session()
-        line = json.dumps({
-            "type": "assistant",
-            "message": {"content": [{"type": "text", "text": "Hello world"}]},
-        })
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Hello world"}]},
+            }
+        )
 
         # Simulate one iteration of _read_stdout by testing the parsing logic
         parsed = json.loads(line)
@@ -206,10 +211,12 @@ class TestReadStdoutPopulatesEventLog:
     def test_tool_use_appends_to_event_log(self):
         """tool_use JSON message is recorded in event_log."""
         session = self._make_session()
-        line = json.dumps({
-            "type": "tool_use",
-            "tool": {"name": "Read", "input": {"file_path": "/tmp/app.py"}},
-        })
+        line = json.dumps(
+            {
+                "type": "tool_use",
+                "tool": {"name": "Read", "input": {"file_path": "/tmp/app.py"}},
+            }
+        )
 
         parsed = json.loads(line)
         msg_type = parsed.get("type", "")
@@ -217,11 +224,13 @@ class TestReadStdoutPopulatesEventLog:
 
         session.tool_calls.append(parsed)
         tool_info = parsed.get("tool", {})
-        session.event_log.append({
-            "type": "tool_use",
-            "tool_name": tool_info.get("name", "unknown"),
-            "tool_input": tool_info.get("input", {}),
-        })
+        session.event_log.append(
+            {
+                "type": "tool_use",
+                "tool_name": tool_info.get("name", "unknown"),
+                "tool_input": tool_info.get("input", {}),
+            }
+        )
 
         assert len(session.event_log) == 1
         assert session.event_log[0]["type"] == "tool_use"
@@ -315,10 +324,9 @@ class TestChangeDetectionAutoCommit:
         commit_before = "abc123"
         commit_sha = "def456"
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
-        has_uncommitted = False
 
         if not sha_changed:
-            has_uncommitted = gh.has_uncommitted_changes()
+            _ = gh.has_uncommitted_changes()  # noqa: F841
 
         # SHA already changed, so has_uncommitted branch was not entered
         assert sha_changed
@@ -332,11 +340,12 @@ class TestChangeDetectionBranchLevelCheck:
         """If branch has commits vs origin/main, should NOT fail."""
         gh = MagicMock()
         gh.get_diff_stats.return_value = {
-            "additions": 100, "deletions": 20, "files": 5, "commits": 3,
+            "additions": 100,
+            "deletions": 20,
+            "files": 5,
+            "commits": 3,
         }
 
-        sha_changed = False
-        has_uncommitted = False
         branch_has_changes = False
         base_diff_stats = {}
         branch_name = "auto-dev/wf-2"
@@ -352,11 +361,12 @@ class TestChangeDetectionBranchLevelCheck:
         """No SHA change, no uncommitted, branch has no changes → fail."""
         gh = MagicMock()
         gh.get_diff_stats.return_value = {
-            "additions": 0, "deletions": 0, "files": 0, "commits": 0,
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
         }
 
-        sha_changed = False
-        has_uncommitted = False
         branch_has_changes = False
         base_diff_stats = {}
         branch_name = "auto-dev/wf-3"
@@ -372,8 +382,6 @@ class TestChangeDetectionBranchLevelCheck:
         gh = MagicMock()
         gh.get_diff_stats.side_effect = Exception("git error")
 
-        sha_changed = False
-        has_uncommitted = False
         branch_has_changes = False
         branch_name = "auto-dev/wf-4"
 

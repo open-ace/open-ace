@@ -691,12 +691,11 @@ class RemoteAgentManager:
             return False
 
         # Check machine_id binding
-        if row["machine_id"] != machine_id:
-            return False
+        return bool(row["machine_id"] == machine_id)
 
-        return True
-
-    def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> str | None:
+    def rotate_agent_token(
+        self, machine_id: str, rotated_by: int | None = None
+    ) -> dict[str, str | bool] | None:
         """Rotate the agent token for a machine.
 
         Revokes all existing tokens for the machine and issues a new one.
@@ -850,13 +849,11 @@ class RemoteAgentManager:
         if not row:
             return False
 
-        legacy_mode = row["legacy_mode"]
+        raw_legacy = row["legacy_mode"]
         if is_postgresql():
-            legacy_mode = bool(legacy_mode) if legacy_mode is not None else False
+            return bool(raw_legacy) if raw_legacy is not None else False
         else:
-            legacy_mode = bool(legacy_mode)
-
-        return legacy_mode
+            return bool(raw_legacy)
 
     def cleanup_expired_registration_tokens(self) -> int:
         """Remove expired registration tokens that have NOT been consumed.
@@ -882,7 +879,7 @@ class RemoteAgentManager:
             """,
                 (adapt_boolean_value(False), now.isoformat()),
             )
-            removed = cursor.rowcount
+            removed = int(cursor.rowcount)
             conn.commit()
 
         if removed:

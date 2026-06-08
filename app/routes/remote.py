@@ -9,6 +9,8 @@ API endpoints for remote workspace management including:
 - Usage reporting from remote agents
 """
 
+from __future__ import annotations
+
 import hmac
 import ipaddress
 import json
