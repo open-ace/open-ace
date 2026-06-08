@@ -445,6 +445,7 @@ cd frontend && npm install && npm run build && cd ..
 
 # 4. Initialize configuration and database
 python3 cli.py config init
+alembic upgrade head
 python3 scripts/init_db.py
 
 # 5. Start the server
