@@ -152,6 +152,29 @@ def make_manager():
         "completed_at TIMESTAMP, "
         "expires_at TIMESTAMP)"
     )
+    # Agent identity tables (PR #754)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS registration_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL UNIQUE, "
+        "tenant_id INTEGER NOT NULL, "
+        "created_by INTEGER NOT NULL, "
+        "created_at TIMESTAMP, "
+        "expires_at TIMESTAMP, "
+        "is_consumed INTEGER DEFAULT 0, "
+        "consumed_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL UNIQUE, "
+        "machine_id TEXT NOT NULL, "
+        "created_at TIMESTAMP, "
+        "is_revoked INTEGER DEFAULT 0, "
+        "revoked_at TIMESTAMP, "
+        "revoked_by INTEGER, "
+        "rotated_at TIMESTAMP)"
+    )
     conn.commit()
     conn.close()
 

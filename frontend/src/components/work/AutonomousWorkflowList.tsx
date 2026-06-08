@@ -29,6 +29,11 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
   failed: { variant: 'danger', icon: 'bi-x-circle', labelKey: 'autoStatusFailed' },
   cancelled: { variant: 'secondary', icon: 'bi-slash-circle', labelKey: 'autoStatusCancelled' },
   paused: { variant: 'warning', icon: 'bi-pause-circle', labelKey: 'autoStatusPaused' },
+  planning_timeout: {
+    variant: 'warning',
+    icon: 'bi-clock-history',
+    labelKey: 'autoStatusPlanningTimeout',
+  },
 };
 
 /** Shared active status set — used by both WorkflowList and WorkflowTimeline */
@@ -46,7 +51,7 @@ export const ACTIVE_WORKFLOW_STATUSES = [
 const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
   {
-    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused',
+    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
     labelKey: 'autoFilterActive',
   },
   { key: 'completed', labelKey: 'autoFilterCompleted' },

@@ -51,6 +51,7 @@ class AutonomousWorkflowRepository:
         "error_message",
         "retry_count",
         "task_timeout",
+        "planning_timeout_extension",
         "locked_at",
         "locked_by",
         "updated_at",

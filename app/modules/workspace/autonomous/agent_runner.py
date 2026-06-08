@@ -54,6 +54,7 @@ class _LocalSession:
     session_id: str
     process: subprocess.Popen
     cli_tool: str = "claude-code"
+    allowed_tools: list[str] | None = None
     output_lines: list[str] = field(default_factory=list)
     assistant_text: str = ""
     tool_calls: list[dict] = field(default_factory=list)
@@ -65,23 +66,36 @@ class _LocalSession:
     _stopped: threading.Event = field(default_factory=threading.Event)
     _stdout_thread: threading.Thread | None = None
     _stderr_thread: threading.Thread | None = None
+    # Ordered event log for preserving actual message interleaving
+    # Each entry: {"type": "assistant"|"tool_use"|"usage", ...}
+    event_log: list[dict] = field(default_factory=list)
 
 
 class AutonomousAgentRunner:
     """Runs agent tools autonomously and returns results."""
 
-    def __init__(self, session_manager=None, remote_session_manager=None, server_url: str = ""):
+    def __init__(
+        self,
+        session_manager=None,
+        remote_session_manager=None,
+        server_url: str = "",
+        activity_callback=None,
+    ):
         """
         Args:
             session_manager: SessionManager for creating session records.
             remote_session_manager: RemoteSessionManager for remote execution.
             server_url: Open ACE server URL for proxy config.
+            activity_callback: Optional callback ``(session_id, activity_dict)``
+                invoked for each assistant/tool_use/usage event, enabling
+                real-time streaming of agent activity to the frontend.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
         self.server_url = server_url or os.environ.get(
             "OPENACE_SERVER_URL", "http://localhost:5000"
         )
+        self._activity_callback = activity_callback
         self._local_sessions: dict[str, _LocalSession] = {}
 
     def run_agent_task(
@@ -97,6 +111,7 @@ class AutonomousAgentRunner:
         session_type: str = "workflow",
         timeout: int = DEFAULT_TASK_TIMEOUT,
         session_id: str = None,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -154,6 +169,7 @@ class AutonomousAgentRunner:
                     remote_machine_id=remote_machine_id,
                     permission_mode=permission_mode,
                     timeout=timeout,
+                    allowed_tools=allowed_tools,
                 )
             else:
                 result = self._run_local(
@@ -164,19 +180,31 @@ class AutonomousAgentRunner:
                     prompt=prompt,
                     permission_mode=permission_mode,
                     timeout=timeout,
+                    allowed_tools=allowed_tools,
                 )
 
-            # Update session record
-            if self.session_manager and result.success:
+            # Persist session messages to database (Issue #776 Bug 1)
+            if self.session_manager and session_id:
                 try:
+                    self._persist_local_session_messages(session_id, result)
+                except Exception as e:
+                    logger.warning("Failed to persist session messages: %s", e)
+
+            # Update session record
+            if self.session_manager:
+                try:
+                    update_fields = {
+                        "total_tokens": result.total_tokens,
+                        "total_input_tokens": result.total_input_tokens,
+                        "total_output_tokens": result.total_output_tokens,
+                    }
+                    if result.success:
+                        update_fields["status"] = "completed"
+                    else:
+                        update_fields["status"] = "error"
                     self.session_manager.update_session_fields(
                         session_id,
-                        {
-                            "status": "completed",
-                            "total_tokens": result.total_tokens,
-                            "total_input_tokens": result.total_input_tokens,
-                            "total_output_tokens": result.total_output_tokens,
-                        },
+                        update_fields,
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
@@ -200,6 +228,7 @@ class AutonomousAgentRunner:
         prompt: str,
         permission_mode: str,
         timeout: int,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -238,6 +267,7 @@ class AutonomousAgentRunner:
             project_path,
             model,
             permission_mode=permission_mode,
+            allowed_tools=allowed_tools,
         )
         cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
@@ -260,7 +290,12 @@ class AutonomousAgentRunner:
                 error=f"Failed to start process: {e}",
             )
 
-        session = _LocalSession(session_id=session_id, process=process, cli_tool=cli_tool)
+        session = _LocalSession(
+            session_id=session_id,
+            process=process,
+            cli_tool=cli_tool,
+            allowed_tools=allowed_tools,
+        )
         self._local_sessions[session_id] = session
 
         # Start output reader threads
@@ -309,6 +344,7 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                event_log=session.event_log,
             )
 
         return AgentTaskResult(
@@ -320,6 +356,7 @@ class AutonomousAgentRunner:
             tool_calls=session.tool_calls,
             success=session.error is None,
             error=session.error,
+            event_log=session.event_log,
         )
 
     def _run_remote(
@@ -332,6 +369,7 @@ class AutonomousAgentRunner:
         remote_machine_id: str,
         permission_mode: str,
         timeout: int,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run an agent task on a remote machine via RemoteSessionManager."""
         if not self.remote_session_manager:
@@ -355,6 +393,7 @@ class AutonomousAgentRunner:
                 cli_tool=cli_tool,
                 model=model,
                 permission_mode=permission_mode,
+                allowed_tools=allowed_tools,
             )
 
             if not result.get("success"):
@@ -438,6 +477,63 @@ class AutonomousAgentRunner:
 
     # ── Local helpers ──────────────────────────────────────────────
 
+    def _persist_local_session_messages(self, session_id: str, result: AgentTaskResult) -> None:
+        """Write agent conversation to session_messages preserving order.
+
+        Uses the ordered event_log from _LocalSession to maintain the actual
+        interleaving (assistant -> tool_use -> assistant -> ...).
+        Falls back to separate assistant_text + tool_calls if event_log is empty
+        (e.g. remote sessions or legacy code path).
+
+        Called after the agent task finishes, before the session status is
+        updated.  Errors are caught by the caller and do not affect the
+        main workflow.
+        """
+        # Prefer ordered event log for accurate message interleaving
+        if result.event_log:
+            for event in result.event_log:
+                if event.get("type") == "assistant":
+                    self.session_manager.add_message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=event.get("text", ""),
+                    )
+                elif event.get("type") == "tool_use":
+                    tool_input = event.get("tool_input", {})
+                    self.session_manager.add_message(
+                        session_id=session_id,
+                        role="tool",
+                        content=(
+                            json.dumps(tool_input)
+                            if isinstance(tool_input, (dict, list))
+                            else str(tool_input)
+                        ),
+                        metadata={"tool_name": event.get("tool_name", "unknown")},
+                    )
+                # usage events are metadata-only, not persisted as messages
+        else:
+            # Fallback: write as single assistant + individual tool messages
+            if result.response_text:
+                self.session_manager.add_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=result.response_text,
+                )
+            for tool_call in result.tool_calls:
+                tool_info = tool_call.get("tool", {})
+                tool_name = tool_info.get("name", "unknown")
+                tool_input = tool_info.get("input", {})
+                self.session_manager.add_message(
+                    session_id=session_id,
+                    role="tool",
+                    content=(
+                        json.dumps(tool_input)
+                        if isinstance(tool_input, (dict, list))
+                        else str(tool_input)
+                    ),
+                    metadata={"tool_name": tool_name},
+                )
+
     def _send_sdk_init(self, session: _LocalSession) -> bool:
         """Send SDK initialize message."""
         init_msg = {
@@ -491,15 +587,54 @@ class AutonomousAgentRunner:
                         # Accumulate assistant text
                         msg = parsed.get("message", {})
                         content = msg.get("content", "")
+                        text_delta = ""
                         if isinstance(content, list):
                             for block in content:
                                 if isinstance(block, dict) and block.get("type") == "text":
-                                    session.assistant_text += block.get("text", "")
+                                    text_delta = block.get("text", "")
+                                    session.assistant_text += text_delta
                         elif isinstance(content, str):
+                            text_delta = content
                             session.assistant_text += content
+                        # Record in event log for ordered message persistence
+                        if text_delta:
+                            session.event_log.append(
+                                {
+                                    "type": "assistant",
+                                    "text": text_delta,  # full text for DB persistence
+                                }
+                            )
+                        # Emit activity for real-time frontend display
+                        if self._activity_callback and text_delta:
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "assistant",
+                                    "text": text_delta[:500],  # truncate for SSE
+                                },
+                            )
 
                     elif msg_type == "tool_use":
                         session.tool_calls.append(parsed)
+                        # Record in event log for ordered message persistence
+                        tool_info = parsed.get("tool", {})
+                        session.event_log.append(
+                            {
+                                "type": "tool_use",
+                                "tool_name": tool_info.get("name", "unknown"),
+                                "tool_input": tool_info.get("input", {}),
+                            }
+                        )
+                        # Emit tool call activity
+                        if self._activity_callback:
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "tool_use",
+                                    "tool_name": tool_info.get("name", "unknown"),
+                                    "tool_input": str(tool_info.get("input", ""))[:200],
+                                },
+                            )
 
                     elif msg_type == "result":
                         # End of turn - extract usage via shared parser
@@ -511,19 +646,60 @@ class AutonomousAgentRunner:
                             session.total_input_tokens + session.total_output_tokens
                         )
                         session.completed.set()
+                        # Emit usage activity for real-time token display
+                        if self._activity_callback:
+                            self._activity_callback(
+                                session.session_id,
+                                {
+                                    "type": "usage",
+                                    "total_tokens": session.total_tokens,
+                                    "total_input_tokens": session.total_input_tokens,
+                                    "total_output_tokens": session.total_output_tokens,
+                                },
+                            )
 
                     elif msg_type == "control_request":
-                        # Auto-approve permissions in autonomous mode
+                        # Auto-approve permissions in autonomous mode,
+                        # with filtering when allowed_tools is set (Issue #761).
                         req_id = parsed.get("request_id", "")
                         if req_id:
-                            response = {
-                                "type": "control_response",
-                                "response": {
-                                    "request_id": req_id,
-                                    "subtype": "success",
-                                    "response": {"behavior": "allow"},
-                                },
-                            }
+                            request_payload = parsed.get("request", {})
+                            tool_name = request_payload.get("tool_name", "")
+
+                            if (
+                                session.allowed_tools is not None
+                                and tool_name not in session.allowed_tools
+                            ):
+                                # Tool not in allowed list — deny
+                                response = {
+                                    "type": "control_response",
+                                    "response": {
+                                        "request_id": req_id,
+                                        "subtype": "success",
+                                        "response": {
+                                            "behavior": "deny",
+                                            "message": (
+                                                f"Tool '{tool_name}' is not "
+                                                "allowed in planning phase."
+                                            ),
+                                        },
+                                    },
+                                }
+                                logger.warning(
+                                    "Denied tool '%s' for session %s " "(not in allowed list)",
+                                    tool_name,
+                                    session.session_id[:8],
+                                )
+                            else:
+                                # Approve (no restriction, or tool is allowed)
+                                response = {
+                                    "type": "control_response",
+                                    "response": {
+                                        "request_id": req_id,
+                                        "subtype": "success",
+                                        "response": {"behavior": "allow"},
+                                    },
+                                }
                             self._write_stdin(session, json.dumps(response))
 
                 except (json.JSONDecodeError, ValueError):
