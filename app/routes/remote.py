@@ -8,6 +8,7 @@ API endpoints for remote workspace management including:
 - LLM API proxy for remote CLI tools
 - Usage reporting from remote agents
 """
+
 from __future__ import annotations
 
 import hmac

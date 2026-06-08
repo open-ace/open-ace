@@ -691,12 +691,9 @@ class RemoteAgentManager:
             return False
 
         # Check machine_id binding
-        if row["machine_id"] != machine_id:
-            return False
+        return bool(row["machine_id"] == machine_id)
 
-        return True
-
-    def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> str | None:
+    def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> dict | None:
         """Rotate the agent token for a machine.
 
         Revokes all existing tokens for the machine and issues a new one.
@@ -882,7 +879,7 @@ class RemoteAgentManager:
             """,
                 (adapt_boolean_value(False), now.isoformat()),
             )
-            removed = cursor.rowcount
+            removed: int = cursor.rowcount or 0
             conn.commit()
 
         if removed:
