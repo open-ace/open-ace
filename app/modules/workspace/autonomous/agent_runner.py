@@ -66,6 +66,9 @@ class _LocalSession:
     _stopped: threading.Event = field(default_factory=threading.Event)
     _stdout_thread: threading.Thread | None = None
     _stderr_thread: threading.Thread | None = None
+    # Ordered event log for preserving actual message interleaving
+    # Each entry: {"type": "assistant"|"tool_use"|"usage", ...}
+    event_log: list[dict] = field(default_factory=list)
 
 
 class AutonomousAgentRunner:
@@ -341,6 +344,7 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                event_log=session.event_log,
             )
 
         return AgentTaskResult(
@@ -352,6 +356,7 @@ class AutonomousAgentRunner:
             tool_calls=session.tool_calls,
             success=session.error is None,
             error=session.error,
+            event_log=session.event_log,
         )
 
     def _run_remote(
@@ -475,39 +480,61 @@ class AutonomousAgentRunner:
     def _persist_local_session_messages(
         self, session_id: str, result: AgentTaskResult
     ) -> None:
-        """Write accumulated assistant text and tool calls to session_messages.
+        """Write agent conversation to session_messages preserving order.
+
+        Uses the ordered event_log from _LocalSession to maintain the actual
+        interleaving (assistant -> tool_use -> assistant -> ...).
+        Falls back to separate assistant_text + tool_calls if event_log is empty
+        (e.g. remote sessions or legacy code path).
 
         Called after the agent task finishes, before the session status is
         updated.  Errors are caught by the caller and do not affect the
         main workflow.
         """
-        # Write assistant text as a single assistant message.
-        # NOTE: tokens_used is the session's total output tokens, not per-message.
-        # This is an acceptable approximation since autonomous sessions typically
-        # have a single agent turn per milestone.
-        if result.response_text:
-            self.session_manager.add_message(
-                session_id=session_id,
-                role="assistant",
-                content=result.response_text,
-                tokens_used=result.total_output_tokens,
-            )
-
-        # Write tool calls as individual tool messages
-        for tool_call in result.tool_calls:
-            tool_info = tool_call.get("tool", {})
-            tool_name = tool_info.get("name", "unknown")
-            tool_input = tool_info.get("input", {})
-            self.session_manager.add_message(
-                session_id=session_id,
-                role="tool",
-                content=(
-                    json.dumps(tool_input)
-                    if isinstance(tool_input, (dict, list))
-                    else str(tool_input)
-                ),
-                metadata={"tool_name": tool_name},
-            )
+        # Prefer ordered event log for accurate message interleaving
+        if result.event_log:
+            for event in result.event_log:
+                if event.get("type") == "assistant":
+                    self.session_manager.add_message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=event.get("text", ""),
+                    )
+                elif event.get("type") == "tool_use":
+                    tool_input = event.get("tool_input", {})
+                    self.session_manager.add_message(
+                        session_id=session_id,
+                        role="tool",
+                        content=(
+                            json.dumps(tool_input)
+                            if isinstance(tool_input, (dict, list))
+                            else str(tool_input)
+                        ),
+                        metadata={"tool_name": event.get("tool_name", "unknown")},
+                    )
+                # usage events are metadata-only, not persisted as messages
+        else:
+            # Fallback: write as single assistant + individual tool messages
+            if result.response_text:
+                self.session_manager.add_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=result.response_text,
+                )
+            for tool_call in result.tool_calls:
+                tool_info = tool_call.get("tool", {})
+                tool_name = tool_info.get("name", "unknown")
+                tool_input = tool_info.get("input", {})
+                self.session_manager.add_message(
+                    session_id=session_id,
+                    role="tool",
+                    content=(
+                        json.dumps(tool_input)
+                        if isinstance(tool_input, (dict, list))
+                        else str(tool_input)
+                    ),
+                    metadata={"tool_name": tool_name},
+                )
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:
         """Send SDK initialize message."""
@@ -571,6 +598,12 @@ class AutonomousAgentRunner:
                         elif isinstance(content, str):
                             text_delta = content
                             session.assistant_text += content
+                        # Record in event log for ordered message persistence
+                        if text_delta:
+                            session.event_log.append({
+                                "type": "assistant",
+                                "text": text_delta[:500],
+                            })
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
@@ -583,6 +616,13 @@ class AutonomousAgentRunner:
 
                     elif msg_type == "tool_use":
                         session.tool_calls.append(parsed)
+                        # Record in event log for ordered message persistence
+                        tool_info = parsed.get("tool", {})
+                        session.event_log.append({
+                            "type": "tool_use",
+                            "tool_name": tool_info.get("name", "unknown"),
+                            "tool_input": tool_info.get("input", {}),
+                        })
                         # Emit tool call activity
                         if self._activity_callback:
                             tool_info = parsed.get("tool", {})
