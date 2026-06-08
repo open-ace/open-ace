@@ -172,6 +172,18 @@ export function useRetryWorkflow() {
   });
 }
 
+export function useExtendPlanningTimeout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, additionalSeconds }: { workflowId: string; additionalSeconds?: number }) =>
+      autonomousApi.extendPlanningTimeout(workflowId, additionalSeconds),
+    onSuccess: (_, { workflowId }) => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
 // ── Milestone Mutations ─────────────────────────────────────────────
 
 export function useCancelMilestone() {

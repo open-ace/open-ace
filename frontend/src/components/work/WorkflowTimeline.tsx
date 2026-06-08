@@ -21,6 +21,7 @@ import {
   useStopWorkflow,
   useMarkDone,
   useRetryWorkflow,
+  useExtendPlanningTimeout,
   useCancelMilestone,
   useForkMilestone,
   useMilestoneSession,
@@ -80,6 +81,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const stopMutation = useStopWorkflow();
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
+  const extendTimeoutMutation = useExtendPlanningTimeout();
   const cancelMilestoneMutation = useCancelMilestone();
   const forkMilestoneMutation = useForkMilestone();
 
@@ -211,6 +213,32 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
             </div>
           </div>
           <div className="d-flex gap-2">
+            {workflow.status === 'planning_timeout' && (
+              <>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={extendTimeoutMutation.isPending}
+                  onClick={() =>
+                    extendTimeoutMutation.mutate({
+                      workflowId: workflow.workflow_id,
+                      additionalSeconds: 600,
+                    })
+                  }
+                >
+                  <i className="bi bi-clock-history me-1"></i>
+                  {t('autoExtendPlanning', language)} (+10min)
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => setShowStopConfirm(true)}
+                >
+                  <i className="bi bi-stop-fill me-1"></i>
+                  {t('autoStopWorkflow', language)}
+                </Button>
+              </>
+            )}
             {workflow.status === 'failed' && (
               <Button size="sm" variant="primary" onClick={handleRetry} disabled={retryMutation.isPending}>
                 <i className="bi bi-arrow-clockwise me-1"></i>

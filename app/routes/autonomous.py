@@ -339,6 +339,47 @@ def stop_workflow(workflow_id):
     return jsonify({"success": True})
 
 
+@autonomous_bp.route("/workflows/<workflow_id>/extend-planning-timeout", methods=["POST"])
+@auth_required
+def extend_planning_timeout(workflow_id):
+    """Extend the planning phase timeout for a timed-out workflow."""
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    if workflow.get("status") != "planning_timeout":
+        return jsonify({"error": "Workflow is not in planning_timeout status"}), 400
+
+    data = request.get_json(silent=True) or {}
+    additional_seconds = data.get("additional_seconds", 600)
+    # Clamp to 60s–3600s
+    additional_seconds = max(60, min(additional_seconds, 3600))
+
+    # Increase task_timeout and resume to active status
+    current_timeout = workflow.get("task_timeout", 3600) or 3600
+    new_timeout = current_timeout + additional_seconds
+    phase = workflow.get("current_phase", "planning")
+    status = PHASE_TO_STATUS.get(phase, "planning")
+
+    _get_repo().update_workflow(
+        workflow_id,
+        {
+            "status": status,
+            "task_timeout": new_timeout,
+            "error_message": "",
+        },
+    )
+
+    _emit_event_safe(
+        workflow_id,
+        "status_change",
+        {"status": status, "extended_timeout": additional_seconds},
+    )
+    return jsonify({"success": True, "new_timeout": new_timeout})
+
+
 @autonomous_bp.route("/workflows/<workflow_id>/retry", methods=["POST"])
 @auth_required
 def retry_workflow(workflow_id):
@@ -349,8 +390,8 @@ def retry_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    if workflow.get("status") != "failed":
-        return jsonify({"error": "Only failed workflows can be retried"}), 400
+    if workflow.get("status") not in ("failed", "planning_timeout"):
+        return jsonify({"error": "Only failed or timed-out workflows can be retried"}), 400
 
     # Check retry count limit
     retry_count = workflow.get("retry_count", 0) or 0

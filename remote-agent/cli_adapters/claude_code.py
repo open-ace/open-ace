@@ -89,6 +89,11 @@ class ClaudeCodeAdapter(BaseCLIAdapter):
             if cli_mode:
                 args.extend(["--permission-mode", cli_mode])
 
+        # Restrict available tools (e.g., read-only for planning phase)
+        if allowed_tools:
+            for tool in allowed_tools:
+                args.extend(["--allowedTools", tool])
+
         return args
 
     def get_display_name(self) -> str:

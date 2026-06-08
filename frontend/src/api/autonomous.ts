@@ -152,6 +152,15 @@ export const autonomousApi = {
     return apiClient.post(`/api/autonomous/workflows/${workflowId}/retry`);
   },
 
+  async extendPlanningTimeout(
+    workflowId: string,
+    additionalSeconds: number = 600
+  ): Promise<{ success: boolean; new_timeout: number }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/extend-planning-timeout`, {
+      additional_seconds: additionalSeconds,
+    });
+  },
+
   // Milestone Operations
   async getTimeline(workflowId: string): Promise<{ success: boolean; milestones: WorkflowMilestone[] }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/timeline`);
