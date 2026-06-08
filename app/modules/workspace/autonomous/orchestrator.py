@@ -847,9 +847,14 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        # Verify agent actually produced code changes
-        if result.success and commit_before and commit_sha and commit_before == commit_sha:
-            # Commit SHA unchanged — check if agent left uncommitted changes
+        # Verify agent actually produced code changes (Issue #776 Bug 2)
+        sha_changed = commit_before and commit_sha and commit_before != commit_sha
+        has_uncommitted = False
+
+        if not sha_changed:
+            # SHA unchanged (or unavailable) — check for uncommitted changes
+            # regardless of result.success, because the agent may have edited
+            # files but failed for a secondary reason (e.g. couldn't git commit)
             has_uncommitted = False
             try:
                 has_uncommitted = gh.has_uncommitted_changes()
@@ -858,24 +863,54 @@ class AutonomousOrchestrator:
 
             if has_uncommitted:
                 # Agent modified files but didn't commit — auto-commit
-                logger.info("Agent left uncommitted changes, auto-committing")
+                logger.info(
+                    "Agent left uncommitted changes, auto-committing (success=%s)",
+                    result.success,
+                )
                 try:
                     gh.git_add_all()
                     gh.git_commit(f"auto: development changes (round {dev_round})")
                     commit_sha = gh.get_current_commit()
-                    # Re-calculate diff_stats now that auto-commit is done
+                    sha_changed = True
                     try:
                         diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
                     except Exception:
                         pass
                 except Exception as e:
                     logger.warning("Auto-commit failed: %s", e)
-                    # Fall through to failure path below
                     has_uncommitted = False
 
-            if not has_uncommitted:
-                # Truly no changes or auto-commit failed
-                logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
+        if not sha_changed and not has_uncommitted:
+            # No new commit from this session. Check if the branch already
+            # has commits relative to origin/main (from previous sessions).
+            branch_has_changes_vs_base = False
+            branch_name = wf.get("branch_name", "")
+            base_diff_stats = {}
+            try:
+                if branch_name:
+                    base_diff_stats = gh.get_diff_stats("origin/main", branch_name)
+                    branch_has_changes_vs_base = base_diff_stats.get("commits", 0) > 0
+            except Exception:
+                pass
+
+            if branch_has_changes_vs_base:
+                # Branch has existing changes from prior sessions — treat as success
+                logger.info(
+                    "No new commit this session, but branch '%s' has %d commits vs origin/main",
+                    branch_name,
+                    base_diff_stats.get("commits", 0),
+                )
+                diff_stats = base_diff_stats
+                if not commit_sha:
+                    try:
+                        commit_sha = gh.get_current_commit()
+                    except Exception:
+                        pass
+            else:
+                # Truly no changes at all
+                logger.warning(
+                    "Agent reported success but no new commits detected (SHA unchanged)"
+                )
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
                     {

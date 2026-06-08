@@ -329,3 +329,5 @@ class AgentTaskResult:
     tool_calls: list = field(default_factory=list)
     success: bool = False
     error: Optional[str] = None
+    # Ordered event log preserving actual message interleaving
+    event_log: list = field(default_factory=list)
