@@ -18,7 +18,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
@@ -151,7 +151,7 @@ def load_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
-def _validate_agent_bearer(machine_id: str) -> Tuple[Optional[str], Optional[Tuple[Any, Any]]]:
+def _validate_agent_bearer(machine_id: str) -> tuple[Optional[str], Optional[tuple[Any, Any]]]:
     """Validate the Bearer token in the Authorization header.
 
     Returns:
@@ -173,7 +173,7 @@ def _validate_agent_bearer(machine_id: str) -> Tuple[Optional[str], Optional[Tup
     return token, None
 
 
-def _check_legacy_fallback(machine_id: str) -> Tuple[bool, Optional[Tuple[Any, Any]]]:
+def _check_legacy_fallback(machine_id: str) -> tuple[bool, Optional[tuple[Any, Any]]]:
     """Check if a machine qualifies for legacy (no-Bearer) auth.
 
     Legacy machines that were registered before Bearer token enforcement
