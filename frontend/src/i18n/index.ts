@@ -752,7 +752,8 @@ const translations: Record<Language, Translations> = {
     apiKeys: 'API Keys',
     aiAgentSettings: 'AI Agent',
     aiGithubToken: 'GitHub Token',
-    aiGithubTokenHelp: 'Personal access token for the AI bot account. Autonomous workflows will use this token for all GitHub operations (issues, PRs, comments).',
+    aiGithubTokenHelp:
+      'Personal access token for the AI bot account. Autonomous workflows will use this token for all GitHub operations (issues, PRs, comments).',
     aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
     aiGithubAuthorName: 'Author Name',
     aiGithubAuthorNameHelp: 'Git commit author name used by the AI agent.',
@@ -1720,7 +1721,8 @@ const translations: Record<Language, Translations> = {
     apiKeys: 'API 密钥',
     aiAgentSettings: 'AI 代理',
     aiGithubToken: 'GitHub 令牌',
-    aiGithubTokenHelp: 'AI 机器人账户的个人访问令牌。自治工作流将使用此令牌执行所有 GitHub 操作（issue、PR、评论）。',
+    aiGithubTokenHelp:
+      'AI 机器人账户的个人访问令牌。自治工作流将使用此令牌执行所有 GitHub 操作（issue、PR、评论）。',
     aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
     aiGithubAuthorName: '作者名称',
     aiGithubAuthorNameHelp: 'AI 代理提交 git 时使用的作者名称。',
@@ -2108,7 +2110,8 @@ const translations: Record<Language, Translations> = {
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
     aiGithubToken: 'GitHubトークン',
-    aiGithubTokenHelp: 'AIボットアカウントの個人アクセストークン。自律ワークフローはこのトークンを使用してすべてのGitHub操作（issue、PR、コメント）を行います。',
+    aiGithubTokenHelp:
+      'AIボットアカウントの個人アクセストークン。自律ワークフローはこのトークンを使用してすべてのGitHub操作（issue、PR、コメント）を行います。',
     aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
     aiGithubAuthorName: '作成者名',
     aiGithubAuthorNameHelp: 'AIエージェントがgitコミット時に使用する作成者名。',
@@ -2117,7 +2120,8 @@ const translations: Record<Language, Translations> = {
     aiGithubTestConnection: '接続テスト',
     aiGithubTestSuccess: 'トークン有効。接続先: {username}',
     aiGithubTestFailed: '無効なトークン: {error}',
-    aiGithubTokenNotConfigured: 'トークン未設定 — サーバーのデフォルトGitHubアカウントを使用しています。',
+    aiGithubTokenNotConfigured:
+      'トークン未設定 — サーバーのデフォルトGitHubアカウントを使用しています。',
     aiGithubAccountConfigured: 'AI GitHubアカウント設定済み',
     aiGithubTestSavedToken: '保存済みトークンをテスト',
     aiGithubEnterTokenFirst: 'テストする前に新しいトークンを入力してください',
@@ -2771,7 +2775,8 @@ const translations: Record<Language, Translations> = {
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',
     aiGithubToken: 'GitHub 토큰',
-    aiGithubTokenHelp: 'AI 봇 계정의 개인 액세스 토큰입니다. 자율 워크플로는 이 토큰을 사용하여 모든 GitHub 작업(issue, PR, 댓글)을 수행합니다.',
+    aiGithubTokenHelp:
+      'AI 봇 계정의 개인 액세스 토큰입니다. 자율 워크플로는 이 토큰을 사용하여 모든 GitHub 작업(issue, PR, 댓글)을 수행합니다.',
     aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
     aiGithubAuthorName: '작성자 이름',
     aiGithubAuthorNameHelp: 'AI 에이전트가 git 커밋에 사용하는 작성자 이름입니다.',
