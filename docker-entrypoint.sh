@@ -161,6 +161,7 @@ except Exception as e:
 
     # Configure sudoers for qwen-code-webui
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user
+    # NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
     WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
     if [ -x "$WEBUI_PATH" ]; then
         cat > /etc/sudoers.d/open-ace-webui << SUDOERS_EOF
@@ -169,8 +170,8 @@ except Exception as e:
 # Support both open-ace (container user) and openace (workspace user synced from database)
 open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
 openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir, /usr/bin/chown
-openace ALL=(ALL) NOPASSWD: /usr/bin/test, /usr/bin/ls, /usr/bin/cat, /usr/bin/stat, /usr/bin/mkdir, /usr/bin/chown
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *
+openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *
 
 # Preserve environment variables for sudo env_keep passing
 Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"
