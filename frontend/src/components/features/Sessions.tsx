@@ -69,6 +69,15 @@ export const Sessions: React.FC = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Issue #669: Session terminated recreation modal
+  const [showRecreateModal, setShowRecreateModal] = useState(false);
+  const [recreateData, setRecreateData] = useState<{
+    session_id: string;
+    can_resume: boolean;
+    project_path?: string;
+    tool_name?: string;
+    remote_machine_id?: string;
+  } | null>(null);
 
   // Queries
   const { data, isLoading, isFetching, isError, error, refetch } = useSessions({
@@ -233,7 +242,18 @@ export const Sessions: React.FC = () => {
   };
 
   const handleRestore = async (sessionId: string) => {
-    await restoreMutation.mutateAsync(sessionId);
+    const result = await restoreMutation.mutateAsync(sessionId);
+    // Issue #669: Check if session process terminated
+    if (result && result.can_recreate) {
+      setRecreateData({
+        session_id: sessionId,
+        can_resume: result.can_resume ?? false,
+        project_path: result.project_path,
+        tool_name: result.tool_name,
+        remote_machine_id: result.remote_machine_id,
+      });
+      setShowRecreateModal(true);
+    }
   };
 
   const handleCloseModal = () => {
@@ -488,6 +508,57 @@ export const Sessions: React.FC = () => {
         ) : (
           <div className="text-muted">{t('noData', language)}</div>
         )}
+      </Modal>
+
+      {/* Issue #669: Session Terminated Recreation Modal */}
+      <Modal
+        isOpen={showRecreateModal}
+        onClose={() => setShowRecreateModal(false)}
+        title={t('sessionTerminated', language) ?? 'Session Process Terminated'}
+        size="sm"
+      >
+        <div className="mb-3">
+          {recreateData?.can_resume
+            ? (t('sessionTerminatedCanResume', language) ?? 'Detected recoverable conversation history. Would you like to try resuming context?')
+            : (t('sessionTerminatedNoResume', language) ?? 'Session process has terminated. Please create a new session to continue.')}
+        </div>
+        <div className="d-flex gap-2 justify-content-end">
+          <Button variant="secondary" size="sm" onClick={() => setShowRecreateModal(false)}>
+            {t('cancel', language) ?? 'Cancel'}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setShowRecreateModal(false);
+              // Navigate to workspace to create new session with the same project
+              const projectPath = recreateData?.project_path || '';
+              const toolName = recreateData?.tool_name || 'qwen-code';
+              const machineId = recreateData?.remote_machine_id || '';
+              const url = `/work/workspace?projectPath=${encodeURIComponent(projectPath)}&toolName=${encodeURIComponent(toolName)}&workspaceType=remote&machineId=${encodeURIComponent(machineId)}`;
+              window.location.href = url;
+            }}
+          >
+            {t('createNewSession', language) ?? 'Create New Session'}
+          </Button>
+          {recreateData?.can_resume && (
+            <Button
+              variant="success"
+              size="sm"
+              onClick={() => {
+                setShowRecreateModal(false);
+                // Navigate with resume hint (CLI tool will use --resume internally)
+                const projectPath = recreateData?.project_path || '';
+                const toolName = recreateData?.tool_name || 'qwen-code';
+                const machineId = recreateData?.remote_machine_id || '';
+                const url = `/work/workspace?projectPath=${encodeURIComponent(projectPath)}&toolName=${encodeURIComponent(toolName)}&workspaceType=remote&machineId=${encodeURIComponent(machineId)}&resumeHint=true`;
+                window.location.href = url;
+              }}
+            >
+              {t('tryResumeContext', language) ?? 'Try Resume'}
+            </Button>
+          )}
+        </div>
       </Modal>
     </div>
   );

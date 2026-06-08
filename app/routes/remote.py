@@ -1394,6 +1394,16 @@ def agent_message():
 
         return jsonify({"success": True})
 
+    elif msg_type == "command_response":
+        # Agent responds to a synchronous command request (Issue #669)
+        request_id = data.get("request_id")
+        result = data.get("result")
+
+        # Forward to RemoteAgentManager to signal waiting coroutine
+        agent_mgr.handle_command_response(data)
+
+        return jsonify({"success": True})
+
     else:
         return jsonify({"error": f"Unknown message type: {msg_type}"}), 400
 

@@ -203,6 +203,12 @@ export const sessionsApi = {
       url: string;
     };
     error?: string;
+    // Issue #669: Process terminated status
+    can_recreate?: boolean;
+    can_resume?: boolean;
+    project_path?: string;
+    model?: string;
+    remote_machine_id?: string;
   }> {
     const response = await apiClient.post<{
       success: boolean;
@@ -213,6 +219,11 @@ export const sessionsApi = {
         url: string;
       };
       error?: string;
+      can_recreate?: boolean;
+      can_resume?: boolean;
+      project_path?: string;
+      model?: string;
+      remote_machine_id?: string;
     }>(`/api/workspace/sessions/${sessionId}/restore`, {});
     return response;
   },
