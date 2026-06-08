@@ -721,7 +721,7 @@ interface RenderModalProps {
   language: Language;
   isOpen: boolean;
   result: string | null;
-  onRender: (variables: Record<string, string>) => void;
+  onRender: (variables: Record<string, string>) => Promise<void>;
   onClose: () => void;
 }
 
@@ -752,6 +752,9 @@ const RenderModal: React.FC<RenderModalProps> = ({
     setIsLoading(true);
     try {
       await onRender(variables);
+    } catch (err) {
+      console.error('Failed to render prompt:', err);
+      toast.error(t('renderFailed', language) || 'Failed to render prompt');
     } finally {
       setIsLoading(false);
     }
