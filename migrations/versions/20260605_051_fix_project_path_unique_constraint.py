@@ -67,9 +67,20 @@ def upgrade() -> None:
 
     if conn.dialect.name == "postgresql":
         # PostgreSQL: Use conditional unique index (partial index)
-        # Drop the old unconditional unique constraint
+        # Drop the old unconditional unique constraint/index.
+        # uq_projects_path may be a CONSTRAINT (created via create_unique_constraint)
+        # or a plain UNIQUE INDEX (created via schema_init or create_index).
+        # Use the appropriate drop method based on what actually exists.
         if _index_exists(conn, "uq_projects_path", "projects"):
-            op.drop_constraint("uq_projects_path", "projects", type_="unique")
+            result = conn.execute(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_projects_path')"
+                )
+            )
+            if result.fetchone()[0]:
+                op.drop_constraint("uq_projects_path", "projects", type_="unique")
+            else:
+                op.drop_index("uq_projects_path", "projects")
 
         # Create new conditional unique index
         # Only enforce uniqueness for active projects (is_active = TRUE)
