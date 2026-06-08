@@ -18,7 +18,8 @@ from typing import Any, cast
 import gevent
 from gevent.lock import Semaphore
 
-from app.repositories.database import DB_PATH, Database, is_postgresql
+from app.modules.workspace.agent_token import generate_agent_token, hash_agent_token
+from app.repositories.database import DB_PATH, Database, adapt_boolean_value, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,7 @@ class RemoteAgentManager:
     def create_registration_token(self, tenant_id: int, created_by: int) -> str:
         """
         Generate a one-time registration token for a new machine.
+        Persisted to database so it survives server restarts.
 
         Args:
             tenant_id: Tenant ID to associate the machine with.
@@ -274,12 +276,20 @@ class RemoteAgentManager:
             Registration token string.
         """
         token = str(uuid.uuid4()).replace("-", "") + str(uuid.uuid4()).replace("-", "")
-        with self._lock:
-            self._registration_tokens[token] = {
-                "tenant_id": tenant_id,
-                "created_by": created_by,
-                "created_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-            }
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = (now + timedelta(hours=24)).isoformat()
+
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                INSERT INTO registration_tokens (token, tenant_id, created_by, created_at, expires_at)
+                VALUES ({_params(5)})
+                """,
+                (token, tenant_id, created_by, now.isoformat(), expires_at),
+            )
+            conn.commit()
+
         logger.info(f"Created registration token for tenant {tenant_id}")
         return token
 
@@ -312,9 +322,8 @@ class RemoteAgentManager:
         Returns:
             Dict with machine info or None if token invalid.
         """
-        with self._lock:
-            token_info = self._registration_tokens.pop(registration_token, None)
-
+        # Validate registration token from database
+        token_info = self._consume_registration_token(registration_token)
         if not token_info:
             logger.warning("Invalid or expired registration token")
             return None
@@ -490,25 +499,317 @@ class RemoteAgentManager:
                     )
                 conn.commit()
 
+                # Issue agent token for the newly registered machine
+                agent_token = self._issue_agent_token(machine_id)
+
                 return {
                     "machine_id": machine_id,
                     "machine_name": machine_name,
                     "status": "online",
                     "tenant_id": token_info["tenant_id"],
+                    "agent_token": agent_token,
                 }
             except Exception as e:
                 logger.error(f"Failed to register machine: {e}")
                 conn.rollback()
                 return None
 
+    # ==================== Agent Token Management ====================
+
+    def _consume_registration_token(self, registration_token: str) -> dict[str, Any] | None:
+        """Validate and consume a registration token from the database.
+
+        Looks up the token, checks it's not consumed or expired, then marks
+        it as consumed. Returns token info dict on success, None on failure.
+
+        Args:
+            registration_token: The registration token string to validate.
+
+        Returns:
+            Dict with tenant_id and created_by, or None if invalid/expired.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        p = _param()
+
+        with self._lock, self.db.connection() as conn:
+            cursor = conn.cursor()
+            # Look up valid (unconsumed, unexpired) token
+            cursor.execute(
+                f"""
+                SELECT id, tenant_id, created_by FROM registration_tokens
+                WHERE token = {p} AND NOT is_consumed AND expires_at > {p}
+                """,
+                (registration_token, now.isoformat()),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            token_id = row["id"]
+            token_info = {
+                "tenant_id": row["tenant_id"],
+                "created_by": row["created_by"],
+            }
+
+            # Mark as consumed
+            cursor.execute(
+                f"""
+                UPDATE registration_tokens
+                SET is_consumed = {p}, consumed_at = {p}
+                WHERE id = {p}
+                """,
+                (now.isoformat(), token_id),
+            )
+            conn.commit()
+
+        return token_info
+
+    def _issue_agent_token(self, machine_id: str) -> str | None:
+        """Generate and store an agent token for a machine.
+
+        Creates a new agent token, stores only its SHA-256 hash in the
+        agent_tokens table, and returns the plaintext token. This is the
+        only time the plaintext token is available.
+
+        Args:
+            machine_id: The machine to issue a token for.
+
+        Returns:
+            The plaintext agent token string, or None on failure.
+        """
+        plaintext = generate_agent_token()
+        token_hash = hash_agent_token(plaintext)
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        p = _param()
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                # Delete any existing token for this machine (shouldn't exist for new machines)
+                cursor.execute(
+                    f"DELETE FROM agent_tokens WHERE machine_id = {p}",
+                    (machine_id,),
+                )
+                cursor.execute(
+                    f"""
+                    INSERT INTO agent_tokens (machine_id, token_hash, created_at)
+                    VALUES ({p}, {p}, {p})
+                    """,
+                    (machine_id, token_hash, now),
+                )
+                conn.commit()
+            logger.info(f"Issued agent token for machine {machine_id[:8]}")
+            return plaintext
+        except Exception as e:
+            logger.error(f"Failed to issue agent token for {machine_id[:8]}: {e}")
+            return None
+
+    def validate_agent_bearer(self, token_hash: str) -> str | None:
+        """Validate an agent token hash and return the bound machine_id.
+
+        Looks up the hash in agent_tokens, checks it's not revoked.
+        Returns the associated machine_id or None.
+
+        Args:
+            token_hash: The SHA-256 hash of the Bearer token.
+
+        Returns:
+            The machine_id bound to this token, or None if invalid/revoked.
+        """
+        p = _param()
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT machine_id FROM agent_tokens
+                WHERE token_hash = {p} AND NOT is_revoked
+                """,
+                (token_hash,),
+            )
+            row = cursor.fetchone()
+            return row["machine_id"] if row else None
+
+    def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> str | None:
+        """Rotate the agent token for a machine.
+
+        Generates a new token and replaces the stored hash. The old token
+        is immediately invalidated.
+
+        Args:
+            machine_id: The machine whose token to rotate.
+            rotated_by: User ID who initiated the rotation.
+
+        Returns:
+            The new plaintext agent token, or None on failure.
+        """
+        plaintext = generate_agent_token()
+        token_hash = hash_agent_token(plaintext)
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        p = _param()
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                # Check if machine exists in agent_tokens
+                cursor.execute(
+                    f"SELECT id FROM agent_tokens WHERE machine_id = {p}",
+                    (machine_id,),
+                )
+                existing = cursor.fetchone()
+
+                if existing:
+                    # Update existing token
+                    cursor.execute(
+                        f"""
+                        UPDATE agent_tokens
+                        SET token_hash = {p}, rotated_at = {p}, rotated_by = {p}
+                        WHERE machine_id = {p} AND NOT is_revoked
+                        """,
+                        (token_hash, now, rotated_by, machine_id),
+                    )
+                    if cursor.rowcount == 0:
+                        # Token was revoked; un-revoke and set new hash
+                        cursor.execute(
+                            f"""
+                            UPDATE agent_tokens
+                            SET token_hash = {p}, is_revoked = {p}, revoked_at = NULL, revoked_by = NULL,
+                                rotated_at = {p}, rotated_by = {p}
+                            WHERE machine_id = {p}
+                            """,
+                            (token_hash, adapt_boolean_value(False), now, rotated_by, machine_id),
+                        )
+                else:
+                    # No token exists yet (legacy machine); create one
+                    cursor.execute(
+                        f"""
+                        INSERT INTO agent_tokens (machine_id, token_hash, created_at, rotated_at, rotated_by)
+                        VALUES ({p}, {p}, {p}, {p}, {p})
+                        """,
+                        (machine_id, token_hash, now, now, rotated_by),
+                    )
+
+                # Clear legacy mode on the machine
+                cursor.execute(
+                    f"""
+                    UPDATE remote_machines SET legacy_mode = {p} WHERE machine_id = {p}
+                    """,
+                    (adapt_boolean_value(False), machine_id),
+                )
+                conn.commit()
+
+            logger.info(f"Rotated agent token for machine {machine_id[:8]} by user {rotated_by}")
+            return plaintext
+        except Exception as e:
+            logger.error(f"Failed to rotate agent token for {machine_id[:8]}: {e}")
+            return None
+
+    def revoke_agent_token(self, machine_id: str, revoked_by: int) -> bool:
+        """Revoke the agent token for a machine.
+
+        The agent will receive 401 on its next message and need to
+        re-register with a new registration token.
+
+        Args:
+            machine_id: The machine whose token to revoke.
+            revoked_by: User ID who initiated the revocation.
+
+        Returns:
+            True if successfully revoked, False otherwise.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        p = _param()
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    UPDATE agent_tokens
+                    SET is_revoked = {p}, revoked_at = {p}, revoked_by = {p}
+                    WHERE machine_id = {p} AND NOT is_revoked
+                    """,
+                    (now, revoked_by, machine_id),
+                )
+                conn.commit()
+                success = bool(cursor.rowcount > 0)
+
+            if success:
+                logger.info(
+                    f"Revoked agent token for machine {machine_id[:8]} by user {revoked_by}"
+                )
+            else:
+                logger.warning(f"No active agent token to revoke for machine {machine_id[:8]}")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to revoke agent token for {machine_id[:8]}: {e}")
+            return False
+
+    def clear_legacy_mode(self, machine_id: str) -> None:
+        """Clear the legacy_mode flag for a machine after it presents a valid Bearer token.
+
+        Args:
+            machine_id: The machine to update.
+        """
+        p = _param()
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE remote_machines SET legacy_mode = {adapt_boolean_value(False)} WHERE machine_id = {p} AND legacy_mode = {adapt_boolean_value(True)}",
+                    (machine_id,),
+                )
+                conn.commit()
+                if cursor.rowcount > 0:
+                    logger.info(f"Cleared legacy mode for machine {machine_id[:8]}")
+        except Exception as e:
+            logger.debug(f"Failed to clear legacy mode for {machine_id[:8]}: {e}")
+
+    def cleanup_expired_registration_tokens(self) -> int:
+        """Clean up consumed and expired registration tokens.
+
+        Deletes tokens that:
+        - Were consumed more than 7 days ago
+        - Have expired (past their expires_at timestamp)
+
+        Returns:
+            Number of tokens deleted.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        consumed_cutoff = (now - timedelta(days=7)).isoformat()
+        now_iso = now.isoformat()
+        p = _param()
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    DELETE FROM registration_tokens
+                    WHERE (is_consumed = 1 AND consumed_at < {p})
+                       OR (expires_at < {p})
+                    """,
+                    (consumed_cutoff, now_iso),
+                )
+                deleted: int = cursor.rowcount
+                conn.commit()
+
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} expired registration tokens")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to cleanup registration tokens: {e}")
+            return 0
+
     def deregister_machine(self, machine_id: str) -> bool:
-        """Remove a machine and its assignments."""
+        """Remove a machine, its assignments, and its agent token."""
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
             cursor.execute(
                 f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
             )
+            cursor.execute(f"DELETE FROM agent_tokens WHERE machine_id = {_param()}", (machine_id,))
             cursor.execute(
                 f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
             )
@@ -1060,6 +1361,7 @@ class RemoteAgentManager:
 def get_ddl_statements() -> list[str]:
     """Return DDL statements for remote agent manager tables."""
     id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    bool_default = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
     return [
         f"""
         CREATE TABLE IF NOT EXISTS remote_machines (
@@ -1079,7 +1381,8 @@ def get_ddl_statements() -> list[str]:
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_heartbeat TIMESTAMP
+            last_heartbeat TIMESTAMP,
+            legacy_mode {bool_default}
         )
         """,
         f"""
@@ -1093,10 +1396,40 @@ def get_ddl_statements() -> list[str]:
             UNIQUE(machine_id, user_id)
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS registration_tokens (
+            id {id_type},
+            token TEXT NOT NULL UNIQUE,
+            tenant_id INTEGER NOT NULL,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL,
+            is_consumed {bool_default},
+            consumed_at TIMESTAMP,
+            consumed_machine_id TEXT
+        )
+        """,
+        f"""
+        CREATE TABLE IF NOT EXISTS agent_tokens (
+            id {id_type},
+            machine_id TEXT NOT NULL UNIQUE,
+            token_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            rotated_at TIMESTAMP,
+            rotated_by INTEGER,
+            is_revoked {bool_default},
+            revoked_at TIMESTAMP,
+            revoked_by INTEGER
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)",
         "CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)",
         "CREATE INDEX IF NOT EXISTS idx_remote_machines_hostname_tenant ON remote_machines(hostname, tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_registration_tokens_token ON registration_tokens(token)",
+        "CREATE INDEX IF NOT EXISTS idx_registration_tokens_expires ON registration_tokens(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tokens_machine_id ON agent_tokens(machine_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_tokens_token_hash ON agent_tokens(token_hash)",
     ]
 
 

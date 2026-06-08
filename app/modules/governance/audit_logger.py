@@ -58,6 +58,13 @@ class AuditAction(Enum):
     CONTENT_BLOCKED = "content_blocked"
     CONTENT_FLAGGED = "content_flagged"
 
+    # Remote agent actions
+    AGENT_REGISTER = "agent_register"
+    AGENT_TOKEN_ROTATE = "agent_token_rotate"
+    AGENT_TOKEN_REVOKE = "agent_token_revoke"
+    AGENT_AUTH_FAILURE = "agent_auth_failure"
+    AGENT_RECONNECT = "agent_reconnect"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
