@@ -28,6 +28,9 @@ pip install -r requirements.txt
 # 初始化配置
 python3 cli.py config init
 
+# 运行数据库迁移
+alembic upgrade head
+
 # 启动 Web 服务器
 python3 web.py
 

@@ -147,6 +147,7 @@ cd frontend && npm install && npm run build && cd ..
 
 # 4. 初始化配置和数据库
 python3 cli.py config init
+alembic upgrade head
 python3 scripts/init_db.py
 
 # 5. 启动服务
@@ -444,6 +445,7 @@ cd frontend && npm install && npm run build && cd ..
 
 # 4. Initialize configuration and database
 python3 cli.py config init
+alembic upgrade head
 python3 scripts/init_db.py
 
 # 5. Start the server
