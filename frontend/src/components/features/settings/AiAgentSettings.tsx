@@ -12,19 +12,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Card,
-  Button,
-  TextInput,
-  Loading,
-  Error as ErrorDisplay,
-} from '@/components/common';
+import { Card, Button, TextInput, Loading, Error as ErrorDisplay } from '@/components/common';
 import { useToast } from '@/components/common';
-import {
-  useAiAgentSettings,
-  useUpdateAiAgentSettings,
-  useValidateGithubToken,
-} from '@/hooks';
+import { useAiAgentSettings, useUpdateAiAgentSettings, useValidateGithubToken } from '@/hooks';
 import type { AiAgentSettings as AiAgentSettingsType } from '@/api/aiAgentSettings';
 
 export const AiAgentSettings: React.FC = () => {
@@ -32,13 +22,7 @@ export const AiAgentSettings: React.FC = () => {
   const toast = useToast();
 
   // Data
-  const {
-    data: settings,
-    isLoading,
-    isError,
-    error: fetchError,
-    refetch,
-  } = useAiAgentSettings();
+  const { data: settings, isLoading, isError, error: fetchError, refetch } = useAiAgentSettings();
   const updateSettings = useUpdateAiAgentSettings();
   const validateToken = useValidateGithubToken();
 
@@ -198,10 +182,7 @@ export const AiAgentSettings: React.FC = () => {
                 value={newToken}
                 onChange={(e) => setNewToken(e.target.value)}
               />
-              <Button
-                variant="outline-secondary"
-                onClick={() => setShowToken(!showToken)}
-              >
+              <Button variant="outline-secondary" onClick={() => setShowToken(!showToken)}>
                 <i className={`bi ${showToken ? 'bi-eye-slash' : 'bi-eye'}`} />
               </Button>
             </div>
@@ -239,11 +220,11 @@ export const AiAgentSettings: React.FC = () => {
                 {validationResult.valid
                   ? t('aiGithubTestSuccess', language).replace(
                       '{username}',
-                      validationResult.username || ''
+                      validationResult.username ?? ''
                     )
                   : t('aiGithubTestFailed', language).replace(
                       '{error}',
-                      validationResult.error || ''
+                      validationResult.error ?? ''
                     )}
               </div>
             )}

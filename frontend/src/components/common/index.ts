@@ -33,7 +33,6 @@ export { Dropdown, SplitButton } from './Dropdown';
 export { Divider } from './Divider';
 export { SessionDetailContent } from './SessionDetailContent';
 export { UserSettingsModal } from './UserSettingsModal';
-export { ContextMenuProvider, useContextMenu } from './ContextMenu';
 
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';

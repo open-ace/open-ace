@@ -17,9 +17,7 @@ export interface TokenValidationResult {
   error?: string;
 }
 
-export type TokenValidationRequest =
-  | { token: string }
-  | { source: 'saved' };
+export type TokenValidationRequest = { token: string } | { source: 'saved' };
 
 // API
 export const aiAgentSettingsApi = {
