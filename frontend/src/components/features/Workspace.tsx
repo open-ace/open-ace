@@ -496,7 +496,8 @@ export const Workspace: React.FC = () => {
         workspaceType?: 'local' | 'remote';
         machineId?: string;
         machineName?: string;
-      }
+      },
+      resumeHint?: boolean
     ): string => {
       if (!config?.enabled) return '';
 
@@ -570,6 +571,10 @@ export const Workspace: React.FC = () => {
         // File changes panel visibility (Issue #144)
         const showPanel = useAppStore.getState().showFileChangesPanel;
         url = `${url}&showFileChangesPanel=${showPanel}`;
+        // Resume hint for CLI session (Issue #669)
+        if (resumeHint) {
+          url = `${url}&resumeHint=true`;
+        }
         // Remote workspace parameters
         url = appendRemoteParams(url);
         // Recent remote projects (Issue #417)
@@ -612,6 +617,10 @@ export const Workspace: React.FC = () => {
       // File changes panel visibility (Issue #144)
       const showPanel = useAppStore.getState().showFileChangesPanel;
       url = appendParam(url, 'showFileChangesPanel', String(showPanel));
+      // Resume hint for CLI session (Issue #669)
+      if (resumeHint) {
+        url = appendParam(url, 'resumeHint', 'true');
+      }
       // Remote workspace parameters
       url = appendRemoteParams(url);
       // Recent remote projects (Issue #417)
@@ -652,6 +661,7 @@ export const Workspace: React.FC = () => {
     const urlMachineId = searchParams.get('machineId');
     const urlMachineName = searchParams.get('machineName');
     const urlTerminalId = searchParams.get('terminalId');
+    const urlResumeHint = searchParams.get('resumeHint') === 'true';
     const restoreSessionId = urlSessionId ?? restoreSession;
 
     // Determine if we should restore from store or create new
@@ -724,7 +734,8 @@ export const Workspace: React.FC = () => {
           urlEncodedProjectName ?? undefined,
           urlToolName ?? undefined,
           urlSettings,
-          remoteParams
+          remoteParams,
+          urlResumeHint
         );
         if (effectiveUrl) {
           const tab: WorkspaceTab = {
@@ -774,6 +785,7 @@ export const Workspace: React.FC = () => {
       searchParams.delete('machineId');
       searchParams.delete('machineName');
       searchParams.delete('terminalId');
+      searchParams.delete('resumeHint');
       setSearchParams(searchParams, { replace: true });
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
