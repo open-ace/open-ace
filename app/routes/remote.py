@@ -210,9 +210,8 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple | None]:
                 created_at = datetime.fromisoformat(created_at)
             if created_at.tzinfo is not None:
                 created_at = created_at.replace(tzinfo=None)
-            from datetime import datetime as _dt
 
-            age_days = (_dt.now(timezone.utc).replace(tzinfo=None) - created_at).days
+            age_days = (datetime.now(timezone.utc).replace(tzinfo=None) - created_at).days
             deadline = agent_mgr.LEGACY_MODE_DEADLINE_DAYS
             if age_days > deadline:
                 return False, (
@@ -440,22 +439,23 @@ def rotate_machine_token(machine_id):
     """
     agent_mgr = get_remote_agent_manager()
 
-    new_token = agent_mgr.rotate_agent_token(
+    result = agent_mgr.rotate_agent_token(
         machine_id=machine_id,
         rotated_by=g.user["id"],
     )
 
-    if new_token is None:
+    if result is None:
         return jsonify({"error": "Machine not found"}), 404
+
+    new_token = result["new_token"]
 
     # AGENT_TOKEN_ROTATE audit event
     details = {
         "machine_id": machine_id,
         "rotated_by": g.user["id"],
     }
-    if agent_mgr._last_rotate_unrevoked:
+    if result.get("unrevoked"):
         details["unrevoke"] = True
-    agent_mgr._last_rotate_unrevoked = False
 
     audit_logger.log_action(
         AuditAction.AGENT_TOKEN_ROTATE,

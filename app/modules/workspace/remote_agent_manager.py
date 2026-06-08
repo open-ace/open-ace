@@ -88,8 +88,7 @@ class RemoteAgentManager:
         self._lock = Semaphore(1)
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
-        # Flag indicating last rotate unrevoked a token (for audit logging)
-        self._last_rotate_unrevoked: bool = False
+        # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
         self._restore_in_memory_state()
         # Defer session cleanup to heartbeat monitor instead of running on startup.
         # This gives agents time to re-register after a server restart before their
@@ -762,13 +761,16 @@ class RemoteAgentManager:
 
             conn.commit()
 
-        # Track if any previously-revoked tokens were present (audit detail)
-        self._last_rotate_unrevoked = len(existing) > 0 and not any_unrevoked
+        # Track if rotate also lifted a prior revocation (audit detail)
+        had_revoked_tokens = len(existing) > 0 and not any_unrevoked
 
         # Issue a new token
         new_token = self._create_agent_token(machine_id)
         logger.info("Rotated agent token for machine %s", machine_id[:8])
-        return new_token
+        return {
+            "new_token": new_token,
+            "unrevoked": had_revoked_tokens,
+        }
 
     def revoke_agent_token(self, machine_id: str, revoked_by: int | None = None) -> bool:
         """Revoke all active agent tokens for a machine.
@@ -857,7 +859,10 @@ class RemoteAgentManager:
         return legacy_mode
 
     def cleanup_expired_registration_tokens(self) -> int:
-        """Remove expired and already-consumed registration tokens.
+        """Remove expired registration tokens that have NOT been consumed.
+
+        Consumed tokens are retained for audit trail (who authorized which
+        machine, when it was consumed, etc.).
 
         Returns:
             Number of tokens removed.
@@ -867,21 +872,21 @@ class RemoteAgentManager:
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
-            # Delete tokens that are consumed OR expired
-            # P0-2 fix: use parameterized boolean instead of `= 1`
+            # Only delete tokens that are expired AND not yet consumed.
+            # Consumed tokens are kept for audit purposes.
             cursor.execute(
                 f"""
                 DELETE FROM registration_tokens
                 WHERE is_consumed = {_param()}
-                   OR expires_at < {_param()}
+                   AND expires_at < {_param()}
             """,
-                (adapt_boolean_value(True), now.isoformat()),
+                (adapt_boolean_value(False), now.isoformat()),
             )
             removed = cursor.rowcount
             conn.commit()
 
         if removed:
-            logger.info("Cleaned up %d expired/consumed registration tokens", removed)
+            logger.info("Cleaned up %d expired unconsumed registration tokens", removed)
         return removed
 
     def _start_token_cleanup(self) -> None:

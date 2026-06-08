@@ -179,14 +179,14 @@ class TestScenario05_TokenRotation:
         assert manager.validate_agent_token(old_token, "machine-005") is True
 
         # Rotate
-        new_token = manager.rotate_agent_token("machine-005", rotated_by=1)
-        assert new_token is not None
+        new_result = manager.rotate_agent_token("machine-005", rotated_by=1)
+        assert new_result is not None
 
         # Old token no longer works
         assert manager.validate_agent_token(old_token, "machine-005") is False
 
         # New token works
-        assert manager.validate_agent_token(new_token, "machine-005") is True
+        assert manager.validate_agent_token(new_result["new_token"], "machine-005") is True
 
 
 class TestScenario06_TokenRevocation:
@@ -338,10 +338,10 @@ class TestScenario10_ReRegisterAfterRevocation:
         assert new_token is not None
 
         # New token works
-        assert manager.validate_agent_token(new_token, "machine-010") is True
+        assert manager.validate_agent_token(new_token["new_token"], "machine-010") is True
 
-        # _last_rotate_unrevoked should be True (was revoked before rotate)
-        assert manager._last_rotate_unrevoked is True
+        # Rotate returns unrevoked=True (was revoked before rotate)
+        assert new_token["unrevoked"] is True
 
 
 class TestScenario11_DuplicateConsumeRegistrationToken:
