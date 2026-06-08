@@ -66,7 +66,6 @@ class TestScenario01_MissingBearerToken:
 
     def test_non_legacy_requires_token(self, manager):
         machine_id = "machine-001"
-        agent_token = "fake-token"
 
         # Register a machine via token flow
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
@@ -77,7 +76,6 @@ class TestScenario01_MissingBearerToken:
             hostname="testhost",
         )
         assert result is not None
-        agent_token = result["agent_token"]
 
         # Validate with no token → should fail (simulated: empty string)
         assert manager.validate_agent_token("", machine_id) is False
@@ -117,7 +115,7 @@ class TestScenario03_TokenBoundToWrongMachine:
 
         # Register machine B
         reg_b = manager.create_registration_token(tenant_id=1, created_by=1)
-        result_b = manager.register_machine(
+        manager.register_machine(
             registration_token=reg_b,
             machine_id="machine-b",
             machine_name="Machine B",
@@ -219,7 +217,7 @@ class TestScenario07_LegacyCompat:
     def test_legacy_machine_accepted(self, manager):
         # Register a machine normally
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
-        result = manager.register_machine(
+        manager.register_machine(
             registration_token=reg_token,
             machine_id="machine-007",
             machine_name="legacy-machine",

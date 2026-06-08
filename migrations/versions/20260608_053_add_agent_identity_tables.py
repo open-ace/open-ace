@@ -23,10 +23,7 @@ depends_on = None
 def _table_exists(conn, table: str) -> bool:
     """Check if a table already exists."""
     result = conn.execute(
-        sa.text(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = :table"
-        ),
+        sa.text("SELECT COUNT(*) FROM information_schema.tables " "WHERE table_name = :table"),
         {"table": table},
     )
     return result.scalar() > 0
@@ -79,12 +76,8 @@ def upgrade() -> None:
             sa.Column("revoked_by", sa.Integer, nullable=True),
             sa.Column("rotated_at", sa.DateTime, nullable=True),
         )
-        op.create_index(
-            "idx_agent_tokens_hash", "agent_tokens", ["token_hash"]
-        )
-        op.create_index(
-            "idx_agent_tokens_machine", "agent_tokens", ["machine_id"]
-        )
+        op.create_index("idx_agent_tokens_hash", "agent_tokens", ["token_hash"])
+        op.create_index("idx_agent_tokens_machine", "agent_tokens", ["machine_id"])
 
     # legacy_mode column on remote_machines
     if not _column_exists(conn, "remote_machines", "legacy_mode"):
@@ -111,7 +104,5 @@ def downgrade() -> None:
         op.drop_table("agent_tokens")
 
     if _table_exists(conn, "registration_tokens"):
-        op.drop_index(
-            "idx_registration_tokens_hash", table_name="registration_tokens"
-        )
+        op.drop_index("idx_registration_tokens_hash", table_name="registration_tokens")
         op.drop_table("registration_tokens")

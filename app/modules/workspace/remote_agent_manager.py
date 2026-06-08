@@ -696,7 +696,9 @@ class RemoteAgentManager:
 
         return True
 
-    def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> str | None:
+    def rotate_agent_token(
+        self, machine_id: str, rotated_by: int | None = None
+    ) -> dict[str, Any] | None:
         """Rotate the agent token for a machine.
 
         Revokes all existing tokens for the machine and issues a new one.
@@ -709,7 +711,7 @@ class RemoteAgentManager:
             rotated_by: User ID who initiated the rotation.
 
         Returns:
-            New plaintext agent token, or None if machine not found.
+            dict with 'new_token' and 'unrevoked' keys, or None if machine not found.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -852,11 +854,11 @@ class RemoteAgentManager:
 
         legacy_mode = row["legacy_mode"]
         if is_postgresql():
-            legacy_mode = bool(legacy_mode) if legacy_mode is not None else False
+            legacy_mode_val = bool(legacy_mode) if legacy_mode is not None else False
         else:
-            legacy_mode = bool(legacy_mode)
+            legacy_mode_val = bool(legacy_mode)
 
-        return legacy_mode
+        return bool(legacy_mode_val)
 
     def cleanup_expired_registration_tokens(self) -> int:
         """Remove expired registration tokens that have NOT been consumed.
@@ -885,9 +887,10 @@ class RemoteAgentManager:
             removed = cursor.rowcount
             conn.commit()
 
-        if removed:
-            logger.info("Cleaned up %d expired unconsumed registration tokens", removed)
-        return removed
+        removed_count = int(removed)
+        if removed_count:
+            logger.info("Cleaned up %d expired unconsumed registration tokens", removed_count)
+        return removed_count
 
     def _start_token_cleanup(self) -> None:
         """Start the registration token cleanup timer (lazy, daemon thread)."""
