@@ -908,9 +908,7 @@ class AutonomousOrchestrator:
                         pass
             else:
                 # Truly no changes at all
-                logger.warning(
-                    "Agent reported success but no new commits detected (SHA unchanged)"
-                )
+                logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
                     {

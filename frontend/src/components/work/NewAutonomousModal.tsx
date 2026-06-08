@@ -7,11 +7,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Modal, Button } from '@/components/common';
 import { RemoteMachineSelector } from './RemoteMachineSelector';
-import {
-  useCreateWorkflow,
-  useAvailableTools,
-  useAvailableModels,
-} from '@/hooks/useAutonomous';
+import { useCreateWorkflow, useAvailableTools, useAvailableModels } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow, CreateWorkflowRequest } from '@/api/autonomous';
 
 interface NewAutonomousModalProps {
@@ -39,7 +35,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [isNewProject, setIsNewProject] = useState(false);
   const [repoName, setRepoName] = useState('');
   const [isPrivate, setIsPrivate] = useState(true);
-  const [branchStrategy, setBranchStrategy] = useState<'new-branch' | 'worktree' | 'current'>('new-branch');
+  const [branchStrategy, setBranchStrategy] = useState<'new-branch' | 'worktree' | 'current'>(
+    'new-branch'
+  );
   const [branchName, setBranchName] = useState('');
   const [maxPlanRounds, setMaxPlanRounds] = useState(3);
   const [maxPRReviewRounds, setMaxPRReviewRounds] = useState(5);
@@ -59,11 +57,22 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const isCreating = createWorkflow.isPending;
 
   const canSubmit = useMemo(() => {
-    const hasRequirements = requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
+    const hasRequirements =
+      requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
     const hasPath = isNewProject ? !!repoName.trim() : !!projectPath.trim();
     const hasRemote = workspaceType !== 'remote' || !!selectedMachineId;
     return hasRequirements && !!cliTool && hasPath && hasRemote;
-  }, [requirementsMode, requirementsText, requirementsUrl, cliTool, projectPath, isNewProject, repoName, workspaceType, selectedMachineId]);
+  }, [
+    requirementsMode,
+    requirementsText,
+    requirementsUrl,
+    cliTool,
+    projectPath,
+    isNewProject,
+    repoName,
+    workspaceType,
+    selectedMachineId,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     const data: CreateWorkflowRequest = {
@@ -91,16 +100,30 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
         onCreated(result.workflow);
       }
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'message' in err
-        ? (err as { message: string }).message
-        : t('autoCreateFailed', language) || 'Failed to create task';
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? (err as { message: string }).message
+          : t('autoCreateFailed', language) || 'Failed to create task';
       setErrorMessage(msg);
     }
   }, [
-    title, requirementsMode, requirementsText, requirementsUrl, cliTool, model,
-    workspaceType, selectedMachineId, projectPath, isNewProject, repoName,
-    branchStrategy, branchName, maxPlanRounds, maxPRReviewRounds,
-    createWorkflow, onCreated,
+    title,
+    requirementsMode,
+    requirementsText,
+    requirementsUrl,
+    cliTool,
+    model,
+    workspaceType,
+    selectedMachineId,
+    projectPath,
+    isNewProject,
+    repoName,
+    branchStrategy,
+    branchName,
+    maxPlanRounds,
+    maxPRReviewRounds,
+    createWorkflow,
+    onCreated,
   ]);
 
   return (
@@ -198,11 +221,18 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
           <select
             className="form-select"
             value={cliTool}
-            onChange={(e) => { setCliTool(e.target.value); setModel(''); }}
+            onChange={(e) => {
+              setCliTool(e.target.value);
+              setModel('');
+            }}
           >
-            {tools.length > 0 ? tools.map((tool) => (
-              <option key={tool.id} value={tool.id}>{tool.name}</option>
-            )) : (
+            {tools.length > 0 ? (
+              tools.map((tool) => (
+                <option key={tool.id} value={tool.id}>
+                  {tool.name}
+                </option>
+              ))
+            ) : (
               <>
                 <option value="claude-code">Claude Code</option>
                 <option value="qwen-code-cli">Qwen Code</option>
@@ -216,11 +246,12 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
           <label className="form-label fw-semibold">{t('autoModel', language)}</label>
           <select className="form-select" value={model} onChange={(e) => setModel(e.target.value)}>
             <option value="">{t('autoDefaultModel', language)}</option>
-            {Array.isArray(models) && models.map((m: { name: string }) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-              </option>
-            ))}
+            {Array.isArray(models) &&
+              models.map((m: { name: string }) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}
+                </option>
+              ))}
           </select>
         </div>
 
@@ -322,7 +353,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
           <select
             className="form-select"
             value={branchStrategy}
-            onChange={(e) => setBranchStrategy(e.target.value as 'new-branch' | 'worktree' | 'current')}
+            onChange={(e) =>
+              setBranchStrategy(e.target.value as 'new-branch' | 'worktree' | 'current')
+            }
           >
             <option value="new-branch">{t('autoNewBranch', language)}</option>
             <option value="worktree">{t('autoWorktree', language)}</option>

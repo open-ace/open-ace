@@ -477,9 +477,7 @@ class AutonomousAgentRunner:
 
     # ── Local helpers ──────────────────────────────────────────────
 
-    def _persist_local_session_messages(
-        self, session_id: str, result: AgentTaskResult
-    ) -> None:
+    def _persist_local_session_messages(self, session_id: str, result: AgentTaskResult) -> None:
         """Write agent conversation to session_messages preserving order.
 
         Uses the ordered event_log from _LocalSession to maintain the actual
@@ -600,10 +598,12 @@ class AutonomousAgentRunner:
                             session.assistant_text += content
                         # Record in event log for ordered message persistence
                         if text_delta:
-                            session.event_log.append({
-                                "type": "assistant",
-                                "text": text_delta,  # full text for DB persistence
-                            })
+                            session.event_log.append(
+                                {
+                                    "type": "assistant",
+                                    "text": text_delta,  # full text for DB persistence
+                                }
+                            )
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
@@ -618,11 +618,13 @@ class AutonomousAgentRunner:
                         session.tool_calls.append(parsed)
                         # Record in event log for ordered message persistence
                         tool_info = parsed.get("tool", {})
-                        session.event_log.append({
-                            "type": "tool_use",
-                            "tool_name": tool_info.get("name", "unknown"),
-                            "tool_input": tool_info.get("input", {}),
-                        })
+                        session.event_log.append(
+                            {
+                                "type": "tool_use",
+                                "tool_name": tool_info.get("name", "unknown"),
+                                "tool_input": tool_info.get("input", {}),
+                            }
+                        )
                         # Emit tool call activity
                         if self._activity_callback:
                             self._activity_callback(

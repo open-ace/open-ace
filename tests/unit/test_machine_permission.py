@@ -152,6 +152,33 @@ def make_manager():
         "completed_at TIMESTAMP, "
         "expires_at TIMESTAMP)"
     )
+    # Create agent_tokens and registration_tokens tables (from 053 migration)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS registration_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL UNIQUE, "
+        "tenant_id INTEGER NOT NULL, "
+        "created_by INTEGER NOT NULL, "
+        "created_at TIMESTAMP, "
+        "expires_at TIMESTAMP, "
+        "is_consumed INTEGER DEFAULT 0, "
+        "consumed_at TIMESTAMP)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL UNIQUE, "
+        "machine_id TEXT NOT NULL, "
+        "created_at TIMESTAMP, "
+        "is_revoked INTEGER DEFAULT 0, "
+        "revoked_at TIMESTAMP, "
+        "revoked_by INTEGER, "
+        "rotated_at TIMESTAMP)"
+    )
+    # Add legacy_mode column to remote_machines if not exists
+    conn.execute(
+        "ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0"
+    )
     conn.commit()
     conn.close()
 
