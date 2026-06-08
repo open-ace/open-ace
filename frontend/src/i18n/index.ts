@@ -44,11 +44,6 @@ const translations: Record<Language, Translations> = {
     selectRole: 'Select Role',
     searchMessages: 'Search messages...',
 
-    // Context Menu (Issue #643)
-    openInNewTab: 'Open in New Tab',
-    copyLink: 'Copy Link',
-    copySelectedText: 'Copy Selected Text',
-
     // Navigation
     navigation: 'Navigation',
     dashboard: 'Dashboard',
@@ -1029,11 +1024,6 @@ const translations: Record<Language, Translations> = {
     selectRole: '选择角色',
     searchMessages: '搜索消息...',
 
-    // Context Menu (Issue #643)
-    openInNewTab: '新标签页打开',
-    copyLink: '复制链接',
-    copySelectedText: '复制选中文本',
-
     // Navigation
     navigation: '导航',
     dashboard: '仪表盘',
@@ -1997,11 +1987,6 @@ const translations: Record<Language, Translations> = {
     selectRole: '役割を選択',
     searchMessages: 'メッセージを検索...',
 
-    // Context Menu (Issue #643)
-    openInNewTab: '新規タブで開く',
-    copyLink: 'リンクをコピー',
-    copySelectedText: '選択テキストをコピー',
-
     // Navigation
     navigation: 'ナビゲーション',
     dashboard: 'ダッシュボード',
@@ -2664,11 +2649,6 @@ const translations: Record<Language, Translations> = {
     role: '역할',
     selectRole: '역할 선택',
     searchMessages: '메시지 검색...',
-
-    // Context Menu (Issue #643)
-    openInNewTab: '새 탭에서 열기',
-    copyLink: '링크 복사',
-    copySelectedText: '선택한 텍스트 복사',
 
     // Navigation
     navigation: '네비게이션',
