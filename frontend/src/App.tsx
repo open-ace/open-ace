@@ -17,12 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
-import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
-import {
-  ContextMenuProvider,
-  useContextMenu,
-  shouldUseNativeMenu,
-} from '@/components/common/ContextMenu';
+import { LoadingOverlay, PageSkeleton } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -76,9 +71,6 @@ const UsageOverview = lazy(() =>
 );
 const InsightsReport = lazy(() =>
   import('@/components/work/InsightsReport').then((m) => ({ default: m.InsightsReport }))
-);
-const AutonomousDev = lazy(() =>
-  import('@/components/features/AutonomousDev').then((m) => ({ default: m.AutonomousDev }))
 );
 const UserManagement = lazy(() =>
   import('@/components/features/management/UserManagement').then((m) => ({
@@ -229,24 +221,9 @@ const LegacyAppContent: React.FC = () => {
   );
 };
 
-// Redirect component shown when autonomous feature is disabled
-const AutonomousDisabledRedirect: React.FC = () => {
-  const navigate = useNavigate();
-  const language = useAppStore((state) => state.language);
-  const toast = useToast();
-
-  useEffect(() => {
-    toast.error(t('autoFeatureDisabled', language));
-    navigate('/work', { replace: true });
-  }, [navigate, language, toast]);
-
-  return null;
-};
-
 // Work Mode Routes
 const WorkRoutes: React.FC = () => {
   const location = useLocation();
-  const autonomousEnabled = useAppStore((state) => state.autonomousEnabled);
   const isWorkspaceRoute =
     location.pathname === '/work' ||
     location.pathname === '/work/' ||
@@ -276,11 +253,6 @@ const WorkRoutes: React.FC = () => {
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
-          {autonomousEnabled ? (
-            <Route path="autonomous" element={<AutonomousDev />} />
-          ) : (
-            <Route path="autonomous" element={<AutonomousDisabledRedirect />} />
-          )}
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={null} />
           <Route path="*" element={<Navigate to="/work" replace />} />
@@ -417,39 +389,6 @@ const AppContent: React.FC = () => {
   );
 };
 
-// Global ContextMenu Handler - intercepts browser's native right-click menu
-const GlobalContextMenuHandler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { showMenu } = useContextMenu();
-
-  // Intercept contextmenu event globally on document
-  // This ensures the event listener is always bound regardless of ref timing
-  useEffect(() => {
-    const handleContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-
-      // Allow native context menu for input fields and editable elements
-      // (for spell check, undo, cut, copy, paste, etc.)
-      if (shouldUseNativeMenu(target)) {
-        return; // Don't prevent, allow native menu
-      }
-
-      // Prevent browser's native context menu
-      e.preventDefault();
-      // Show custom context menu at click position
-      showMenu(e.clientX, e.clientY, target);
-    };
-
-    // Add event listener directly to document for reliability
-    document.addEventListener('contextmenu', handleContextMenu);
-
-    return () => {
-      document.removeEventListener('contextmenu', handleContextMenu);
-    };
-  }, [showMenu]);
-
-  return <>{children}</>;
-};
-
 export const App: React.FC = () => {
   const theme = useTheme();
 
@@ -461,25 +400,21 @@ export const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ContextMenuProvider>
-        <GlobalContextMenuHandler>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/logout" element={<LogoutSuccess />} />
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/logout" element={<LogoutSuccess />} />
 
-            {/* Protected routes */}
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <AppContent />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-        </GlobalContextMenuHandler>
-      </ContextMenuProvider>
+        {/* Protected routes */}
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <AppContent />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
     </QueryClientProvider>
   );
 };
