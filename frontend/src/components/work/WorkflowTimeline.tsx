@@ -16,6 +16,7 @@ import { t } from '@/i18n';
 import { Button, Badge, Loading, Modal } from '@/components/common';
 import {
   useWorkflowTimeline,
+  useWorkflowActivity,
   usePauseWorkflow,
   useResumeWorkflow,
   useStopWorkflow,
@@ -98,6 +99,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     viewingDiff ?? '',
     !!viewingDiff,
   );
+
+  // Real-time agent activity (only when workflow is active)
+  const isWorkflowActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
+  const activities = useWorkflowActivity(workflow.workflow_id, isWorkflowActive);
 
   const milestones = timelineData?.milestones ?? [];
 
@@ -461,6 +466,45 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                           {milestone.error_message && (
                             <div className="alert alert-danger py-1 px-2 mt-2 mb-0" style={{ fontSize: '0.8rem' }}>
                               {milestone.error_message}
+                            </div>
+                          )}
+                          {/* Real-time agent activity for in_progress milestones */}
+                          {milestone.status === 'in_progress' && activities.length > 0 && (
+                            <div
+                              className="mt-2 p-2 rounded"
+                              style={{ backgroundColor: 'var(--bs-gray-100)', maxHeight: '200px', overflowY: 'auto', fontSize: '0.75rem', fontFamily: 'monospace' }}
+                            >
+                              <div className="d-flex align-items-center gap-1 mb-1">
+                                <span className="spinner-border spinner-border-sm text-primary" style={{ width: '0.8rem', height: '0.8rem' }}></span>
+                                <strong className="text-primary">Agent Activity</strong>
+                              </div>
+                              {activities.slice(-15).map((act, idx) => (
+                                <div key={idx} className="text-muted" style={{ lineHeight: '1.4' }}>
+                                  {act.type === 'tool_use' && (
+                                    <span>
+                                      <i className="bi bi-tools me-1 text-warning"></i>
+                                      <strong>{act.tool_name}</strong>
+                                      {act.tool_input && (
+                                        <span className="ms-1" style={{ opacity: 0.7 }}>
+                                          {act.tool_input.length > 60 ? act.tool_input.slice(0, 60) + '...' : act.tool_input}
+                                        </span>
+                                      )}
+                                    </span>
+                                  )}
+                                  {act.type === 'assistant' && (
+                                    <span>
+                                      <i className="bi bi-chat-text me-1 text-info"></i>
+                                      {act.text && act.text.length > 80 ? act.text.slice(0, 80) + '...' : act.text}
+                                    </span>
+                                  )}
+                                  {act.type === 'usage' && (
+                                    <span>
+                                      <i className="bi bi-lightning me-1"></i>
+                                      Token: {formatTokens(act.total_tokens || 0)}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
