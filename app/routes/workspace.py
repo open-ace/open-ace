@@ -1418,18 +1418,23 @@ def restore_session(session_id):
                     )
 
                     # Return status for frontend to guide user decision
-                    return jsonify(
-                        {
-                            "success": False,
-                            "error": "Session process has terminated",
-                            "can_recreate": True,
-                            "can_resume": info.get("cli_session_id") is not None if info else False,
-                            "project_path": project_path,
-                            "model": session_data.get("model"),
-                            "tool_name": tool_name,
-                            "remote_machine_id": remote_machine_id,
-                        }
-                    ), 400
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Session process has terminated",
+                                "can_recreate": True,
+                                "can_resume": (
+                                    info.get("cli_session_id") is not None if info else False
+                                ),
+                                "project_path": project_path,
+                                "model": session_data.get("model"),
+                                "tool_name": tool_name,
+                                "remote_machine_id": remote_machine_id,
+                            }
+                        ),
+                        400,
+                    )
 
         # Generate encodedProjectName based on tool
         if normalize_tool_name(tool_name) in ["qwen", "claude"]:

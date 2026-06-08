@@ -1044,12 +1044,15 @@ class RemoteAgentManager:
             }
 
         # Send the command
-        self.send_command(machine_id, {
-            "type": "command",
-            "command": command,
-            "session_id": session_id,
-            "request_id": request_id,
-        })
+        self.send_command(
+            machine_id,
+            {
+                "type": "command",
+                "command": command,
+                "session_id": session_id,
+                "request_id": request_id,
+            },
+        )
 
         # Wait for response (gevent Event.wait is coroutine-safe)
         pending = self._pending_requests[request_id]
@@ -1088,7 +1091,9 @@ class RemoteAgentManager:
                     pending["event"].set()
                     logger.debug("Received response for request %s", request_id[:8])
         else:
-            logger.warning("Received response for unknown request %s", request_id[:8] if request_id else "N/A")
+            logger.warning(
+                "Received response for unknown request %s", request_id[:8] if request_id else "N/A"
+            )
 
     def store_browse_result(self, request_id: str, result: dict) -> None:
         """Store browse result from agent for later retrieval."""
