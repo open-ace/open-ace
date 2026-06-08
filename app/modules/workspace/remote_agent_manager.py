@@ -691,10 +691,7 @@ class RemoteAgentManager:
             return False
 
         # Check machine_id binding
-        if row["machine_id"] != machine_id:
-            return False
-
-        return True
+        return row["machine_id"] == machine_id
 
     def rotate_agent_token(self, machine_id: str, rotated_by: int | None = None) -> str | None:
         """Rotate the agent token for a machine.
