@@ -23,9 +23,7 @@ class TestPersistSessionMessagesWithEventLog:
     """Verify _persist_local_session_messages writes ordered events."""
 
     def _make_runner(self):
-        from app.modules.workspace.autonomous.agent_runner import (
-            AutonomousAgentRunner,
-        )
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
         runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
         runner.session_manager = MagicMock()
@@ -175,9 +173,7 @@ class TestReadStdoutPopulatesEventLog:
 
     def test_assistant_message_appends_to_event_log(self):
         """assistant JSON message is recorded in event_log."""
-        from app.modules.workspace.autonomous.agent_runner import (
-            AutonomousAgentRunner,
-        )
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
         runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
         runner._activity_callback = None
