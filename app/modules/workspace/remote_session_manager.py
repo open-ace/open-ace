@@ -65,6 +65,7 @@ class RemoteSessionManager:
         tenant_id: Optional[int] = None,
         permission_mode: Optional[str] = None,
         ha_pool_token: Optional[str] = None,
+        allowed_tools: Optional[list[str]] = None,
     ) -> Optional[dict[str, Any]]:
         """
         Create a new remote session.
@@ -204,7 +205,7 @@ class RemoteSessionManager:
         self._agent_manager.bind_session(session_id, machine_id)
 
         # Dispatch start_session command to remote agent
-        command = {
+        command: dict[str, Any] = {
             "type": "command",
             "command": "start_session",
             "session_id": session_id,
@@ -216,6 +217,8 @@ class RemoteSessionManager:
         }
         if permission_mode:
             command["permission_mode"] = permission_mode
+        if allowed_tools:
+            command["allowed_tools"] = allowed_tools
 
         self._agent_manager.send_command(machine_id, command)
 

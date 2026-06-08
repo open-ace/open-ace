@@ -56,6 +56,50 @@ AUTONOMOUS_CONTEXT = (
     "4. 遇到权限问题时跳过该步骤继续执行其他任务\n\n"
 )
 
+# Prefix for planning phase — restricts agent to read-only analysis only.
+# Rule #3 overrides AUTONOMOUS_CONTEXT's "直接执行文件修改" to prevent
+# the planning agent from writing code (see Issue #761).
+PLANNING_CONTEXT = (
+    "## 重要提示\n"
+    "你正在自动化工作流的分析和方案设计阶段运行。请遵守以下规则：\n"
+    "1. 不要请求人类确认或等待权限批准，如果操作被阻止请跳过并继续\n"
+    "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
+    "3. 只进行分析、阅读代码、输出方案文本，不要修改任何文件或执行写操作\n"
+    "4. 如果需要查看项目代码以制定方案，可以使用文件读取和搜索工具\n"
+    "5. 不要执行 git commit、git push、文件写入、文件编辑等操作\n\n"
+)
+
+# Read-only tool sets for planning phase, keyed by CLI tool name.
+# When empty (Codex/OpenClaw), rely on PLANNING_CONTEXT prompt +
+# selective auto-approve filtering (Layer 1 + Layer 3).
+PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
+    "claude-code": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Agent",
+        "TaskRead",
+        "TaskGet",
+        "TaskList",
+    ],
+    "qwen-code-cli": [
+        "read_file",
+        "list_files",
+        "search_files",
+        "code_search",
+        "web_search",
+        "web_fetch",
+    ],
+    "codex": [],
+    "openclaw": [],
+}
+
+# Maximum time (seconds) for a single planning agent call.
+# Normal planning should complete in a few minutes; this caps runaway agents.
+PLANNING_TIMEOUT = 600
+
 
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
@@ -472,7 +516,7 @@ class AutonomousOrchestrator:
                     break
 
             prompt = (
-                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
+                PLANNING_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
@@ -483,7 +527,7 @@ class AutonomousOrchestrator:
             milestone_type = "plan_refined"
         else:
             prompt = (
-                AUTONOMOUS_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
+                PLANNING_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
                 f"## 需求\n{requirements}\n\n"
                 f"## 项目路径\n{wf.get('project_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
@@ -506,6 +550,12 @@ class AutonomousOrchestrator:
             title=f"Plan round {round_num}: {milestone_type.replace('_', ' ')}",
         )
 
+        # Planning phase: restrict to read-only tools + capped timeout
+        planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
+        # Base planning timeout + any user extension (via extend-planning-timeout API)
+        extension = int(wf.get("planning_timeout_extension", 0) or 0)
+        planning_timeout = PLANNING_TIMEOUT + extension
+
         result = self._run_agent(
             wf=wf,
             workflow_id=self._workflow_id,
@@ -516,6 +566,8 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=planning_allowed,
+            timeout=planning_timeout,
         )
 
         self._accumulate_tokens(result)
@@ -534,9 +586,29 @@ class AutonomousOrchestrator:
         )
 
         if not result.success:
-            self._update_workflow(
-                {"status": "failed", "error_message": f"Planning failed: {result.error}"}
-            )
+            if "timed out" in (result.error or ""):
+                # Timeout → allow user to extend instead of hard failure
+                self._update_workflow(
+                    {
+                        "status": "planning_timeout",
+                        "error_message": (
+                            f"Planning timed out after {planning_timeout}s. "
+                            "You can extend the timeout and retry."
+                        ),
+                    }
+                )
+                self._emit(
+                    "planning_timeout",
+                    {
+                        "timeout": planning_timeout,
+                        "tokens_used": result.total_tokens,
+                        "partial_plan": (result.response_text or "")[:500],
+                    },
+                )
+            else:
+                self._update_workflow(
+                    {"status": "failed", "error_message": f"Planning failed: {result.error}"}
+                )
             return
 
         # Post plan as issue comment
@@ -550,7 +622,7 @@ class AutonomousOrchestrator:
 
         # Step 2: Review plan
         review_prompt = (
-            AUTONOMOUS_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
+            PLANNING_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
             f"1. 遗漏的需求\n"
             f"2. 架构风险\n"
             f"3. 实现难度估计\n"
@@ -579,6 +651,8 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=planning_allowed,
+            timeout=planning_timeout,
         )
 
         self._accumulate_tokens(review_result)

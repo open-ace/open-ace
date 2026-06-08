@@ -54,6 +54,7 @@ class _LocalSession:
     session_id: str
     process: subprocess.Popen
     cli_tool: str = "claude-code"
+    allowed_tools: list[str] | None = None
     output_lines: list[str] = field(default_factory=list)
     assistant_text: str = ""
     tool_calls: list[dict] = field(default_factory=list)
@@ -97,6 +98,7 @@ class AutonomousAgentRunner:
         session_type: str = "workflow",
         timeout: int = DEFAULT_TASK_TIMEOUT,
         session_id: str = None,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -154,6 +156,7 @@ class AutonomousAgentRunner:
                     remote_machine_id=remote_machine_id,
                     permission_mode=permission_mode,
                     timeout=timeout,
+                    allowed_tools=allowed_tools,
                 )
             else:
                 result = self._run_local(
@@ -164,6 +167,7 @@ class AutonomousAgentRunner:
                     prompt=prompt,
                     permission_mode=permission_mode,
                     timeout=timeout,
+                    allowed_tools=allowed_tools,
                 )
 
             # Update session record
@@ -200,6 +204,7 @@ class AutonomousAgentRunner:
         prompt: str,
         permission_mode: str,
         timeout: int,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -238,6 +243,7 @@ class AutonomousAgentRunner:
             project_path,
             model,
             permission_mode=permission_mode,
+            allowed_tools=allowed_tools,
         )
         cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
@@ -260,7 +266,12 @@ class AutonomousAgentRunner:
                 error=f"Failed to start process: {e}",
             )
 
-        session = _LocalSession(session_id=session_id, process=process, cli_tool=cli_tool)
+        session = _LocalSession(
+            session_id=session_id,
+            process=process,
+            cli_tool=cli_tool,
+            allowed_tools=allowed_tools,
+        )
         self._local_sessions[session_id] = session
 
         # Start output reader threads
@@ -332,6 +343,7 @@ class AutonomousAgentRunner:
         remote_machine_id: str,
         permission_mode: str,
         timeout: int,
+        allowed_tools: list[str] | None = None,
     ) -> AgentTaskResult:
         """Run an agent task on a remote machine via RemoteSessionManager."""
         if not self.remote_session_manager:
@@ -355,6 +367,7 @@ class AutonomousAgentRunner:
                 cli_tool=cli_tool,
                 model=model,
                 permission_mode=permission_mode,
+                allowed_tools=allowed_tools,
             )
 
             if not result.get("success"):
@@ -513,17 +526,47 @@ class AutonomousAgentRunner:
                         session.completed.set()
 
                     elif msg_type == "control_request":
-                        # Auto-approve permissions in autonomous mode
+                        # Auto-approve permissions in autonomous mode,
+                        # with filtering when allowed_tools is set (Issue #761).
                         req_id = parsed.get("request_id", "")
                         if req_id:
-                            response = {
-                                "type": "control_response",
-                                "response": {
-                                    "request_id": req_id,
-                                    "subtype": "success",
-                                    "response": {"behavior": "allow"},
-                                },
-                            }
+                            request_payload = parsed.get("request", {})
+                            tool_name = request_payload.get("tool_name", "")
+
+                            if (
+                                session.allowed_tools is not None
+                                and tool_name not in session.allowed_tools
+                            ):
+                                # Tool not in allowed list — deny
+                                response = {
+                                    "type": "control_response",
+                                    "response": {
+                                        "request_id": req_id,
+                                        "subtype": "success",
+                                        "response": {
+                                            "behavior": "deny",
+                                            "message": (
+                                                f"Tool '{tool_name}' is not "
+                                                "allowed in planning phase."
+                                            ),
+                                        },
+                                    },
+                                }
+                                logger.warning(
+                                    "Denied tool '%s' for session %s " "(not in allowed list)",
+                                    tool_name,
+                                    session.session_id[:8],
+                                )
+                            else:
+                                # Approve (no restriction, or tool is allowed)
+                                response = {
+                                    "type": "control_response",
+                                    "response": {
+                                        "request_id": req_id,
+                                        "subtype": "success",
+                                        "response": {"behavior": "allow"},
+                                    },
+                                }
                             self._write_stdin(session, json.dumps(response))
 
                 except (json.JSONDecodeError, ValueError):

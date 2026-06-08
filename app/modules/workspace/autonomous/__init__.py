@@ -70,7 +70,8 @@ def get_ddl_statements():
             locked_at TIMESTAMP,
             locked_by TEXT DEFAULT '',
             retry_count INTEGER DEFAULT 0,
-            task_timeout INTEGER
+            task_timeout INTEGER,
+            planning_timeout_extension INTEGER DEFAULT 0
         )
         """,
         """
