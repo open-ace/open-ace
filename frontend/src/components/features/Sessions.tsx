@@ -54,6 +54,7 @@ const statusIcons: Record<string, string> = {
 // Session type badge colors
 const typeColors: Record<string, BadgeVariant> = {
   chat: 'primary',
+  workflow: 'warning',
   agent: 'success',
   terminal: 'info',
 };
@@ -159,6 +160,7 @@ export const Sessions: React.FC = () => {
       { value: '', label: t('allTypes', language) ?? 'All Types' },
       { value: 'chat', label: 'Chat' },
       { value: 'agent', label: 'Agent' },
+      { value: 'workflow', label: 'Workflow' },
       { value: 'terminal', label: 'Terminal' },
     ],
     [language]

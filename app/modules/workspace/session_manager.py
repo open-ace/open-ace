@@ -46,6 +46,7 @@ class SessionType(Enum):
 
     CHAT = "chat"
     AGENT = "agent"
+    WORKFLOW = "workflow"
     TERMINAL = "terminal"
 
 
