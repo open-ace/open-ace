@@ -1014,7 +1014,7 @@ install_docker_redhat() {
     local install_output=""
     local install_success=false
 
-    install_output=$(sudo yum install -y "$packages" 2>&1) && install_success=true || install_success=false
+    install_output=$(sudo yum install -y $packages 2>&1) && install_success=true || install_success=false
 
     if [ "$install_success" = false ]; then
         # Check if it's SSL/network error
@@ -1029,13 +1029,13 @@ install_docker_redhat() {
             sudo yum-config-manager --add-repo "$aliyun_repo"
 
             print_info "重新尝试安装..."
-            if sudo yum install -y --nogpgcheck "$packages"; then
+            if sudo yum install -y --nogpgcheck $packages; then
                 install_success=true
             fi
         else
             # Non-SSL error, try --nogpgcheck
             print_warning "安装失败，尝试跳过 GPG 检查..."
-            if sudo yum install -y --nogpgcheck "$packages"; then
+            if sudo yum install -y --nogpgcheck $packages; then
                 install_success=true
             fi
         fi
