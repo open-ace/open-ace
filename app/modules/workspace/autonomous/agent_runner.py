@@ -180,17 +180,28 @@ class AutonomousAgentRunner:
                     allowed_tools=allowed_tools,
                 )
 
-            # Update session record
-            if self.session_manager and result.success:
+            # Persist session messages to database (Issue #776 Bug 1)
+            if self.session_manager and session_id:
                 try:
+                    self._persist_local_session_messages(session_id, result)
+                except Exception as e:
+                    logger.warning("Failed to persist session messages: %s", e)
+
+            # Update session record
+            if self.session_manager:
+                try:
+                    update_fields = {
+                        "total_tokens": result.total_tokens,
+                        "total_input_tokens": result.total_input_tokens,
+                        "total_output_tokens": result.total_output_tokens,
+                    }
+                    if result.success:
+                        update_fields["status"] = "completed"
+                    else:
+                        update_fields["status"] = "error"
                     self.session_manager.update_session_fields(
                         session_id,
-                        {
-                            "status": "completed",
-                            "total_tokens": result.total_tokens,
-                            "total_input_tokens": result.total_input_tokens,
-                            "total_output_tokens": result.total_output_tokens,
-                        },
+                        update_fields,
                     )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
@@ -460,6 +471,40 @@ class AutonomousAgentRunner:
             self._local_sessions.pop(session_id, None)
 
     # ── Local helpers ──────────────────────────────────────────────
+
+    def _persist_local_session_messages(
+        self, session_id: str, result: AgentTaskResult
+    ) -> None:
+        """Write accumulated assistant text and tool calls to session_messages.
+
+        Called after the agent task finishes, before the session status is
+        updated.  Errors are caught by the caller and do not affect the
+        main workflow.
+        """
+        # Write assistant text as a single assistant message
+        if result.response_text:
+            self.session_manager.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=result.response_text,
+                tokens_used=result.total_output_tokens,
+            )
+
+        # Write tool calls as individual tool messages
+        for tool_call in result.tool_calls:
+            tool_info = tool_call.get("tool", {})
+            tool_name = tool_info.get("name", "unknown")
+            tool_input = tool_info.get("input", {})
+            self.session_manager.add_message(
+                session_id=session_id,
+                role="tool",
+                content=(
+                    json.dumps(tool_input)
+                    if isinstance(tool_input, (dict, list))
+                    else str(tool_input)
+                ),
+                metadata={"tool_name": tool_name},
+            )
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:
         """Send SDK initialize message."""
