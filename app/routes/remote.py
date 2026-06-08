@@ -14,6 +14,7 @@ import ipaddress
 import json
 import logging
 import os
+import threading
 import time
 import urllib.parse
 import uuid
@@ -21,6 +22,8 @@ import uuid
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
+from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
@@ -31,6 +34,14 @@ logger = logging.getLogger(__name__)
 
 MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
+
+# Module-level audit logger instance
+audit_logger = AuditLogger()
+
+# AUTH_FAILURE rate-limiting state: {token_hash_prefix: last_audit_timestamp}
+_auth_failure_lock = threading.Lock()
+_auth_failure_last_audit: dict[str, float] = {}
+_AUTH_FAILURE_RATE_LIMIT_SECONDS = 300  # 5 minutes
 
 _CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli"]
 
@@ -137,6 +148,111 @@ def load_user():
             logger.warning("Failed to validate URL token: %s", e)
 
     return jsonify({"error": "Authentication required"}), 401
+
+
+def _validate_agent_bearer(machine_id: str) -> tuple[str | None, tuple | None]:
+    """Validate the Bearer token in the Authorization header.
+
+    Returns:
+        (token_value, None) on success.
+        (None, error_response) on failure.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None, (jsonify({"error": "Missing Bearer token"}), 401)
+
+    token = auth_header[7:]  # Strip "Bearer " prefix
+    if not token:
+        return None, (jsonify({"error": "Empty Bearer token"}), 401)
+
+    agent_mgr = get_remote_agent_manager()
+    if not agent_mgr.validate_agent_token(token, machine_id):
+        return None, (jsonify({"error": "Invalid or revoked Bearer token"}), 401)
+
+    return token, None
+
+
+def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple | None]:
+    """Check if a machine qualifies for legacy (no-Bearer) auth.
+
+    Legacy machines that were registered before Bearer token enforcement
+    can still authenticate without a Bearer token, but with an expiry
+    deadline and a clear_legacy_mode transition on first Bearer use.
+
+    Returns:
+        (is_legacy, None) if legacy mode applies.
+        (False, error_response) if not legacy and no Bearer provided.
+        (False, None) if Bearer is present (caller should validate normally).
+    """
+    agent_mgr = get_remote_agent_manager()
+
+    # If an Authorization header is present, clear legacy mode and use Bearer
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        # If this was a legacy machine, clear the flag
+        if agent_mgr.is_legacy_machine(machine_id):
+            agent_mgr.clear_legacy_mode(machine_id)
+            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+        return False, None
+
+    # No Bearer header — check if legacy mode is allowed
+    if not agent_mgr.is_legacy_machine(machine_id):
+        return False, (jsonify({"error": "Missing Bearer token"}), 401)
+
+    # Legacy machine — check deadline (P2-1: 90-day expiry)
+    machine = agent_mgr.get_machine(machine_id)
+    if machine and machine.get("created_at"):
+        try:
+            from datetime import datetime, timezone
+
+            created_at = machine["created_at"]
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            if created_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=None)
+
+            age_days = (datetime.now(timezone.utc).replace(tzinfo=None) - created_at).days
+            deadline = agent_mgr.LEGACY_MODE_DEADLINE_DAYS
+            if age_days > deadline:
+                return False, (
+                    jsonify({"error": "Legacy mode expired. Please re-register the agent."}),
+                    401,
+                )
+        except Exception:
+            pass  # If date parsing fails, allow legacy
+
+    logger.warning(
+        "Legacy auth (no Bearer) accepted for machine %s — deadline approaching",
+        machine_id[:8],
+    )
+    return True, None
+
+
+def _audit_auth_failure(token_or_prefix: str, reason: str, client_ip: str) -> None:
+    """Record an AGENT_AUTH_FAILURE audit event with rate limiting.
+
+    Only writes one audit log per token_hash_prefix per 5-minute window.
+    """
+    prefix = token_hash_prefix(token_or_prefix) if len(token_or_prefix) > 16 else token_or_prefix
+
+    now = time.time()
+    with _auth_failure_lock:
+        last = _auth_failure_last_audit.get(prefix, 0)
+        if now - last < _AUTH_FAILURE_RATE_LIMIT_SECONDS:
+            return  # Rate-limited — skip audit write
+        _auth_failure_last_audit[prefix] = now
+
+    audit_logger.log(
+        action=AuditAction.AGENT_AUTH_FAILURE.value,
+        severity="warning",
+        resource_type="agent_token",
+        details={
+            "token_hash_prefix": prefix,
+            "reason": reason,
+            "client_ip": client_ip,
+        },
+        success=False,
+    )
 
 
 def _require_machine_admin(machine_id):
@@ -310,6 +426,83 @@ def revoke_user(machine_id, user_id):
     if success:
         return jsonify({"success": True, "message": "User access revoked"})
     return jsonify({"error": "Assignment not found"}), 404
+
+
+@remote_bp.route("/machines/<machine_id>/token/rotate", methods=["POST"])
+@admin_required
+def rotate_machine_token(machine_id):
+    """Rotate the agent token for a machine. System admin only.
+
+    Revokes all existing tokens and issues a new one. If the existing
+    tokens were already revoked (i.e., the machine was previously
+    revoked and is being re-activated), this is logged as an unrevoke.
+    """
+    agent_mgr = get_remote_agent_manager()
+
+    result = agent_mgr.rotate_agent_token(
+        machine_id=machine_id,
+        rotated_by=g.user["id"],
+    )
+
+    if result is None:
+        return jsonify({"error": "Machine not found"}), 404
+
+    new_token = result["new_token"]
+
+    # AGENT_TOKEN_ROTATE audit event
+    details = {
+        "machine_id": machine_id,
+        "rotated_by": g.user["id"],
+    }
+    if result.get("unrevoked"):
+        details["unrevoke"] = True
+
+    audit_logger.log_action(
+        AuditAction.AGENT_TOKEN_ROTATE,
+        user_id=g.user["id"],
+        username=g.user.get("username"),
+        severity="info",
+        resource_type="remote_machine",
+        resource_id=machine_id,
+        details=details,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "agent_token": new_token,
+            "message": "Agent token rotated. Update the agent configuration with the new token.",
+        }
+    )
+
+
+@remote_bp.route("/machines/<machine_id>/token/revoke", methods=["POST"])
+@admin_required
+def revoke_machine_token(machine_id):
+    """Revoke all agent tokens for a machine. System admin only."""
+    agent_mgr = get_remote_agent_manager()
+
+    success = agent_mgr.revoke_agent_token(
+        machine_id=machine_id,
+        revoked_by=g.user["id"],
+    )
+
+    if success:
+        # AGENT_TOKEN_REVOKE audit event
+        audit_logger.log_action(
+            AuditAction.AGENT_TOKEN_REVOKE,
+            user_id=g.user["id"],
+            username=g.user.get("username"),
+            severity="warning",
+            resource_type="remote_machine",
+            resource_id=machine_id,
+            details={
+                "machine_id": machine_id,
+                "revoked_by": g.user["id"],
+            },
+        )
+        return jsonify({"success": True, "message": "Agent token revoked"})
+    return jsonify({"error": "No active tokens found for this machine"}), 404
 
 
 # ==================== Machine User Assignments ====================
@@ -818,6 +1011,20 @@ def agent_register():
     if result:
         if result.get("error") == "hostname_conflict":
             return jsonify({"error": result["message"]}), 409
+        # AGENT_REGISTER audit event
+        audit_logger.log_action(
+            AuditAction.AGENT_REGISTER,
+            severity="info",
+            resource_type="remote_machine",
+            resource_id=machine_id,
+            details={
+                "machine_id": machine_id,
+                "machine_name": machine_name,
+                "hostname": hostname,
+                "tenant_id": result.get("tenant_id"),
+            },
+            ip_address=ip_address,
+        )
         return jsonify({"success": True, "machine": result})
     return jsonify({"error": "Invalid or expired registration token"}), 401
 
@@ -874,6 +1081,49 @@ def agent_message():
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
 
+    # ===== Bearer token authentication =====
+    # All message types except "register" require a valid Bearer token
+    # (or legacy mode fallback for pre-existing machines).
+    if msg_type != "register":
+        # First, check if the machine exists
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Unknown machine_id"}), 404
+
+        # Check for legacy fallback (no Bearer header, machine in legacy_mode)
+        is_legacy, legacy_error = _check_legacy_fallback(machine_id)
+        if legacy_error:
+            # Not legacy and no Bearer → try extracting for audit
+            auth_header = request.headers.get("Authorization", "")
+            client_ip = get_client_ip_from_request()
+            if auth_header.startswith("Bearer "):
+                failed_token = auth_header[7:]
+                _audit_auth_failure(failed_token, "invalid_or_revoked", client_ip)
+            return legacy_error
+
+        if not is_legacy:
+            # Normal Bearer token validation
+            bearer_token, bearer_error = _validate_agent_bearer(machine_id)
+            if bearer_error:
+                client_ip = get_client_ip_from_request()
+                auth_header = request.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    _audit_auth_failure(
+                        auth_header[7:],
+                        bearer_error[0].get_json().get("error", "unknown"),
+                        client_ip,
+                    )
+                return bearer_error
+
+        # Check for offline→online reconnect (AGENT_RECONNECT audit)
+        if machine.get("status") == "offline":
+            g._did_reconnect = True
+            g._previous_status = "offline"
+        else:
+            g._did_reconnect = False
+    else:
+        g._did_reconnect = False
+
     if msg_type == "register":
         # Validate machine exists in DB before allowing registration
         machine = agent_mgr.get_machine(machine_id)
@@ -900,6 +1150,18 @@ def agent_message():
         active_sessions = data.get("active_sessions", 0)
         capabilities = data.get("capabilities", {})
         agent_mgr.process_heartbeat(machine_id, status, active_sessions, capabilities=capabilities)
+        # AGENT_RECONNECT audit: if machine was offline, log the reconnection
+        if getattr(g, "_did_reconnect", False):
+            audit_logger.log_action(
+                AuditAction.AGENT_RECONNECT,
+                severity="info",
+                resource_type="remote_machine",
+                resource_id=machine_id,
+                details={
+                    "machine_id": machine_id,
+                    "previous_status": getattr(g, "_previous_status", "unknown"),
+                },
+            )
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "heartbeat_ack", "pending_commands": pending})
 
