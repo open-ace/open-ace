@@ -97,12 +97,16 @@ def api_validate_github_token():
     """
     data = request.get_json(silent=True) or {}
 
-    # Explicit field: validate the already-saved token from DB
+    # Determine token: either from DB ("source": "saved") or from request body
     if data.get("source") == "saved":
         env = repo.get_ai_github_env()
         if env is None:
             return jsonify({"valid": False, "error": "No token configured"})
         token = env["GH_TOKEN"]
+    else:
+        token = data.get("token", "").strip()
+        if not token:
+            return jsonify({"valid": False, "error": "No token provided"}), 400
 
     try:
         result = subprocess.run(

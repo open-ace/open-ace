@@ -106,11 +106,7 @@ export const AiAgentSettings: React.FC = () => {
   // Test a new token entered by the user
   const handleTestNewToken = async () => {
     if (!hasNewToken) {
-      toast.warning(
-        language === 'zh'
-          ? '请先输入新的令牌再测试'
-          : 'Please enter a new token before testing'
-      );
+      toast.warning(t('aiGithubEnterTokenFirst', language));
       return;
     }
 
@@ -173,9 +169,7 @@ export const AiAgentSettings: React.FC = () => {
           <i className="bi bi-info-circle-fill me-2" />
           <span>
             <i className="bi bi-github me-1" />
-            {language === 'zh'
-              ? '已配置 AI GitHub 账户'
-              : 'AI GitHub account configured'}
+            {t('aiGithubAccountConfigured', language)}
             {' — '}
             <code>{settings?.ai_github_token}</code>
           </span>
@@ -230,7 +224,7 @@ export const AiAgentSettings: React.FC = () => {
                 loading={isValidating && !hasNewToken}
               >
                 <i className="bi bi-arrow-repeat me-1" />
-                {language === 'zh' ? '测试已保存的令牌' : 'Test saved token'}
+                {t('aiGithubTestSavedToken', language)}
               </Button>
             )}
             {validationResult && (

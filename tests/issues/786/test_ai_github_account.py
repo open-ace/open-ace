@@ -335,3 +335,193 @@ class TestGitHubOpsEnvInjection:
 
         call_kwargs = mock_run.call_args
         assert "env" not in call_kwargs[1]
+
+
+# ── invalidate_ai_github_env_cache ──────────────────────────────────
+
+
+class TestInvalidateCache:
+    """Verify cache invalidation function works correctly."""
+
+    def test_invalidate_resets_timestamp(self):
+        from app.utils import config
+
+        config._ai_github_env_ts = 999.0
+        config._ai_github_env_data = {"GH_TOKEN": "old"}
+
+        config.invalidate_ai_github_env_cache()
+
+        assert config._ai_github_env_ts == 0.0
+
+    def test_invalidate_forces_next_read(self):
+        from app.utils import config
+
+        config._ai_github_env_ts = 999.0
+        config._ai_github_env_data = {"GH_TOKEN": "old"}
+
+        config.invalidate_ai_github_env_cache()
+
+        with patch(
+            "app.repositories.ai_agent_settings_repo.AiAgentSettingsRepo.get_ai_github_env",
+            return_value={"GH_TOKEN": "new"},
+        ):
+            result = config.get_ai_github_env()
+            assert result == {"GH_TOKEN": "new"}
+
+
+# ── API route tests ─────────────────────────────────────────────────
+
+from flask import Flask
+from flask import g as flask_g
+
+
+def _make_app():
+    """Create a minimal Flask app for route testing."""
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    return app
+
+
+def _get_json(resp):
+    """Extract JSON from Flask route response (handles tuple returns)."""
+    if isinstance(resp, tuple):
+        return resp[0].get_json()
+    return json.loads(resp.data)
+
+
+def _unwrap(func):
+    """Bypass @admin_required decorator to call route function directly."""
+    return getattr(func, "__wrapped__", func)
+
+
+class TestApiGetSettings:
+    """Verify GET /api/ai-agent/settings returns masked token."""
+
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_returns_masked_token(self, mock_repo):
+        from app.routes.ai_agent_settings import api_get_ai_agent_settings
+
+        mock_repo.get_ai_agent_settings.return_value = {
+            "ai_github_token": "ghp_****7890",
+            "ai_github_author_name": "Bot",
+            "ai_github_author_email": "bot@test.com",
+        }
+
+        app = _make_app()
+        with app.test_request_context():
+            with app.app_context():
+                resp = _unwrap(api_get_ai_agent_settings)()
+                data = _get_json(resp)
+                assert data["ai_github_token"] == "ghp_****7890"
+                assert data["ai_github_author_name"] == "Bot"
+
+
+class TestApiUpdateSettings:
+    """Verify PUT /api/ai-agent/settings filters keys and invalidates cache."""
+
+    @patch("app.routes.ai_agent_settings.audit_logger")
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_filters_unknown_keys(self, mock_repo, mock_audit):
+        from app.routes.ai_agent_settings import api_update_ai_agent_settings
+
+        mock_repo.update_ai_agent_settings.return_value = True
+
+        app = _make_app()
+        with app.test_request_context(json={"evil_key": "value", "ai_github_author_name": "Bot"}):
+            with app.app_context():
+                flask_g.user_id = 1
+                flask_g.user = {"username": "admin"}
+                resp = _unwrap(api_update_ai_agent_settings)()
+                assert _get_json(resp).get("success") is True
+                # Only ai_github_author_name should be passed to repo
+                call_args = mock_repo.update_ai_agent_settings.call_args[0][0]
+                assert "evil_key" not in call_args
+                assert "ai_github_author_name" in call_args
+
+    @patch("app.routes.ai_agent_settings.audit_logger")
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_skips_masked_token(self, mock_repo, mock_audit):
+        from app.routes.ai_agent_settings import api_update_ai_agent_settings
+
+        mock_repo.update_ai_agent_settings.return_value = True
+
+        app = _make_app()
+        with app.test_request_context(
+            json={"ai_github_token": "ghp_****7890", "ai_github_author_name": "Bot"}
+        ):
+            with app.app_context():
+                flask_g.user_id = 1
+                flask_g.user = {"username": "admin"}
+                resp = _unwrap(api_update_ai_agent_settings)()
+                assert _get_json(resp).get("success") is True
+                call_args = mock_repo.update_ai_agent_settings.call_args[0][0]
+                assert "ai_github_token" not in call_args
+                assert "ai_github_author_name" in call_args
+
+
+class TestApiValidateToken:
+    """Verify POST /api/ai-agent/settings/validate-github-token."""
+
+    def test_rejects_empty_token(self):
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        app = _make_app()
+        with app.test_request_context(json={"token": ""}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                data = _get_json(resp)
+                assert data["valid"] is False
+
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_saved_source_reads_from_db(self, mock_repo):
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        mock_repo.get_ai_github_env.return_value = {"GH_TOKEN": "ghp_saved_token"}
+
+        with patch("app.routes.ai_agent_settings.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ai-bot\n", stderr="")
+            app = _make_app()
+            with app.test_request_context(json={"source": "saved"}):
+                with app.app_context():
+                    resp = _unwrap(api_validate_github_token)()
+                    data = _get_json(resp)
+                    assert data["valid"] is True
+                    assert data["username"] == "ai-bot"
+                    # Verify it used the DB token, not request body
+                    call_env = mock_run.call_args[1]["env"]
+                    assert call_env["GH_TOKEN"] == "ghp_saved_token"
+
+    @patch("app.routes.ai_agent_settings.repo")
+    def test_saved_source_no_token_configured(self, mock_repo):
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        mock_repo.get_ai_github_env.return_value = None
+
+        app = _make_app()
+        with app.test_request_context(json={"source": "saved"}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                data = _get_json(resp)
+                assert data["valid"] is False
+                assert "No token configured" in data["error"]
+
+    @patch("app.routes.ai_agent_settings.subprocess.run")
+    def test_validates_new_token(self, mock_run):
+        from app.routes.ai_agent_settings import api_validate_github_token
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="test-user\n", stderr="")
+
+        app = _make_app()
+        with app.test_request_context(json={"token": "ghp_new_token"}):
+            with app.app_context():
+                resp = _unwrap(api_validate_github_token)()
+                data = _get_json(resp)
+                assert data["valid"] is True
+                assert data["username"] == "test-user"
+                call_env = mock_run.call_args[1]["env"]
+                assert call_env["GH_TOKEN"] == "ghp_new_token"
+            data = json.loads(resp.data)
+            assert data["valid"] is True
+            assert data["username"] == "test-user"
+            call_env = mock_run.call_args[1]["env"]
+            assert call_env["GH_TOKEN"] == "ghp_new_token"

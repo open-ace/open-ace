@@ -767,6 +767,9 @@ const translations: Record<Language, Translations> = {
     aiGithubTestSuccess: 'Token valid. Connected as: {username}',
     aiGithubTestFailed: 'Invalid token: {error}',
     aiGithubTokenNotConfigured: 'No token configured — using server default GitHub account.',
+    aiGithubAccountConfigured: 'AI GitHub account configured',
+    aiGithubTestSavedToken: 'Test saved token',
+    aiGithubEnterTokenFirst: 'Please enter a new token before testing',
     generateToken: 'Generate Token',
     registrationToken: 'Registration Token',
     deregister: 'Deregister',
@@ -1737,6 +1740,9 @@ const translations: Record<Language, Translations> = {
     aiGithubTestSuccess: '令牌有效。已连接为：{username}',
     aiGithubTestFailed: '令牌无效：{error}',
     aiGithubTokenNotConfigured: '未配置令牌 — 使用服务器默认 GitHub 账户。',
+    aiGithubAccountConfigured: '已配置 AI GitHub 账户',
+    aiGithubTestSavedToken: '测试已保存的令牌',
+    aiGithubEnterTokenFirst: '请先输入新的令牌再测试',
     generateToken: '生成注册令牌',
     registrationToken: '注册令牌',
     deregister: '注销',
@@ -2127,6 +2133,9 @@ const translations: Record<Language, Translations> = {
     aiGithubTestSuccess: 'トークン有効。接続先: {username}',
     aiGithubTestFailed: '無効なトークン: {error}',
     aiGithubTokenNotConfigured: 'トークン未設定 — サーバーのデフォルトGitHubアカウントを使用しています。',
+    aiGithubAccountConfigured: 'AI GitHubアカウント設定済み',
+    aiGithubTestSavedToken: '保存済みトークンをテスト',
+    aiGithubEnterTokenFirst: 'テストする前に新しいトークンを入力してください',
 
     // Quota Management
     quotaUsage: 'クォータ使用量',
@@ -2792,6 +2801,9 @@ const translations: Record<Language, Translations> = {
     aiGithubTestSuccess: '토큰 유효. 연결됨: {username}',
     aiGithubTestFailed: '유효하지 않은 토큰: {error}',
     aiGithubTokenNotConfigured: '토큰 미설정 — 서버 기본 GitHub 계정을 사용 중입니다.',
+    aiGithubAccountConfigured: 'AI GitHub 계정 구성됨',
+    aiGithubTestSavedToken: '저장된 토큰 테스트',
+    aiGithubEnterTokenFirst: '테스트 전 새 토큰을 입력하세요',
 
     // Quota Management
     quotaUsage: '할당량 사용',
