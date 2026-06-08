@@ -220,11 +220,11 @@ export const AiAgentSettings: React.FC = () => {
                 {validationResult.valid
                   ? t('aiGithubTestSuccess', language).replace(
                       '{username}',
-                      validationResult.username || ''
+                      validationResult.username ?? ''
                     )
                   : t('aiGithubTestFailed', language).replace(
                       '{error}',
-                      validationResult.error || ''
+                      validationResult.error ?? ''
                     )}
               </div>
             )}
