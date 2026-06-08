@@ -33,13 +33,22 @@ const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: s
 
 /** Shared active status set — used by both WorkflowList and WorkflowTimeline */
 export const ACTIVE_WORKFLOW_STATUSES = [
-  'pending', 'preparing', 'planning', 'developing',
-  'pr_review', 'reporting', 'waiting', 'merging',
+  'pending',
+  'preparing',
+  'planning',
+  'developing',
+  'pr_review',
+  'reporting',
+  'waiting',
+  'merging',
 ];
 
 const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
-  { key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused', labelKey: 'autoFilterActive' },
+  {
+    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused',
+    labelKey: 'autoFilterActive',
+  },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
   { key: 'failed', labelKey: 'autoFilterFailed' },
 ];
@@ -112,22 +121,36 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
               >
                 <div className="flex-grow-1 min-width-0">
                   <div className="fw-semibold text-truncate" style={{ fontSize: '0.875rem' }}>
-                    {workflow.title || workflow.requirements_text?.slice(0, 50) || `Workflow ${workflow.workflow_id.slice(0, 8)}`}
+                    {workflow.title ||
+                      workflow.requirements_text?.slice(0, 50) ||
+                      `Workflow ${workflow.workflow_id.slice(0, 8)}`}
                   </div>
                   <div className="d-flex align-items-center gap-1 mt-1">
-                    <Badge variant={statusCfg.variant as 'secondary' | 'info' | 'primary' | 'warning' | 'success' | 'danger'}>
+                    <Badge
+                      variant={
+                        statusCfg.variant as
+                          | 'secondary'
+                          | 'info'
+                          | 'primary'
+                          | 'warning'
+                          | 'success'
+                          | 'danger'
+                      }
+                    >
                       <i className={`bi ${statusCfg.icon} me-1`}></i>
                       {t(statusCfg.labelKey, language)}
                     </Badge>
-                    {workflow.dev_round > 1 && (
-                      <Badge variant="light">R{workflow.dev_round}</Badge>
-                    )}
+                    {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
                   </div>
                   <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
-                    <i className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}></i>
+                    <i
+                      className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
+                    ></i>
                     {workflow.cli_tool}
                     {workflow.created_at && (
-                      <span className="ms-2">{new Date(workflow.created_at).toLocaleDateString()}</span>
+                      <span className="ms-2">
+                        {new Date(workflow.created_at).toLocaleDateString()}
+                      </span>
                     )}
                   </div>
                 </div>

@@ -38,24 +38,30 @@ export const AutonomousDev: React.FC = () => {
   }, []);
 
   const { data: workflowData, isLoading: workflowLoading } = useWorkflow(
-    selectedWorkflowId || '',
+    selectedWorkflowId ?? '',
     !!selectedWorkflowId
   );
 
-  useWorkflowEvents(selectedWorkflowId || '', !!selectedWorkflowId);
+  useWorkflowEvents(selectedWorkflowId ?? '', !!selectedWorkflowId);
 
-  const selectedWorkflow = workflowData?.workflow || null;
+  const selectedWorkflow = workflowData?.workflow ?? null;
 
-  const handleSelectWorkflow = useCallback((workflow: AutonomousWorkflow) => {
-    setSelectedWorkflowId(workflow.workflow_id);
-    updateUrl(workflow.workflow_id);
-  }, [updateUrl]);
+  const handleSelectWorkflow = useCallback(
+    (workflow: AutonomousWorkflow) => {
+      setSelectedWorkflowId(workflow.workflow_id);
+      updateUrl(workflow.workflow_id);
+    },
+    [updateUrl]
+  );
 
-  const handleWorkflowCreated = useCallback((workflow: AutonomousWorkflow) => {
-    setSelectedWorkflowId(workflow.workflow_id);
-    updateUrl(workflow.workflow_id);
-    setShowNewModal(false);
-  }, [updateUrl]);
+  const handleWorkflowCreated = useCallback(
+    (workflow: AutonomousWorkflow) => {
+      setSelectedWorkflowId(workflow.workflow_id);
+      updateUrl(workflow.workflow_id);
+      setShowNewModal(false);
+    },
+    [updateUrl]
+  );
 
   return (
     <div className="d-flex h-100">
@@ -72,10 +78,7 @@ export const AutonomousDev: React.FC = () => {
           </Button>
         </div>
         <div className="flex-grow-1 overflow-auto">
-          <AutonomousWorkflowList
-            selectedId={selectedWorkflowId}
-            onSelect={handleSelectWorkflow}
-          />
+          <AutonomousWorkflowList selectedId={selectedWorkflowId} onSelect={handleSelectWorkflow} />
         </div>
       </div>
 

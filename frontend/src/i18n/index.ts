@@ -347,8 +347,10 @@ const translations: Record<Language, Translations> = {
     restoredSession: 'Restored Session',
     // Issue #669: Session terminated recreation
     sessionTerminated: 'Session Process Terminated',
-    sessionTerminatedCanResume: 'Detected recoverable conversation history. Would you like to try resuming context?',
-    sessionTerminatedNoResume: 'Session process has terminated. Please create a new session to continue.',
+    sessionTerminatedCanResume:
+      'Detected recoverable conversation history. Would you like to try resuming context?',
+    sessionTerminatedNoResume:
+      'Session process has terminated. Please create a new session to continue.',
     createNewSession: 'Create New Session',
     tryResumeContext: 'Try Resume',
     today: 'Today',
