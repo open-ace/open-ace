@@ -28,6 +28,7 @@ interface ContextMenuState {
   targetElement: HTMLElement | null;
   linkUrl: string | null;
   selectedText: string | null;
+  navItem: { label: string; path: string } | null;
 }
 
 interface ContextMenuContextType {
@@ -93,6 +94,32 @@ const NewTabIcon = () => (
   </svg>
 );
 
+const BackIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+const ForwardIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+const SelectAllIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <path d="M7 7h10M7 12h10M7 17h10" />
+  </svg>
+);
+
+const NavigationIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <polyline points="9 22 9 12 15 12 15 22" />
+  </svg>
+);
+
 /**
  * Copy text to clipboard with error handling and fallback
  */
@@ -140,6 +167,90 @@ export const shouldUseNativeMenu = (target: HTMLElement): boolean => {
 };
 
 /**
+ * Detect if element is a navigation item (sidebar/nav buttons)
+ * Returns navigation path info for context menu
+ */
+const detectNavItem = (target: HTMLElement): { label: string; path: string } | null => {
+  // Check for navigation buttons with various class patterns
+  const navPatterns = [
+    'work-nav-item',
+    'nav-item',
+    'sidebar-item',
+    'menu-item',
+  ];
+
+  for (const pattern of navPatterns) {
+    const navButton = target.closest(`[class*="${pattern}"]`);
+    if (navButton) {
+      // Extract label from the button's text content or title
+      const spanElement = navButton.querySelector('span');
+      const label = spanElement?.textContent?.trim() || 
+                   navButton.getAttribute('title') || 
+                   navButton.textContent?.trim() || '';
+      
+      // Try to get path from various sources
+      const href = navButton.getAttribute('href') || 
+                  navButton.getAttribute('data-href') ||
+                  navButton.getAttribute('data-path');
+      
+      if (href) {
+        return { label, path: href };
+      }
+
+      // For internal navigation buttons, generate pseudo-link
+      const navId = navButton.getAttribute('data-id') ||
+                   navButton.getAttribute('data-section') ||
+                   navButton.getAttribute('data-nav-id') ||
+                   navButton.className.match(/(?:work-nav-item|nav-item|sidebar-item)[^"]*active[^"]*/)?.[0];
+      
+      if (navId) {
+        return { label, path: `#nav-${navId}` };
+      }
+
+      // If we have a label but no explicit path, still return as navigation item
+      if (label) {
+        return { label, path: '' };
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Detect if element is a link (anchor tag or link-like element)
+ */
+const detectLinkUrl = (target: HTMLElement): string | null => {
+  // Check native <a> tag
+  const anchor = target.closest('a');
+  if (anchor?.href) {
+    return anchor.href;
+  }
+
+  // Check for elements with href attribute (link-like buttons)
+  const linkElement = target.closest('[href]');
+  if (linkElement && linkElement.getAttribute('href')) {
+    const href = linkElement.getAttribute('href')!;
+    try {
+      return new URL(href, window.location.origin).href;
+    } catch {
+      return href;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Detect selected text with improved reliability
+ */
+const detectSelectedText = (): string | null => {
+  const selection = window.getSelection();
+  const text = selection?.toString()?.trim();
+  return text && text.length > 0 ? text : null;
+};
+
+/**
  * ContextMenuProvider - Provides global context menu state
  */
 export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -150,14 +261,16 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
     targetElement: null,
     linkUrl: null,
     selectedText: null,
+    navItem: null,
   });
 
   const { success, error, ToastContainer } = useToast();
 
   const showMenu = useCallback((x: number, y: number, target: HTMLElement) => {
-    // Detect context
-    const linkUrl = target.closest('a')?.href ?? null;
-    const selectedText = window.getSelection()?.toString() ?? null;
+    // Detect context using improved detection functions
+    const linkUrl = detectLinkUrl(target);
+    const selectedText = detectSelectedText();
+    const navItem = detectNavItem(target);
 
     setState({
       isOpen: true,
@@ -165,7 +278,8 @@ export const ContextMenuProvider: React.FC<{ children: React.ReactNode }> = ({ c
       y,
       targetElement: target,
       linkUrl,
-      selectedText: selectedText && selectedText.length > 0 ? selectedText : null,
+      selectedText,
+      navItem: navItem && !linkUrl ? navItem : null, // Only show navItem if not a real link
     });
   }, []);
 
@@ -276,6 +390,8 @@ const ContextMenuMenu: React.FC = () => {
   }, [state.x, state.y]);
 
   // Build menu items based on context
+  const hasSpecificContext = state.linkUrl || state.selectedText || state.navItem;
+  
   const menuItems: MenuItem[] = [
     // Link context items
     {
@@ -313,6 +429,45 @@ const ContextMenuMenu: React.FC = () => {
       divider: true,
       visible: !!state.linkUrl,
     },
+    
+    // Navigation item context
+    {
+      id: 'open-nav-new-tab',
+      label: t('openNavItemInNewTab', language),
+      icon: <NewTabIcon />,
+      visible: !!state.navItem && !!state.navItem.path,
+      onClick: async () => {
+        if (state.navItem?.path) {
+          window.open(state.navItem.path, '_blank', 'noopener,noreferrer');
+        }
+        hideMenu();
+      },
+    },
+    {
+      id: 'copy-nav-path',
+      label: t('copyNavPath', language),
+      icon: <NavigationIcon />,
+      visible: !!state.navItem,
+      onClick: async () => {
+        const textToCopy = state.navItem?.path || state.navItem?.label || '';
+        if (textToCopy) {
+          const success = await copyToClipboard(textToCopy);
+          if (success) {
+            showToast.success(t('copySuccess', language));
+          } else {
+            showToast.error(t('copyFailed', language));
+          }
+        }
+        hideMenu();
+      },
+    },
+    // Divider for nav items
+    {
+      id: 'divider-nav',
+      divider: true,
+      visible: !!state.navItem,
+    },
+    
     // Text selection items
     {
       id: 'copy-text',
@@ -335,16 +490,54 @@ const ContextMenuMenu: React.FC = () => {
     {
       id: 'divider-text',
       divider: true,
-      visible: !!state.selectedText,
+      visible: !!state.selectedText && !hasSpecificContext,
     },
-    // General items (always visible when no specific context)
+    
+    // General items (show when no specific context OR always available)
+    {
+      id: 'back',
+      label: t('goBack', language),
+      icon: <BackIcon />,
+      visible: !hasSpecificContext,
+      disabled: !window.history.state || window.history.length <= 1,
+      onClick: () => {
+        window.history.back();
+        hideMenu();
+      },
+    },
+    {
+      id: 'forward',
+      label: t('goForward', language),
+      icon: <ForwardIcon />,
+      visible: !hasSpecificContext,
+      disabled: window.history.length <= 1,
+      onClick: () => {
+        window.history.forward();
+        hideMenu();
+      },
+    },
     {
       id: 'refresh',
       label: t('refresh', language),
       icon: <RefreshIcon />,
-      visible: !state.linkUrl && !state.selectedText,
+      visible: !hasSpecificContext,
       onClick: () => {
         window.location.reload();
+        hideMenu();
+      },
+    },
+    {
+      id: 'divider-general',
+      divider: true,
+      visible: !hasSpecificContext,
+    },
+    {
+      id: 'select-all',
+      label: t('selectAll', language),
+      icon: <SelectAllIcon />,
+      visible: true, // Always available
+      onClick: () => {
+        document.execCommand('selectAll');
         hideMenu();
       },
     },

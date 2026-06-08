@@ -48,6 +48,11 @@ const translations: Record<Language, Translations> = {
     openInNewTab: 'Open in New Tab',
     copyLink: 'Copy Link',
     copySelectedText: 'Copy Selected Text',
+    goBack: 'Back',
+    goForward: 'Forward',
+    selectAll: 'Select All',
+    openNavItemInNewTab: 'Open Navigation in New Tab',
+    copyNavPath: 'Copy Navigation Path',
 
     // Navigation
     navigation: 'Navigation',
@@ -1008,6 +1013,11 @@ const translations: Record<Language, Translations> = {
     openInNewTab: '新标签页打开',
     copyLink: '复制链接',
     copySelectedText: '复制选中文本',
+    goBack: '后退',
+    goForward: '前进',
+    selectAll: '全选',
+    openNavItemInNewTab: '在新标签页打开导航',
+    copyNavPath: '复制导航路径',
 
     // Navigation
     navigation: '导航',
@@ -1953,6 +1963,11 @@ const translations: Record<Language, Translations> = {
     openInNewTab: '新規タブで開く',
     copyLink: 'リンクをコピー',
     copySelectedText: '選択テキストをコピー',
+    goBack: '戻る',
+    goForward: '進む',
+    selectAll: 'すべて選択',
+    openNavItemInNewTab: '新規タブでナビを開く',
+    copyNavPath: 'ナビパスをコピー',
 
     // Navigation
     navigation: 'ナビゲーション',
@@ -2602,6 +2617,11 @@ const translations: Record<Language, Translations> = {
     openInNewTab: '새 탭에서 열기',
     copyLink: '링크 복사',
     copySelectedText: '선택한 텍스트 복사',
+    goBack: '뒤로',
+    goForward: '앞으로',
+    selectAll: '모두 선택',
+    openNavItemInNewTab: '새 탭에서 탐색 열기',
+    copyNavPath: '탐색 경로 복사',
 
     // Navigation
     navigation: '네비게이션',
