@@ -552,10 +552,9 @@ class AutonomousOrchestrator:
 
         # Planning phase: restrict to read-only tools + capped timeout
         planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
-        planning_timeout = min(
-            int(wf.get("task_timeout", 3600) or 3600),
-            PLANNING_TIMEOUT,
-        )
+        # Base planning timeout + any user extension (via extend-planning-timeout API)
+        extension = int(wf.get("planning_timeout_extension", 0) or 0)
+        planning_timeout = PLANNING_TIMEOUT + extension
 
         result = self._run_agent(
             wf=wf,

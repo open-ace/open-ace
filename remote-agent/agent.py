@@ -535,6 +535,7 @@ class RemoteAgent:
         proxy_token = data.get("proxy_token", "")
         model = data.get("model")
         permission_mode = data.get("permission_mode")
+        allowed_tools = data.get("allowed_tools")
         cli_settings = data.get("cli_settings", {})
 
         logger.info(
@@ -557,6 +558,7 @@ class RemoteAgent:
             proxy_token=proxy_token,
             model=model,
             permission_mode=permission_mode,
+            allowed_tools=allowed_tools,
         )
 
         if result["success"]:

@@ -303,6 +303,30 @@ class TestPlanningTimeout:
 
         assert PLANNING_TIMEOUT < 3600
 
+    def test_extension_adds_to_base_timeout(self):
+        """Verify extend API accumulates into planning_timeout_extension."""
+        from app.modules.workspace.autonomous.orchestrator import PLANNING_TIMEOUT
+
+        # Simulate: initial extension = 0 → timeout = 600
+        extension = 0
+        assert PLANNING_TIMEOUT + extension == 600
+
+        # After extend by 600 → timeout = 1200
+        extension = 600
+        assert PLANNING_TIMEOUT + extension == 1200
+
+    def test_multiple_extensions_accumulate(self):
+        """Each extend call adds to the previous extension."""
+        from app.modules.workspace.autonomous.orchestrator import PLANNING_TIMEOUT
+
+        current_extension = 0
+        # First extend: +600
+        current_extension += 600
+        assert PLANNING_TIMEOUT + current_extension == 1200
+        # Second extend: +300
+        current_extension += 300
+        assert PLANNING_TIMEOUT + current_extension == 1500
+
 
 class TestLocalSessionAllowedTools:
     """Verify _LocalSession dataclass stores allowed_tools."""

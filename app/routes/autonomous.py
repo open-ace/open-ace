@@ -357,9 +357,10 @@ def extend_planning_timeout(workflow_id):
     # Clamp to 60s–3600s
     additional_seconds = max(60, min(additional_seconds, 3600))
 
-    # Increase task_timeout and resume to active status
-    current_timeout = workflow.get("task_timeout", 3600) or 3600
-    new_timeout = current_timeout + additional_seconds
+    # Accumulate extension in planning_timeout_extension field.
+    # Orchestrator computes actual timeout as PLANNING_TIMEOUT + extension.
+    current_extension = int(workflow.get("planning_timeout_extension", 0) or 0)
+    new_extension = current_extension + additional_seconds
     phase = workflow.get("current_phase", "planning")
     status = PHASE_TO_STATUS.get(phase, "planning")
 
@@ -367,7 +368,7 @@ def extend_planning_timeout(workflow_id):
         workflow_id,
         {
             "status": status,
-            "task_timeout": new_timeout,
+            "planning_timeout_extension": new_extension,
             "error_message": "",
         },
     )
@@ -377,7 +378,7 @@ def extend_planning_timeout(workflow_id):
         "status_change",
         {"status": status, "extended_timeout": additional_seconds},
     )
-    return jsonify({"success": True, "new_timeout": new_timeout})
+    return jsonify({"success": True, "new_planning_timeout": new_extension})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/retry", methods=["POST"])

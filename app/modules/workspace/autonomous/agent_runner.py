@@ -367,6 +367,7 @@ class AutonomousAgentRunner:
                 cli_tool=cli_tool,
                 model=model,
                 permission_mode=permission_mode,
+                allowed_tools=allowed_tools,
             )
 
             if not result.get("success"):
