@@ -543,7 +543,7 @@ def list_sessions():
 
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "archived", "error"}
-        VALID_SESSION_TYPE_VALUES = {"chat", "task", "workflow", "agent"}
+        VALID_SESSION_TYPE_VALUES = {"chat", "agent", "terminal"}
 
         # Validate status and session_type parameters
         if status and status not in VALID_STATUS_VALUES:

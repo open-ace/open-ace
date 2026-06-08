@@ -45,9 +45,8 @@ class SessionType(Enum):
     """Session type enumeration."""
 
     CHAT = "chat"
-    TASK = "task"
-    WORKFLOW = "workflow"
     AGENT = "agent"
+    TERMINAL = "terminal"
 
 
 @dataclass
