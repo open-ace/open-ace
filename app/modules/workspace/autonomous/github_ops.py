@@ -33,12 +33,17 @@ class GitHubOps:
         self._ai_env: Optional[dict[str, str]] = None  # lazy-loaded, None=unset
 
     def _get_env(self) -> Optional[dict[str, str]]:
-        """Get environment overrides for AI GitHub account (lazy-loaded, cached per instance).
+        """Get environment overrides for AI GitHub account.
+
+        Loaded once on first call, then cached for the lifetime of this
+        GitHubOps instance.  The underlying ``config.get_ai_github_env()``
+        has its own 60-second TTL cache, so new DB settings propagate to
+        *new* GitHubOps instances within ~1 minute.  Existing instances
+        keep their originally-loaded value.
 
         Returns None if:
-          - _ai_env was never set (first call triggers load)
-          - Loading succeeded but no token is configured (repo returns None)
-          - Loading failed (set to sentinel empty dict)
+          - No token is configured in the database
+          - Loading failed (exception caught)
         """
         if self._ai_env is None:
             try:

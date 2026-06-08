@@ -81,12 +81,24 @@ def api_update_ai_agent_settings():
 @ai_agent_settings_bp.route("/ai-agent/settings/validate-github-token", methods=["POST"])
 @admin_required
 def api_validate_github_token():
-    """Validate a GitHub PAT by calling the GitHub API."""
+    """Validate a GitHub PAT by calling the GitHub API.
+
+    Accepts either:
+      - A full token string for validation
+      - The sentinel "__saved__" to validate the token stored in the database
+    """
     data = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
 
     if not token:
         return jsonify({"valid": False, "error": "No token provided"}), 400
+
+    # If the client sends "__saved__", read the stored token from DB
+    if token == "__saved__":
+        env = repo.get_ai_github_env()
+        if env is None:
+            return jsonify({"valid": False, "error": "No token configured"})
+        token = env["GH_TOKEN"]
 
     try:
         result = subprocess.run(

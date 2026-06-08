@@ -78,8 +78,10 @@ def is_autonomous_enabled() -> bool:
 
 # ── AI GitHub Account env cache ───────────────────────────────────
 # Avoids a DB query on every subprocess.run() inside GitHubOps.
+# Simple two-variable cache: data + timestamp, guarded by _cache_lock.
 
-_ai_github_env_cache: dict[str, tuple[float, dict[str, str] | None]] = {}
+_ai_github_env_data: dict[str, str] | None = None
+_ai_github_env_ts: float = 0.0
 _ai_github_env_ttl: float = 60.0  # seconds
 
 
@@ -93,13 +95,12 @@ def get_ai_github_env() -> dict[str, str] | None:
         Dict with GH_TOKEN, GIT_AUTHOR_NAME/EMAIL, GIT_COMMITTER_NAME/EMAIL,
         or None if no AI GitHub token is configured.
     """
+    global _ai_github_env_data, _ai_github_env_ts
+
     now = time.time()
     with _cache_lock:
-        entry = _ai_github_env_cache.get("_ai_env")
-        if entry is not None:
-            ts, data = entry
-            if now - ts < _ai_github_env_ttl:
-                return data
+        if now - _ai_github_env_ts < _ai_github_env_ttl:
+            return _ai_github_env_data
 
     # Cache miss — read from DB
     try:
@@ -111,5 +112,6 @@ def get_ai_github_env() -> dict[str, str] | None:
         result = None
 
     with _cache_lock:
-        _ai_github_env_cache["_ai_env"] = (now, result)
+        _ai_github_env_data = result
+        _ai_github_env_ts = now
     return result

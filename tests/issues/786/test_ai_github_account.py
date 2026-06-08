@@ -185,7 +185,8 @@ class TestGetAiGithubEnv:
         from app.utils import config
 
         # Clear cache
-        config._ai_github_env_cache.clear()
+        config._ai_github_env_ts = 0.0
+        config._ai_github_env_data = None
 
         with patch(
             "app.repositories.ai_agent_settings_repo.AiAgentSettingsRepo.get_ai_github_env",
@@ -197,7 +198,8 @@ class TestGetAiGithubEnv:
     def test_returns_env_dict_when_configured(self):
         from app.utils import config
 
-        config._ai_github_env_cache.clear()
+        config._ai_github_env_ts = 0.0
+        config._ai_github_env_data = None
 
         mock_env = {
             "GH_TOKEN": "ghp_test",
@@ -218,7 +220,8 @@ class TestGetAiGithubEnv:
 
         from app.utils import config
 
-        config._ai_github_env_cache.clear()
+        config._ai_github_env_ts = 0.0
+        config._ai_github_env_data = None
 
         mock_env = {
             "GH_TOKEN": "ghp_cached",

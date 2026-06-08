@@ -4,11 +4,12 @@
  * Features:
  * - Configure the GitHub account used by autonomous workflows
  * - Token input with show/hide toggle
- * - Test connection to validate the token
+ * - Test connection for both new and already-saved tokens
  * - Author name and email for git commits
+ * - Dirty detection: Save button only enabled when form has changes
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -41,8 +42,10 @@ export const AiAgentSettings: React.FC = () => {
   const updateSettings = useUpdateAiAgentSettings();
   const validateToken = useValidateGithubToken();
 
-  // Form state
-  const [formData, setFormData] = useState<Partial<AiAgentSettingsType>>({});
+  // Form state — token is managed separately from name/email
+  const [newToken, setNewToken] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const [authorEmail, setAuthorEmail] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [validationResult, setValidationResult] = useState<{
     valid: boolean;
@@ -54,26 +57,45 @@ export const AiAgentSettings: React.FC = () => {
   // Initialize form when settings load
   useEffect(() => {
     if (settings) {
-      // Don't pre-fill token if it's masked
-      const tokenValue = settings.ai_github_token || '';
-      setFormData({
-        ai_github_author_name: settings.ai_github_author_name || 'Open ACE AI',
-        ai_github_author_email: settings.ai_github_author_email || 'bot@open-ace.com',
-        // Only set token if it's empty (not masked)
-        ...(tokenValue === '' ? { ai_github_token: '' } : {}),
-      });
+      setAuthorName(settings.ai_github_author_name || 'Open ACE AI');
+      setAuthorEmail(settings.ai_github_author_email || 'bot@open-ace.com');
+      setNewToken('');
     }
   }, [settings]);
 
+  // Dirty detection: compare current form values against loaded settings
+  const isDirty = useMemo(() => {
+    if (!settings) return false;
+
+    // Token is dirty if user typed something new
+    if (newToken.trim() !== '') return true;
+
+    // Name/email dirty if different from loaded settings
+    const origName = settings.ai_github_author_name || 'Open ACE AI';
+    const origEmail = settings.ai_github_author_email || 'bot@open-ace.com';
+    if (authorName !== origName) return true;
+    if (authorEmail !== origEmail) return true;
+
+    return false;
+  }, [newToken, authorName, authorEmail, settings]);
+
+  const hasMaskedToken = settings?.ai_github_token?.includes('****');
+  const hasNewToken = newToken.trim() !== '' && !newToken.includes('****');
+
   const handleSave = async () => {
     try {
-      await updateSettings.mutateAsync(formData);
+      const payload: Partial<AiAgentSettingsType> = {
+        ai_github_author_name: authorName,
+        ai_github_author_email: authorEmail,
+      };
+      // Only include token if user entered a new one
+      if (hasNewToken) {
+        payload.ai_github_token = newToken.trim();
+      }
+      await updateSettings.mutateAsync(payload);
       toast.success(t('settingsSaved', language));
-      setFormData((prev) => ({
-        ...prev,
-        // Clear token from form after save (it will be masked on reload)
-        ai_github_token: undefined,
-      }));
+      setNewToken('');
+      setValidationResult(null);
       refetch();
     } catch (err) {
       console.error('Failed to save AI agent settings:', err);
@@ -81,9 +103,9 @@ export const AiAgentSettings: React.FC = () => {
     }
   };
 
-  const handleTestConnection = async () => {
-    const tokenToTest = formData.ai_github_token;
-    if (!tokenToTest || tokenToTest.includes('****')) {
+  // Test a new token entered by the user
+  const handleTestNewToken = async () => {
+    if (!hasNewToken) {
       toast.warning(
         language === 'zh'
           ? '请先输入新的令牌再测试'
@@ -95,7 +117,7 @@ export const AiAgentSettings: React.FC = () => {
     setIsValidating(true);
     setValidationResult(null);
     try {
-      const result = await validateToken.mutateAsync(tokenToTest);
+      const result = await validateToken.mutateAsync(newToken.trim());
       setValidationResult(result);
     } catch (err) {
       setValidationResult({
@@ -107,8 +129,23 @@ export const AiAgentSettings: React.FC = () => {
     }
   };
 
-  const hasMaskedToken = settings?.ai_github_token?.includes('****');
-  const hasNewToken = formData.ai_github_token && !formData.ai_github_token.includes('****');
+  // Test the already-saved token (server reads from DB)
+  const handleTestSavedToken = async () => {
+    setIsValidating(true);
+    setValidationResult(null);
+    try {
+      // Send empty string to tell backend to validate the stored token
+      const result = await validateToken.mutateAsync('__saved__');
+      setValidationResult(result);
+    } catch (err) {
+      setValidationResult({
+        valid: false,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
@@ -162,14 +199,8 @@ export const AiAgentSettings: React.FC = () => {
                 type={showToken ? 'text' : 'password'}
                 className="form-control"
                 placeholder={t('aiGithubTokenPlaceholder', language)}
-                value={
-                  formData.ai_github_token !== undefined
-                    ? formData.ai_github_token
-                    : settings?.ai_github_token || ''
-                }
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, ai_github_token: e.target.value }))
-                }
+                value={newToken}
+                onChange={(e) => setNewToken(e.target.value)}
               />
               <Button
                 variant="outline-secondary"
@@ -182,19 +213,29 @@ export const AiAgentSettings: React.FC = () => {
           </div>
 
           {/* Test Connection */}
-          <div className="col-12">
+          <div className="col-12 d-flex gap-2 flex-wrap">
             <Button
               variant="outline-primary"
-              onClick={handleTestConnection}
-              loading={isValidating}
+              onClick={handleTestNewToken}
+              loading={isValidating && hasNewToken}
               disabled={!hasNewToken}
             >
               <i className="bi bi-plug me-1" />
               {t('aiGithubTestConnection', language)}
             </Button>
+            {hasMaskedToken && (
+              <Button
+                variant="outline-secondary"
+                onClick={handleTestSavedToken}
+                loading={isValidating && !hasNewToken}
+              >
+                <i className="bi bi-arrow-repeat me-1" />
+                {language === 'zh' ? '测试已保存的令牌' : 'Test saved token'}
+              </Button>
+            )}
             {validationResult && (
               <div
-                className={`alert ${validationResult.valid ? 'alert-success' : 'alert-danger'} mt-2 mb-0 py-2`}
+                className={`alert ${validationResult.valid ? 'alert-success' : 'alert-danger'} mt-2 mb-0 py-2 w-100`}
               >
                 <i
                   className={`bi ${validationResult.valid ? 'bi-check-circle-fill' : 'bi-x-circle-fill'} me-1`}
@@ -216,10 +257,8 @@ export const AiAgentSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label fw-semibold">{t('aiGithubAuthorName', language)}</label>
             <TextInput
-              value={formData.ai_github_author_name || ''}
-              onChange={(value: string) =>
-                setFormData((prev) => ({ ...prev, ai_github_author_name: value }))
-              }
+              value={authorName}
+              onChange={(value: string) => setAuthorName(value)}
               placeholder="Open ACE AI"
             />
             <small className="text-muted">{t('aiGithubAuthorNameHelp', language)}</small>
@@ -229,10 +268,8 @@ export const AiAgentSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label fw-semibold">{t('aiGithubAuthorEmail', language)}</label>
             <TextInput
-              value={formData.ai_github_author_email || ''}
-              onChange={(value: string) =>
-                setFormData((prev) => ({ ...prev, ai_github_author_email: value }))
-              }
+              value={authorEmail}
+              onChange={(value: string) => setAuthorEmail(value)}
               placeholder="bot@open-ace.com"
             />
             <small className="text-muted">{t('aiGithubAuthorEmailHelp', language)}</small>
@@ -240,12 +277,26 @@ export const AiAgentSettings: React.FC = () => {
         </div>
       </Card>
 
-      {/* Save Button */}
+      {/* Save / Reset Buttons */}
       <div className="d-flex gap-2 justify-content-end">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            if (settings) {
+              setAuthorName(settings.ai_github_author_name || 'Open ACE AI');
+              setAuthorEmail(settings.ai_github_author_email || 'bot@open-ace.com');
+              setNewToken('');
+              setValidationResult(null);
+            }
+          }}
+        >
+          {t('reset', language)}
+        </Button>
         <Button
           variant="primary"
           onClick={handleSave}
           loading={updateSettings.isPending}
+          disabled={!isDirty}
         >
           {t('save', language)}
         </Button>
