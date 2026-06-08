@@ -96,7 +96,9 @@ export const AiAgentSettings: React.FC = () => {
       toast.success(t('settingsSaved', language));
       setNewToken('');
       setValidationResult(null);
-      refetch();
+      // Await refetch so useEffect updates authorName/authorEmail immediately,
+      // ensuring isDirty becomes false before the next render.
+      await refetch();
     } catch (err) {
       console.error('Failed to save AI agent settings:', err);
       toast.error(t('error', language));
@@ -165,8 +167,8 @@ export const AiAgentSettings: React.FC = () => {
 
       {/* Status Banner */}
       {hasMaskedToken && !hasNewToken && (
-        <div className="alert alert-info d-flex align-items-center mb-3" role="alert">
-          <i className="bi bi-info-circle-fill me-2" />
+        <div className="alert alert-success d-flex align-items-center mb-3" role="status">
+          <i className="bi bi-check-circle-fill me-2" />
           <span>
             <i className="bi bi-github me-1" />
             {t('aiGithubAccountConfigured', language)}
