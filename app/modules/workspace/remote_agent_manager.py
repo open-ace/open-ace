@@ -849,13 +849,11 @@ class RemoteAgentManager:
         if not row:
             return False
 
-        legacy_mode = row["legacy_mode"]
+        raw_legacy = row["legacy_mode"]
         if is_postgresql():
-            legacy_mode = bool(legacy_mode) if legacy_mode is not None else False
+            return bool(raw_legacy) if raw_legacy is not None else False
         else:
-            legacy_mode = bool(legacy_mode)
-
-        return legacy_mode
+            return bool(raw_legacy)
 
     def cleanup_expired_registration_tokens(self) -> int:
         """Remove expired registration tokens that have NOT been consumed.
