@@ -602,7 +602,7 @@ class AutonomousAgentRunner:
                         if text_delta:
                             session.event_log.append({
                                 "type": "assistant",
-                                "text": text_delta[:500],
+                                "text": text_delta,  # full text for DB persistence
                             })
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
@@ -625,7 +625,6 @@ class AutonomousAgentRunner:
                         })
                         # Emit tool call activity
                         if self._activity_callback:
-                            tool_info = parsed.get("tool", {})
                             self._activity_callback(
                                 session.session_id,
                                 {
