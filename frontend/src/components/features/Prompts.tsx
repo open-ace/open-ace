@@ -751,7 +751,7 @@ const RenderModal: React.FC<RenderModalProps> = ({
   const handleRender = async () => {
     setIsLoading(true);
     try {
-      onRender(variables);
+      await onRender(variables);
     } finally {
       setIsLoading(false);
     }
