@@ -64,6 +64,14 @@ def api_update_ai_agent_settings():
     success = repo.update_ai_agent_settings(filtered)
 
     if success:
+        # Invalidate config cache so new settings propagate immediately
+        try:
+            from app.utils.config import invalidate_ai_github_env_cache
+
+            invalidate_ai_github_env_cache()
+        except Exception:
+            pass
+
         client_info = _get_client_info()
         audit_logger.log_action(
             action=AuditAction.SYSTEM_CONFIG_CHANGE,
@@ -84,17 +92,13 @@ def api_validate_github_token():
     """Validate a GitHub PAT by calling the GitHub API.
 
     Accepts either:
-      - A full token string for validation
-      - The sentinel "__saved__" to validate the token stored in the database
+      - ``{"token": "ghp_xxx"}`` — validate a specific token
+      - ``{"source": "saved"}`` — validate the token stored in the database
     """
     data = request.get_json(silent=True) or {}
-    token = data.get("token", "").strip()
 
-    if not token:
-        return jsonify({"valid": False, "error": "No token provided"}), 400
-
-    # If the client sends "__saved__", read the stored token from DB
-    if token == "__saved__":
+    # Explicit field: validate the already-saved token from DB
+    if data.get("source") == "saved":
         env = repo.get_ai_github_env()
         if env is None:
             return jsonify({"valid": False, "error": "No token configured"})
@@ -123,4 +127,4 @@ def api_validate_github_token():
         return jsonify({"valid": False, "error": "gh CLI not found"})
     except Exception as e:
         logger.error("Token validation error: %s", e)
-        return jsonify({"valid": False, "error": str(e)})
+        return jsonify({"valid": False, "error": "Validation failed"})

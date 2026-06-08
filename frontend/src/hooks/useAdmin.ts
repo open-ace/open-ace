@@ -4,7 +4,11 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminApi, governanceApi, complianceApi } from '@/api';
-import { aiAgentSettingsApi, type AiAgentSettings } from '@/api/aiAgentSettings';
+import {
+  aiAgentSettingsApi,
+  type AiAgentSettings,
+  type TokenValidationRequest,
+} from '@/api/aiAgentSettings';
 import type {
   CreateUserRequest,
   UpdateUserRequest,
@@ -194,6 +198,7 @@ export function useUpdateAiAgentSettings() {
 
 export function useValidateGithubToken() {
   return useMutation({
-    mutationFn: (token: string) => aiAgentSettingsApi.validateGithubToken(token),
+    mutationFn: (payload: TokenValidationRequest) =>
+      aiAgentSettingsApi.validateGithubToken(payload),
   });
 }

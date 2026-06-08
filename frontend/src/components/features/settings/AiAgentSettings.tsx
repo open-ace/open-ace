@@ -117,7 +117,7 @@ export const AiAgentSettings: React.FC = () => {
     setIsValidating(true);
     setValidationResult(null);
     try {
-      const result = await validateToken.mutateAsync(newToken.trim());
+      const result = await validateToken.mutateAsync({ token: newToken.trim() });
       setValidationResult(result);
     } catch (err) {
       setValidationResult({
@@ -134,8 +134,8 @@ export const AiAgentSettings: React.FC = () => {
     setIsValidating(true);
     setValidationResult(null);
     try {
-      // Send empty string to tell backend to validate the stored token
-      const result = await validateToken.mutateAsync('__saved__');
+      // Use explicit source field instead of embedding meaning in token value
+      const result = await validateToken.mutateAsync({ source: 'saved' });
       setValidationResult(result);
     } catch (err) {
       setValidationResult({

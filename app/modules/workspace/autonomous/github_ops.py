@@ -30,33 +30,25 @@ class GitHubOps:
             repo_path: Local path to the git repository (for cwd in gh commands).
         """
         self.repo_path = repo_path
-        self._ai_env: Optional[dict[str, str]] = None  # lazy-loaded, None=unset
 
     def _get_env(self) -> Optional[dict[str, str]]:
         """Get environment overrides for AI GitHub account.
 
-        Loaded once on first call, then cached for the lifetime of this
-        GitHubOps instance.  The underlying ``config.get_ai_github_env()``
-        has its own 60-second TTL cache, so new DB settings propagate to
-        *new* GitHubOps instances within ~1 minute.  Existing instances
-        keep their originally-loaded value.
+        Delegates to ``config.get_ai_github_env()`` which has a 60-second
+        TTL cache.  Token updates propagate to all GitHubOps instances
+        within ~60 seconds automatically (or immediately if the admin API
+        invalidates the cache).
 
         Returns None if:
           - No token is configured in the database
           - Loading failed (exception caught)
         """
-        if self._ai_env is None:
-            try:
-                from app.utils.config import get_ai_github_env
+        try:
+            from app.utils.config import get_ai_github_env
 
-                loaded = get_ai_github_env()
-                self._ai_env = loaded if loaded is not None else {}
-            except Exception:
-                self._ai_env = {}
-        # Empty dict = no token configured or load failed
-        if not self._ai_env:
+            return get_ai_github_env()
+        except Exception:
             return None
-        return self._ai_env
 
     def _build_subprocess_kwargs(self) -> dict:
         """Build subprocess.run kwargs, injecting AI env if configured."""

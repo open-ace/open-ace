@@ -2114,6 +2114,20 @@ const translations: Record<Language, Translations> = {
     complianceManagement: 'コンプライアンス',
     securityCenter: 'セキュリティセンター',
 
+    // AI Agent Settings
+    aiAgentSettings: 'AIエージェント',
+    aiGithubToken: 'GitHubトークン',
+    aiGithubTokenHelp: 'AIボットアカウントの個人アクセストークン。自律ワークフローはこのトークンを使用してすべてのGitHub操作（issue、PR、コメント）を行います。',
+    aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
+    aiGithubAuthorName: '作成者名',
+    aiGithubAuthorNameHelp: 'AIエージェントがgitコミット時に使用する作成者名。',
+    aiGithubAuthorEmail: '作成者メール',
+    aiGithubAuthorEmailHelp: 'AIエージェントがgitコミット時に使用する作成者メール。',
+    aiGithubTestConnection: '接続テスト',
+    aiGithubTestSuccess: 'トークン有効。接続先: {username}',
+    aiGithubTestFailed: '無効なトークン: {error}',
+    aiGithubTokenNotConfigured: 'トークン未設定 — サーバーのデフォルトGitHubアカウントを使用しています。',
+
     // Quota Management
     quotaUsage: 'クォータ使用量',
     noQuotaData: 'クォータデータがありません',
@@ -2764,6 +2778,20 @@ const translations: Record<Language, Translations> = {
     quotaAndAlerts: '할당량 및 알림',
     complianceManagement: '규정 준수',
     securityCenter: '보안 센터',
+
+    // AI Agent Settings
+    aiAgentSettings: 'AI 에이전트',
+    aiGithubToken: 'GitHub 토큰',
+    aiGithubTokenHelp: 'AI 봇 계정의 개인 액세스 토큰입니다. 자율 워크플로는 이 토큰을 사용하여 모든 GitHub 작업(issue, PR, 댓글)을 수행합니다.',
+    aiGithubTokenPlaceholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
+    aiGithubAuthorName: '작성자 이름',
+    aiGithubAuthorNameHelp: 'AI 에이전트가 git 커밋에 사용하는 작성자 이름입니다.',
+    aiGithubAuthorEmail: '작성자 이메일',
+    aiGithubAuthorEmailHelp: 'AI 에이전트가 git 커밋에 사용하는 작성자 이메일입니다.',
+    aiGithubTestConnection: '연결 테스트',
+    aiGithubTestSuccess: '토큰 유효. 연결됨: {username}',
+    aiGithubTestFailed: '유효하지 않은 토큰: {error}',
+    aiGithubTokenNotConfigured: '토큰 미설정 — 서버 기본 GitHub 계정을 사용 중입니다.',
 
     // Quota Management
     quotaUsage: '할당량 사용',

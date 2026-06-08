@@ -17,6 +17,10 @@ export interface TokenValidationResult {
   error?: string;
 }
 
+export type TokenValidationRequest =
+  | { token: string }
+  | { source: 'saved' };
+
 // API
 export const aiAgentSettingsApi = {
   async getSettings(): Promise<AiAgentSettings> {
@@ -27,10 +31,10 @@ export const aiAgentSettingsApi = {
     return apiClient.put<{ success: boolean }>('/api/ai-agent/settings', data);
   },
 
-  async validateGithubToken(token: string): Promise<TokenValidationResult> {
+  async validateGithubToken(payload: TokenValidationRequest): Promise<TokenValidationResult> {
     return apiClient.post<TokenValidationResult>(
       '/api/ai-agent/settings/validate-github-token',
-      { token }
+      payload
     );
   },
 };

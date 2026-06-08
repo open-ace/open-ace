@@ -115,3 +115,15 @@ def get_ai_github_env() -> dict[str, str] | None:
         _ai_github_env_data = result
         _ai_github_env_ts = now
     return result
+
+
+def invalidate_ai_github_env_cache():
+    """Force the AI GitHub env cache to refresh on next read.
+
+    Call this after updating AI agent settings via the admin API
+    so that new token values propagate immediately instead of
+    waiting for the 60-second TTL to expire.
+    """
+    global _ai_github_env_data, _ai_github_env_ts
+    with _cache_lock:
+        _ai_github_env_ts = 0.0
