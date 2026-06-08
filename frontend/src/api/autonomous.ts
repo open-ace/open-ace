@@ -155,7 +155,7 @@ export const autonomousApi = {
   async extendPlanningTimeout(
     workflowId: string,
     additionalSeconds: number = 600
-  ): Promise<{ success: boolean; new_timeout: number }> {
+  ): Promise<{ success: boolean; new_planning_timeout: number }> {
     return apiClient.post(`/api/autonomous/workflows/${workflowId}/extend-planning-timeout`, {
       additional_seconds: additionalSeconds,
     });

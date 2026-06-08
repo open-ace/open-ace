@@ -1829,8 +1829,8 @@ const translations: Record<Language, Translations> = {
     folderName: '文件夹名称',
     createDirError: '创建目录失败。',
 
-    // AI自主开发
-    autonomousDev: 'AI自主开发',
+    // AI 自主开发
+    autonomousDev: 'AI 自主开发',
     autonomousDevEmpty: '创建自主开发任务，让 AI 独立完成开发工作。',
     autoFeatureDisabled: '自主开发功能未启用',
     autoNewTask: '新建任务',
@@ -1881,6 +1881,7 @@ const translations: Record<Language, Translations> = {
     autoPhasePreparation: '准备工作',
     autoPhasePlanning: '方案设计',
     autoPhaseDevelopment: '开发实现',
+    autoPhasePRReview: 'PR 审查',
     autoPhaseReport: '进度报告',
     autoPhaseWait: '等待需求',
     autoPhaseMerge: '合并',
