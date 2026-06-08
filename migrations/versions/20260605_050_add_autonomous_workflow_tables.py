@@ -1,7 +1,7 @@
 """Add autonomous workflow tables for AI autonomous development
 
 Revision ID: 050_autonomous_workflows
-Revises: 049_user_id_daily_stats
+Revises: 051_fix_project_path_unique
 Create Date: 2026-06-05
 
 Tables:
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "050_autonomous_workflows"
-down_revision: Union[str, None] = "049_user_id_daily_stats"
+down_revision: Union[str, None] = "051_fix_project_path_unique"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
@@ -56,8 +56,8 @@ def upgrade() -> None:
         sa.Column("requirements_issue_url", sa.Text, server_default=""),
         sa.Column("project_path", sa.Text, server_default=""),
         sa.Column("project_repo_url", sa.Text, server_default=""),
-        sa.Column("is_new_project", sa.Boolean, server_default=sa.text("0")),
-        sa.Column("is_private", sa.Boolean, server_default=sa.text("1")),
+        sa.Column("is_new_project", sa.Boolean, server_default=sa.text("FALSE")),
+        sa.Column("is_private", sa.Boolean, server_default=sa.text("TRUE")),
         sa.Column("cli_tool", sa.Text, server_default=""),
         sa.Column("model", sa.Text, server_default=""),
         sa.Column("permission_mode", sa.Text, server_default="auto-edit"),
