@@ -481,7 +481,10 @@ class AutonomousAgentRunner:
         updated.  Errors are caught by the caller and do not affect the
         main workflow.
         """
-        # Write assistant text as a single assistant message
+        # Write assistant text as a single assistant message.
+        # NOTE: tokens_used is the session's total output tokens, not per-message.
+        # This is an acceptable approximation since autonomous sessions typically
+        # have a single agent turn per milestone.
         if result.response_text:
             self.session_manager.add_message(
                 session_id=session_id,

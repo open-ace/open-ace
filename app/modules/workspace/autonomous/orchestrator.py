@@ -849,6 +849,7 @@ class AutonomousOrchestrator:
 
         # Verify agent actually produced code changes (Issue #776 Bug 2)
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
+        has_uncommitted = False
 
         if not sha_changed:
             # SHA unchanged (or unavailable) — check for uncommitted changes
