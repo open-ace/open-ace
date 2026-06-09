@@ -471,19 +471,30 @@ def rotate_machine_token(machine_id):
     )
 
     # Push rotate_token command to agent so it updates its local config
-    agent_mgr.send_command(
-        machine_id,
-        {
-            "command": "rotate_token",
-            "new_token": new_token,
-        },
+    pushed = False
+    try:
+        agent_mgr.send_command(
+            machine_id,
+            {
+                "command": "rotate_token",
+                "new_token": new_token,
+            },
+        )
+        pushed = True
+    except Exception:
+        logger.warning("Failed to push new token to agent %s (may be offline)", machine_id)
+
+    msg = (
+        "Agent token rotated. The new token has been pushed to the agent."
+        if pushed
+        else "Agent token rotated. Agent is offline — manually update the agent config with the new token."
     )
 
     return jsonify(
         {
             "success": True,
             "agent_token": new_token,
-            "message": "Agent token rotated. The new token has been pushed to the agent.",
+            "message": msg,
         }
     )
 

@@ -208,6 +208,10 @@ class RemoteAgent:
         self._session_sync.start()
 
         while self._running:
+            # Reset token_revoked flag for this connection attempt.
+            # If the previous loop exited due to a non-401 error (network
+            # timeout, etc.), we should retry with the same token — only
+            # a fresh 401 response should stop reconnection.
             self._token_revoked = False
             try:
                 self._http_poll_loop()
@@ -577,8 +581,8 @@ class RemoteAgent:
         the new token.
         """
         new_token = data.get("new_token")
-        if not new_token:
-            logger.warning("rotate_token command missing new_token field")
+        if not new_token or len(new_token) < 16:
+            logger.warning("rotate_token: new_token missing or too short, ignoring")
             return
 
         old_prefix = (self.config.agent_token or "")[:8]

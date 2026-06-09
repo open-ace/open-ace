@@ -186,14 +186,16 @@ class TestAgentRotateToken:
         agent = self._make_agent(tmp_path)
         config_file = tmp_path / "config.json"
 
-        agent._cmd_rotate_token({"command": "rotate_token", "new_token": "new_token_xyz"})
+        agent._cmd_rotate_token(
+            {"command": "rotate_token", "new_token": "new_token_xyz_abcdef012345"}
+        )
 
-        assert agent.config.agent_token == "new_token_xyz"
+        assert agent.config.agent_token == "new_token_xyz_abcdef012345"
 
         # Verify persisted to disk
         with open(config_file) as f:
             data = json.load(f)
-        assert data["agent_token"] == "new_token_xyz"
+        assert data["agent_token"] == "new_token_xyz_abcdef012345"
 
     def test_cmd_rotate_token_missing_new_token(self, tmp_path):
         """_cmd_rotate_token should log warning if new_token missing."""
@@ -210,8 +212,15 @@ class TestAgentRotateToken:
         agent._handle_command(
             {
                 "command": "rotate_token",
-                "new_token": "dispatched_new_token",
+                "new_token": "dispatched_new_token_abcdef",
             }
         )
 
-        assert agent.config.agent_token == "dispatched_new_token"
+        assert agent.config.agent_token == "dispatched_new_token_abcdef"
+
+    def test_cmd_rotate_token_too_short_rejected(self, tmp_path):
+        """_cmd_rotate_token should reject tokens shorter than 16 chars."""
+        agent = self._make_agent(tmp_path)
+
+        agent._cmd_rotate_token({"command": "rotate_token", "new_token": "short"})
+        assert agent.config.agent_token == "old_token_abc"
