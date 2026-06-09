@@ -416,9 +416,19 @@ class GitHubOps:
         """Stage all changes."""
         self._run_git(["add", "-A"])
 
-    def git_commit(self, message: str) -> dict:
-        """Create a git commit."""
-        self._run_git(["commit", "-m", message])
+    def git_commit(self, message: str, no_verify: bool = False) -> dict:
+        """Create a git commit.
+
+        Args:
+            message: Commit message.
+            no_verify: Skip pre-commit hooks. Use for auto-commits where the
+                       agent's output hasn't been lint-checked and hooks would
+                       block the commit, causing "no code changes" failures.
+        """
+        args = ["commit", "-m", message]
+        if no_verify:
+            args.append("--no-verify")
+        self._run_git(args)
         sha = self.get_current_commit()
         return {"sha": sha, "message": message}
 

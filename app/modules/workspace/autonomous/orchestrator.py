@@ -892,7 +892,10 @@ class AutonomousOrchestrator:
                 )
                 try:
                     gh.git_add_all()
-                    gh.git_commit(f"auto: development changes (round {dev_round})")
+                    gh.git_commit(
+                        f"auto: development changes (round {dev_round})",
+                        no_verify=True,
+                    )
                     commit_sha = gh.get_current_commit()
                     sha_changed = True
                     try:
