@@ -247,9 +247,10 @@ class AutonomousOrchestrator:
                 "total_tokens": result.total_tokens,
                 "total_input_tokens": result.total_input_tokens,
                 "total_output_tokens": result.total_output_tokens,
-                "total_requests": 1,
             },
         )
+        # Recalculate request count from actual session_messages
+        self.repo.recalculate_workflow_requests(self._workflow_id)
 
     def _on_agent_activity(self, session_id: str, activity: dict):
         """Forward agent activity to the SSE event stream and update tokens."""
@@ -270,7 +271,6 @@ class AutonomousOrchestrator:
                         "total_tokens": activity.get("total_tokens", 0),
                         "total_input_tokens": activity.get("total_input_tokens", 0),
                         "total_output_tokens": activity.get("total_output_tokens", 0),
-                        "total_requests": 1,
                     },
                 )
             except Exception:

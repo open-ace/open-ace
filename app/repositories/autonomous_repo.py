@@ -288,7 +288,6 @@ class AutonomousWorkflowRepository:
                 total_tokens = total_tokens + ?,
                 total_input_tokens = total_input_tokens + ?,
                 total_output_tokens = total_output_tokens + ?,
-                total_requests = total_requests + ?,
                 updated_at = ?
             WHERE workflow_id = ?
             """,
@@ -296,7 +295,37 @@ class AutonomousWorkflowRepository:
                 tokens.get("total_tokens", 0),
                 tokens.get("total_input_tokens", 0),
                 tokens.get("total_output_tokens", 0),
-                tokens.get("total_requests", 1),
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                workflow_id,
+            ),
+        )
+
+    def recalculate_workflow_requests(self, workflow_id: str) -> None:
+        """Recalculate workflow total_requests from actual session message counts.
+
+        Counts assistant messages across all sessions linked to this workflow's
+        milestones, matching the request count shown in the session list sidebar.
+        """
+
+        ph = "?" if not is_postgresql() else "%s"
+        self.db.execute(
+            f"""
+            UPDATE autonomous_workflows SET
+                total_requests = (
+                    SELECT COALESCE(SUM(cnt), 0) FROM (
+                        SELECT COUNT(*) as cnt
+                        FROM session_messages sm
+                        JOIN workflow_milestones wm ON wm.session_id = sm.session_id
+                        WHERE wm.workflow_id = {ph}
+                        AND wm.session_id IS NOT NULL AND wm.session_id != ''
+                        AND sm.role = 'assistant'
+                    ) sub
+                ),
+                updated_at = ?
+            WHERE workflow_id = {ph}
+            """,
+            (
+                workflow_id,
                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_id,
             ),
