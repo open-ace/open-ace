@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { Button } from '@/components/common';
+import { ssoApi, tenantApi, type SSOProvider } from '@/api';
 import type { Language } from '@/types';
 import './Login.css';
 
@@ -27,6 +28,8 @@ const translations: Record<Language, Record<string, string>> = {
     defaultCredentials: 'Default admin credentials:',
     changePasswordNotice: 'Change the default password after first login!',
     copyright: '© 2026 Open ACE. All rights reserved.',
+    orSignInWith: 'Or sign in with',
+    signInWith: 'Sign in with',
   },
   zh: {
     title: 'Open ACE',
@@ -43,6 +46,8 @@ const translations: Record<Language, Record<string, string>> = {
     defaultCredentials: '默认管理员账号：',
     changePasswordNotice: '首次登录后请修改默认密码！',
     copyright: '© 2026 Open ACE. 保留所有权利。',
+    orSignInWith: '或使用以下方式登录',
+    signInWith: '使用',
   },
   ja: {
     title: 'Open ACE',
@@ -59,6 +64,8 @@ const translations: Record<Language, Record<string, string>> = {
     defaultCredentials: 'デフォルトの管理者認証情報：',
     changePasswordNotice: '初回ログイン後にデフォルトパスワードを変更してください！',
     copyright: '© 2026 Open ACE. All rights reserved.',
+    orSignInWith: 'または以下でサインイン',
+    signInWith: 'サインイン',
   },
   ko: {
     title: 'Open ACE',
@@ -75,11 +82,23 @@ const translations: Record<Language, Record<string, string>> = {
     defaultCredentials: '기본 관리자 자격 증명:',
     changePasswordNotice: '첫 로그인 후 기본 비밀번호를 변경하세요!',
     copyright: '© 2026 Open ACE. All rights reserved.',
+    orSignInWith: '또는 다음으로 로그인',
+    signInWith: '로그인',
   },
 };
 
 function getTranslation(key: string, language: Language): string {
   return translations[language]?.[key] || translations.en[key] || key;
+}
+
+function getProviderIcon(name: string): string {
+  const icons: Record<string, string> = {
+    google: 'bi-google',
+    microsoft: 'bi-microsoft',
+    github: 'bi-github',
+    okta: 'bi-shield-lock',
+  };
+  return icons[name.toLowerCase()] || 'bi-key';
 }
 
 export const Login: React.FC = () => {
@@ -94,6 +113,10 @@ export const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showDefaultCredentials, setShowDefaultCredentials] = useState(false);
 
+  // SSO state
+  const [ssoProviders, setSsoProviders] = useState<SSOProvider[]>([]);
+  const [ssoLoading, setSsoLoading] = useState(false);
+
   // Check if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
@@ -104,6 +127,42 @@ export const Login: React.FC = () => {
     const isDev = import.meta.env.DEV;
     setShowDefaultCredentials(isDev);
   }, [navigate, isAuthenticated]);
+
+  // Fetch SSO configuration for default tenant (tenant_id = 1)
+  useEffect(() => {
+    const fetchSSOConfig = async () => {
+      setSsoLoading(true);
+      try {
+        // Get default tenant settings
+        const tenant = await tenantApi.getTenant(1);
+        const settings = tenant.settings as Record<string, unknown>;
+
+        if (settings?.sso_enabled) {
+          // Get enabled SSO providers
+          const result = await ssoApi.getProviders(1);
+          const enabledProviders = result.registered.filter((p) => p.is_enabled);
+          setSsoProviders(enabledProviders);
+        }
+      } catch (err) {
+        // Silently ignore - SSO may not be configured
+        console.log('SSO config fetch failed (may not be configured):', err);
+      } finally {
+        setSsoLoading(false);
+      }
+    };
+
+    fetchSSOConfig();
+  }, []);
+
+  const handleSSOLogin = async (providerName: string) => {
+    try {
+      const result = await ssoApi.startLogin(providerName);
+      window.location.href = result.authorization_url;
+    } catch (err) {
+      console.error('Failed to start SSO login:', err);
+      setError(getTranslation('errorOccurred', language));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,6 +269,29 @@ export const Login: React.FC = () => {
             {loading ? getTranslation('signingIn', language) : getTranslation('signIn', language)}
           </Button>
         </form>
+
+        {/* SSO Login Buttons */}
+        {!ssoLoading && ssoProviders.length > 0 && (
+          <div className="login-sso-section">
+            <div className="login-sso-divider">
+              <span>{getTranslation('orSignInWith', language)}</span>
+            </div>
+            <div className="login-sso-buttons">
+              {ssoProviders.map((provider) => (
+                <Button
+                  key={provider.name}
+                  variant="outline-secondary"
+                  fullWidth
+                  onClick={() => handleSSOLogin(provider.name)}
+                  className="login-sso-btn"
+                >
+                  <i className={`bi ${getProviderIcon(provider.name)} me-2`} />
+                  {getTranslation('signInWith', language)} {provider.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {showDefaultCredentials && (
           <div className="login-default-credentials">

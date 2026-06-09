@@ -8,6 +8,7 @@ export interface User {
   username: string;
   email: string;
   role: 'admin' | 'user' | 'viewer';
+  tenant_id?: number;
   createdAt: string;
   lastLogin?: string;
   avatar_url?: string;
