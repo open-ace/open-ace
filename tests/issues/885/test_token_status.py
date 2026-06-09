@@ -36,6 +36,8 @@ class TestI18nTokenKeys:
         "revokeTokenWarning",
         "copyNewToken",
         "tokenRotatedMessage",
+        "rotateTokenFailed",
+        "revokeTokenFailed",
     ]
 
     @pytest.fixture

@@ -1525,7 +1525,7 @@ class RemoteAgentManager:
 
         for tr in token_rows:
             mid = tr["machine_id"] if isinstance(tr, dict) else tr[0]
-            is_revoked = tr["is_revoked"] if isinstance(tr, dict) else tr[1]
+            is_revoked = bool(tr["is_revoked"] if isinstance(tr, dict) else tr[1])
             if is_revoked:
                 machines_with_revoked_tokens.add(mid)
             else:
@@ -1542,8 +1542,9 @@ class RemoteAgentManager:
             try:
                 cursor.execute(
                     f"SELECT machine_id FROM remote_machines "
-                    f"WHERE machine_id IN ({_params(len(legacy_candidates))}) AND legacy_mode = 1",
-                    tuple(legacy_candidates),
+                    f"WHERE machine_id IN ({_params(len(legacy_candidates))})"
+                    f" AND legacy_mode = {_param()}",
+                    tuple(legacy_candidates) + (adapt_boolean_value(True),),
                 )
                 legacy_rows = cursor.fetchall()
             except Exception as e:
