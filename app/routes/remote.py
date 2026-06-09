@@ -470,11 +470,20 @@ def rotate_machine_token(machine_id):
         details=details,
     )
 
+    # Push rotate_token command to agent so it updates its local config
+    agent_mgr.send_command(
+        machine_id,
+        {
+            "command": "rotate_token",
+            "new_token": new_token,
+        },
+    )
+
     return jsonify(
         {
             "success": True,
             "agent_token": new_token,
-            "message": "Agent token rotated. Update the agent configuration with the new token.",
+            "message": "Agent token rotated. The new token has been pushed to the agent.",
         }
     )
 

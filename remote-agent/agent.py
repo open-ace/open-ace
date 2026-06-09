@@ -60,6 +60,7 @@ class RemoteAgent:
         self._capabilities = get_capabilities()
         self._running = False
         self._reconnect_delay = self.config.reconnect_base_delay
+        self._token_revoked = False
         # Terminal server management
         self._terminal_processes: dict[str, subprocess.Popen] = {}
         self._terminal_tokens: dict[str, str] = {}
@@ -207,12 +208,21 @@ class RemoteAgent:
         self._session_sync.start()
 
         while self._running:
+            self._token_revoked = False
             try:
                 self._http_poll_loop()
             except Exception as e:
                 logger.error("HTTP poll loop error: %s", e)
 
             if not self._running:
+                break
+
+            # If token was revoked, do not attempt to reconnect
+            if self._token_revoked:
+                logger.error(
+                    "Agent token revoked. Agent will NOT reconnect. "
+                    "Contact your admin to generate a new token."
+                )
                 break
 
             # Exponential backoff reconnection
@@ -298,6 +308,7 @@ class RemoteAgent:
         POST a message to the server's HTTP fallback endpoint.
 
         Returns the parsed JSON response or None on failure.
+        Sets self._token_revoked = True on 401 responses.
         """
         url = f"{self.config.server_url}/api/remote/agent/message"
         headers = {"Content-Type": "application/json"}
@@ -315,6 +326,22 @@ class RemoteAgent:
             )
             if resp.status_code == 200:
                 return resp.json()
+            elif resp.status_code == 401:
+                # Authentication failure — token may be revoked or invalid
+                self._token_revoked = True
+                try:
+                    error_body = resp.json()
+                    error_msg = error_body.get("error", "Unknown auth error")
+                except Exception:
+                    error_msg = resp.text[:200]
+                logger.error(
+                    "Authentication failed (401) for machine %s: %s. "
+                    "Agent token has been revoked or is invalid. "
+                    "Contact admin to regenerate token.",
+                    self.config.machine_id[:8],
+                    error_msg,
+                )
+                return None
             else:
                 logger.warning(
                     "HTTP %d from %s: %s",
@@ -537,8 +564,31 @@ class RemoteAgent:
                         "result": info or {"error": "Session not found"},
                     }
                 )
+        elif command == "rotate_token":
+            self._cmd_rotate_token(data)
         else:
             logger.warning("Unknown command: %s", command)
+
+    def _cmd_rotate_token(self, data: dict[str, Any]) -> None:
+        """Handle a rotate_token command from the server.
+
+        The server pushes a new agent token after an admin rotates it.
+        The agent updates its local config so subsequent requests use
+        the new token.
+        """
+        new_token = data.get("new_token")
+        if not new_token:
+            logger.warning("rotate_token command missing new_token field")
+            return
+
+        old_prefix = (self.config.agent_token or "")[:8]
+        self.config.save_agent_token(new_token)
+        logger.info(
+            "Agent token rotated (old prefix=%s..., new prefix=%s...). "
+            "Config updated. Subsequent requests will use the new token.",
+            old_prefix,
+            new_token[:8],
+        )
 
     def _cmd_start_session(self, data: dict[str, Any]) -> None:
         """Handle a start_session command."""
