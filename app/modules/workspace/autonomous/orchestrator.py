@@ -247,9 +247,10 @@ class AutonomousOrchestrator:
                 "total_tokens": result.total_tokens,
                 "total_input_tokens": result.total_input_tokens,
                 "total_output_tokens": result.total_output_tokens,
-                "total_requests": 1,
             },
         )
+        # Recalculate request count from actual session_messages
+        self.repo.recalculate_workflow_requests(self._workflow_id)
 
     def _on_agent_activity(self, session_id: str, activity: dict):
         """Forward agent activity to the SSE event stream and update tokens."""
@@ -270,7 +271,6 @@ class AutonomousOrchestrator:
                         "total_tokens": activity.get("total_tokens", 0),
                         "total_input_tokens": activity.get("total_input_tokens", 0),
                         "total_output_tokens": activity.get("total_output_tokens", 0),
-                        "total_requests": 1,
                     },
                 )
             except Exception:
@@ -705,6 +705,19 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(review_result)
 
         review_text = review_result.response_text or ""
+
+        # Detect empty review output (agent produced no meaningful content)
+        if not review_text.strip():
+            logger.warning(
+                "Plan review round %d produced empty output (session=%s, success=%s)",
+                round_num,
+                review_result.session_id,
+                review_result.success,
+            )
+            # Use a fallback message so the planning loop can still decide
+            # whether to refine, rather than treating empty as "approved"
+            review_text = "Review agent produced no output. Plan should be reviewed manually."
+
         self.repo.update_milestone(
             review_ms.get("milestone_id", ""),
             {
@@ -725,10 +738,20 @@ class AutonomousOrchestrator:
                 pass
 
         # Step 3: Check if all rounds are done
+        # max_plan_rounds means the max number of Plan→Review→Refine cycles.
+        # After the initial Plan + Review (round 1), we need at least one
+        # refinement round if the review had substantive feedback.
+        # So the total rounds = initial plan + up to max_plan_rounds refinements.
         self._update_workflow({"current_round": round_num})
 
-        if round_num >= max_rounds:
-            # All plan review rounds completed — post final plan to issue
+        review_has_feedback = bool(
+            review_text and len(review_text.strip()) > 50 and "方案通过审查" not in review_text
+        )
+        needs_refinement = review_has_feedback and round_num < max_rounds + 1
+
+        if not needs_refinement:
+            # Planning complete — post final plan to issue.
+            # Use the latest refined plan if available, otherwise the original.
             final_plan = ""
             last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
