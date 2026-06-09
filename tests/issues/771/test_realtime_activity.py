@@ -179,7 +179,6 @@ class TestOrchestratorActivityForwarding:
                 "total_tokens": 10000,
                 "total_input_tokens": 8000,
                 "total_output_tokens": 2000,
-                "total_requests": 1,
             },
         )
 
