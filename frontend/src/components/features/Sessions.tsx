@@ -40,7 +40,6 @@ const statusColors: Record<string, BadgeVariant> = {
   active: 'success',
   paused: 'warning',
   completed: 'secondary',
-  archived: 'dark',
   error: 'danger',
 };
 
@@ -49,16 +48,15 @@ const statusIcons: Record<string, string> = {
   active: 'bi-circle-fill',
   paused: 'bi-pause-circle-fill',
   completed: 'bi-check-circle-fill',
-  archived: 'bi-archive-fill',
   error: 'bi-exclamation-circle-fill',
 };
 
 // Session type badge colors
 const typeColors: Record<string, BadgeVariant> = {
   chat: 'primary',
-  task: 'info',
   workflow: 'warning',
   agent: 'success',
+  terminal: 'info',
 };
 
 export const Sessions: React.FC = () => {
@@ -161,9 +159,9 @@ export const Sessions: React.FC = () => {
     () => [
       { value: '', label: t('allTypes', language) ?? 'All Types' },
       { value: 'chat', label: 'Chat' },
-      { value: 'task', label: 'Task' },
-      { value: 'workflow', label: 'Workflow' },
       { value: 'agent', label: 'Agent' },
+      { value: 'workflow', label: 'Workflow' },
+      { value: 'terminal', label: 'Terminal' },
     ],
     [language]
   );
