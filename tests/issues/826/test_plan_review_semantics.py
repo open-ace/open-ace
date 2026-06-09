@@ -6,6 +6,7 @@ Covers:
 - review_has_feedback logic with various review texts
 - needs_refinement loop termination
 - REVIEW_FEEDBACK_MIN_LENGTH constant usage
+- Integration: _do_planning refinement loop behavior
 """
 
 from unittest.mock import MagicMock, patch
@@ -15,19 +16,6 @@ from app.modules.workspace.autonomous.orchestrator import REVIEW_FEEDBACK_MIN_LE
 
 class TestReviewFeedbackDetection:
     """Test the review_has_feedback logic in _do_planning."""
-
-    def _make_orchestrator(self):
-        """Create a minimal orchestrator with mocked dependencies."""
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        with (
-            patch("app.modules.workspace.autonomous.orchestrator.SessionManager"),
-            patch("app.modules.workspace.autonomous.orchestrator.AutonomousAgentRunner"),
-        ):
-            orch = AutonomousOrchestrator("wf-test", db=MagicMock())
-        orch.repo = MagicMock()
-        orch._gh = MagicMock()
-        return orch
 
     def test_short_review_is_not_feedback(self):
         """Review shorter than REVIEW_FEEDBACK_MIN_LENGTH is not feedback."""
@@ -167,3 +155,167 @@ class TestNeedsRefinementLogic:
         round_num = 2
         needs_refinement = True and round_num <= max_rounds  # feedback assumed True
         assert needs_refinement is False
+
+
+class TestPlanningIntegration:
+    """Integration tests: call _do_planning and verify refinement loop behavior."""
+
+    def _make_orchestrator(self, wf_data):
+        """Create orchestrator with mocked dependencies for _do_planning."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+            ) as mock_repo_cls,
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = wf_data
+            mock_repo.list_milestones.return_value = []
+            mock_repo.create_milestone.return_value = {
+                "milestone_id": "ms-plan-1",
+                "workflow_id": wf_data["workflow_id"],
+            }
+            mock_repo.create_event.return_value = {"id": 1}
+            mock_repo.update_workflow.return_value = wf_data
+            mock_repo_cls.return_value = mock_repo
+            orch = AutonomousOrchestrator(wf_data["workflow_id"])
+            orch.repo = mock_repo
+
+        orch.emitter = MagicMock()
+        orch._runner = MagicMock()
+        return orch, mock_repo
+
+    def _make_workflow(self, **overrides):
+        """Create a minimal workflow dict for planning tests."""
+        base = {
+            "workflow_id": "test-wf-826",
+            "user_id": 1,
+            "title": "Test Plan Review",
+            "status": "planning",
+            "requirements_text": "Fix the review bug",
+            "requirements_issue_url": "",
+            "project_path": "/tmp/test",
+            "project_repo_url": "",
+            "is_new_project": False,
+            "cli_tool": "claude-code",
+            "model": "claude-sonnet-4-6",
+            "permission_mode": "auto-edit",
+            "branch_name": "test-branch",
+            "branch_strategy": "new-branch",
+            "workspace_type": "local",
+            "remote_machine_id": "",
+            "worktree_path": "",
+            "github_issue_number": None,
+            "github_pr_number": None,
+            "github_pr_url": "",
+            "current_phase": "planning",
+            "current_round": 1,
+            "dev_round": 1,
+            "max_plan_rounds": 2,
+            "max_pr_review_rounds": 5,
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "error_message": "",
+        }
+        base.update(overrides)
+        return base
+
+    def test_substantive_review_triggers_refinement(self):
+        """When review has substantive feedback, _do_planning emits round_end
+        (not phase_change), signaling the scheduler to run another round."""
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        wf = self._make_workflow(max_plan_rounds=2)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        plan_result = AgentTaskResult(
+            session_id="sess-plan",
+            response_text="# Plan\nStep 1: Implement fix",
+            total_tokens=100,
+            total_input_tokens=50,
+            total_output_tokens=50,
+            success=True,
+        )
+        review_result = AgentTaskResult(
+            session_id="sess-review",
+            response_text=(
+                "方案存在以下问题需要修改：1. 遗漏了错误处理 "
+                "2. 架构风险较高 3. 需要补充测试策略 4. 缺少回滚方案"
+            ),
+            total_tokens=80,
+            total_input_tokens=40,
+            total_output_tokens=40,
+            success=True,
+        )
+
+        orch._runner.run_agent_task.side_effect = [plan_result, review_result]
+
+        orch._do_planning(wf)
+
+        # One round of _do_planning = 1 plan + 1 review = 2 agent calls
+        assert orch._runner.run_agent_task.call_count == 2
+
+        # The key behavior: emits "round_end" (not "phase_change"),
+        # signaling the scheduler that refinement is needed
+        round_end_calls = [c for c in orch.emitter.emit.call_args_list if c[0][1] == "round_end"]
+        phase_change_calls = [
+            c for c in orch.emitter.emit.call_args_list if c[0][1] == "phase_change"
+        ]
+        assert len(round_end_calls) == 1
+        assert len(phase_change_calls) == 0
+
+        # Workflow should still be in planning (not moved to development)
+        status_updates = [
+            c[0][1] for c in mock_repo.update_workflow.call_args_list if "status" in c[0][1]
+        ]
+        assert not any(u.get("status") == "developing" for u in status_updates)
+
+    def test_approved_review_skips_refinement(self):
+        """When review approves the plan, _do_planning transitions to development."""
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        wf = self._make_workflow(max_plan_rounds=2)
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        plan_result = AgentTaskResult(
+            session_id="sess-plan",
+            response_text="# Plan\nStep 1: Implement fix",
+            total_tokens=100,
+            total_input_tokens=50,
+            total_output_tokens=50,
+            success=True,
+        )
+        review_result = AgentTaskResult(
+            session_id="sess-review",
+            response_text="方案通过审查，没有重大问题。" * 10,
+            total_tokens=80,
+            total_input_tokens=40,
+            total_output_tokens=40,
+            success=True,
+        )
+
+        orch._runner.run_agent_task.side_effect = [plan_result, review_result]
+
+        orch._do_planning(wf)
+
+        # 1 plan + 1 review = 2 agent calls, no refinement round
+        assert orch._runner.run_agent_task.call_count == 2
+
+        # Key behavior: emits "phase_change" to development (not "round_end")
+        phase_change_calls = [
+            c for c in orch.emitter.emit.call_args_list if c[0][1] == "phase_change"
+        ]
+        assert len(phase_change_calls) == 1
+        assert phase_change_calls[0][0][2].get("phase") == "development"
+
+        # Workflow should be moved to development
+        status_updates = [
+            c[0][1]
+            for c in mock_repo.update_workflow.call_args_list
+            if c[0][1].get("status") == "developing"
+        ]
+        assert len(status_updates) >= 1
