@@ -541,6 +541,33 @@ REGISTER_RESPONSE=$(curl -s -X POST "${SERVER_URL}/api/remote/agent/register" \
 
 if echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('success') else 1)" 2>/dev/null; then
     log_success "Machine registered successfully!"
+
+    # Extract agent_token from registration response and save to config
+    AGENT_TOKEN=$(echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "
+import sys, json
+d = json.load(sys.stdin)
+m = d.get('machine', {})
+token = m.get('agent_token', '')
+print(token)
+" 2>/dev/null)
+
+    if [ -n "$AGENT_TOKEN" ]; then
+        "$PYTHON_PATH" -c "
+import json, sys
+config_path = '${INSTALL_DIR}/config.json'
+try:
+    with open(config_path) as f:
+        cfg = json.load(f)
+    cfg['agent_token'] = sys.argv[1]
+    with open(config_path, 'w') as f:
+        json.dump(cfg, f, indent=2)
+except Exception as e:
+    print(f'Warning: Failed to save agent_token: {e}', file=sys.stderr)
+" "$AGENT_TOKEN" 2>/dev/null
+        log_success "Agent token saved to configuration"
+    else
+        log_info "No agent_token in response (server may not support token auth yet)"
+    fi
 else
     log_error "Registration failed. Response: $REGISTER_RESPONSE"
     log_error "Please check your registration token and server URL."

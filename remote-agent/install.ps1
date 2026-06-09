@@ -356,6 +356,15 @@ try {
 
     if ($response.success) {
         Write-Host "[OK] Machine registered successfully!" -ForegroundColor Green
+
+        # Extract agent_token from registration response and save to config
+        if ($response.machine -and $response.machine.agent_token) {
+            $config.agent_token = $response.machine.agent_token
+            $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
+            Write-Host "[OK] Agent token saved to configuration" -ForegroundColor Green
+        } else {
+            Write-Host "[INFO] No agent_token in response (server may not support token auth yet)" -ForegroundColor Cyan
+        }
     } elseif ($response.error) {
         Write-Host "[ERROR] Registration failed: $($response.error)" -ForegroundColor Red
         Write-Host "       This may happen if the machine is already registered. Delete it from the server first to re-register." -ForegroundColor Yellow
