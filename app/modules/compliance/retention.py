@@ -432,9 +432,22 @@ class DataRetentionManager:
 
         return history
 
+    # Estimated average record sizes in bytes (based on table structure analysis)
+    ESTIMATED_RECORD_SIZES: dict[str, int] = {
+        "audit_logs": 600,  # details(text) is the main large field
+        "quota_alerts": 200,  # mostly numeric fields
+        "sessions": 150,  # token + timestamps
+        "daily_usage": 100,  # numeric counters
+        "daily_messages": 1000,  # content + full_entry (two TEXT fields)
+        "users": 300,  # user basic info
+    }
+
     def estimate_storage(self) -> list[dict[str, Any]]:
         """
         Estimate storage usage by data type.
+
+        Uses average record size estimates based on table structure analysis.
+        This provides a reasonable approximation for storage planning purposes.
 
         Returns:
             List of storage estimates with data_type, record_count, estimated_size_mb.
@@ -453,11 +466,17 @@ class DataRetentionManager:
         for data_type, table in tables.items():
             try:
                 result = self.db.fetch_one(f"SELECT COUNT(*) as count FROM {table}")
+                record_count = result["count"] if result else 0
+
+                # Calculate estimated size based on average record size
+                avg_size_bytes = self.ESTIMATED_RECORD_SIZES.get(data_type, 100)
+                estimated_size_mb = round((record_count * avg_size_bytes) / (1024 * 1024), 2)
+
                 estimates.append(
                     {
                         "data_type": data_type,
-                        "record_count": result["count"] if result else 0,
-                        "estimated_size_mb": 0,
+                        "record_count": record_count,
+                        "estimated_size_mb": estimated_size_mb,
                     }
                 )
             except Exception:
