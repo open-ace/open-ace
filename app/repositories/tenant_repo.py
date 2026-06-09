@@ -146,7 +146,9 @@ class TenantRepository:
                     )
                     audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
                     sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
-                    auto_provision_val = 1 if settings_dict.get("auto_provision_users", False) else 0
+                    auto_provision_val = (
+                        1 if settings_dict.get("auto_provision_users", False) else 0
+                    )
 
                 cursor.execute(
                     adapt_sql(
@@ -154,7 +156,7 @@ class TenantRepository:
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
                      audit_log_retention_days, data_retention_days, sso_enabled, sso_provider, auto_provision_users)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """
                     ),
                     (

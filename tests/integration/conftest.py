@@ -243,6 +243,7 @@ def _create_sqlite_tables(db):
                 data_retention_days INTEGER DEFAULT 365,
                 sso_enabled INTEGER DEFAULT 0,
                 sso_provider TEXT,
+                auto_provision_users INTEGER DEFAULT 0,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id)
             )
         """

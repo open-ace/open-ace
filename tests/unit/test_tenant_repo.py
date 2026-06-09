@@ -360,11 +360,18 @@ class TestTenantRepository:
         quota_dict = {"daily_token_limit": 500000}
         result = self.repo.update(1, {"quota": quota_dict})
         assert result is True
-        call_args = self.db.execute.call_args
-        params = call_args[0][1]
-        # quota should be JSON-serialized
-        quota_param = next(p for p in params if isinstance(p, str) and "daily_token_limit" in p)
+        # quota should be JSON-serialized in tenants table update (first execute call)
+        call_args_list = self.db.execute.call_args_list
+        assert len(call_args_list) >= 1
+        first_call_params = call_args_list[0][0][1]
+        quota_param = next(
+            (p for p in first_call_params if isinstance(p, str) and "daily_token_limit" in p),
+            None,
+        )
+        assert quota_param is not None
         assert json.loads(quota_param) == quota_dict
+        # Also verify quota table was updated (second execute call)
+        assert self.db.execute.call_count == 2
 
     def test_update_json_serializes_settings(self):
         mock_cursor = MagicMock()
@@ -374,10 +381,18 @@ class TestTenantRepository:
         settings_dict = {"sso_enabled": True}
         result = self.repo.update(1, {"settings": settings_dict})
         assert result is True
-        call_args = self.db.execute.call_args
-        params = call_args[0][1]
-        settings_param = next(p for p in params if isinstance(p, str) and "sso_enabled" in p)
+        # settings should be JSON-serialized in tenants table update (first execute call)
+        call_args_list = self.db.execute.call_args_list
+        assert len(call_args_list) >= 1
+        first_call_params = call_args_list[0][0][1]
+        settings_param = next(
+            (p for p in first_call_params if isinstance(p, str) and "sso_enabled" in p),
+            None,
+        )
+        assert settings_param is not None
         assert json.loads(settings_param) == settings_dict
+        # Also verify settings table was updated (second execute call)
+        assert self.db.execute.call_count == 2
 
     def test_update_ignores_disallowed_columns(self):
         mock_cursor = MagicMock()
