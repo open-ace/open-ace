@@ -553,10 +553,7 @@ try:
 except Exception as e:
     print(f'Warning: Failed to parse agent_token from response: {e}', file=sys.stderr)
     print('')
-" 2>&1)
-
-    # Trim whitespace from extraction result
-    AGENT_TOKEN=$(echo "$AGENT_TOKEN" | head -1 | tr -d '[:space:]')
+")
 
     if [ -n "$AGENT_TOKEN" ]; then
         if "$PYTHON_PATH" -c "
