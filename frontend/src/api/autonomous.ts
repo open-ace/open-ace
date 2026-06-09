@@ -211,14 +211,10 @@ export const autonomousApi = {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/forks`);
   },
 
-  async resumeWithFeedback(
-    workflowId: string,
-    feedback: string
-  ): Promise<{ success: boolean }> {
-    return apiClient.post(
-      `/api/autonomous/workflows/${workflowId}/resume-with-feedback`,
-      { user_feedback: feedback }
-    );
+  async resumeWithFeedback(workflowId: string, feedback: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/resume-with-feedback`, {
+      user_feedback: feedback,
+    });
   },
 
   async getMilestoneSession(

@@ -28,10 +28,12 @@ export default function CancelRoundModal({
     if (!feedback.trim() || feedback.trim().length < 10) return;
     cancelMutation.mutate(
       { workflowId, milestoneId, feedback: feedback.trim() },
-      { onSuccess: () => {
-        setFeedback('');
-        onClose();
-      }}
+      {
+        onSuccess: () => {
+          setFeedback('');
+          onClose();
+        },
+      }
     );
   };
 
@@ -45,24 +47,14 @@ export default function CancelRoundModal({
   const isValid = feedback.trim().length >= 10;
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={t('autoCancelRound', language)}
-    >
+    <Modal isOpen={isOpen} onClose={handleClose} title={t('autoCancelRound', language)}>
       <div className="mb-3">
-        <p className="text-muted small">
-          {t('autoCancelRoundDesc', language)}
-        </p>
-        <p className="fw-semibold small">
-          {milestoneTitle}
-        </p>
+        <p className="text-muted small">{t('autoCancelRoundDesc', language)}</p>
+        <p className="fw-semibold small">{milestoneTitle}</p>
       </div>
 
       <div className="mb-3">
-        <label className="form-label fw-semibold">
-          {t('autoFeedbackLabel', language)}
-        </label>
+        <label className="form-label fw-semibold">{t('autoFeedbackLabel', language)}</label>
         <textarea
           className="form-control"
           rows={4}
@@ -72,18 +64,12 @@ export default function CancelRoundModal({
           disabled={cancelMutation.isPending}
         />
         {!isValid && feedback.length > 0 && (
-          <div className="form-text text-danger">
-            {t('autoFeedbackRequired', language)}
-          </div>
+          <div className="form-text text-danger">{t('autoFeedbackRequired', language)}</div>
         )}
       </div>
 
       <div className="d-flex justify-content-end gap-2">
-        <Button
-          variant="secondary"
-          onClick={handleClose}
-          disabled={cancelMutation.isPending}
-        >
+        <Button variant="secondary" onClick={handleClose} disabled={cancelMutation.isPending}>
           {t('cancel', language)}
         </Button>
         <Button

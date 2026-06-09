@@ -247,8 +247,15 @@ export function useExtendPlanningTimeout() {
 export function useCancelMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ workflowId, milestoneId, feedback }: { workflowId: string; milestoneId: string; feedback: string }) =>
-      autonomousApi.cancelMilestone(workflowId, milestoneId, feedback),
+    mutationFn: ({
+      workflowId,
+      milestoneId,
+      feedback,
+    }: {
+      workflowId: string;
+      milestoneId: string;
+      feedback: string;
+    }) => autonomousApi.cancelMilestone(workflowId, milestoneId, feedback),
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
@@ -271,7 +278,8 @@ export function useForkMilestone() {
       feedback: string;
       pauseOriginal: boolean;
       branchName?: string;
-    }) => autonomousApi.forkMilestone(workflowId, milestoneId, { feedback, pauseOriginal, branchName }),
+    }) =>
+      autonomousApi.forkMilestone(workflowId, milestoneId, { feedback, pauseOriginal, branchName }),
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });

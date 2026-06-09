@@ -965,11 +965,13 @@ const translations: Record<Language, Translations> = {
     autoViewSession: 'View Session',
     autoForkFromHere: 'Fork From Here',
     autoCancelRound: 'Cancel Round',
-    autoCancelRoundDesc: 'Cancel this and subsequent milestones. The workflow will wait, and AI will resume with your feedback from the interruption point.',
+    autoCancelRoundDesc:
+      'Cancel this and subsequent milestones. The workflow will wait, and AI will resume with your feedback from the interruption point.',
     autoFeedbackLabel: 'Your Feedback / Instructions',
     autoFeedbackPlaceholder: 'Describe what should be done differently...',
     autoFeedbackRequired: 'Please provide feedback (at least 10 characters)',
-    autoForkDesc: 'Create a new workflow starting from this point. Both workflows can run in parallel with different approaches.',
+    autoForkDesc:
+      'Create a new workflow starting from this point. Both workflows can run in parallel with different approaches.',
     autoForkInstructionsLabel: 'Fork Instructions',
     autoForkBranchLabel: 'New Branch Name (optional)',
     autoForkPauseOriginal: 'Pause original workflow',
@@ -2630,11 +2632,13 @@ const translations: Record<Language, Translations> = {
     autoViewSession: 'セッションを見る',
     autoForkFromHere: 'ここから分岐',
     autoCancelRound: 'ラウンドをキャンセル',
-    autoCancelRoundDesc: 'このマイルストーン以降をキャンセルします。ワークフローは待機し、AIはフィードバックに基づいて再開します。',
+    autoCancelRoundDesc:
+      'このマイルストーン以降をキャンセルします。ワークフローは待機し、AIはフィードバックに基づいて再開します。',
     autoFeedbackLabel: 'フィードバック/指示',
     autoFeedbackPlaceholder: 'どう変更すべきか説明してください...',
     autoFeedbackRequired: 'フィードバックを入力してください（10文字以上）',
-    autoForkDesc: 'このポイントから新しいワークフローを作成します。異なるアプローチで並行実行できます。',
+    autoForkDesc:
+      'このポイントから新しいワークフローを作成します。異なるアプローチで並行実行できます。',
     autoForkInstructionsLabel: '分岐の指示',
     autoForkBranchLabel: '新しいブランチ名（任意）',
     autoForkPauseOriginal: '元のワークフローを一時停止',
@@ -3310,11 +3314,13 @@ const translations: Record<Language, Translations> = {
     autoViewSession: '세션 보기',
     autoForkFromHere: '여기서 분기',
     autoCancelRound: '라운드 취소',
-    autoCancelRoundDesc: '이 마일스톤 이후를 취소합니다. 워크플로우가 대기하며 AI가 피드백에 따라 재개합니다.',
+    autoCancelRoundDesc:
+      '이 마일스톤 이후를 취소합니다. 워크플로우가 대기하며 AI가 피드백에 따라 재개합니다.',
     autoFeedbackLabel: '피드백/지시사항',
     autoFeedbackPlaceholder: '어떻게 변경해야 하는지 설명해주세요...',
     autoFeedbackRequired: '피드백을 입력해주세요 (최소 10자)',
-    autoForkDesc: '이 지점에서 새 워크플로우를 생성합니다. 다른 접근 방식으로 병렬 실행할 수 있습니다.',
+    autoForkDesc:
+      '이 지점에서 새 워크플로우를 생성합니다. 다른 접근 방식으로 병렬 실행할 수 있습니다.',
     autoForkInstructionsLabel: '분기 지시사항',
     autoForkBranchLabel: '새 브랜치 이름 (선택)',
     autoForkPauseOriginal: '원본 워크플로우 일시정지',

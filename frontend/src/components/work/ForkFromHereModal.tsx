@@ -57,24 +57,14 @@ export default function ForkFromHereModal({
   const isValid = feedback.trim().length >= 10;
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={t('autoForkFromHere', language)}
-    >
+    <Modal isOpen={isOpen} onClose={handleClose} title={t('autoForkFromHere', language)}>
       <div className="mb-3">
-        <p className="text-muted small">
-          {t('autoForkDesc', language)}
-        </p>
-        <p className="fw-semibold small">
-          {milestoneTitle}
-        </p>
+        <p className="text-muted small">{t('autoForkDesc', language)}</p>
+        <p className="fw-semibold small">{milestoneTitle}</p>
       </div>
 
       <div className="mb-3">
-        <label className="form-label fw-semibold">
-          {t('autoForkInstructionsLabel', language)}
-        </label>
+        <label className="form-label fw-semibold">{t('autoForkInstructionsLabel', language)}</label>
         <textarea
           className="form-control"
           rows={4}
@@ -84,16 +74,12 @@ export default function ForkFromHereModal({
           disabled={forkMutation.isPending}
         />
         {!isValid && feedback.length > 0 && (
-          <div className="form-text text-danger">
-            {t('autoFeedbackRequired', language)}
-          </div>
+          <div className="form-text text-danger">{t('autoFeedbackRequired', language)}</div>
         )}
       </div>
 
       <div className="mb-3">
-        <label className="form-label fw-semibold">
-          {t('autoForkBranchLabel', language)}
-        </label>
+        <label className="form-label fw-semibold">{t('autoForkBranchLabel', language)}</label>
         <input
           type="text"
           className="form-control"
@@ -105,9 +91,7 @@ export default function ForkFromHereModal({
       </div>
 
       <div className="mb-3">
-        <label className="form-label fw-semibold">
-          {t('autoForkOriginalBehavior', language)}
-        </label>
+        <label className="form-label fw-semibold">{t('autoForkOriginalBehavior', language)}</label>
         <div className="form-check">
           <input
             className="form-check-input"
@@ -139,18 +123,10 @@ export default function ForkFromHereModal({
       </div>
 
       <div className="d-flex justify-content-end gap-2">
-        <Button
-          variant="secondary"
-          onClick={handleClose}
-          disabled={forkMutation.isPending}
-        >
+        <Button variant="secondary" onClick={handleClose} disabled={forkMutation.isPending}>
           {t('cancel', language)}
         </Button>
-        <Button
-          variant="info"
-          onClick={handleSubmit}
-          disabled={!isValid || forkMutation.isPending}
-        >
+        <Button variant="info" onClick={handleSubmit} disabled={!isValid || forkMutation.isPending}>
           {forkMutation.isPending ? t('autoCreating', language) : t('autoForkFromHere', language)}
         </Button>
       </div>
