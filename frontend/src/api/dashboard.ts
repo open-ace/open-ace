@@ -43,9 +43,11 @@ export const dashboardApi = {
   /**
    * Get summary data
    */
-  async getSummary(host?: string): Promise<SummaryData> {
+  async getSummary(host?: string, startDate?: string, endDate?: string): Promise<SummaryData> {
     const params: Record<string, string> = {};
     if (host) params.host = host;
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
 
     const response = await apiClient.get<SummaryData>('/api/summary', params);
     return response;
