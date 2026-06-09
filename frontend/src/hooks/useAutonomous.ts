@@ -247,8 +247,8 @@ export function useExtendPlanningTimeout() {
 export function useCancelMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ workflowId, milestoneId }: { workflowId: string; milestoneId: string }) =>
-      autonomousApi.cancelMilestone(workflowId, milestoneId),
+    mutationFn: ({ workflowId, milestoneId, feedback }: { workflowId: string; milestoneId: string; feedback: string }) =>
+      autonomousApi.cancelMilestone(workflowId, milestoneId, feedback),
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
@@ -262,15 +262,41 @@ export function useForkMilestone() {
     mutationFn: ({
       workflowId,
       milestoneId,
+      feedback,
+      pauseOriginal,
       branchName,
     }: {
       workflowId: string;
       milestoneId: string;
+      feedback: string;
+      pauseOriginal: boolean;
       branchName?: string;
-    }) => autonomousApi.forkMilestone(workflowId, milestoneId, branchName),
+    }) => autonomousApi.forkMilestone(workflowId, milestoneId, { feedback, pauseOriginal, branchName }),
     onSuccess: (_, { workflowId }) => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'timeline', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
+export function useWorkflowForks(workflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'forks', workflowId],
+    queryFn: () => autonomousApi.getWorkflowForks(workflowId),
+    enabled: enabled && !!workflowId,
+    staleTime: 10 * 1000,
+  });
+}
+
+export function useResumeWithFeedback() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, feedback }: { workflowId: string; feedback: string }) =>
+      autonomousApi.resumeWithFeedback(workflowId, feedback),
+    onSuccess: (_, { workflowId }) => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflow', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
     },
   });
 }

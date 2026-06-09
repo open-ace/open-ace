@@ -23,12 +23,12 @@ import {
   useMarkDone,
   useRetryWorkflow,
   useExtendPlanningTimeout,
-  useCancelMilestone,
-  useForkMilestone,
   useMilestoneSession,
   useMilestoneDiff,
 } from '@/hooks/useAutonomous';
 import type { MilestoneSession } from '@/hooks/useAutonomous';
+import CancelRoundModal from './CancelRoundModal';
+import ForkFromHereModal from './ForkFromHereModal';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
@@ -86,8 +86,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
-  const cancelMilestoneMutation = useCancelMilestone();
-  const forkMilestoneMutation = useForkMilestone();
 
   // Session detail query
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
@@ -157,17 +155,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
     setShowBranchSelector(false);
   };
   const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
-  const handleCancelMilestone = (milestoneId: string) => {
-    cancelMilestoneMutation.mutate({ workflowId: workflow.workflow_id, milestoneId });
-  };
-  const handleForkMilestone = (milestoneId: string) => {
-    const branch = `fork/from-${milestoneId.slice(0, 8)}`;
-    forkMilestoneMutation.mutate({
-      workflowId: workflow.workflow_id,
-      milestoneId,
-      branchName: branch,
-    });
-  };
+
+  // Modal state for cancel/fork
+  const [showCancelModal, setShowCancelModal] = useState<string | null>(null);
+  const [showForkModal, setShowForkModal] = useState<string | null>(null);
 
   const toggleExpand = (milestoneId: string) => {
     setExpandedMilestone((prev) => (prev === milestoneId ? null : milestoneId));
@@ -503,8 +494,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               <Button
                                 size="sm"
                                 variant="outline-info"
-                                onClick={() => handleForkMilestone(milestone.milestone_id)}
-                                disabled={forkMilestoneMutation.isPending}
+                                onClick={() => setShowForkModal(milestone.milestone_id)}
                               >
                                 <i className="bi bi-diagram-3 me-1"></i>
                                 {t('autoForkFromHere', language)}
@@ -514,8 +504,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
                               <Button
                                 size="sm"
                                 variant="outline-secondary"
-                                onClick={() => handleCancelMilestone(milestone.milestone_id)}
-                                disabled={cancelMilestoneMutation.isPending}
+                                onClick={() => setShowCancelModal(milestone.milestone_id)}
                               >
                                 <i className="bi bi-x-circle me-1"></i>
                                 {t('autoCancelRound', language)}
@@ -726,6 +715,28 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({ workflow }) 
             )}
           </div>
         </Modal>
+      )}
+
+      {/* Cancel Round Modal */}
+      {showCancelModal && (
+        <CancelRoundModal
+          isOpen={true}
+          onClose={() => setShowCancelModal(null)}
+          workflowId={workflow.workflow_id}
+          milestoneId={showCancelModal}
+          milestoneTitle={milestones.find(m => m.milestone_id === showCancelModal)?.title || ''}
+        />
+      )}
+
+      {/* Fork From Here Modal */}
+      {showForkModal && (
+        <ForkFromHereModal
+          isOpen={true}
+          onClose={() => setShowForkModal(null)}
+          workflowId={workflow.workflow_id}
+          milestoneId={showForkModal}
+          milestoneTitle={milestones.find(m => m.milestone_id === showForkModal)?.title || ''}
+        />
       )}
     </div>
   );

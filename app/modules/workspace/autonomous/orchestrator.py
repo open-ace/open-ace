@@ -107,6 +107,20 @@ PLANNING_TIMEOUT = 600
 # triggers a refinement round.
 REVIEW_FEEDBACK_MIN_LENGTH = 50
 
+# Phase ordering — used by fork to determine the next phase after the fork point.
+PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
+
+
+def _next_phase(current_phase: str) -> str:
+    """Return the phase that follows current_phase."""
+    try:
+        idx = PHASE_ORDER.index(current_phase)
+    except ValueError:
+        return "planning"
+    if idx + 1 < len(PHASE_ORDER):
+        return PHASE_ORDER[idx + 1]
+    return "merge"
+
 
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
@@ -150,6 +164,21 @@ class AutonomousOrchestrator:
                 "event_type": event_type,
                 "event_data": json.dumps(data, ensure_ascii=False),
             }
+        )
+
+    def _is_fork_workflow(self, wf: dict) -> bool:
+        """Check if this workflow was created by a fork operation."""
+        return bool(wf.get("parent_workflow_id"))
+
+    def _get_user_feedback_prompt(self, wf: dict) -> str:
+        """Return a prompt section with user feedback, or empty string."""
+        feedback = wf.get("user_feedback", "")
+        if not feedback or not feedback.strip():
+            return ""
+        return (
+            "\n\n## ⚠️ 用户反馈/指令\n"
+            "用户提供了以下反馈，请在工作中充分考虑并优先执行：\n"
+            f"{feedback}\n\n"
         )
 
     @staticmethod
@@ -388,8 +417,87 @@ class AutonomousOrchestrator:
     # ── Phase: Preparation ────────────────────────────────────────
 
     def _do_preparation(self, wf: dict):
-        """Set up project, create/read issue, create branch."""
+        """Set up project, create/read issue, create branch.
+
+        For fork workflows (parent_workflow_id set):
+        - Skip repo/issue creation (already exist from parent)
+        - Force worktree strategy for parallel execution
+        - Jump to the next phase after the fork milestone's phase
+        """
         project_path = wf.get("project_path", "")
+
+        # --- Fork workflow fast path ---
+        if self._is_fork_workflow(wf):
+            gh = self._get_gh()
+            branch_name = wf.get("branch_name", "")
+            if not branch_name:
+                branch_name = f"fork/{self._workflow_id[:8]}"
+
+            # Determine the base commit from the fork milestone
+            fork_milestone_id = wf.get("fork_milestone_id", "")
+            base_ref = "origin/main"
+            if fork_milestone_id:
+                fork_ms = self.repo.get_milestone(fork_milestone_id)
+                if fork_ms:
+                    commit_shas = fork_ms.get("commit_shas", "")
+                    if commit_shas:
+                        try:
+                            shas = json.loads(commit_shas)
+                            if shas:
+                                base_ref = shas[-1]
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+            # Force worktree for parallel execution
+            try:
+                gh._run_git(["fetch", "origin", "main"])
+                wt_path = f"{project_path}/../{branch_name.replace('/', '-')}"
+                gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
+                self._update_workflow(
+                    {
+                        "worktree_path": wt_path,
+                        "branch_name": branch_name,
+                        "branch_strategy": "worktree",
+                    }
+                )
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="branch_created",
+                    status="completed",
+                    title=f"Fork branch '{branch_name}' created (worktree)",
+                )
+            except GitHubOpsError as e:
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="branch_created",
+                    status="failed",
+                    title="Fork branch creation failed",
+                    error_message=str(e),
+                )
+                raise
+
+            # Jump to the next phase after the fork point's phase
+            fork_ms = self.repo.get_milestone(fork_milestone_id) if fork_milestone_id else None
+            fork_phase = fork_ms.get("phase", "planning") if fork_ms else "planning"
+            next_phase = _next_phase(fork_phase)
+            phase_status_map = {
+                "planning": "planning",
+                "development": "developing",
+                "pr_review": "pr_review",
+                "report": "reporting",
+                "merge": "merging",
+            }
+            self._update_workflow(
+                {
+                    "current_phase": next_phase,
+                    "status": phase_status_map.get(next_phase, "planning"),
+                    "current_round": 0,
+                }
+            )
+            self._emit("phase_change", {"phase": next_phase, "fork": True})
+            return
+
+        # --- Normal workflow path ---
 
         # New project: create GitHub repo
         if wf.get("is_new_project"):
@@ -578,6 +686,7 @@ class AutonomousOrchestrator:
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
+            prompt += self._get_user_feedback_prompt(wf)
             milestone_type = "plan_refined"
         else:
             prompt = (
@@ -593,6 +702,7 @@ class AutonomousOrchestrator:
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
+            prompt += self._get_user_feedback_prompt(wf)
             milestone_type = "plan_created"
 
         ms = self._create_milestone(
@@ -851,6 +961,7 @@ class AutonomousOrchestrator:
             f"5. 遵循项目现有的代码风格和约定\n"
             f"6. 所有修改完成后，提交 git commit"
         )
+        dev_prompt += self._get_user_feedback_prompt(wf)
 
         result = self._run_agent(
             wf=wf,
@@ -1376,7 +1487,55 @@ class AutonomousOrchestrator:
     # ── Phase: Wait ─────────────────────────────────────────────────
 
     def _do_wait(self, wf: dict):
-        """Poll for new requirements or completion signal."""
+        """Poll for new requirements or completion signal.
+
+        If user_feedback is stored on the workflow (from cancel-with-feedback),
+        resume immediately from the cancelled milestone's phase.
+        """
+        # Check for stored user feedback (from cancel-with-feedback)
+        user_feedback = wf.get("user_feedback", "")
+        if user_feedback and user_feedback.strip():
+            # User provided feedback via cancel — resume from the cancelled phase
+            # Find the most recent non-cancelled, non-wait milestone to determine phase
+            cancelled_phase = "development"  # default fallback
+            milestones = self.repo.list_milestones(self._workflow_id)
+            for ms in reversed(milestones):
+                status = ms.get("status", "")
+                mtype = ms.get("milestone_type", "")
+                if status == "completed" and mtype not in (
+                    "wait_started",
+                    "requirement_received",
+                    "branch_created",
+                    "repo_setup",
+                    "issue_created",
+                ):
+                    cancelled_phase = ms.get("phase", "development")
+                    break
+
+            new_dev_round = wf.get("dev_round", 1) + 1
+            phase_status_map = {
+                "preparation": "preparing",
+                "planning": "planning",
+                "development": "developing",
+                "pr_review": "pr_review",
+                "report": "reporting",
+                "merge": "merging",
+            }
+            self._update_workflow(
+                {
+                    "current_phase": cancelled_phase,
+                    "status": phase_status_map.get(cancelled_phase, "developing"),
+                    "dev_round": new_dev_round,
+                    "current_round": 0,
+                }
+            )
+            self._emit(
+                "phase_change",
+                {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True},
+            )
+            return
+
+        # Original behavior: poll GitHub issue comments
         issue_number = wf.get("github_issue_number")
         gh = self._get_gh()
 
