@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { usePrompts, usePromptCategories, useCopyPrompt } from '@/hooks';
@@ -144,10 +145,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
 
   const handleCategoryClick = (category: string) => {
     setSelectedCategory(category === selectedCategory ? '' : category);
-  };
-
-  const handleToolClick = (url: string) => {
-    window.location.href = url;
   };
 
   const handleDocClick = (docId: string) => {
@@ -297,13 +294,13 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       <ul className="assist-items list-unstyled">
         {aiTools.map((tool) => (
           <li key={tool.id}>
-            <button
+            <Link
+              to={tool.url}
               className="assist-item assist-item-clickable"
-              onClick={() => handleToolClick(tool.url)}
             >
               <i className={`bi ${tool.icon} me-2`} />
               <span>{tool.name}</span>
-            </button>
+            </Link>
           </li>
         ))}
       </ul>
