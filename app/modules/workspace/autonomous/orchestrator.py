@@ -1389,6 +1389,10 @@ class AutonomousOrchestrator:
 
             self._accumulate_tokens(fix_result)
 
+            # Clear user feedback after it has been injected into the prompt
+            if wf.get("user_feedback", "").strip():
+                self._update_workflow({"user_feedback": ""})
+
             commit_sha = ""
             try:
                 gh.git_push()
