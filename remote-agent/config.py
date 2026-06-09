@@ -220,6 +220,12 @@ class AgentConfig:
 
     def save_agent_token(self, token: str) -> None:
         """Save agent_token to config file for persistence across restarts."""
+        if os.environ.get("OPENACE_AGENT_TOKEN"):
+            logger.warning(
+                "OPENACE_AGENT_TOKEN env var is set; saved token will be"
+                " overridden on next restart. Unset the env var to use"
+                " the config file value."
+            )
         self.update({"agent_token": token})
         self.save()
         logger.info("Agent token updated and persisted to config")
