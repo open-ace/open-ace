@@ -13,10 +13,9 @@ interface LayoutProps {
   children: React.ReactNode;
   activeSection: string;
   title?: string;
-  onNavigate: (section: string) => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, activeSection, onNavigate }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, activeSection }) => {
   const collapsed = useSidebarCollapsed();
   const mobileOpen = useMobileSidebarOpen();
 
@@ -48,7 +47,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeSection, onNavig
 
   return (
     <div className={cn('app-layout', collapsed && 'sidebar-collapsed')}>
-      <Sidebar activeSection={activeSection} onNavigate={onNavigate} mobileOpen={mobileOpen} />
+      <Sidebar activeSection={activeSection} mobileOpen={mobileOpen} />
       {mobileOpen && <div className="sidebar-overlay" onClick={closeMobileSidebar} />}
       <div className="main-content d-flex flex-column">
         <Header />

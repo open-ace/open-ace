@@ -31,12 +31,10 @@ const navItems: NavItem[] = [
 
 interface SidebarProps {
   activeSection: string;
-  onNavigate: (section: string) => void;
   mobileOpen?: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate: _onNavigate, mobileOpen }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeSection, mobileOpen }) => {
   const collapsed = useSidebarCollapsed();
   const language = useLanguage();
   const { user } = useAuth();
@@ -53,6 +51,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate: _on
 
   const toggleSidebar = () => {
     useAppStore.getState().toggleSidebar();
+  };
+
+  const renderNavItem = (item: NavItem) => {
+    const isDisabled = item.adminOnly && !isAdmin;
+    const commonProps = {
+      className: cn(
+        'nav-link text-white text-start w-100 d-flex align-items-center',
+        activeSection === item.id && !isDisabled && 'active bg-primary',
+        isDisabled && 'disabled opacity-50'
+      ),
+      onClick: (e: React.MouseEvent<HTMLAnchorElement>) => handleNavClick(e, isDisabled),
+      title: collapsed
+        ? t(item.label, language)
+        : isDisabled
+          ? t('adminOnly', language)
+          : undefined,
+      'aria-disabled': isDisabled ? true : undefined,
+      tabIndex: isDisabled ? -1 : undefined,
+    };
+
+    // External link: use <a> tag
+    if (item.href) {
+      return (
+        <a
+          href={item.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          {...commonProps}
+        >
+          <i className={cn('bi', item.icon, 'me-2')} />
+          {!collapsed && <span>{t(item.label, language)}</span>}
+        </a>
+      );
+    }
+
+    // Internal navigation: use <Link> component
+    return (
+      <Link to={`/${item.id}`} {...commonProps}>
+        <i className={cn('bi', item.icon, 'me-2')} />
+        {!collapsed && <span>{t(item.label, language)}</span>}
+      </Link>
+    );
   };
 
   return (
@@ -78,32 +118,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate: _on
 
       {/* Navigation */}
       <ul className="nav flex-column py-3">
-        {navItems.map((item) => {
-          const isDisabled = item.adminOnly && !isAdmin;
-          return (
-            <li className="nav-item" key={item.id}>
-              <Link
-                to={item.href || `/${item.id}`}
-                className={cn(
-                  'nav-link text-white text-start w-100 d-flex align-items-center',
-                  activeSection === item.id && !isDisabled && 'active bg-primary',
-                  isDisabled && 'disabled opacity-50'
-                )}
-                onClick={(e) => handleNavClick(e, isDisabled)}
-                title={
-                  collapsed
-                    ? t(item.label, language)
-                    : isDisabled
-                      ? t('adminOnly', language)
-                      : undefined
-                }
-              >
-                <i className={cn('bi', item.icon, 'me-2')} />
-                {!collapsed && <span>{t(item.label, language)}</span>}
-              </Link>
-            </li>
-          );
-        })}
+        {navItems.map((item) => (
+          <li className="nav-item" key={item.id}>
+            {renderNavItem(item)}
+          </li>
+        ))}
       </ul>
 
       {/* Collapse Toggle Button */}
