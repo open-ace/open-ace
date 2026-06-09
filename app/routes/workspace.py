@@ -542,7 +542,7 @@ def list_sessions():
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
         # Valid values for status and session_type (whitelist validation)
-        VALID_STATUS_VALUES = {"active", "paused", "completed", "archived", "error"}
+        VALID_STATUS_VALUES = {"active", "paused", "completed", "error"}
         VALID_SESSION_TYPE_VALUES = {"chat", "agent", "workflow", "terminal"}
 
         # Validate status and session_type parameters

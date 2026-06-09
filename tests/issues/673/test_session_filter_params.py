@@ -64,7 +64,6 @@ def test_sessions(db, test_user_id):
     sessions_data = [
         # (session_id, status, session_type, title)
         (f"test_active_chat_{uuid.uuid4().hex}", "active", "chat", "Test Active Chat"),
-        (f"test_active_task_{uuid.uuid4().hex}", "active", "task", "Test Active Task"),
         (f"test_paused_chat_{uuid.uuid4().hex}", "paused", "chat", "Test Paused Chat"),
         (
             f"test_completed_workflow_{uuid.uuid4().hex}",
@@ -73,7 +72,6 @@ def test_sessions(db, test_user_id):
             "Test Completed Workflow",
         ),
         (f"test_error_agent_{uuid.uuid4().hex}", "error", "agent", "Test Error Agent"),
-        (f"test_archived_chat_{uuid.uuid4().hex}", "archived", "chat", "Test Archived Chat"),
     ]
 
     created_session_ids = []
