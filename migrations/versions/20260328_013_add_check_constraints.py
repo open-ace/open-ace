@@ -128,6 +128,11 @@ def upgrade() -> None:
     else:
         # SQLite doesn't support ALTER TABLE ADD CONSTRAINT
         # We need to recreate the table
+        # Drop indexes first to avoid name conflicts (SQLite indexes are globally unique)
+        op.execute("DROP INDEX IF EXISTS idx_users_role")
+        op.execute("DROP INDEX IF EXISTS idx_users_email")
+        op.execute("DROP INDEX IF EXISTS idx_users_active")
+        op.execute("DROP INDEX IF EXISTS idx_users_tenant")
         op.execute(
             """
             CREATE TABLE users_new (
@@ -184,6 +189,9 @@ def upgrade() -> None:
         )
     else:
         # SQLite: recreate table with CHECK constraints
+        # Drop indexes first to avoid name conflicts (SQLite indexes are globally unique)
+        op.execute("DROP INDEX IF EXISTS idx_tenants_slug")
+        op.execute("DROP INDEX IF EXISTS idx_tenants_status")
         op.execute(
             """
             CREATE TABLE tenants_new (
@@ -241,6 +249,9 @@ def upgrade() -> None:
         )
     else:
         # SQLite: recreate table with CHECK constraints
+        # Drop indexes first to avoid name conflicts (SQLite indexes are globally unique)
+        op.execute("DROP INDEX IF EXISTS idx_quota_usage_user")
+        op.execute("DROP INDEX IF EXISTS idx_quota_usage_date")
         op.execute(
             """
             CREATE TABLE quota_usage_new (
