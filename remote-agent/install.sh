@@ -545,11 +545,18 @@ if echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "import sys,json; d=json.load(s
     # Extract agent_token from registration response and save to config
     AGENT_TOKEN=$(echo "$REGISTER_RESPONSE" | "$PYTHON_PATH" -c "
 import sys, json
-d = json.load(sys.stdin)
-m = d.get('machine', {})
-token = m.get('agent_token', '')
-print(token)
-" 2>/dev/null)
+try:
+    d = json.load(sys.stdin)
+    m = d.get('machine', {})
+    token = m.get('agent_token', '')
+    print(token)
+except Exception as e:
+    print(f'Warning: Failed to parse agent_token from response: {e}', file=sys.stderr)
+    print('')
+" 2>&1)
+
+    # Trim whitespace from extraction result
+    AGENT_TOKEN=$(echo "$AGENT_TOKEN" | head -1 | tr -d '[:space:]')
 
     if [ -n "$AGENT_TOKEN" ]; then
         if "$PYTHON_PATH" -c "

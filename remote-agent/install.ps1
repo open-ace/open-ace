@@ -359,9 +359,13 @@ try {
 
         # Extract agent_token from registration response and save to config
         if ($response.machine -and $response.machine.agent_token) {
-            $config.agent_token = $response.machine.agent_token
-            $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
-            Write-Host "[OK] Agent token saved to configuration" -ForegroundColor Green
+            try {
+                $config.agent_token = $response.machine.agent_token
+                $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
+                Write-Host "[OK] Agent token saved to configuration" -ForegroundColor Green
+            } catch {
+                Write-Host "[WARNING] Failed to save agent_token: $_" -ForegroundColor Yellow
+            }
         } else {
             Write-Host "[INFO] No agent_token in response (server may not support token auth yet)" -ForegroundColor Cyan
         }

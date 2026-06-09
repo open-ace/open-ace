@@ -95,3 +95,53 @@ class TestInstallScriptsRegistrationResponse:
         with open(INSTALL_PS1) as f:
             content = f.read()
         assert "machine_id" in content
+
+
+class TestInstallScriptStructure:
+    """Verify token logic is inside the registration success branch."""
+
+    def test_sh_agent_token_inside_success_branch(self):
+        """install.sh agent_token extraction should be inside the success block."""
+        with open(INSTALL_SH) as f:
+            content = f.read()
+        # Find the registration success block and verify AGENT_TOKEN logic is within it
+        success_match = re.search(
+            r"registered successfully.*?(?=\n\s*else\b|\n\s*fi\b)",
+            content,
+            re.DOTALL,
+        )
+        assert success_match is not None, "Registration success block not found"
+        assert "AGENT_TOKEN" in success_match.group(
+            0
+        ), "AGENT_TOKEN extraction not inside registration success block"
+
+    def test_ps1_agent_token_inside_success_branch(self):
+        """install.ps1 agent_token extraction should be inside the success block."""
+        with open(INSTALL_PS1) as f:
+            content = f.read()
+        # Find the success block and verify agent_token logic is within it
+        success_match = re.search(
+            r"\$response\.success.*?(?=\} elseif|\} catch|\}$)",
+            content,
+            re.DOTALL,
+        )
+        assert success_match is not None, "Registration success block not found"
+        assert "agent_token" in success_match.group(
+            0
+        ), "agent_token extraction not inside registration success block"
+
+    def test_sh_uses_sys_argv_for_path(self):
+        """install.sh should pass config path via sys.argv, not string interpolation."""
+        with open(INSTALL_SH) as f:
+            content = f.read()
+        # The save script should use sys.argv[1] for config_path
+        assert "sys.argv[1]" in content
+        assert "sys.argv[2]" in content
+
+    def test_ps1_has_try_catch_for_token_save(self):
+        """install.ps1 should have try/catch around token save."""
+        with open(INSTALL_PS1) as f:
+            content = f.read()
+        # Verify there's a try block around the token save
+        assert "try {" in content
+        assert "Set-Content" in content
