@@ -1,10 +1,11 @@
 /**
  * AutonomousWorkflowList Component - List of autonomous development workflows
  *
- * Displays workflows with status filter tabs and delete capability.
+ * Displays workflows with status filter tabs, fork grouping, and delete capability.
+ * Fork workflows are indented under their parent with a 🔀 icon.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Badge, Loading } from '@/components/common';
@@ -70,6 +71,28 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
 
   const workflows = data?.workflows ?? [];
 
+  // Build fork tree: identify parents and children
+  const { rootWorkflows, childrenMap } = useMemo(() => {
+    const children: Record<string, AutonomousWorkflow[]> = {};
+    const childIds = new Set<string>();
+
+    // First pass: identify fork children
+    workflows.forEach((wf) => {
+      if (wf.parent_workflow_id) {
+        if (!children[wf.parent_workflow_id]) {
+          children[wf.parent_workflow_id] = [];
+        }
+        children[wf.parent_workflow_id].push(wf);
+        childIds.add(wf.workflow_id);
+      }
+    });
+
+    // Second pass: roots = workflows that are NOT children
+    const roots = workflows.filter((wf) => !childIds.has(wf.workflow_id));
+
+    return { rootWorkflows: roots, childrenMap: children };
+  }, [workflows]);
+
   if (isLoading) {
     return (
       <div className="d-flex justify-content-center p-4">
@@ -86,6 +109,88 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     } else {
       setConfirmDeleteId(workflowId);
     }
+  };
+
+  // Render a single workflow item
+  const renderWorkflowItem = (workflow: AutonomousWorkflow, isForkChild: boolean) => {
+    const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
+    const isSelected = selectedId === workflow.workflow_id;
+    const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
+    const isConfirming = confirmDeleteId === workflow.workflow_id;
+
+    return (
+      <div
+        key={workflow.workflow_id}
+        className={`list-group-item border-0 px-3 py-2 d-flex align-items-start ${isSelected ? 'active' : ''} ${isForkChild ? 'bg-light' : ''}`}
+        style={{
+          cursor: 'pointer',
+          ...(isForkChild
+            ? { paddingLeft: '2rem', borderTop: '1px dashed var(--bs-gray-300)' }
+            : {}),
+        }}
+        onClick={() => onSelect(workflow)}
+      >
+        <div className="flex-grow-1 min-width-0">
+          <div className="fw-semibold text-truncate" style={{ fontSize: '0.875rem' }}>
+            {isForkChild && (
+              <i className="bi bi-diagram-3 text-info me-1" style={{ fontSize: '0.75rem' }}></i>
+            )}
+            {workflow.title ||
+              workflow.requirements_text?.slice(0, 50) ||
+              `Workflow ${workflow.workflow_id.slice(0, 8)}`}
+          </div>
+          <div className="d-flex align-items-center gap-1 mt-1">
+            <Badge
+              variant={
+                statusCfg.variant as
+                  | 'secondary'
+                  | 'info'
+                  | 'primary'
+                  | 'warning'
+                  | 'success'
+                  | 'danger'
+              }
+            >
+              <i className={`bi ${statusCfg.icon} me-1`}></i>
+              {t(statusCfg.labelKey, language)}
+            </Badge>
+            {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
+            {isForkChild && (
+              <Badge variant="info" style={{ fontSize: '0.6rem' }}>
+                {t('autoForkedFrom', language)}
+              </Badge>
+            )}
+          </div>
+          <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
+            <i
+              className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
+            ></i>
+            {workflow.cli_tool}
+            {workflow.created_at && (
+              <span className="ms-2">{new Date(workflow.created_at).toLocaleDateString()}</span>
+            )}
+          </div>
+        </div>
+        <div className="d-flex align-items-center gap-1 ms-1">
+          {isActive && (
+            <span className="spinner-border spinner-border-sm text-primary" role="status">
+              <span className="visually-hidden">...</span>
+            </span>
+          )}
+          {!isActive && (
+            <button
+              className={`btn btn-sm border-0 p-0 ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
+              title={t('autoDeleteWorkflow', language)}
+              disabled={deleteMutation.isPending}
+              onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
+            >
+              <i className="bi bi-trash" style={{ fontSize: '0.75rem' }}></i>
+              {isConfirming && <small className="ms-1">{t('autoDeleteConfirm', language)}</small>}
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -111,75 +216,17 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
         </div>
       ) : (
         <div className="list-group list-group-flush">
-          {workflows.map((workflow) => {
-            const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
-            const isSelected = selectedId === workflow.workflow_id;
-            const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
-            const isConfirming = confirmDeleteId === workflow.workflow_id;
+          {rootWorkflows.map((workflow) => {
+            const forkChildren = childrenMap[workflow.workflow_id] || [];
 
             return (
-              <div
-                key={workflow.workflow_id}
-                className={`list-group-item border-0 px-3 py-2 d-flex align-items-start ${isSelected ? 'active' : ''}`}
-                style={{ cursor: 'pointer' }}
-                onClick={() => onSelect(workflow)}
-              >
-                <div className="flex-grow-1 min-width-0">
-                  <div className="fw-semibold text-truncate" style={{ fontSize: '0.875rem' }}>
-                    {workflow.title ||
-                      workflow.requirements_text?.slice(0, 50) ||
-                      `Workflow ${workflow.workflow_id.slice(0, 8)}`}
-                  </div>
-                  <div className="d-flex align-items-center gap-1 mt-1">
-                    <Badge
-                      variant={
-                        statusCfg.variant as
-                          | 'secondary'
-                          | 'info'
-                          | 'primary'
-                          | 'warning'
-                          | 'success'
-                          | 'danger'
-                      }
-                    >
-                      <i className={`bi ${statusCfg.icon} me-1`}></i>
-                      {t(statusCfg.labelKey, language)}
-                    </Badge>
-                    {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
-                  </div>
-                  <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
-                    <i
-                      className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
-                    ></i>
-                    {workflow.cli_tool}
-                    {workflow.created_at && (
-                      <span className="ms-2">
-                        {new Date(workflow.created_at).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="d-flex align-items-center gap-1 ms-1">
-                  {isActive && (
-                    <span className="spinner-border spinner-border-sm text-primary" role="status">
-                      <span className="visually-hidden">...</span>
-                    </span>
-                  )}
-                  {!isActive && (
-                    <button
-                      className={`btn btn-sm border-0 p-0 ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
-                      title={t('autoDeleteWorkflow', language)}
-                      disabled={deleteMutation.isPending}
-                      onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
-                    >
-                      <i className="bi bi-trash" style={{ fontSize: '0.75rem' }}></i>
-                      {isConfirming && (
-                        <small className="ms-1">{t('autoDeleteConfirm', language)}</small>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <React.Fragment key={workflow.workflow_id}>
+                {/* Parent/root workflow item */}
+                {renderWorkflowItem(workflow, false)}
+
+                {/* Fork children indented under parent */}
+                {forkChildren.map((child) => renderWorkflowItem(child, true))}
+              </React.Fragment>
             );
           })}
         </div>
