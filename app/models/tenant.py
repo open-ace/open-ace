@@ -65,6 +65,7 @@ class TenantSettings:
     data_retention_days: int = 365
     sso_enabled: bool = False
     sso_provider: Optional[str] = None
+    auto_provision_users: bool = False
     custom_branding: bool = False
     branding_name: Optional[str] = None
     branding_logo_url: Optional[str] = None
@@ -79,6 +80,7 @@ class TenantSettings:
             "data_retention_days": self.data_retention_days,
             "sso_enabled": self.sso_enabled,
             "sso_provider": self.sso_provider,
+            "auto_provision_users": self.auto_provision_users,
             "custom_branding": self.custom_branding,
             "branding_name": self.branding_name,
             "branding_logo_url": self.branding_logo_url,
@@ -95,6 +97,7 @@ class TenantSettings:
             data_retention_days=data.get("data_retention_days", 365),
             sso_enabled=data.get("sso_enabled", False),
             sso_provider=data.get("sso_provider"),
+            auto_provision_users=data.get("auto_provision_users", False),
             custom_branding=data.get("custom_branding", False),
             branding_name=data.get("branding_name"),
             branding_logo_url=data.get("branding_logo_url"),

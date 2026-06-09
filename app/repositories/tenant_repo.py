@@ -139,20 +139,24 @@ class TenantRepository:
                     content_filter_val = settings_dict.get("content_filter_enabled", True)
                     audit_log_val = settings_dict.get("audit_log_enabled", True)
                     sso_val = settings_dict.get("sso_enabled", False)
+                    auto_provision_val = settings_dict.get("auto_provision_users", False)
                 else:
                     content_filter_val = (
                         1 if settings_dict.get("content_filter_enabled", True) else 0
                     )
                     audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
                     sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
+                    auto_provision_val = (
+                        1 if settings_dict.get("auto_provision_users", False) else 0
+                    )
 
                 cursor.execute(
                     adapt_sql(
                         """
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
-                     audit_log_retention_days, data_retention_days, sso_enabled, sso_provider)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                     audit_log_retention_days, data_retention_days, sso_enabled, sso_provider, auto_provision_users)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """
                     ),
                     (
@@ -163,6 +167,7 @@ class TenantRepository:
                         settings_dict.get("data_retention_days", 365),
                         sso_val,
                         settings_dict.get("sso_provider"),
+                        auto_provision_val,
                     ),
                 )
 
@@ -274,10 +279,16 @@ class TenantRepository:
         if not updates:
             return False
 
+        # Store original settings dict before JSON serialization
+        settings_dict_original = None
+        quota_dict_original = None
+
         # Handle nested objects
         if "quota" in updates and isinstance(updates["quota"], dict):
+            quota_dict_original = updates["quota"].copy()
             updates["quota"] = json.dumps(updates["quota"])
         if "settings" in updates and isinstance(updates["settings"], dict):
+            settings_dict_original = updates["settings"].copy()
             updates["settings"] = json.dumps(updates["settings"])
 
         set_clauses = []
@@ -314,6 +325,15 @@ class TenantRepository:
 
         try:
             cursor = self.db.execute(query, tuple(params))
+
+            # Sync updates to tenant_settings table if settings were provided
+            if settings_dict_original:
+                self._update_tenant_settings_table(tenant_id, settings_dict_original)
+
+            # Sync updates to tenant_quotas table if quota were provided
+            if quota_dict_original:
+                self._update_tenant_quotas_table(tenant_id, quota_dict_original)
+
             return cast("bool", cursor.rowcount > 0)
 
         except Exception as e:
@@ -621,6 +641,7 @@ class TenantRepository:
                         data_retention_days=settings_row.get("data_retention_days", 365),
                         sso_enabled=bool(settings_row.get("sso_enabled", 0)),
                         sso_provider=settings_row.get("sso_provider"),
+                        auto_provision_users=bool(settings_row.get("auto_provision_users", 0)),
                     )
             except Exception:
                 pass
@@ -653,3 +674,113 @@ class TenantRepository:
             total_tokens_used=row.get("total_tokens_used", 0),
             total_requests_made=row.get("total_requests_made", 0),
         )
+
+    def _update_tenant_settings_table(self, tenant_id: int, settings_dict: dict) -> None:
+        """
+        Sync updates to tenant_settings table.
+
+        Args:
+            tenant_id: Tenant ID.
+            settings_dict: Settings dictionary to update.
+        """
+        from app.repositories.database import get_param_placeholder
+
+        p = get_param_placeholder()
+
+        # Check if tenant_settings row exists
+        existing = self.db.fetch_one(
+            f"SELECT id FROM tenant_settings WHERE tenant_id = {p}", (tenant_id,)
+        )
+
+        # Field mapping for tenant_settings table
+        field_mapping = {
+            "content_filter_enabled": bool,
+            "audit_log_enabled": bool,
+            "audit_log_retention_days": int,
+            "data_retention_days": int,
+            "sso_enabled": bool,
+            "sso_provider": str,
+            "auto_provision_users": bool,
+        }
+
+        fields = []
+        values = []
+
+        for key, cast_type in field_mapping.items():
+            if key in settings_dict:
+                fields.append(f"{key} = {p}")
+                value = settings_dict[key]
+                if cast_type == bool:
+                    # SQLite uses 1/0 for boolean
+                    value = 1 if value else 0
+                elif cast_type == int and isinstance(value, bool):
+                    value = 1 if value else 0
+                values.append(value)
+
+        if not fields:
+            return
+
+        if existing:
+            # Update existing row
+            values.append(tenant_id)
+            query = f"UPDATE tenant_settings SET {', '.join(fields)} WHERE tenant_id = {p}"
+            self.db.execute(query, tuple(values))
+        else:
+            # Insert new row (should not happen normally, but handle edge case)
+            fields.append(f"tenant_id = {p}")
+            values.append(tenant_id)
+            query = f"INSERT INTO tenant_settings ({', '.join([f.split('=')[0].strip() for f in fields])}) VALUES ({', '.join([p for _ in fields])})"
+            self.db.execute(query, tuple(values))
+
+    def _update_tenant_quotas_table(self, tenant_id: int, quota_dict: dict) -> None:
+        """
+        Sync updates to tenant_quotas table.
+
+        Args:
+            tenant_id: Tenant ID.
+            quota_dict: Quota dictionary to update.
+        """
+        from app.repositories.database import get_param_placeholder
+
+        p = get_param_placeholder()
+
+        # Check if tenant_quotas row exists
+        existing = self.db.fetch_one(
+            f"SELECT id FROM tenant_quotas WHERE tenant_id = {p}", (tenant_id,)
+        )
+
+        # Field mapping for tenant_quotas table
+        field_mapping = {
+            "daily_token_limit": int,
+            "monthly_token_limit": int,
+            "daily_request_limit": int,
+            "monthly_request_limit": int,
+            "max_users": int,
+            "max_sessions_per_user": int,
+        }
+
+        fields = []
+        values = []
+
+        for key, cast_type in field_mapping.items():
+            if key in quota_dict:
+                fields.append(f"{key} = {p}")
+                value = quota_dict[key]
+                if cast_type == int and isinstance(value, bool):
+                    value = 1 if value else 0
+                values.append(value)
+
+        if not fields:
+            return
+
+        if existing:
+            # Update existing row
+            values.append(tenant_id)
+            query = f"UPDATE tenant_quotas SET {', '.join(fields)} WHERE tenant_id = {p}"
+            self.db.execute(query, tuple(values))
+        else:
+            # Insert new row (should not happen normally, but handle edge case)
+            fields.append(f"tenant_id = {p}")
+            values.append(tenant_id)
+            query = f"INSERT INTO tenant_quotas ({', '.join([f.split('=')[0].strip() for f in fields])}) VALUES ({', '.join([p for _ in fields])})"
+            self.db.execute(query, tuple(values))

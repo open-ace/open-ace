@@ -6,11 +6,14 @@
  * - Register new providers
  * - Configure OAuth2/OIDC parameters
  * - Enable/Disable providers
+ * - Enable/Disable SSO globally
+ * - Auto-provision users setting
  */
 
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
+import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import {
   Card,
@@ -22,9 +25,11 @@ import {
   Modal,
   TextInput,
   Badge,
+  useToast,
 } from '@/components/common';
 import {
   ssoApi,
+  tenantApi,
   type SSOProvider,
   type PredefinedProvider,
   type RegisterProviderRequest,
@@ -40,10 +45,19 @@ const PREDEFINED_PROVIDERS = [
 
 export const SSOSettings: React.FC = () => {
   const language = useLanguage();
+  const { user } = useAuth();
+  const tenantId = user?.tenant_id;
+  const { success, error: toastError } = useToast();
+
   const [registeredProviders, setRegisteredProviders] = useState<SSOProvider[]>([]);
   const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // SSO settings state
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+  const [autoProvision, setAutoProvision] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [formData, setFormData] = useState<RegisterProviderRequest>({
@@ -60,12 +74,14 @@ export const SSOSettings: React.FC = () => {
     issuer_url: '',
   });
 
-  // Fetch providers
+  // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
+    if (!tenantId) return;
+
     setIsLoading(true);
     setError(null);
     try {
-      const result = await ssoApi.getProviders();
+      const result = await ssoApi.getProviders(tenantId);
       setRegisteredProviders(result.registered);
       setPredefinedProviders(result.predefined as PredefinedProvider[]);
     } catch (err) {
@@ -75,7 +91,23 @@ export const SSOSettings: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [tenantId]);
+
+  // Fetch tenant settings
+  useEffect(() => {
+    if (!tenantId) return;
+
+    tenantApi
+      .getTenant(tenantId)
+      .then((tenant) => {
+        const settings = tenant.settings as Record<string, unknown>;
+        setSsoEnabled(Boolean(settings?.sso_enabled ?? false));
+        setAutoProvision(Boolean(settings?.auto_provision_users ?? false));
+      })
+      .catch((err) => {
+        console.error('Failed to fetch tenant settings:', err);
+      });
+  }, [tenantId]);
 
   useEffect(() => {
     fetchProviders();
@@ -101,6 +133,28 @@ export const SSOSettings: React.FC = () => {
 
   const handleCloseModal = () => {
     setShowModal(false);
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) {
+      toastError(t('tenantIdRequired', language));
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await tenantApi.updateSettings(tenantId, {
+        sso_enabled: ssoEnabled,
+        auto_provision_users: autoProvision,
+      });
+      success(t('settingsSaved', language));
+    } catch (err) {
+      console.error('Failed to save SSO settings:', err);
+      toastError(t('saveFailed', language));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handlePredefinedChange = (value: string) => {
@@ -160,7 +214,7 @@ export const SSOSettings: React.FC = () => {
 
       {/* SSO Configuration Form */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
-        <form className="sso-form">
+        <form className="sso-form" onSubmit={handleSaveSettings}>
           <div className="row g-3">
             <div className="col-md-6">
               <div className="form-check form-switch">
@@ -168,8 +222,8 @@ export const SSOSettings: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   id="ssoEnabled"
-                  checked={registeredProviders.some((p) => p.is_enabled)}
-                  onChange={() => {}}
+                  checked={ssoEnabled}
+                  onChange={(e) => setSsoEnabled(e.target.checked)}
                 />
                 <label className="form-check-label" htmlFor="ssoEnabled">
                   {t('enableSSO', language)}
@@ -182,8 +236,8 @@ export const SSOSettings: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   id="autoProvision"
-                  checked={false}
-                  onChange={() => {}}
+                  checked={autoProvision}
+                  onChange={(e) => setAutoProvision(e.target.checked)}
                 />
                 <label className="form-check-label" htmlFor="autoProvision">
                   {t('autoProvisionUsers', language)}
@@ -192,7 +246,7 @@ export const SSOSettings: React.FC = () => {
             </div>
           </div>
           <div className="mt-3">
-            <Button variant="primary" type="submit">
+            <Button variant="primary" type="submit" loading={isSaving} disabled={!tenantId}>
               <i className="bi bi-check-lg me-1" />
               {t('save', language)}
             </Button>
