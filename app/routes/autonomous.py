@@ -476,6 +476,8 @@ def cancel_milestone(workflow_id, milestone_id):
     user_feedback = data.get("user_feedback", "").strip()
     if not user_feedback:
         return jsonify({"error": "user_feedback is required"}), 400
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
 
     cancelled = _get_repo().cancel_milestones_after(workflow_id, milestone_id)
 
@@ -539,6 +541,8 @@ def fork_milestone(workflow_id, milestone_id):
 
     data = request.get_json(silent=True) or {}
     user_feedback = data.get("user_feedback", "").strip()
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
     pause_original = data.get("pause_original", True)
     fork_branch = data.get("branch_name", "") or f"fork/from-{milestone_id[:8]}"
 
@@ -661,6 +665,8 @@ def resume_with_feedback(workflow_id):
     user_feedback = data.get("user_feedback", "").strip()
     if not user_feedback:
         return jsonify({"error": "user_feedback is required"}), 400
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
 
     # Store feedback and set to waiting (scheduler will pick up via _do_wait)
     _get_repo().update_workflow(

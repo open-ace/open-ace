@@ -362,7 +362,10 @@ class AutonomousWorkflowRepository:
 
         Used by fork to carry forward shared history to the new workflow.
         Returns the list of newly created milestone records.
+        All inserts are committed in a single transaction for atomicity.
         """
+        from app.repositories.database import adapt_sql
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         # Fetch milestones up to and including the fork point
         milestones = self.db.fetch_all(
@@ -376,59 +379,70 @@ class AutonomousWorkflowRepository:
             (src_workflow_id, up_to_milestone_id),
         )
         copied = []
-        for ms in milestones:
-            new_ms_id = str(uuid.uuid4())
-            fields = [
-                "phase",
-                "dev_round",
-                "round_number",
-                "milestone_type",
-                "title",
-                "description",
-                "session_id",
-                "review_session_id",
-                "github_issue_number",
-                "github_pr_number",
-                "github_comment_id",
-                "commit_shas",
-                "diff_stats",
-                "result_summary",
-                "plan_content",
-                "review_content",
-                "error_message",
-                "parent_milestone_id",
-                "fork_branch",
-                "metadata",
-            ]
-            col_names = [
-                "workflow_id",
-                "milestone_id",
-                "status",
-                "started_at",
-                "created_at",
-                "updated_at",
-            ]
-            col_values = [dst_workflow_id, new_ms_id, ms.get("status", "completed"), now, now, now]
+        new_ms_ids = []
+        fields = [
+            "phase",
+            "dev_round",
+            "round_number",
+            "milestone_type",
+            "title",
+            "description",
+            "session_id",
+            "review_session_id",
+            "github_issue_number",
+            "github_pr_number",
+            "github_comment_id",
+            "commit_shas",
+            "diff_stats",
+            "result_summary",
+            "plan_content",
+            "review_content",
+            "error_message",
+            "parent_milestone_id",
+            "fork_branch",
+            "metadata",
+        ]
+        col_names = [
+            "workflow_id",
+            "milestone_id",
+            "status",
+            "started_at",
+            "created_at",
+            "updated_at",
+        ] + fields
+        placeholders = ",".join(["?"] * len(col_names))
+        col_str = ",".join(col_names)
 
-            for f in fields:
-                col_names.append(f)
-                col_values.append(ms.get(f, ""))
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            for ms in milestones:
+                new_ms_id = str(uuid.uuid4())
+                new_ms_ids.append(new_ms_id)
+                col_values = [
+                    dst_workflow_id,
+                    new_ms_id,
+                    ms.get("status", "completed"),
+                    now,
+                    now,
+                    now,
+                ]
+                for f in fields:
+                    col_values.append(ms.get(f, ""))
 
-            placeholders = ",".join(["?"] * len(col_names))
-            col_str = ",".join(col_names)
-
-            if is_postgresql():
-                result = self.db.fetch_one(
-                    f"INSERT INTO workflow_milestones ({col_str}) VALUES ({placeholders}) RETURNING *",
+                cursor.execute(
+                    adapt_sql(
+                        f"INSERT INTO workflow_milestones ({col_str}) VALUES ({placeholders})"
+                    ),
                     tuple(col_values),
-                    commit=True,
                 )
-            else:
-                self.db.execute(
-                    f"INSERT INTO workflow_milestones ({col_str}) VALUES ({placeholders})",
-                    tuple(col_values),
-                )
-                result = self.get_milestone(new_ms_id)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Fetch the newly created milestones for return value
+        for ms_id in new_ms_ids:
+            result = self.get_milestone(ms_id)
             if result:
                 copied.append(result)
         return copied

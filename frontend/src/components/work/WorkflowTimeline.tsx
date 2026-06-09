@@ -888,7 +888,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       width:
                         forkViz.branches.length === 1
                           ? '100%'
-                          : `${idx === 0 ? leftWidth : 100 - leftWidth}%`,
+                          : forkViz.branches.length === 2
+                            ? `${idx === 0 ? leftWidth : 100 - leftWidth}%`
+                            : `${100 / forkViz.branches.length}%`,
                       minWidth: '120px',
                     }}
                   >

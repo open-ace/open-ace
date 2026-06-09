@@ -110,6 +110,16 @@ REVIEW_FEEDBACK_MIN_LENGTH = 50
 # Phase ordering — used by fork to determine the next phase after the fork point.
 PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
 
+# Maps phases to their corresponding workflow status values
+PHASE_STATUS_MAP = {
+    "preparation": "preparing",
+    "planning": "planning",
+    "development": "developing",
+    "pr_review": "pr_review",
+    "report": "reporting",
+    "merge": "merging",
+}
+
 
 def _next_phase(current_phase: str) -> str:
     """Return the phase that follows current_phase."""
@@ -435,18 +445,17 @@ class AutonomousOrchestrator:
 
             # Determine the base commit from the fork milestone
             fork_milestone_id = wf.get("fork_milestone_id", "")
+            fork_ms = self.repo.get_milestone(fork_milestone_id) if fork_milestone_id else None
             base_ref = "origin/main"
-            if fork_milestone_id:
-                fork_ms = self.repo.get_milestone(fork_milestone_id)
-                if fork_ms:
-                    commit_shas = fork_ms.get("commit_shas", "")
-                    if commit_shas:
-                        try:
-                            shas = json.loads(commit_shas)
-                            if shas:
-                                base_ref = shas[-1]
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+            if fork_ms:
+                commit_shas = fork_ms.get("commit_shas", "")
+                if commit_shas:
+                    try:
+                        shas = json.loads(commit_shas)
+                        if shas:
+                            base_ref = shas[-1]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
             # Force worktree for parallel execution
             try:
@@ -477,20 +486,12 @@ class AutonomousOrchestrator:
                 raise
 
             # Jump to the next phase after the fork point's phase
-            fork_ms = self.repo.get_milestone(fork_milestone_id) if fork_milestone_id else None
             fork_phase = fork_ms.get("phase", "planning") if fork_ms else "planning"
             next_phase = _next_phase(fork_phase)
-            phase_status_map = {
-                "planning": "planning",
-                "development": "developing",
-                "pr_review": "pr_review",
-                "report": "reporting",
-                "merge": "merging",
-            }
             self._update_workflow(
                 {
                     "current_phase": next_phase,
-                    "status": phase_status_map.get(next_phase, "planning"),
+                    "status": PHASE_STATUS_MAP.get(next_phase, "planning"),
                     "current_round": 0,
                 }
             )
@@ -1513,20 +1514,13 @@ class AutonomousOrchestrator:
                     break
 
             new_dev_round = wf.get("dev_round", 1) + 1
-            phase_status_map = {
-                "preparation": "preparing",
-                "planning": "planning",
-                "development": "developing",
-                "pr_review": "pr_review",
-                "report": "reporting",
-                "merge": "merging",
-            }
             self._update_workflow(
                 {
                     "current_phase": cancelled_phase,
-                    "status": phase_status_map.get(cancelled_phase, "developing"),
+                    "status": PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
                     "dev_round": new_dev_round,
                     "current_round": 0,
+                    "user_feedback": "",
                 }
             )
             self._emit(
