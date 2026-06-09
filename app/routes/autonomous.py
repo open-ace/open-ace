@@ -644,6 +644,10 @@ def stream_workflow_events(workflow_id):
     q = emitter.subscribe(workflow_id)
 
     def generate():
+        # Yield immediately so Flask sends response headers — otherwise
+        # the browser's EventSource stays in CONNECTING (readyState 0)
+        # until the first q.get() returns (up to 30 s).
+        yield ": connected\n\n"
         try:
             while True:
                 try:
