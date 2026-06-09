@@ -70,6 +70,8 @@ export {
   useMachineUsers,
   useGenerateToken,
   useDeregisterMachine,
+  useRotateMachineToken,
+  useRevokeMachineToken,
   useAssignUser,
   useRevokeUser,
   useApiKeys,

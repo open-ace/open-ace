@@ -23,6 +23,7 @@ export interface RemoteMachine {
   work_dir: string | null;
   tenant_id: number | null;
   created_by: number | null;
+  token_status: string; // "active" | "revoked" | "legacy" | "none"
   created_at: string | null;
   updated_at: string | null;
   last_heartbeat: string | null;
@@ -135,6 +136,18 @@ export const remoteApi = {
 
   deregisterMachine(machineId: string): Promise<{ success: boolean; message: string }> {
     return apiClient.delete(`/api/remote/machines/${machineId}`);
+  },
+
+  rotateMachineToken(
+    machineId: string
+  ): Promise<{ success: boolean; agent_token: string; message: string }> {
+    return apiClient.post(`/api/remote/machines/${machineId}/token/rotate`);
+  },
+
+  revokeMachineToken(
+    machineId: string
+  ): Promise<{ success: boolean; message: string }> {
+    return apiClient.post(`/api/remote/machines/${machineId}/token/revoke`);
   },
 
   getMachineUsers(machineId: string): Promise<{ success: boolean; users: MachineAssignment[] }> {

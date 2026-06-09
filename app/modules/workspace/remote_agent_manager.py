@@ -1355,7 +1355,13 @@ class RemoteAgentManager:
 
             rows = cursor.fetchall()
 
+            # Batch-query token_status for all machines (avoid N+1)
+            machine_ids = [row["machine_id"] for row in rows]
+            token_status_map = self._batch_get_token_status(cursor, machine_ids)
+
         machines = [self._row_to_machine(row) for row in rows]
+        for m in machines:
+            m["token_status"] = token_status_map.get(m["machine_id"], "none")
         if user_id:
             for m in machines:
                 m["current_user_permission"] = self.check_user_access(m["machine_id"], user_id)
@@ -1489,6 +1495,85 @@ class RemoteAgentManager:
             except Exception as e:
                 logger.error(f"Failed to get machine assignments: {e}")
                 return []
+
+    def _batch_get_token_status(self, cursor, machine_ids: list[str]) -> dict[str, str]:
+        """Batch-query token status for multiple machines.
+
+        Returns a dict mapping machine_id -> token_status.
+        Values: "active", "revoked", "legacy", "none"
+        """
+        if not machine_ids:
+            return {}
+
+        result: dict[str, str] = {}
+
+        # Query agent_tokens for all machines at once
+        if is_postgresql():
+            placeholders = ", ".join("%s" for _ in machine_ids)
+        else:
+            placeholders = ", ".join("?" for _ in machine_ids)
+
+        try:
+            cursor.execute(
+                f"SELECT machine_id, is_revoked FROM agent_tokens "
+                f"WHERE machine_id IN ({placeholders})",
+                tuple(machine_ids),
+            )
+            token_rows = cursor.fetchall()
+        except Exception:
+            token_rows = []
+
+        # Track which machines have tokens
+        machines_with_active_tokens: set[str] = set()
+        machines_with_revoked_tokens: set[str] = set()
+
+        for tr in token_rows:
+            mid = tr["machine_id"] if isinstance(tr, dict) else tr[0]
+            is_revoked = tr["is_revoked"] if isinstance(tr, dict) else tr[1]
+            if is_revoked:
+                machines_with_revoked_tokens.add(mid)
+            else:
+                machines_with_active_tokens.add(mid)
+
+        # Query legacy_mode for machines without active tokens
+        legacy_candidates = [
+            mid
+            for mid in machine_ids
+            if mid not in machines_with_active_tokens and mid not in machines_with_revoked_tokens
+        ]
+
+        if legacy_candidates:
+            try:
+                placeholders2 = ", ".join(
+                    "%s" if is_postgresql() else "?" for _ in legacy_candidates
+                )
+                cursor.execute(
+                    f"SELECT machine_id FROM remote_machines "
+                    f"WHERE machine_id IN ({placeholders2}) AND legacy_mode = 1",
+                    tuple(legacy_candidates),
+                )
+                legacy_rows = cursor.fetchall()
+            except Exception:
+                legacy_rows = []
+
+            legacy_machines = {
+                r["machine_id"] if isinstance(r, dict) else r[0] for r in legacy_rows
+            }
+        else:
+            legacy_machines = set()
+
+        # Build the result map
+        for mid in machine_ids:
+            if mid in machines_with_active_tokens:
+                result[mid] = "active"
+            elif mid in machines_with_revoked_tokens:
+                result[mid] = "revoked"
+            elif mid in legacy_machines:
+                result[mid] = "legacy"
+            else:
+                result[mid] = "none"
+
+        return result
 
     def _row_to_machine(self, row) -> dict[str, Any]:
         """Convert a database row to machine dict."""
