@@ -815,8 +815,10 @@ const translations: Record<Language, Translations> = {
     tokenNone: 'No Token',
     rotateToken: 'Rotate Token',
     revokeToken: 'Revoke Token',
-    rotateTokenConfirm: 'Rotate agent token for this machine? The new token will be pushed to the agent automatically.',
-    revokeTokenConfirm: 'Are you sure you want to revoke the agent token? This will immediately disconnect the remote agent.',
+    rotateTokenConfirm:
+      'Rotate agent token for this machine? The new token will be pushed to the agent automatically.',
+    revokeTokenConfirm:
+      'Are you sure you want to revoke the agent token? This will immediately disconnect the remote agent.',
     rotateTokenSuccess: 'Token rotated successfully',
     revokeTokenSuccess: 'Token revoked successfully',
     newAgentToken: 'New Agent Token',
@@ -2534,8 +2536,10 @@ const translations: Record<Language, Translations> = {
     tokenNone: 'トークンなし',
     rotateToken: 'トークン更新',
     revokeToken: 'トークン取消',
-    rotateTokenConfirm: 'このマシンのエージェントトークンを更新しますか？新しいトークンは自動的にエージェントにプッシュされます。',
-    revokeTokenConfirm: 'このマシンのエージェントトークンを取り消しますか？リモートエージェントが即座に切断されます。',
+    rotateTokenConfirm:
+      'このマシンのエージェントトークンを更新しますか？新しいトークンは自動的にエージェントにプッシュされます。',
+    revokeTokenConfirm:
+      'このマシンのエージェントトークンを取り消しますか？リモートエージェントが即座に切断されます。',
     rotateTokenSuccess: 'トークンが更新されました',
     revokeTokenSuccess: 'トークンが取り消されました',
     newAgentToken: '新しいエージェントトークン',
@@ -3213,8 +3217,10 @@ const translations: Record<Language, Translations> = {
     tokenNone: '토큰 없음',
     rotateToken: '토큰 교체',
     revokeToken: '토큰 취소',
-    rotateTokenConfirm: '이 머신의 에이전트 토큰을 교체하시겠습니까? 새 토큰이 자동으로 에이전트에 푸시됩니다.',
-    revokeTokenConfirm: '이 머신의 에이전트 토큰을 취소하시겠습니까? 원격 에이전트가 즉시 연결이 끊깁니다.',
+    rotateTokenConfirm:
+      '이 머신의 에이전트 토큰을 교체하시겠습니까? 새 토큰이 자동으로 에이전트에 푸시됩니다.',
+    revokeTokenConfirm:
+      '이 머신의 에이전트 토큰을 취소하시겠습니까? 원격 에이전트가 즉시 연결이 끊깁니다.',
     rotateTokenSuccess: '토큰이 교체되었습니다',
     revokeTokenSuccess: '토큰이 취소되었습니다',
     newAgentToken: '새 에이전트 토큰',
