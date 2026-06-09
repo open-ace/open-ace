@@ -144,9 +144,7 @@ export const remoteApi = {
     return apiClient.post(`/api/remote/machines/${machineId}/token/rotate`);
   },
 
-  revokeMachineToken(
-    machineId: string
-  ): Promise<{ success: boolean; message: string }> {
+  revokeMachineToken(machineId: string): Promise<{ success: boolean; message: string }> {
     return apiClient.post(`/api/remote/machines/${machineId}/token/revoke`);
   },
 

@@ -395,17 +395,22 @@ export const RemoteMachineManagement: React.FC = () => {
                   <td>
                     <Badge
                       variant={
-                        machine.token_status === 'active' ? 'success' :
-                        machine.token_status === 'revoked' ? 'danger' :
-                        machine.token_status === 'legacy' ? 'warning' : 'secondary'
+                        machine.token_status === 'active'
+                          ? 'success'
+                          : machine.token_status === 'revoked'
+                            ? 'danger'
+                            : machine.token_status === 'legacy'
+                              ? 'warning'
+                              : 'secondary'
                       }
                     >
-                      {
-                        machine.token_status === 'active' ? t('tokenActive', language) :
-                        machine.token_status === 'revoked' ? t('tokenRevoked', language) :
-                        machine.token_status === 'legacy' ? t('tokenLegacy', language) :
-                        t('tokenNone', language)
-                      }
+                      {machine.token_status === 'active'
+                        ? t('tokenActive', language)
+                        : machine.token_status === 'revoked'
+                          ? t('tokenRevoked', language)
+                          : machine.token_status === 'legacy'
+                            ? t('tokenLegacy', language)
+                            : t('tokenNone', language)}
                     </Badge>
                   </td>
                   <td>{machine.agent_version ?? '-'}</td>
@@ -707,7 +712,8 @@ export const RemoteMachineManagement: React.FC = () => {
             <p>{t('rotateTokenConfirm', language)}</p>
             {rotateTarget && (
               <p>
-                <strong>{rotateTarget.machine_name}</strong> ({rotateTarget.machine_id.substring(0, 8)}...)
+                <strong>{rotateTarget.machine_name}</strong> (
+                {rotateTarget.machine_id.substring(0, 8)}...)
               </p>
             )}
           </>
@@ -729,7 +735,11 @@ export const RemoteMachineManagement: React.FC = () => {
                   readOnly
                 />
                 <Button variant="outline-secondary" onClick={handleCopyRotatedToken}>
-                  {copiedRotated ? <i className="bi bi-check" /> : <i className="bi bi-clipboard" />}
+                  {copiedRotated ? (
+                    <i className="bi bi-check" />
+                  ) : (
+                    <i className="bi bi-clipboard" />
+                  )}
                 </Button>
               </div>
             </div>
@@ -764,7 +774,8 @@ export const RemoteMachineManagement: React.FC = () => {
         <p>{t('revokeTokenConfirm', language)}</p>
         {revokeTarget && (
           <p>
-            <strong>{revokeTarget.machine_name}</strong> ({revokeTarget.machine_id.substring(0, 8)}...)
+            <strong>{revokeTarget.machine_name}</strong> ({revokeTarget.machine_id.substring(0, 8)}
+            ...)
           </p>
         )}
       </Modal>
