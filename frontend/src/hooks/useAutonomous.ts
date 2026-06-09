@@ -85,7 +85,7 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
       try {
         const data = JSON.parse(event.data);
         if (data.event_type === 'agent_activity') {
-          setActivities((prev) => [...prev.slice(-49), data]);
+          setActivities((prev) => [...prev.slice(-49), data.data]);
         }
       } catch {
         // Ignore parse errors
