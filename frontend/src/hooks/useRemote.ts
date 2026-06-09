@@ -46,6 +46,28 @@ export function useDeregisterMachine() {
   });
 }
 
+export function useRotateMachineToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (machineId: string) => remoteApi.rotateMachineToken(machineId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
+    },
+  });
+}
+
+export function useRevokeMachineToken() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (machineId: string) => remoteApi.revokeMachineToken(machineId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['remote', 'machines'] });
+    },
+  });
+}
+
 export function useAssignUser() {
   const queryClient = useQueryClient();
 

@@ -15,6 +15,8 @@ import {
   useMachineUsers,
   useGenerateToken,
   useDeregisterMachine,
+  useRotateMachineToken,
+  useRevokeMachineToken,
   useAssignUser,
   useRevokeUser,
   useUsers,
@@ -41,6 +43,8 @@ export const RemoteMachineManagement: React.FC = () => {
   const { data: machinesData, isLoading, isError, error, refetch } = useMachines();
   const generateToken = useGenerateToken();
   const deregisterMachine = useDeregisterMachine();
+  const rotateMachineToken = useRotateMachineToken();
+  const revokeMachineToken = useRevokeMachineToken();
   const assignUser = useAssignUser();
   const revokeUser = useRevokeUser();
   const { data: allUsers } = useUsers();
@@ -70,6 +74,15 @@ export const RemoteMachineManagement: React.FC = () => {
   const [deregisterTarget, setDeregisterTarget] = useState<RemoteMachine | null>(null);
   const [deregisterOS, setDeregisterOS] = useState<'linux' | 'windows' | 'macos'>('linux');
   const [copiedUninstall, setCopiedUninstall] = useState(false);
+
+  // Token management dialog states
+  const [showRotateDialog, setShowRotateDialog] = useState(false);
+  const [rotateTarget, setRotateTarget] = useState<RemoteMachine | null>(null);
+  const [rotatedToken, setRotatedToken] = useState<string>('');
+  const [copiedRotated, setCopiedRotated] = useState(false);
+
+  const [showRevokeDialog, setShowRevokeDialog] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<RemoteMachine | null>(null);
 
   // Handlers
   const handleGenerateToken = async () => {
@@ -161,6 +174,53 @@ export const RemoteMachineManagement: React.FC = () => {
       await revokeUser.mutateAsync({ machineId, userId });
     } catch (err) {
       console.error('Failed to revoke user:', err);
+    }
+  };
+
+  const handleOpenRotate = (machine: RemoteMachine) => {
+    setRotateTarget(machine);
+    setRotatedToken('');
+    setCopiedRotated(false);
+    setShowRotateDialog(true);
+  };
+
+  const handleRotateToken = async () => {
+    if (!rotateTarget) return;
+    try {
+      const result = await rotateMachineToken.mutateAsync(rotateTarget.machine_id);
+      setRotatedToken(result.agent_token);
+      toast.success(t('rotateTokenSuccess', language) || 'Token rotated');
+    } catch (err) {
+      console.error('Failed to rotate token:', err);
+      toast.error(t('rotateTokenFailed', language) || 'Failed to rotate token');
+    }
+  };
+
+  const handleCopyRotatedToken = async () => {
+    const success = await copyToClipboard(rotatedToken);
+    if (success) {
+      setCopiedRotated(true);
+      setTimeout(() => setCopiedRotated(false), 2000);
+    } else {
+      toast.error(t('copyFailed', language) || 'Copy failed');
+    }
+  };
+
+  const handleOpenRevoke = (machine: RemoteMachine) => {
+    setRevokeTarget(machine);
+    setShowRevokeDialog(true);
+  };
+
+  const handleRevokeToken = async () => {
+    if (!revokeTarget) return;
+    try {
+      await revokeMachineToken.mutateAsync(revokeTarget.machine_id);
+      setShowRevokeDialog(false);
+      setRevokeTarget(null);
+      toast.success(t('revokeTokenSuccess', language) || 'Token revoked');
+    } catch (err) {
+      console.error('Failed to revoke token:', err);
+      toast.error(t('revokeTokenFailed', language) || 'Failed to revoke token');
     }
   };
 
@@ -299,6 +359,7 @@ export const RemoteMachineManagement: React.FC = () => {
                 <th>{t('hostname', language)}</th>
                 <th>OS</th>
                 <th>{t('keyStatus', language)}</th>
+                <th>{t('tokenStatus', language)}</th>
                 <th>{t('agentVersion', language)}</th>
                 <th>{t('lastHeartbeat', language)}</th>
                 <th>{t('tableActions', language)}</th>
@@ -333,6 +394,27 @@ export const RemoteMachineManagement: React.FC = () => {
                         : t('offline', language)}
                     </Badge>
                   </td>
+                  <td>
+                    <Badge
+                      variant={
+                        machine.token_status === 'active'
+                          ? 'success'
+                          : machine.token_status === 'revoked'
+                            ? 'danger'
+                            : machine.token_status === 'legacy'
+                              ? 'warning'
+                              : 'secondary'
+                      }
+                    >
+                      {machine.token_status === 'active'
+                        ? t('tokenActive', language)
+                        : machine.token_status === 'revoked'
+                          ? t('tokenRevoked', language)
+                          : machine.token_status === 'legacy'
+                            ? t('tokenLegacy', language)
+                            : t('tokenNone', language)}
+                    </Badge>
+                  </td>
                   <td>{machine.agent_version ?? '-'}</td>
                   <td>
                     {machine.last_heartbeat
@@ -349,13 +431,29 @@ export const RemoteMachineManagement: React.FC = () => {
                         <i className="bi bi-eye" />
                       </Button>
                       {isSystemAdmin && (
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          onClick={() => handleOpenDeregister(machine)}
-                        >
-                          <i className="bi bi-x-lg" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => handleOpenRotate(machine)}
+                          >
+                            <i className="bi bi-key" />
+                          </Button>
+                          <Button
+                            variant="outline-warning"
+                            size="sm"
+                            onClick={() => handleOpenRevoke(machine)}
+                          >
+                            <i className="bi bi-shield-lock" />
+                          </Button>
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => handleOpenDeregister(machine)}
+                          >
+                            <i className="bi bi-x-lg" />
+                          </Button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -587,6 +685,101 @@ export const RemoteMachineManagement: React.FC = () => {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Rotate Token Dialog */}
+      <Modal
+        isOpen={showRotateDialog}
+        onClose={() => setShowRotateDialog(false)}
+        title={t('rotateToken', language)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowRotateDialog(false)}>
+              {t('close', language)}
+            </Button>
+            {!rotatedToken && (
+              <Button
+                variant="primary"
+                onClick={handleRotateToken}
+                loading={rotateMachineToken.isPending}
+              >
+                {t('rotateToken', language)}
+              </Button>
+            )}
+          </>
+        }
+      >
+        {!rotatedToken ? (
+          <>
+            <p>{t('rotateTokenConfirm', language)}</p>
+            {rotateTarget && (
+              <p>
+                <strong>{rotateTarget.machine_name}</strong> (
+                {rotateTarget.machine_id.substring(0, 8)}...)
+              </p>
+            )}
+          </>
+        ) : (
+          <div>
+            <p className="text-success">
+              <i className="bi bi-check-circle me-1" />
+              {t('rotateTokenSuccess', language)}
+            </p>
+            <p className="text-muted small">{t('tokenRotatedMessage', language)}</p>
+            <div className="mb-2">
+              <label className="form-label fw-bold">{t('newAgentToken', language)}</label>
+              <p className="text-muted small">{t('newTokenDesc', language)}</p>
+              <div className="input-group">
+                <input
+                  type="text"
+                  className="form-control font-monospace"
+                  value={rotatedToken}
+                  readOnly
+                />
+                <Button variant="outline-secondary" onClick={handleCopyRotatedToken}>
+                  {copiedRotated ? (
+                    <i className="bi bi-check" />
+                  ) : (
+                    <i className="bi bi-clipboard" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Revoke Token Dialog */}
+      <Modal
+        isOpen={showRevokeDialog}
+        onClose={() => setShowRevokeDialog(false)}
+        title={t('revokeToken', language)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowRevokeDialog(false)}>
+              {t('cancel', language)}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleRevokeToken}
+              loading={revokeMachineToken.isPending}
+            >
+              {t('revokeToken', language)}
+            </Button>
+          </>
+        }
+      >
+        <div className="alert alert-warning">
+          <i className="bi bi-exclamation-triangle me-1" />
+          {t('revokeTokenWarning', language)}
+        </div>
+        <p>{t('revokeTokenConfirm', language)}</p>
+        {revokeTarget && (
+          <p>
+            <strong>{revokeTarget.machine_name}</strong> ({revokeTarget.machine_id.substring(0, 8)}
+            ...)
+          </p>
+        )}
       </Modal>
     </div>
   );
