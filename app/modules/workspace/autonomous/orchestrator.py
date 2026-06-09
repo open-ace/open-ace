@@ -735,6 +735,10 @@ class AutonomousOrchestrator:
             timeout=planning_timeout,
         )
 
+        # Clear user feedback after it has been injected into the prompt
+        if wf.get("user_feedback", "").strip():
+            self._update_workflow({"user_feedback": ""})
+
         self._accumulate_tokens(result)
 
         # Store plan
@@ -975,6 +979,10 @@ class AutonomousOrchestrator:
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
         )
+
+        # Clear user feedback after it has been injected into the prompt
+        if wf.get("user_feedback", "").strip():
+            self._update_workflow({"user_feedback": ""})
 
         self._accumulate_tokens(result)
 
@@ -1520,7 +1528,6 @@ class AutonomousOrchestrator:
                     "status": PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
                     "dev_round": new_dev_round,
                     "current_round": 0,
-                    "user_feedback": "",
                 }
             )
             self._emit(

@@ -904,8 +904,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     </BranchColumn>
                   </div>
 
-                  {/* Resize handle between columns */}
-                  {idx < forkViz.branches.length - 1 && (
+                  {/* Resize handle between columns (only for 2-branch layout) */}
+                  {idx < forkViz.branches.length - 1 && forkViz.branches.length === 2 && (
                     <div
                       onMouseDown={handleResizeStart}
                       style={{
