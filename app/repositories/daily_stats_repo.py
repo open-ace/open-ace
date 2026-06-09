@@ -144,6 +144,92 @@ class DailyStatsRepository:
 
         return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
 
+    def get_tool_totals_with_range(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+    ) -> dict[str, dict]:
+        """
+        Get tool totals with all required fields for summary API.
+
+        This method returns a dict format (keyed by tool_name) with all fields
+        required by the frontend ToolSummary type, including days_count, avg_tokens,
+        first_date, and last_date.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+
+        Returns:
+            Dict[str, Dict]: Summary data keyed by normalized tool name.
+        """
+        conditions = []
+        params = []
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT
+                tool_name,
+                SUM(total_tokens) as total_tokens,
+                SUM(total_input_tokens) as total_input_tokens,
+                SUM(total_output_tokens) as total_output_tokens,
+                SUM(message_count) as message_count,
+                COUNT(DISTINCT date) as days_count,
+                MIN(date) as first_date,
+                MAX(date) as last_date
+            FROM daily_stats
+            {where_clause}
+            GROUP BY tool_name
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        # Convert to dict format and merge normalized tool names
+        merged: dict[str, dict] = {}
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
+            if tool in merged:
+                existing = merged[tool]
+                existing["total_tokens"] += row["total_tokens"] or 0
+                existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                existing["total_output_tokens"] += row["total_output_tokens"] or 0
+                existing["total_requests"] += row["message_count"] or 0
+                # days_count: use max() as conservative approach (dates may overlap)
+                existing["days_count"] = max(existing["days_count"], row["days_count"] or 0)
+                # first_date: take earliest
+                existing["first_date"] = min(existing["first_date"], row["first_date"] or "")
+                # last_date: take latest
+                existing["last_date"] = max(existing["last_date"], row["last_date"] or "")
+            else:
+                merged[tool] = {
+                    "total_tokens": row["total_tokens"] or 0,
+                    "total_requests": row["message_count"] or 0,
+                    "total_input_tokens": row["total_input_tokens"] or 0,
+                    "total_output_tokens": row["total_output_tokens"] or 0,
+                    "days_count": row["days_count"] or 1,
+                    "first_date": row["first_date"] or start_date or "",
+                    "last_date": row["last_date"] or end_date or "",
+                }
+
+        # Calculate avg_tokens after merging
+        for tool, data in merged.items():
+            data["avg_tokens"] = (data["total_tokens"] or 0) // max(data["days_count"] or 1, 1)
+
+        return merged
+
     def get_user_totals(
         self,
         start_date: Optional[str] = None,

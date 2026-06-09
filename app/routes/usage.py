@@ -26,12 +26,25 @@ def _require_auth():
 def api_summary():
     """Get summary statistics for all tools from pre-aggregated summary table."""
     host = request.args.get("host")
+    start_date = request.args.get("start")
+    end_date = request.args.get("end")
 
-    # Check if summary needs refresh and refresh if stale
-    if summary_service.needs_refresh():
-        summary_service.refresh_summary()
+    # No date parameters -> use pre-aggregated usage_summary table (fast)
+    if not start_date and not end_date:
+        # Check if summary needs refresh and refresh if stale
+        if summary_service.needs_refresh():
+            summary_service.refresh_summary()
 
-    summary = summary_service.get_summary(host_name=host)
+        summary = summary_service.get_summary(host_name=host)
+    else:
+        # With date parameters -> query from daily_stats table
+        from app.repositories.daily_stats_repo import DailyStatsRepository
+
+        daily_stats_repo = DailyStatsRepository()
+        summary = daily_stats_repo.get_tool_totals_with_range(
+            start_date=start_date, end_date=end_date, host_name=host
+        )
+
     return jsonify(summary)
 
 

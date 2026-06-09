@@ -32,10 +32,10 @@ export function useTodayUsage(options: UseDashboardOptions = {}) {
   });
 }
 
-export function useSummary(host?: string) {
+export function useSummary(host?: string, startDate?: string, endDate?: string) {
   return useQuery<SummaryData>({
-    queryKey: ['dashboard', 'summary', { host }],
-    queryFn: () => dashboardApi.getSummary(host),
+    queryKey: ['dashboard', 'summary', { host, startDate, endDate }],
+    queryFn: () => dashboardApi.getSummary(host, startDate, endDate),
     staleTime: 5 * 60 * 1000, // 5 minutes
     refetchOnWindowFocus: true,
   });
@@ -73,8 +73,8 @@ export function useDashboard(options: UseDashboardOptions = {}) {
         refetchOnWindowFocus: true,
       },
       {
-        queryKey: ['dashboard', 'summary', { host }],
-        queryFn: () => dashboardApi.getSummary(host),
+        queryKey: ['dashboard', 'summary', { host, startDate, endDate }],
+        queryFn: () => dashboardApi.getSummary(host, startDate, endDate),
         staleTime: 5 * 60 * 1000, // 5 minutes
         refetchOnWindowFocus: true,
       },

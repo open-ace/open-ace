@@ -15,8 +15,9 @@ import {
   TokenTrendChart,
   TokenDistributionChart,
   DashboardSkeleton,
+  TextInput,
 } from '@/components/common';
-import { formatTokens, formatDate, TOOL_DISPLAY_NAMES } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -32,6 +33,44 @@ const TOOL_COLORS: Record<string, { border: string; background: string; card: st
     card: 'bg-success',
   },
   qwen: { border: 'rgba(54, 162, 235, 1)', background: 'rgba(54, 162, 235, 0.2)', card: 'bg-info' },
+};
+
+// Date range presets
+const DATE_RANGE_PRESETS = [
+  { value: '7', label: 'Last 7 Days' },
+  { value: '30', label: 'Last 30 Days' },
+  { value: 'month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
+  { value: 'custom', label: 'Custom' },
+];
+
+// Helper to get date string N days ago
+const getDaysAgo = (days: number): string => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().split('T')[0];
+};
+
+// Helper to get first day of current month
+const getFirstDayOfMonth = (): string => {
+  const date = new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().split('T')[0];
+};
+
+// Helper to get first day of last month
+const getFirstDayOfLastMonth = (): string => {
+  const date = new Date();
+  return new Date(date.getFullYear(), date.getMonth() - 1, 1).toISOString().split('T')[0];
+};
+
+// Helper to get last day of last month
+const getLastDayOfLastMonth = (): string => {
+  const date = new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 0).toISOString().split('T')[0];
+};
+
+const getToday = (): string => {
+  return new Date().toISOString().split('T')[0];
 };
 
 // Sort configuration type
@@ -51,15 +90,40 @@ export const Dashboard: React.FC = () => {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Get date range for trend data (last 30 days)
+  // Date range state
+  const [dateRangePreset, setDateRangePreset] = useState('30');
+  const [customStartDate, setCustomStartDate] = useState(getDaysAgo(30));
+  const [customEndDate, setCustomEndDate] = useState(getToday());
+  const [useCustomRange, setUseCustomRange] = useState(false);
+
+  // Compute actual date range based on preset or custom
   const { startDate, endDate } = useMemo(() => {
-    const end = new Date();
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    return {
-      startDate: formatDate(start, 'iso'),
-      endDate: formatDate(end, 'iso'),
-    };
-  }, []);
+    if (useCustomRange) {
+      return { startDate: customStartDate, endDate: customEndDate };
+    }
+    switch (dateRangePreset) {
+      case '7':
+        return { startDate: getDaysAgo(7), endDate: getToday() };
+      case '30':
+        return { startDate: getDaysAgo(30), endDate: getToday() };
+      case 'month':
+        return { startDate: getFirstDayOfMonth(), endDate: getToday() };
+      case 'last_month':
+        return { startDate: getFirstDayOfLastMonth(), endDate: getLastDayOfLastMonth() };
+      default:
+        return { startDate: getDaysAgo(30), endDate: getToday() };
+    }
+  }, [dateRangePreset, useCustomRange, customStartDate, customEndDate]);
+
+  // Handle preset change
+  const handlePresetChange = (value: string) => {
+    if (value === 'custom') {
+      setUseCustomRange(true);
+    } else {
+      setUseCustomRange(false);
+      setDateRangePreset(value);
+    }
+  };
 
   // Use combined dashboard hook with trend data for parallel fetching
   const { todayData, summaryData, hosts, trendData, isLoading, isError, error, refetch } =
@@ -114,6 +178,12 @@ export const Dashboard: React.FC = () => {
     [language]
   );
 
+  // Date range preset options
+  const dateRangeOptions = useMemo(
+    () => DATE_RANGE_PRESETS.map((preset) => ({ value: preset.value, label: preset.label })),
+    []
+  );
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -127,7 +197,31 @@ export const Dashboard: React.FC = () => {
       {/* Header */}
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
-        <div className="page-header-controls">
+        <div className="page-header-controls d-flex gap-2 align-items-center">
+          {/* Date Range Selector */}
+          <Select
+            options={dateRangeOptions}
+            value={useCustomRange ? 'custom' : dateRangePreset}
+            onChange={handlePresetChange}
+            size="sm"
+            className="select-narrow"
+          />
+          {useCustomRange && (
+            <>
+              <TextInput
+                type="date"
+                value={customStartDate}
+                onChange={setCustomStartDate}
+                className="date-input-narrow"
+              />
+              <TextInput
+                type="date"
+                value={customEndDate}
+                onChange={setCustomEndDate}
+                className="date-input-narrow"
+              />
+            </>
+          )}
           <Select
             options={hostOptions}
             value={selectedHost}
