@@ -100,6 +100,13 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
 # Normal planning should complete in a few minutes; this caps runaway agents.
 PLANNING_TIMEOUT = 600
 
+# Minimum review text length (chars) to be considered substantive feedback.
+# Below this threshold the review is treated as "no feedback" (e.g. empty
+# output or trivially short responses).  The fallback message injected for
+# empty reviews is ~60 chars, so it exceeds this threshold and correctly
+# triggers a refinement round.
+REVIEW_FEEDBACK_MIN_LENGTH = 50
+
 
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
@@ -745,9 +752,11 @@ class AutonomousOrchestrator:
         self._update_workflow({"current_round": round_num})
 
         review_has_feedback = bool(
-            review_text and len(review_text.strip()) > 50 and "方案通过审查" not in review_text
+            review_text
+            and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
+            and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds + 1
+        needs_refinement = review_has_feedback and round_num <= max_rounds
 
         if not needs_refinement:
             # Planning complete — post final plan to issue.

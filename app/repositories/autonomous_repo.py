@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app.repositories.database import Database, is_postgresql
+from app.repositories.database import Database, adapt_sql, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -306,24 +306,24 @@ class AutonomousWorkflowRepository:
         Counts assistant messages across all sessions linked to this workflow's
         milestones, matching the request count shown in the session list sidebar.
         """
-
-        ph = "?" if not is_postgresql() else "%s"
         self.db.execute(
-            f"""
-            UPDATE autonomous_workflows SET
-                total_requests = (
-                    SELECT COALESCE(SUM(cnt), 0) FROM (
-                        SELECT COUNT(*) as cnt
-                        FROM session_messages sm
-                        JOIN workflow_milestones wm ON wm.session_id = sm.session_id
-                        WHERE wm.workflow_id = {ph}
-                        AND wm.session_id IS NOT NULL AND wm.session_id != ''
-                        AND sm.role = 'assistant'
-                    ) sub
-                ),
-                updated_at = ?
-            WHERE workflow_id = {ph}
-            """,
+            adapt_sql(
+                """
+                UPDATE autonomous_workflows SET
+                    total_requests = (
+                        SELECT COALESCE(SUM(cnt), 0) FROM (
+                            SELECT COUNT(*) as cnt
+                            FROM session_messages sm
+                            JOIN workflow_milestones wm ON wm.session_id = sm.session_id
+                            WHERE wm.workflow_id = ?
+                            AND wm.session_id IS NOT NULL AND wm.session_id != ''
+                            AND sm.role = 'assistant'
+                        ) sub
+                    ),
+                    updated_at = ?
+                WHERE workflow_id = ?
+                """
+            ),
             (
                 workflow_id,
                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
