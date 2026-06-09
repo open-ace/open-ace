@@ -20,7 +20,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useSidebarCollapsed } from '@/store';
 import { useAppStore } from '@/store';
@@ -191,7 +191,6 @@ interface ManageLayoutProps {
 
 export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   const language = useLanguage();
-  const navigate = useNavigate();
   const location = useLocation();
   const collapsed = useSidebarCollapsed();
   const { user } = useAuth();
@@ -290,9 +289,12 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
     });
   };
 
-  const handleNavClick = (item: NavItem, disabled?: boolean) => {
-    if (disabled) return;
-    navigate(item.path);
+  const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, disabled?: boolean) => {
+    if (disabled) {
+      e.preventDefault();
+      return;
+    }
+    useAppStore.getState().setMobileSidebarOpen(false);
   };
 
   const toggleSidebar = () => {
@@ -360,14 +362,14 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                     const isDisabled = item.adminOnly && user?.role !== 'admin';
                     return (
                       <li key={item.id}>
-                        <button
+                        <Link
+                          to={item.path}
                           className={cn(
                             'nav-item',
                             activeNavItem === item.id && !isDisabled && 'active',
                             isDisabled && 'disabled'
                           )}
-                          onClick={() => handleNavClick(item, isDisabled)}
-                          disabled={isDisabled}
+                          onClick={(e) => handleNavClick(e, isDisabled)}
                           title={
                             collapsed
                               ? t(item.label, language)
@@ -378,7 +380,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                         >
                           <i className={cn('bi', item.icon)} />
                           {!collapsed && <span>{t(item.label, language)}</span>}
-                        </button>
+                        </Link>
                       </li>
                     );
                   })}

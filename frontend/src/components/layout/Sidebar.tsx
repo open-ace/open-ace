@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useSidebarCollapsed, useLanguage } from '@/store';
 import { useAppStore } from '@/store';
@@ -34,21 +35,20 @@ interface SidebarProps {
   mobileOpen?: boolean;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate, mobileOpen }) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate: _onNavigate, mobileOpen }) => {
   const collapsed = useSidebarCollapsed();
   const language = useLanguage();
   const { user } = useAuth();
 
   const isAdmin = user?.role === 'admin';
 
-  const handleNavClick = (id: string, href?: string, disabled?: boolean) => {
-    if (disabled) return;
-    useAppStore.getState().setMobileSidebarOpen(false);
-    if (href) {
-      window.location.href = href;
-    } else {
-      onNavigate(id);
+  const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, disabled?: boolean) => {
+    if (disabled) {
+      e.preventDefault();
+      return;
     }
+    useAppStore.getState().setMobileSidebarOpen(false);
   };
 
   const toggleSidebar = () => {
@@ -82,14 +82,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate, mob
           const isDisabled = item.adminOnly && !isAdmin;
           return (
             <li className="nav-item" key={item.id}>
-              <button
+              <Link
+                to={item.href || `/${item.id}`}
                 className={cn(
-                  'nav-link btn btn-link text-white text-start w-100 d-flex align-items-center',
+                  'nav-link text-white text-start w-100 d-flex align-items-center',
                   activeSection === item.id && !isDisabled && 'active bg-primary',
                   isDisabled && 'disabled opacity-50'
                 )}
-                onClick={() => handleNavClick(item.id, item.href, isDisabled)}
-                disabled={isDisabled}
+                onClick={(e) => handleNavClick(e, isDisabled)}
                 title={
                   collapsed
                     ? t(item.label, language)
@@ -100,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, onNavigate, mob
               >
                 <i className={cn('bi', item.icon, 'me-2')} />
                 {!collapsed && <span>{t(item.label, language)}</span>}
-              </button>
+              </Link>
             </li>
           );
         })}
