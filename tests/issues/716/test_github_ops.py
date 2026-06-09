@@ -301,6 +301,31 @@ class TestGitHubOpsGit:
         assert result["message"] == "feat: add feature"
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_git_commit_no_verify(self, mock_run):
+        """git_commit(no_verify=True) should pass --no-verify to git."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout="def456\n"),
+        ]
+        result = self.gh.git_commit("auto: changes", no_verify=True)
+        assert result["sha"] == "def456"
+        # First call is the commit, second is rev-parse
+        commit_cmd = mock_run.call_args_list[0][0][0]
+        assert "commit" in commit_cmd
+        assert "--no-verify" in commit_cmd
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_git_commit_default_no_verify_flag(self, mock_run):
+        """git_commit() without no_verify should NOT include --no-verify."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout="abc123\n"),
+        ]
+        self.gh.git_commit("feat: normal commit")
+        commit_cmd = mock_run.call_args_list[0][0][0]
+        assert "--no-verify" not in commit_cmd
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_git_push(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         self.gh.git_push("origin", "main")

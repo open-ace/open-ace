@@ -240,6 +240,13 @@ class TestDevelopmentCommitVerification:
         orch._gh.get_current_commit.return_value = "abc123"
         # No uncommitted changes either
         orch._gh.has_uncommitted_changes.return_value = False
+        # No existing branch changes vs base — truly no code changes
+        orch._gh.get_diff_stats.return_value = {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
+        }
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
@@ -295,10 +302,11 @@ class TestDevelopmentCommitVerification:
 
         orch._do_development(wf)
 
-        # Should have auto-committed
+        # Should have auto-committed with no_verify=True
         orch._gh.git_add_all.assert_called_once()
         orch._gh.git_commit.assert_called_once()
         assert "auto: development changes" in orch._gh.git_commit.call_args[0][0]
+        assert orch._gh.git_commit.call_args[1].get("no_verify") is True
         # Should NOT have failed
         failed_updates = self._get_failed_updates(mock_repo)
         assert len(failed_updates) == 0
@@ -317,6 +325,13 @@ class TestDevelopmentCommitVerification:
         orch._gh.get_current_commit.return_value = "abc123"
         orch._gh.has_uncommitted_changes.return_value = True
         orch._gh.git_commit.side_effect = Exception("pre-commit hook rejected")
+        # No existing branch changes vs base
+        orch._gh.get_diff_stats.return_value = {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0,
+            "commits": 0,
+        }
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
