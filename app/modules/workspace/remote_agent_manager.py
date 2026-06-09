@@ -1508,19 +1508,15 @@ class RemoteAgentManager:
         result: dict[str, str] = {}
 
         # Query agent_tokens for all machines at once
-        if is_postgresql():
-            placeholders = ", ".join("%s" for _ in machine_ids)
-        else:
-            placeholders = ", ".join("?" for _ in machine_ids)
-
         try:
             cursor.execute(
                 f"SELECT machine_id, is_revoked FROM agent_tokens "
-                f"WHERE machine_id IN ({placeholders})",
+                f"WHERE machine_id IN ({_params(len(machine_ids))})",
                 tuple(machine_ids),
             )
             token_rows = cursor.fetchall()
-        except Exception:
+        except Exception as e:
+            logger.error("Failed to batch query token status: %s", e)
             token_rows = []
 
         # Track which machines have tokens
@@ -1544,16 +1540,14 @@ class RemoteAgentManager:
 
         if legacy_candidates:
             try:
-                placeholders2 = ", ".join(
-                    "%s" if is_postgresql() else "?" for _ in legacy_candidates
-                )
                 cursor.execute(
                     f"SELECT machine_id FROM remote_machines "
-                    f"WHERE machine_id IN ({placeholders2}) AND legacy_mode = 1",
+                    f"WHERE machine_id IN ({_params(len(legacy_candidates))}) AND legacy_mode = 1",
                     tuple(legacy_candidates),
                 )
                 legacy_rows = cursor.fetchall()
-            except Exception:
+            except Exception as e:
+                logger.error("Failed to query legacy_mode status: %s", e)
                 legacy_rows = []
 
             legacy_machines = {

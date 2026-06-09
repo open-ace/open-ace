@@ -192,6 +192,7 @@ export const RemoteMachineManagement: React.FC = () => {
       toast.success(t('rotateTokenSuccess', language) || 'Token rotated');
     } catch (err) {
       console.error('Failed to rotate token:', err);
+      toast.error(t('rotateTokenFailed', language) || 'Failed to rotate token');
     }
   };
 
@@ -219,6 +220,7 @@ export const RemoteMachineManagement: React.FC = () => {
       toast.success(t('revokeTokenSuccess', language) || 'Token revoked');
     } catch (err) {
       console.error('Failed to revoke token:', err);
+      toast.error(t('revokeTokenFailed', language) || 'Failed to revoke token');
     }
   };
 

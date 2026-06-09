@@ -826,6 +826,8 @@ const translations: Record<Language, Translations> = {
     revokeTokenWarning: 'This will immediately disconnect the remote agent.',
     copyNewToken: 'Copy New Token',
     tokenRotatedMessage: 'The new token has been pushed to the agent.',
+    rotateTokenFailed: 'Failed to rotate token',
+    revokeTokenFailed: 'Failed to revoke token',
 
     // API Key Management
     addApiKey: 'Add API Key',
@@ -1810,6 +1812,8 @@ const translations: Record<Language, Translations> = {
     revokeTokenWarning: '这将立即断开远程 Agent 连接。',
     copyNewToken: '复制新 Token',
     tokenRotatedMessage: '新 Token 已推送到 Agent。',
+    rotateTokenFailed: 'Token 轮换失败',
+    revokeTokenFailed: 'Token 吊销失败',
 
     // API 密钥管理
     addApiKey: '添加 API 密钥',
@@ -2547,6 +2551,8 @@ const translations: Record<Language, Translations> = {
     revokeTokenWarning: 'リモートエージェントが即座に切断されます。',
     copyNewToken: '新しいトークンをコピー',
     tokenRotatedMessage: '新しいトークンがエージェントにプッシュされました。',
+    rotateTokenFailed: 'トークンの更新に失敗しました',
+    revokeTokenFailed: 'トークンの取り消しに失敗しました',
     remoteSession: 'リモートセッション',
     pauseSession: 'セッションを一時停止',
     resumeSession: 'セッションを再開',
@@ -3228,6 +3234,8 @@ const translations: Record<Language, Translations> = {
     revokeTokenWarning: '원격 에이전트가 즉시 연결이 끊깁니다.',
     copyNewToken: '새 토큰 복사',
     tokenRotatedMessage: '새 토큰이 에이전트에 푸시되었습니다.',
+    rotateTokenFailed: '토큰 교체 실패',
+    revokeTokenFailed: '토큰 취소 실패',
     remoteSession: '원격 세션',
     pauseSession: '세션 일시정지',
     resumeSession: '세션 재개',
