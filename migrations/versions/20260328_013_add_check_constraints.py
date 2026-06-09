@@ -307,6 +307,14 @@ def upgrade() -> None:
     else:
         # SQLite: recreate table with CHECK constraints
         # Note: This is complex due to many columns, but we need to add constraints
+        # Drop indexes first to avoid name conflicts (SQLite indexes are globally unique)
+        op.execute("DROP INDEX IF EXISTS idx_messages_date_tool_host")
+        op.execute("DROP INDEX IF EXISTS idx_messages_sender_id")
+        op.execute("DROP INDEX IF EXISTS idx_messages_date_role_timestamp")
+        op.execute("DROP INDEX IF EXISTS idx_messages_feishu_conv")
+        op.execute("DROP INDEX IF EXISTS idx_messages_conv_id")
+        op.execute("DROP INDEX IF EXISTS idx_messages_date_conv")
+        op.execute("DROP INDEX IF EXISTS idx_messages_query_optimized")
         op.execute(
             """
             CREATE TABLE daily_messages_new (
