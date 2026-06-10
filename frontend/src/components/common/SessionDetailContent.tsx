@@ -96,6 +96,22 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
     }
   };
 
+  // Get role label based on message role
+  const getRoleLabel = (role: string): string => {
+    switch (role) {
+      case 'user':
+        return t('messageRoleUser', language);
+      case 'assistant':
+        return t('messageRoleAssistant', language);
+      case 'system':
+        return t('messageRoleSystem', language);
+      case 'toolResult':
+        return t('messageRoleToolResult', language);
+      default:
+        return role;
+    }
+  };
+
   return (
     <div className="session-detail-content">
       {/* Session Meta Info - Three column layout */}
@@ -155,21 +171,21 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
             className={`btn btn-sm ${showUser ? 'btn-primary' : 'btn-outline-primary'}`}
             onClick={() => setShowUser(!showUser)}
           >
-            {t('user', language) ?? 'User'}
+            {t('messageRoleUser', language)}
           </button>
           <button
             type="button"
             className={`btn btn-sm ${showAssistant ? 'btn-success' : 'btn-outline-success'}`}
             onClick={() => setShowAssistant(!showAssistant)}
           >
-            {t('assistant', language) ?? 'Assistant'}
+            {t('messageRoleAssistant', language)}
           </button>
           <button
             type="button"
             className={`btn btn-sm ${showSystem ? 'btn-secondary' : 'btn-outline-secondary'}`}
             onClick={() => setShowSystem(!showSystem)}
           >
-            {t('system', language) ?? 'System'}
+            {t('messageRoleSystem', language)}
           </button>
         </div>
         {/* Search input */}
@@ -209,7 +225,7 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
               }`}
             >
               <div className="d-flex justify-content-between align-items-center mb-1">
-                <Badge variant={getRoleVariant(msg.role)}>{msg.role}</Badge>
+                <Badge variant={getRoleVariant(msg.role)}>{getRoleLabel(msg.role)}</Badge>
                 <small className="text-muted">
                   {msg.timestamp ? formatDateTime(msg.timestamp) : ''}
                   {msg.tokens_used > 0 && ` • ${formatTokens(msg.tokens_used)} tokens`}

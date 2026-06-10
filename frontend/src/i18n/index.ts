@@ -43,6 +43,11 @@ const translations: Record<Language, Translations> = {
     role: 'Role',
     selectRole: 'Select Role',
     searchMessages: 'Search messages...',
+    // Message role labels
+    messageRoleUser: 'User',
+    messageRoleAssistant: 'Assistant',
+    messageRoleSystem: 'System',
+    messageRoleToolResult: 'Tool Result',
 
     // Navigation
     navigation: 'Navigation',
@@ -437,6 +442,11 @@ const translations: Record<Language, Translations> = {
     created: 'Created',
     previous: 'Previous',
     next: 'Next',
+    goToPage: 'Go to page',
+    pageInfo: 'Page {current} of {total}',
+    invalidPageNumber: 'Please enter a valid page number (1-{total})',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
 
     // Prompts
     addPrompt: 'Add Prompt',
@@ -1088,6 +1098,11 @@ const translations: Record<Language, Translations> = {
     role: '角色',
     selectRole: '选择角色',
     searchMessages: '搜索消息...',
+    // Message role labels
+    messageRoleUser: '用户',
+    messageRoleAssistant: '助手',
+    messageRoleSystem: '系统',
+    messageRoleToolResult: '工具结果',
 
     // Navigation
     navigation: '导航',
@@ -1475,6 +1490,11 @@ const translations: Record<Language, Translations> = {
     created: '创建时间',
     previous: '上一页',
     next: '下一页',
+    goToPage: '跳转到页',
+    pageInfo: '第 {current} 页 / 共 {total} 页',
+    invalidPageNumber: '请输入有效的页码 (1-{total})',
+    previousPage: '上一页',
+    nextPage: '下一页',
 
     // Prompts
     addPrompt: '添加提示词',
@@ -2111,6 +2131,11 @@ const translations: Record<Language, Translations> = {
     role: '役割',
     selectRole: '役割を選択',
     searchMessages: 'メッセージを検索...',
+    // Message role labels
+    messageRoleUser: 'ユーザー',
+    messageRoleAssistant: 'アシスタント',
+    messageRoleSystem: 'システム',
+    messageRoleToolResult: 'ツール結果',
 
     // Navigation
     navigation: 'ナビゲーション',
@@ -2482,6 +2507,11 @@ const translations: Record<Language, Translations> = {
     created: '作成日時',
     previous: '前へ',
     next: '次へ',
+    goToPage: 'ページへ移動',
+    pageInfo: '{current}ページ / {total}ページ',
+    invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
+    previousPage: '前のページ',
+    nextPage: '次のページ',
 
     // Prompts
     addPrompt: 'プロンプト追加',
@@ -2833,6 +2863,11 @@ const translations: Record<Language, Translations> = {
     role: '역할',
     selectRole: '역할 선택',
     searchMessages: '메시지 검색...',
+    // Message role labels
+    messageRoleUser: '사용자',
+    messageRoleAssistant: '어시스턴트',
+    messageRoleSystem: '시스템',
+    messageRoleToolResult: '도구 결과',
 
     // Navigation
     navigation: '네비게이션',
@@ -3203,6 +3238,15 @@ const translations: Record<Language, Translations> = {
     created: '생성일',
     previous: '이전',
     next: '다음',
+
+    // Pagination
+    goToPage: '페이지 이동',
+    pageInfo: '{current}페이지 / {total}페이지',
+    invalidPageNumber: '올바른 페이지 번호를 입력하세요 (1-{total})',
+    firstPage: '첫 페이지',
+    lastPage: '마지막 페이지',
+    previousPage: '이전 페이지',
+    nextPage: '다음 페이지',
 
     // Prompts
     addPrompt: '프롬프트 추가',
