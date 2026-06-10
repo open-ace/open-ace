@@ -107,6 +107,13 @@ PLANNING_TIMEOUT = 600
 # triggers a refinement round.
 REVIEW_FEEDBACK_MIN_LENGTH = 50
 
+# Minimum review text length (chars) for an approved review to be considered
+# as having substantive improvement suggestions.  A brief approval like
+# "审查结论：方案通过审查。" is ~12 chars — well below this threshold.
+# Reviews exceeding this length after approval likely contain actionable
+# suggestions worth incorporating via the refinement step.
+REVIEW_SUGGESTIONS_MIN_LENGTH = 200
+
 # Phase ordering — used by fork to determine the next phase after the fork point.
 PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
 
@@ -201,10 +208,32 @@ class AutonomousOrchestrator:
         """
         if not text:
             return text
-        match = re.search(r"^#\s", text, re.MULTILINE)
+        match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
         if match:
             return text[match.start() :]
         return text
+
+    @staticmethod
+    def _should_show_review_warning(round_num: int, max_rounds: int, last_review: str) -> bool:
+        """Whether to append a "feedback not yet addressed" warning.
+
+        True when the planning loop exhausted all rounds without the
+        reviewer approving the plan (no "方案通过审查" in the last review).
+        """
+        return bool(last_review and round_num >= max_rounds and "方案通过审查" not in last_review)
+
+    @staticmethod
+    def _should_refine_plan(last_review: str) -> bool:
+        """Whether the approved review contains substantive suggestions.
+
+        True when the review approved the plan ("方案通过审查" present)
+        *and* the review text is long enough to contain actionable
+        improvement suggestions (exceeds REVIEW_SUGGESTIONS_MIN_LENGTH).
+        """
+        if not last_review:
+            return False
+        review_approved = "方案通过审查" in last_review
+        return review_approved and len(last_review.strip()) > REVIEW_SUGGESTIONS_MIN_LENGTH
 
     @staticmethod
     def _smart_truncate_diff(
@@ -910,9 +939,7 @@ class AutonomousOrchestrator:
             # If the review approved the plan but contained improvement
             # suggestions, run a one-time refinement step to incorporate
             # them into the final plan.
-            review_approved = last_review and "方案通过审查" in last_review
-            review_has_suggestions = review_approved and len(last_review.strip()) > 200
-            if review_has_suggestions and final_plan:
+            if self._should_refine_plan(last_review) and final_plan:
                 refine_prompt = (
                     PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
                     "请根据建议优化方案。直接输出优化后的完整方案，"
@@ -939,6 +966,14 @@ class AutonomousOrchestrator:
                 self._accumulate_tokens(refine_result)
                 if refine_result.success and refine_result.response_text:
                     final_plan = refine_result.response_text
+                    # Record refinement as a milestone for crash recovery.
+                    self._create_milestone(
+                        phase="planning",
+                        milestone_type="plan_refined",
+                        title="Plan Refined (Review Suggestions Incorporated)",
+                        plan_content=final_plan,
+                        round_number=round_num,
+                    )
 
             # Clean up agent intro text (e.g. "我来分析代码库...")
             final_plan = self._clean_plan_output(final_plan)
@@ -951,11 +986,7 @@ class AutonomousOrchestrator:
                         f"Plan review completed after {round_num} round(s).\n\n"
                         f"{final_plan}"
                     )
-                    if (
-                        last_review
-                        and round_num >= max_rounds
-                        and "方案通过审查" not in last_review
-                    ):
+                    if self._should_show_review_warning(round_num, max_rounds, last_review):
                         final_comment += (
                             f"\n\n---\n\n"
                             f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
