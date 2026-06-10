@@ -367,6 +367,21 @@ class GitHubOps:
         data = json.loads(result.stdout.strip())
         return data.get("commits", [])
 
+    def get_pr_checks(self, pr_number: int) -> list:
+        """Get CI check status for a PR.
+
+        Returns list of dicts with keys: name, state, bucket, link.
+        bucket values: 'pass', 'fail', 'skipping', 'pending'.
+        """
+        result = self._run_gh(
+            ["pr", "checks", str(pr_number), "--json", "name,state,bucket,link"],
+            check=False,
+        )
+        try:
+            return json.loads(result.stdout)
+        except (json.JSONDecodeError, AttributeError):
+            return []
+
     # ── Diff Operations ─────────────────────────────────────────────
 
     def get_diff(self, base: str = "HEAD~1", head: str = "HEAD") -> str:

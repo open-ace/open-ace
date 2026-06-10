@@ -48,8 +48,8 @@ def _patch_is_postgresql():
     return patchers
 
 
-def _passthrough(q):
-    """Passthrough function for adapt_sql."""
+def _passthrough_sql(q):
+    """Return SQL query unchanged for SQLite compatibility."""
     return q
 
 
@@ -60,7 +60,7 @@ def _replace_adapt_sql():
         mod = sys.modules.get(mod_path)
         if mod is not None and hasattr(mod, "adapt_sql"):
             originals[mod_path] = mod.adapt_sql
-            mod.adapt_sql = _passthrough
+            mod.adapt_sql = _passthrough_sql
     return originals
 
 
