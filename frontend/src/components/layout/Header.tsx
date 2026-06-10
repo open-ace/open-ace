@@ -3,11 +3,12 @@
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useAuth, useTheme, useLanguage, useGlobalFetch, useAppMode } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
-import { Button, UserSettingsModal, Avatar } from '@/components/common';
+import { UserSettingsModal, Avatar } from '@/components/common';
 
 interface HeaderProps {
   compact?: boolean;
@@ -139,9 +140,9 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
           </ul>
         </div>
       ) : (
-        <Button variant="primary" size="sm" onClick={() => (window.location.href = '/login')}>
+        <Link to="/login" className="btn btn-primary btn-sm">
           {t('login', language)}
-        </Button>
+        </Link>
       )}
     </div>
   );
