@@ -194,6 +194,7 @@ class AutonomousOrchestrator:
         self._workflow_id = workflow_id
         self._current_session_id: Optional[str] = None
         self._session_lock = threading.Lock()
+        self._cancel_requested = threading.Event()  # in-memory cancel signal
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -264,23 +265,30 @@ class AutonomousOrchestrator:
 
         # Pass 2: strip leading agent intro lines, skipping headings/empty lines.
         # Scan up to the first _INTRO_SCAN_LIMIT non-empty, non-heading lines.
+        # Only strip the FIRST contiguous intro block — once we see a heading
+        # after intro lines, stop so that legitimate sub-headings between
+        # intro lines are not deleted.
         _INTRO_SCAN_LIMIT = 5
         lines = text.split("\n")
-        intro_end = 0  # line index after the last consecutive intro line
+        intro_end = 0  # line index after the last contiguous intro line
         non_heading_count = 0
+        seen_intro = False
         for i, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 continue
             is_heading = bool(re.match(r"^#{1,6}\s", stripped))
             if is_heading:
-                continue  # skip headings, don't count toward limit
+                if seen_intro:
+                    break  # stop — don't strip across sub-headings
+                continue  # skip initial headings before any intro
             non_heading_count += 1
             if non_heading_count > _INTRO_SCAN_LIMIT:
                 break  # past scan limit, stop
             is_intro = any(p.search(stripped) for p in _AGENT_INTRO_PATTERNS)
             if is_intro:
                 intro_end = i + 1
+                seen_intro = True
             else:
                 break  # non-intro content found, stop
         if intro_end > 0:
@@ -598,15 +606,15 @@ class AutonomousOrchestrator:
                 },
             )
 
-            # Interruptible sleep: check for cancellation every 5s
+            # Interruptible sleep: check for cancellation every 5s.
+            # Use in-memory flag instead of DB query to avoid overhead.
             slept = 0
+            self._cancel_requested.clear()
             while slept < delay:
                 time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
                 slept += _CANCEL_POLL_INTERVAL
-                # Check if workflow was paused/stopped externally
-                wf_check = self.workflow
-                if wf_check and wf_check.get("status") in ("paused", "stopped"):
-                    logger.info("429 retry cancelled (workflow %s)", wf_check["status"])
+                if self._cancel_requested.is_set():
+                    logger.info("429 retry cancelled (cancel requested)")
                     with self._session_lock:
                         self._current_session_id = result.session_id
                     return result
@@ -626,6 +634,7 @@ class AutonomousOrchestrator:
 
     def cancel_current_task(self):
         """Cancel the currently running agent task (e.g. on pause/stop)."""
+        self._cancel_requested.set()  # signal 429 retry loop to stop
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:

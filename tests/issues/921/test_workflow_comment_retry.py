@@ -68,6 +68,28 @@ class TestCleanAgentTextPass2:
         assert "分析完成" not in result
         assert "### Design" in result
 
+    def test_does_not_strip_across_sub_headings(self):
+        """Intro lines separated by sub-headings should not cause heading deletion.
+
+        See PR #922 Review Round 2 Issue #1: the sub-heading between two
+        intro blocks should be preserved — only the first contiguous intro
+        block (before the first sub-heading) should be stripped.
+        """
+        text = (
+            "## 实现方案\n\n"
+            "我来为这个方案做补充。\n\n"
+            "### 子标题\n\n"
+            "让我再检查一下这个细节。\n\n"
+            "### 核心内容\n实际内容..."
+        )
+        result = AutonomousOrchestrator._clean_agent_text(text)
+        # First intro block should be stripped
+        assert "我来为这个方案做补充" not in result
+        # Sub-heading and second intro should be preserved
+        assert "### 子标题" in result
+        assert "让我再检查" in result
+        assert "### 核心内容" in result
+
 
 class TestCleanAgentTextPass3:
     """Pass 3: strip trailing closing lines."""
