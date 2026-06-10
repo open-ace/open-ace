@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "055_fork_and_cancel_feedback"
-down_revision: str = "054_ai_agent_settings"
+down_revision: str = "054_add_ai_agent_settings_table"
 branch_labels = None
 depends_on = None
 
