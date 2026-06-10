@@ -64,45 +64,77 @@ def _table_exists(conn, table_name: str) -> bool:
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if not _table_exists(conn, "usage_summary"):
-        # Create usage_summary table
-        op.create_table(
-            "usage_summary",
-            sa.Column("tool_name", sa.String(50), nullable=False),
-            sa.Column("host_name", sa.String(100), nullable=True),  # NULL for global summary
-            sa.Column("days_count", sa.Integer, nullable=False, default=0),
-            sa.Column("total_tokens", sa.BigInteger, nullable=False, default=0),
-            sa.Column("avg_tokens", sa.BigInteger, nullable=False, default=0),
-            sa.Column("total_requests", sa.Integer, nullable=False, default=0),
-            sa.Column("total_input_tokens", sa.BigInteger, nullable=False, default=0),
-            sa.Column("total_output_tokens", sa.BigInteger, nullable=False, default=0),
-            sa.Column("first_date", sa.String(10), nullable=True),
-            sa.Column("last_date", sa.String(10), nullable=True),
-            sa.Column(
-                "updated_at",
-                sa.DateTime,
-                nullable=False,
-                server_default=sa.text("CURRENT_TIMESTAMP"),
-            ),
-        )
+        if is_postgresql:
+            # PostgreSQL: 创建表后添加约束
+            op.create_table(
+                "usage_summary",
+                sa.Column("tool_name", sa.String(50), nullable=False),
+                sa.Column("host_name", sa.String(100), nullable=True),  # NULL for global summary
+                sa.Column("days_count", sa.Integer, nullable=False, default=0),
+                sa.Column("total_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("avg_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("total_requests", sa.Integer, nullable=False, default=0),
+                sa.Column("total_input_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("total_output_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("first_date", sa.String(10), nullable=True),
+                sa.Column("last_date", sa.String(10), nullable=True),
+                sa.Column(
+                    "updated_at",
+                    sa.DateTime,
+                    nullable=False,
+                    server_default=sa.text("CURRENT_TIMESTAMP"),
+                ),
+            )
 
-        # Create unique constraint for tool_name + host_name
-        op.create_unique_constraint(
-            "uq_usage_summary_tool_host", "usage_summary", ["tool_name", "host_name"]
-        )
+            # Create unique constraint for tool_name + host_name
+            op.create_unique_constraint(
+                "uq_usage_summary_tool_host", "usage_summary", ["tool_name", "host_name"]
+            )
 
-        # Create indexes for fast lookup
-        op.create_index("idx_usage_summary_tool", "usage_summary", ["tool_name"])
-        op.create_index("idx_usage_summary_host", "usage_summary", ["host_name"])
+            # Create indexes for fast lookup
+            op.create_index("idx_usage_summary_tool", "usage_summary", ["tool_name"])
+            op.create_index("idx_usage_summary_host", "usage_summary", ["host_name"])
+        else:
+            # SQLite: 在创建表时直接定义唯一约束
+            op.create_table(
+                "usage_summary",
+                sa.Column("tool_name", sa.String(50), nullable=False),
+                sa.Column("host_name", sa.String(100), nullable=True),  # NULL for global summary
+                sa.Column("days_count", sa.Integer, nullable=False, default=0),
+                sa.Column("total_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("avg_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("total_requests", sa.Integer, nullable=False, default=0),
+                sa.Column("total_input_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("total_output_tokens", sa.BigInteger, nullable=False, default=0),
+                sa.Column("first_date", sa.String(10), nullable=True),
+                sa.Column("last_date", sa.String(10), nullable=True),
+                sa.Column(
+                    "updated_at",
+                    sa.DateTime,
+                    nullable=False,
+                    server_default=sa.text("CURRENT_TIMESTAMP"),
+                ),
+                sa.UniqueConstraint("tool_name", "host_name", name="uq_usage_summary_tool_host"),
+            )
+
+            # Create indexes for fast lookup
+            op.create_index("idx_usage_summary_tool", "usage_summary", ["tool_name"])
+            op.create_index("idx_usage_summary_host", "usage_summary", ["host_name"])
 
 
 def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if _table_exists(conn, "usage_summary"):
         op.drop_index("idx_usage_summary_host", "usage_summary")
         op.drop_index("idx_usage_summary_tool", "usage_summary")
-        op.drop_constraint("uq_usage_summary_tool_host", "usage_summary")
+        if is_postgresql:
+            # PostgreSQL: 需要先删除约束
+            op.drop_constraint("uq_usage_summary_tool_host", "usage_summary")
+        # SQLite: 约束随表一起删除，无需单独处理
         op.drop_table("usage_summary")
