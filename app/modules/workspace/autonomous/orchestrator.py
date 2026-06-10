@@ -1252,6 +1252,8 @@ class AutonomousOrchestrator:
             )
         else:
             self._run_development_agent(wf, dev_round, gh)
+            # Post development completion comment (before tests)
+            self._post_dev_completion_comment(wf, dev_round, gh)
 
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)
@@ -1427,6 +1429,49 @@ class AutonomousOrchestrator:
                 {"status": "failed", "error_message": f"Development failed: {result.error}"}
             )
             return
+
+    def _post_dev_completion_comment(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Post development completion comment with file change stats to issue.
+
+        Posted BEFORE tests run, so the logical order on the issue is:
+        Plan → Dev Completed (this) → Test Results → PR Review.
+        """
+        issue_number = wf.get("github_issue_number")
+        if not issue_number:
+            return
+
+        # Collect diff stats (branch vs main)
+        diff_stats = {}
+        try:
+            branch = wf.get("branch_name", "")
+            if branch:
+                diff_stats = gh.get_diff_stats("main", branch)
+        except Exception:
+            pass
+
+        branch = wf.get("branch_name", "")
+        commit_sha = ""
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+
+        msg = f"## ✅ Development Round {dev_round} Completed\n\n"
+        if commit_sha:
+            msg += f"- **Commit**: `{commit_sha[:8]}`\n"
+        if branch:
+            msg += f"- **Branch**: `{branch}`\n"
+        if diff_stats:
+            msg += (
+                f"- **Changes**: {diff_stats.get('files', 0)} files "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
+            )
+        msg += "\nProgressing to test phase..."
+
+        try:
+            gh.add_issue_comment(issue_number, msg)
+        except Exception:
+            pass
 
     def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run tests, post results to issue, handle retries.
@@ -1614,16 +1659,15 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round} completed",
         )
 
-        # Post development status to issue
+        # Post test-passed status to issue
         if issue_number:
             try:
                 branch = wf.get("branch_name", "")
                 status_msg = (
-                    f"## ✅ Development Round {dev_round} Completed\n\n"
-                    f"- **Status**: Development finished, tests passed\n"
+                    f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
+                    f"- **Status**: Development + tests completed successfully\n"
                     f"- **Branch**: `{branch}`\n"
-                    f"- **Next**: Creating PR and running code review\n\n"
-                    f"Progressing to PR review phase..."
+                    f"- **Next**: Creating PR and running code review\n"
                 )
                 gh.add_issue_comment(issue_number, status_msg)
             except Exception:
