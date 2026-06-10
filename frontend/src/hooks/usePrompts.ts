@@ -11,6 +11,10 @@ export function usePrompts(filters?: PromptFilters) {
     queryKey: ['prompts', filters?.category, filters?.search, filters?.page, filters?.limit],
     queryFn: () => promptsApi.list(filters),
     staleTime: 30 * 1000,
+    // Keep previous data when queryKey changes (e.g., search/filter changes)
+    // This prevents UI from showing empty state during data transition,
+    // which would cause focus loss on search input (Issue #684)
+    placeholderData: (previousData) => previousData,
   });
 }
 
