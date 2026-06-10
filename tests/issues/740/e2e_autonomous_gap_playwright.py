@@ -263,7 +263,11 @@ def step_test_fork_milestone_api():
     r = api(
         "post",
         f"/api/autonomous/workflows/{wf_id}/milestones/{ms1_id}/fork",
-        json={"branch_name": fork_branch},
+        json={
+            "branch_name": fork_branch,
+            "user_feedback": "Try an alternative approach",
+            "pause_original": False,
+        },
     )
     log("FORK-API", f"  Fork response: {r.status_code}")
 
@@ -271,21 +275,16 @@ def step_test_fork_milestone_api():
         data = r.json()
         assert data["success"] is True, "Fork should succeed"
 
-        # Verify fork milestone was created
-        fork_ms = data.get("fork_milestone", {})
-        assert (
-            fork_ms.get("fork_branch") == fork_branch
-        ), f"Fork branch should match. Expected: {fork_branch}, Got: {fork_ms.get('fork_branch')}"
-        log("FORK-API", f"  ✅ Fork milestone created with branch: {fork_branch}")
+        # Verify fork workflow was created (new API returns fork_workflow)
+        fork_wf = data.get("fork_workflow", {})
+        assert fork_wf.get("workflow_id"), "Fork workflow should have an ID"
+        log("FORK-API", f"  ✅ Fork workflow created: {fork_wf.get('workflow_id', '')[:8]}")
 
-        # Verify workflow state changed to planning
+        # Verify original workflow was NOT paused (pause_original=False)
         r2 = api("get", f"/api/autonomous/workflows/{wf_id}")
         wf = r2.json()["workflow"]
-        assert wf["status"] == "planning", f"Status should be planning, got {wf['status']}"
-        assert (
-            wf["current_phase"] == "planning"
-        ), f"Phase should be planning, got {wf['current_phase']}"
-        log("FORK-API", "  ✅ Workflow transitioned to planning after fork")
+        assert wf["status"] != "paused", f"Original should not be paused, got {wf['status']}"
+        log("FORK-API", f"  ✅ Original workflow still active: {wf['status']}")
 
         # Verify milestones after fork point were cancelled
         r3 = api("get", f"/api/autonomous/workflows/{wf_id}/timeline")
@@ -319,7 +318,11 @@ def step_test_cancel_milestone_api():
     ms1_id = ms_ids[0]  # completed repo_setup milestone
 
     # Cancel from the first milestone — should cancel all subsequent
-    r = api("post", f"/api/autonomous/workflows/{wf_id}/milestones/{ms1_id}/cancel")
+    r = api(
+        "post",
+        f"/api/autonomous/workflows/{wf_id}/milestones/{ms1_id}/cancel",
+        json={"user_feedback": "Stop this round, needs rework"},
+    )
     log("CANCEL-API", f"  Cancel response: {r.status_code}")
 
     if r.status_code == 200:

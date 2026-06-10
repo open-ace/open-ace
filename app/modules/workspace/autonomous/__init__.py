@@ -71,12 +71,20 @@ def get_ddl_statements():
             locked_by TEXT DEFAULT '',
             retry_count INTEGER DEFAULT 0,
             task_timeout INTEGER,
-            planning_timeout_extension INTEGER DEFAULT 0
+            planning_timeout_extension INTEGER DEFAULT 0,
+            parent_workflow_id TEXT,
+            fork_milestone_id TEXT,
+            user_feedback TEXT DEFAULT '',
+            original_branch_name TEXT DEFAULT ''
         )
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_workflows_user_status
             ON autonomous_workflows(user_id, status)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_workflows_parent
+            ON autonomous_workflows(parent_workflow_id)
         """,
         f"""
         CREATE TABLE IF NOT EXISTS workflow_milestones (
@@ -103,6 +111,7 @@ def get_ddl_statements():
             error_message TEXT DEFAULT '',
             parent_milestone_id TEXT DEFAULT '',
             fork_branch TEXT DEFAULT '',
+            fork_workflow_id TEXT DEFAULT '',
             metadata TEXT DEFAULT '',
             started_at TIMESTAMP,
             completed_at TIMESTAMP,

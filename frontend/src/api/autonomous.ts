@@ -38,6 +38,10 @@ export interface AutonomousWorkflow {
   total_output_tokens: number;
   total_requests: number;
   error_message: string;
+  parent_workflow_id: string | null;
+  fork_milestone_id: string | null;
+  user_feedback: string;
+  original_branch_name: string;
   created_at: string | null;
   updated_at: string | null;
   completed_at: string | null;
@@ -68,6 +72,7 @@ export interface WorkflowMilestone {
   error_message: string;
   parent_milestone_id: string;
   fork_branch: string;
+  fork_workflow_id: string;
   metadata: string;
   started_at: string | null;
   completed_at: string | null;
@@ -176,24 +181,40 @@ export const autonomousApi = {
 
   async cancelMilestone(
     workflowId: string,
-    milestoneId: string
+    milestoneId: string,
+    feedback: string
   ): Promise<{ success: boolean; cancelled: number }> {
     return apiClient.post(
-      `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/cancel`
+      `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/cancel`,
+      { user_feedback: feedback }
     );
   },
 
   async forkMilestone(
     workflowId: string,
     milestoneId: string,
-    branchName?: string
-  ): Promise<{ success: boolean; fork_milestone: WorkflowMilestone }> {
+    options: { feedback: string; pauseOriginal: boolean; branchName?: string }
+  ): Promise<{ success: boolean; fork_workflow: AutonomousWorkflow }> {
     return apiClient.post(
       `/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/fork`,
       {
-        branch_name: branchName,
+        user_feedback: options.feedback,
+        pause_original: options.pauseOriginal,
+        branch_name: options.branchName,
       }
     );
+  },
+
+  async getWorkflowForks(
+    workflowId: string
+  ): Promise<{ success: boolean; forks: AutonomousWorkflow[] }> {
+    return apiClient.get(`/api/autonomous/workflows/${workflowId}/forks`);
+  },
+
+  async resumeWithFeedback(workflowId: string, feedback: string): Promise<{ success: boolean }> {
+    return apiClient.post(`/api/autonomous/workflows/${workflowId}/resume-with-feedback`, {
+      user_feedback: feedback,
+    });
   },
 
   async getMilestoneSession(

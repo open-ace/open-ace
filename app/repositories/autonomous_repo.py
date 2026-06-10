@@ -52,6 +52,10 @@ class AutonomousWorkflowRepository:
         "retry_count",
         "task_timeout",
         "planning_timeout_extension",
+        "parent_workflow_id",
+        "fork_milestone_id",
+        "user_feedback",
+        "original_branch_name",
         "locked_at",
         "locked_by",
         "updated_at",
@@ -79,6 +83,7 @@ class AutonomousWorkflowRepository:
         "error_message",
         "parent_milestone_id",
         "fork_branch",
+        "fork_workflow_id",
         "metadata",
         "started_at",
         "completed_at",
@@ -119,8 +124,10 @@ class AutonomousWorkflowRepository:
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
+                     parent_workflow_id, fork_milestone_id, user_feedback,
+                     original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -145,6 +152,10 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
+                    data.get("parent_workflow_id"),
+                    data.get("fork_milestone_id"),
+                    data.get("user_feedback", ""),
+                    data.get("original_branch_name", ""),
                     now,
                     now,
                 ),
@@ -161,8 +172,10 @@ class AutonomousWorkflowRepository:
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
+                     parent_workflow_id, fork_milestone_id, user_feedback,
+                     original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -186,6 +199,10 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
+                    data.get("parent_workflow_id"),
+                    data.get("fork_milestone_id"),
+                    data.get("user_feedback", ""),
+                    data.get("original_branch_name", ""),
                     now,
                     now,
                 ),
@@ -330,6 +347,105 @@ class AutonomousWorkflowRepository:
                 workflow_id,
             ),
         )
+
+    def list_forks(self, workflow_id: str) -> list:
+        """List all child workflows forked from the given parent."""
+        return self.db.fetch_all(
+            "SELECT * FROM autonomous_workflows WHERE parent_workflow_id = ? ORDER BY created_at ASC",
+            (workflow_id,),
+        )
+
+    def copy_milestones_to_workflow(
+        self, src_workflow_id: str, dst_workflow_id: str, up_to_milestone_id: str
+    ) -> list:
+        """Copy milestones from src to dst workflow, up to and including the target milestone.
+
+        Used by fork to carry forward shared history to the new workflow.
+        Returns the list of newly created milestone records.
+        All inserts are committed in a single transaction for atomicity.
+        """
+        from app.repositories.database import adapt_sql
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # Fetch milestones up to and including the fork point
+        milestones = self.db.fetch_all(
+            """
+            SELECT * FROM workflow_milestones
+            WHERE workflow_id = ? AND id <= (
+                SELECT id FROM workflow_milestones WHERE milestone_id = ?
+            )
+            ORDER BY id ASC
+            """,
+            (src_workflow_id, up_to_milestone_id),
+        )
+        copied = []
+        new_ms_ids = []
+        fields = [
+            "phase",
+            "dev_round",
+            "round_number",
+            "milestone_type",
+            "title",
+            "description",
+            "session_id",
+            "review_session_id",
+            "github_issue_number",
+            "github_pr_number",
+            "github_comment_id",
+            "commit_shas",
+            "diff_stats",
+            "result_summary",
+            "plan_content",
+            "review_content",
+            "error_message",
+            "parent_milestone_id",
+            "fork_branch",
+            "metadata",
+        ]
+        col_names = [
+            "workflow_id",
+            "milestone_id",
+            "status",
+            "started_at",
+            "created_at",
+            "updated_at",
+        ] + fields
+        placeholders = ",".join(["?"] * len(col_names))
+        col_str = ",".join(col_names)
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            for ms in milestones:
+                new_ms_id = str(uuid.uuid4())
+                new_ms_ids.append(new_ms_id)
+                col_values = [
+                    dst_workflow_id,
+                    new_ms_id,
+                    ms.get("status", "completed"),
+                    now,
+                    now,
+                    now,
+                ]
+                for f in fields:
+                    col_values.append(ms.get(f, ""))
+
+                cursor.execute(
+                    adapt_sql(
+                        f"INSERT INTO workflow_milestones ({col_str}) VALUES ({placeholders})"
+                    ),
+                    tuple(col_values),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Fetch the newly created milestones for return value
+        for ms_id in new_ms_ids:
+            result = self.get_milestone(ms_id)
+            if result:
+                copied.append(result)
+        return copied
 
     def delete_workflow(self, workflow_id: str) -> None:
         """Delete a workflow and its milestones/events in a single transaction."""

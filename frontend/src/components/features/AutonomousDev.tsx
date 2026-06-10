@@ -85,7 +85,13 @@ export const AutonomousDev: React.FC = () => {
       {/* Right Panel - Timeline */}
       <div className="flex-grow-1 d-flex flex-column overflow-hidden">
         {selectedWorkflow ? (
-          <WorkflowTimeline workflow={selectedWorkflow} />
+          <WorkflowTimeline
+            workflow={selectedWorkflow}
+            onNavigateToWorkflow={(id) => {
+              setSelectedWorkflowId(id);
+              updateUrl(id);
+            }}
+          />
         ) : selectedWorkflowId && workflowLoading ? (
           <div className="d-flex align-items-center justify-content-center h-100">
             <Loading />
