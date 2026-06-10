@@ -40,7 +40,8 @@ import {
   type OptimizationSuggestion,
   type EfficiencyReport,
 } from '@/api';
-import { formatTokens } from '@/utils';
+import { formatTokens, formatToolName } from '@/utils';
+import { useTools } from '@/hooks';
 
 // Cache key generator
 const getCacheKey = (startDate: string, endDate: string, tool: string) =>
@@ -193,15 +194,17 @@ export const ROIAnalysis: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const tools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Tool options
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
+      ...tools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [tools, language]
   );
 
   // Chart data

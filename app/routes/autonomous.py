@@ -13,6 +13,7 @@ import os
 import queue
 import threading
 import time
+from datetime import datetime, timezone
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
@@ -459,7 +460,7 @@ def get_timeline(workflow_id):
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/cancel", methods=["POST"])
 @auth_required
 def cancel_milestone(workflow_id, milestone_id):
-    """Cancel a milestone and all subsequent milestones."""
+    """Cancel a milestone and all subsequent milestones with user feedback."""
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
@@ -470,24 +471,47 @@ def cancel_milestone(workflow_id, milestone_id):
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
+    # Parse user feedback (required)
+    data = request.get_json(silent=True) or {}
+    user_feedback = data.get("user_feedback", "").strip()
+    if not user_feedback:
+        return jsonify({"error": "user_feedback is required"}), 400
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
+
     cancelled = _get_repo().cancel_milestones_after(workflow_id, milestone_id)
 
-    # Set workflow to waiting state for user to provide new requirements
+    # Store user feedback and set workflow to waiting state
     _get_repo().update_workflow(
         workflow_id,
         {
             "current_phase": "wait",
             "status": "waiting",
+            "user_feedback": user_feedback,
         },
+    )
+
+    # Create a requirement_received milestone to record the feedback
+    _get_repo().create_milestone(
+        {
+            "workflow_id": workflow_id,
+            "phase": "wait",
+            "milestone_type": "requirement_received",
+            "status": "completed",
+            "title": "User feedback received",
+            "description": user_feedback[:500],
+            "result_summary": user_feedback[:200],
+        }
     )
 
     _emit_event_safe(
         workflow_id,
         "user_action",
         {
-            "action": "cancel_milestone",
+            "action": "cancel_with_feedback",
             "milestone_id": milestone_id,
             "cancelled_count": len(cancelled),
+            "has_feedback": True,
         },
     )
     return jsonify({"success": True, "cancelled": len(cancelled)})
@@ -496,7 +520,13 @@ def cancel_milestone(workflow_id, milestone_id):
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/fork", methods=["POST"])
 @auth_required
 def fork_milestone(workflow_id, milestone_id):
-    """Fork from a milestone, creating a new branch."""
+    """Fork from a milestone, creating a new independent workflow.
+
+    Creates a new workflow row with shared history up to the fork point.
+    The new workflow starts at preparation and the orchestrator jumps
+    to the next phase based on the fork milestone's phase.
+    Uses worktree strategy for parallel execution.
+    """
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
@@ -506,36 +536,82 @@ def fork_milestone(workflow_id, milestone_id):
     milestone = _get_repo().get_milestone(milestone_id)
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
+    if milestone.get("status") == "cancelled":
+        return jsonify({"error": "Cannot fork from a cancelled milestone"}), 400
 
     data = request.get_json(silent=True) or {}
-    fork_branch = data.get("branch_name", f"fork/from-milestone-{milestone_id[:8]}")
+    user_feedback = data.get("user_feedback", "").strip()
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
+    pause_original = data.get("pause_original", True)
+    fork_branch = data.get("branch_name", "") or f"fork/from-{milestone_id[:8]}"
 
-    # Create fork milestone
-    fork_data = {
-        "workflow_id": workflow_id,
-        "phase": milestone.get("phase", ""),
-        "dev_round": milestone.get("dev_round", 1),
-        "milestone_type": "branch_created",
-        "status": "completed",
-        "title": f"Forked from milestone: {milestone.get('title', '')}",
-        "parent_milestone_id": milestone_id,
-        "fork_branch": fork_branch,
-    }
-    fork_milestone = _get_repo().create_milestone(fork_data)
+    # Determine the fork milestone's phase (used for fork marker milestone)
+    fork_phase = milestone.get("phase", "planning")
 
-    # Cancel milestones after the fork point
-    _get_repo().cancel_milestones_after(workflow_id, milestone_id)
-
-    # Update workflow with new branch and reset to planning
-    _get_repo().update_workflow(
-        workflow_id,
+    # Create new workflow (copy settings from original)
+    fork_workflow = _get_repo().create_workflow(
         {
+            "user_id": workflow.get("user_id"),
+            "title": f"{workflow.get('title', '')} [Fork]",
+            "requirements_text": workflow.get("requirements_text", ""),
+            "requirements_issue_url": workflow.get("requirements_issue_url", ""),
+            "project_path": workflow.get("project_path", ""),
+            "project_repo_url": workflow.get("project_repo_url", ""),
+            "is_new_project": False,
+            "is_private": workflow.get("is_private", True),
+            "cli_tool": workflow.get("cli_tool", "claude-code"),
+            "model": workflow.get("model", ""),
+            "permission_mode": workflow.get("permission_mode", "auto-edit"),
             "branch_name": fork_branch,
-            "current_phase": "planning",
-            "status": "planning",
-        },
+            "branch_strategy": "worktree",  # Force worktree for parallel execution
+            "workspace_type": workflow.get("workspace_type", "local"),
+            "remote_machine_id": workflow.get("remote_machine_id", ""),
+            "max_plan_rounds": workflow.get("max_plan_rounds", 3),
+            "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
+            "github_issue_number": workflow.get("github_issue_number"),
+            # Fork-specific fields
+            "parent_workflow_id": workflow_id,
+            "fork_milestone_id": milestone_id,
+            "user_feedback": user_feedback,
+            "original_branch_name": workflow.get("branch_name", ""),
+            # Start at the next phase (preparation handles worktree + phase jump)
+            "status": "pending",
+            "current_phase": "preparation",
+            "dev_round": milestone.get("dev_round", 1),
+        }
     )
 
+    # Copy milestones up to fork point to new workflow
+    _get_repo().copy_milestones_to_workflow(workflow_id, fork_workflow["workflow_id"], milestone_id)
+
+    # Create fork marker milestone on parent workflow
+    _get_repo().create_milestone(
+        {
+            "workflow_id": workflow_id,
+            "phase": fork_phase,
+            "dev_round": milestone.get("dev_round", 1),
+            "milestone_type": "workflow_forked",
+            "status": "completed",
+            "title": "Forked to new workflow",
+            "parent_milestone_id": milestone_id,
+            "fork_branch": fork_branch,
+            "fork_workflow_id": fork_workflow["workflow_id"],
+            "result_summary": user_feedback[:200] if user_feedback else "",
+        }
+    )
+
+    # Optionally pause the original workflow
+    if pause_original:
+        _get_repo().update_workflow(
+            workflow_id,
+            {
+                "status": "paused",
+                "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            },
+        )
+
+    # Emit events on both workflows
     _emit_event_safe(
         workflow_id,
         "user_action",
@@ -543,9 +619,71 @@ def fork_milestone(workflow_id, milestone_id):
             "action": "fork_milestone",
             "milestone_id": milestone_id,
             "fork_branch": fork_branch,
+            "fork_workflow_id": fork_workflow["workflow_id"],
+            "pause_original": pause_original,
         },
     )
-    return jsonify({"success": True, "fork_milestone": fork_milestone})
+    _emit_event_safe(
+        fork_workflow["workflow_id"],
+        "user_action",
+        {
+            "action": "workflow_created_as_fork",
+            "parent_workflow_id": workflow_id,
+            "fork_milestone_id": milestone_id,
+        },
+    )
+    return jsonify({"success": True, "fork_workflow": fork_workflow})
+
+
+@autonomous_bp.route("/workflows/<workflow_id>/forks", methods=["GET"])
+@auth_required
+def get_workflow_forks(workflow_id):
+    """List all child workflows forked from this one."""
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    forks = _get_repo().list_forks(workflow_id)
+    return jsonify({"success": True, "forks": forks})
+
+
+@autonomous_bp.route("/workflows/<workflow_id>/resume-with-feedback", methods=["POST"])
+@auth_required
+def resume_with_feedback(workflow_id):
+    """Resume a waiting workflow with updated user feedback."""
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+    if workflow.get("status") not in ("waiting", "paused"):
+        return jsonify({"error": "Workflow is not in a resumable state"}), 400
+
+    data = request.get_json(silent=True) or {}
+    user_feedback = data.get("user_feedback", "").strip()
+    if not user_feedback:
+        return jsonify({"error": "user_feedback is required"}), 400
+    if len(user_feedback) > 5000:
+        return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
+
+    # Store feedback and set to waiting (scheduler will pick up via _do_wait)
+    _get_repo().update_workflow(
+        workflow_id,
+        {
+            "user_feedback": user_feedback,
+            "current_phase": "wait",
+            "status": "waiting",
+        },
+    )
+
+    _emit_event_safe(
+        workflow_id,
+        "user_action",
+        {"action": "resume_with_feedback", "has_feedback": True},
+    )
+    return jsonify({"success": True})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/session", methods=["GET"])

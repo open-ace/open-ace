@@ -2058,6 +2058,269 @@ build_docker_image() {
 
 
 # ============================================================================
+# Upgrade Functions
+# ============================================================================
+
+# Detect existing Open ACE deployment
+# Returns: 0 if deployment exists, 1 if not
+detect_existing_deployment() {
+    local container_name="open-ace"
+
+    # Check if open-ace container exists
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
+        return 1
+    fi
+
+    # Get deployment directory from container mount info
+    # The container mounts config directory at /root/.open-ace (read-only)
+    # We need to find the mount where Destination is /root/.open-ace
+    local deploy_config_dir=$(docker inspect ${container_name} --format \
+        '{{ range .Mounts }}{{ if eq .Destination "/root/.open-ace" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null)
+
+    if [ -z "$deploy_config_dir" ]; then
+        print_warning "无法从容器获取配置目录"
+        return 1
+    fi
+
+    # The Source is the config directory itself (e.g., /home/ivyent/open-ace/config)
+    # We need to get the parent directory (the deploy directory)
+    DEPLOY_DIR=$(dirname "$deploy_config_dir")
+
+    # Verify the deployment directory exists
+    if [ ! -d "$DEPLOY_DIR" ]; then
+        print_warning "部署目录不存在: $DEPLOY_DIR"
+        return 1
+    fi
+
+    # Verify config.json exists
+    if [ ! -f "$DEPLOY_DIR/config/config.json" ]; then
+        print_warning "配置文件不存在: $DEPLOY_DIR/config/config.json"
+        return 1
+    fi
+
+    return 0
+}
+
+# Read configuration from existing deployment
+read_existing_config() {
+    local config_file="$DEPLOY_DIR/config/config.json"
+    local env_file="$DEPLOY_DIR/.env"
+    local compose_file="$DEPLOY_DIR/docker-compose.yml"
+
+    # Check if jq is available
+    if ! command -v jq &>/dev/null; then
+        print_error "jq 未安装，无法读取配置文件"
+        print_info "请安装 jq: yum install jq 或 apt install jq"
+        return 1
+    fi
+
+    # Read from config.json
+    if [ -f "$config_file" ]; then
+        HOST_NAME=$(jq -r '.host_name' "$config_file" 2>/dev/null || echo "")
+        WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "5000")
+        WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
+        WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
+        WORKSPACE_MULTI_USER_MODE=$(jq -r '.workspace.multi_user_mode' "$config_file" 2>/dev/null || echo "false")
+        WORKSPACE_PORT_RANGE_START=$(jq -r '.workspace.port_range_start' "$config_file" 2>/dev/null || echo "3100")
+        WORKSPACE_PORT_RANGE_END=$(jq -r '.workspace.port_range_end' "$config_file" 2>/dev/null || echo "3200")
+        WORKSPACE_MAX_INSTANCES=$(jq -r '.workspace.max_instances' "$config_file" 2>/dev/null || echo "30")
+        WORKSPACE_IDLE_TIMEOUT=$(jq -r '.workspace.idle_timeout_minutes' "$config_file" 2>/dev/null || echo "30")
+        WORKSPACE_TOKEN_SECRET=$(jq -r '.workspace.token_secret' "$config_file" 2>/dev/null || echo "")
+        OPENCLAW_ENABLED=$(jq -r '.tools.openclaw.enabled' "$config_file" 2>/dev/null || echo "true")
+        OPENCLAW_GATEWAY_URL=$(jq -r '.tools.openclaw.gateway_url' "$config_file" 2>/dev/null || echo "http://localhost:18789")
+        CLAUDE_ENABLED=$(jq -r '.tools.claude.enabled' "$config_file" 2>/dev/null || echo "true")
+        QWEN_ENABLED=$(jq -r '.tools.qwen.enabled' "$config_file" 2>/dev/null || echo "true")
+    fi
+
+    # Read from .env file
+    if [ -f "$env_file" ]; then
+        # Source the .env file to get variables
+        RUN_USER=$(grep "^RUN_USER=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "$RUN_USER")
+        DB_USER=$(grep "^DB_USER=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "$DB_USER")
+        DB_PASSWORD=$(grep "^DB_PASSWORD=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "")
+        DB_NAME=$(grep "^DB_NAME=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "$DB_NAME")
+        SECRET_KEY=$(grep "^SECRET_KEY=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "")
+        UPLOAD_AUTH_KEY=$(grep "^UPLOAD_AUTH_KEY=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "")
+
+        # If RUN_USER is empty, try to get from docker-compose.yml
+        if [ -z "$RUN_USER" ] && [ -f "$compose_file" ]; then
+            # Try to extract from volumes path (e.g., /home/ivyent/.qwen)
+            local volume_path=$(grep -E '\.qwen:' "$compose_file" 2>/dev/null | head -1 | sed 's/.*\(-[^:]*:\).*/\1/' | cut -d':' -f1 || echo "")
+            if [ -n "$volume_path" ]; then
+                RUN_USER=$(basename "$(dirname "$volume_path")" 2>/dev/null || echo "open-ace")
+            fi
+        fi
+    fi
+
+    # Extract ports from URLs
+    if [ "$WORKSPACE_ENABLED" = "true" ]; then
+        WORKSPACE_PORT=$(echo "$WORKSPACE_URL" | sed -n 's/.*:\([0-9]*\).*/\1/p')
+        [ -z "$WORKSPACE_PORT" ] && WORKSPACE_PORT="3000"
+    fi
+    if [ "$OPENCLAW_ENABLED" = "true" ]; then
+        OPENCLAW_PORT=$(echo "$OPENCLAW_GATEWAY_URL" | sed -n 's/.*:\([0-9]*\).*/\1/p')
+        [ -z "$OPENCLAW_PORT" ] && OPENCLAW_PORT="18789"
+    fi
+
+    # Get RUN_USER_UID from existing user
+    if [ -n "$RUN_USER" ] && id "$RUN_USER" &>/dev/null; then
+        RUN_USER_UID=$(id -u "$RUN_USER")
+    fi
+
+    return 0
+}
+
+# Show upgrade summary
+show_upgrade_summary() {
+    print_header "升级摘要"
+
+    print_info "检测到已存在的 Open ACE 部署"
+    print_info "  部署目录: $DEPLOY_DIR"
+    echo ""
+
+    echo -e "${YELLOW}当前配置:${NC}"
+    echo "  运行用户: $RUN_USER (UID: ${RUN_USER_UID:-999})"
+    echo "  主机名: $HOST_NAME"
+    echo "  Web 端口: $WEB_PORT"
+    echo "  数据库用户: $DB_USER"
+    echo "  数据库名称: $DB_NAME"
+    echo ""
+
+    echo -e "${YELLOW}工具配置:${NC}"
+    echo "  OpenClaw: $OPENCLAW_ENABLED $( [ "$OPENCLAW_ENABLED" = "true" ] && echo "($OPENCLAW_GATEWAY_URL)" )"
+    echo "  Claude: $CLAUDE_ENABLED"
+    echo "  Qwen: $QWEN_ENABLED"
+    echo "  Workspace: $WORKSPACE_ENABLED $( [ "$WORKSPACE_ENABLED" = "true" ] && echo "($WORKSPACE_URL)" )"
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        echo "    - 多用户模式: 启用"
+        echo "    - 端口池: $WORKSPACE_PORT_RANGE_START - $WORKSPACE_PORT_RANGE_END"
+        echo "    - 最大实例数: $WORKSPACE_MAX_INSTANCES"
+        echo "    - 空闲超时: $WORKSPACE_IDLE_TIMEOUT 分钟"
+    fi
+    echo ""
+
+    print_info "升级操作:"
+    print_info "  1. 构建前端 (npm run build)"
+    print_info "  2. 重建 Docker 镜像"
+    print_info "  3. 更新 docker-compose.yml 和 sudoers"
+    print_info "  4. 保留 config.json 不覆盖"
+    print_info "  5. 只重建 open-ace 容器 (PostgreSQL 不重启)"
+    echo ""
+}
+
+# Execute upgrade deployment
+upgrade_deployment() {
+    print_header "执行升级"
+
+    # Get source directory from script location
+    # Script is at scripts/install-central/docker-method/install.sh
+    # Source dir is at root (3 levels up)
+    local script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local SOURCE_DIR=$(cd "$script_dir/../../.." && pwd)
+
+    # Verify source directory
+    if [ ! -f "$SOURCE_DIR/Dockerfile" ] || [ ! -d "$SOURCE_DIR/frontend" ]; then
+        print_error "无法找到源码目录: $SOURCE_DIR"
+        print_info "请确保脚本位于源码目录的 scripts/install-central/docker-method/ 下"
+        return 1
+    fi
+
+    print_info "源码目录: $SOURCE_DIR"
+
+    # 1. Build frontend in source directory
+    print_info "构建前端..."
+    cd "$SOURCE_DIR/frontend"
+    if [ -f "package.json" ]; then
+        # Check if npm is available
+        if ! command -v npm &>/dev/null; then
+            print_error "npm 未安装，无法构建前端"
+            return 1
+        fi
+
+        # Install dependencies if needed
+        if [ ! -d "node_modules" ]; then
+            print_info "安装前端依赖..."
+            npm install
+        fi
+
+        # Build frontend
+        print_info "执行 npm run build..."
+        npm run build
+        if [ $? -ne 0 ]; then
+            print_error "前端构建失败"
+            return 1
+        fi
+        print_success "前端构建完成"
+    else
+        print_warning "未找到 package.json，跳过前端构建"
+    fi
+
+    # 2. Build Docker image in source directory
+    cd "$SOURCE_DIR"
+    print_info "重建 Docker 镜像..."
+    docker build -t "$IMAGE_NAME" --target production .
+    if [ $? -ne 0 ]; then
+        print_error "Docker 镜像构建失败"
+        return 1
+    fi
+    print_success "Docker 镜像重建完成: $IMAGE_NAME"
+
+    # 3. Update docker-compose.yml and .env
+    cd "$DEPLOY_DIR"
+    print_info "更新 docker-compose.yml 和 .env..."
+    # Call create_docker_compose and create_env_file but they will overwrite, which is fine
+    # We need to temporarily set a flag to avoid prompting
+    local old_non_interactive="$NON_INTERACTIVE"
+    NON_INTERACTIVE=true
+    create_docker_compose
+    create_env_file
+    NON_INTERACTIVE="$old_non_interactive"
+
+    # 4. Update sudoers if multi-user mode is enabled
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        print_info "更新 sudoers 配置..."
+        stop_webui_systemd_service
+        configure_sudoers
+        if [ $? -ne 0 ]; then
+            print_warning "Sudoers 配置失败，但继续升级"
+        fi
+    fi
+
+    # 5. config.json is preserved (not overwritten)
+
+    # 6. Recreate only open-ace container (PostgreSQL not restarted)
+    print_info "重建 open-ace 容器..."
+    docker compose up -d --force-recreate open-ace
+    if [ $? -ne 0 ]; then
+        print_error "容器重建失败"
+        return 1
+    fi
+
+    # Wait for application to be ready
+    print_info "等待应用启动..."
+    sleep 3
+
+    local max_attempts=30
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s "http://localhost:$WEB_PORT/health" | grep -q "healthy"; then
+            print_success "应用已就绪"
+            break
+        fi
+        echo -n "."
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    echo ""
+
+    if [ $attempt -gt $max_attempts ]; then
+        print_warning "应用启动中，请稍后检查状态"
+    fi
+
+    return 0
+}
+
+# ============================================================================
 # Deployment Functions
 # ============================================================================
 
@@ -2809,6 +3072,51 @@ check_existing_config() {
 
 # Check prerequisites
 check_prerequisites
+
+# Detect existing deployment and offer upgrade mode
+if [ "$NON_INTERACTIVE" = false ]; then
+    if detect_existing_deployment; then
+        read_existing_config
+        show_upgrade_summary
+
+        echo "请选择操作:"
+        echo "  1) 升级 (使用当前配置，保留数据库和配置文件)"
+        echo "  2) 重新配置 (重新填写所有参数)"
+        echo "  3) 取消"
+        echo ""
+
+        prompt_input "请选择" "1" mode_choice
+
+        case "$mode_choice" in
+            1|"")
+                print_info "开始升级..."
+                upgrade_deployment
+                if [ $? -eq 0 ]; then
+                    print_header "升级完成"
+                    print_success "Open ACE 已成功升级！"
+                    print_info "访问地址: http://localhost:$WEB_PORT"
+                    print_info "管理命令:"
+                    print_info "  cd $DEPLOY_DIR && docker compose ps"
+                    print_info "  cd $DEPLOY_DIR && docker compose logs -f"
+                else
+                    print_error "升级失败，请检查日志"
+                fi
+                exit 0
+                ;;
+            2)
+                print_info "进入重新配置模式..."
+                # Continue with normal installation flow
+                ;;
+            3)
+                print_info "操作已取消"
+                exit 0
+                ;;
+            *)
+                print_warning "无效选择，进入重新配置模式..."
+                ;;
+        esac
+    fi
+fi
 
 # Check for existing configs after RUN_USER and DEPLOY_DIR are set
 check_existing_config

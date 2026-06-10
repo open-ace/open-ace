@@ -419,7 +419,10 @@ class TestCancelMilestone:
         ]
         with _mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
-                resp = client.post("/api/autonomous/workflows/wf-1/milestones/ms-1/cancel")
+                resp = client.post(
+                    "/api/autonomous/workflows/wf-1/milestones/ms-1/cancel",
+                    json={"user_feedback": "Please fix this issue"},
+                )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["cancelled"] == 1
@@ -446,11 +449,16 @@ class TestForkMilestone:
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.post(
                     "/api/autonomous/workflows/wf-1/milestones/ms-1/fork",
-                    json={"branch_name": "fork/from-ms-1"},
+                    json={
+                        "user_feedback": "Try a different approach",
+                        "branch_name": "fork/from-ms-1",
+                        "pause_original": False,
+                    },
                 )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["fork_milestone"]["milestone_id"] == "ms-fork"
+        assert data["success"] is True
+        assert "fork_workflow" in data
 
 
 # ── Auxiliary Tests ──────────────────────────────────────────────────────

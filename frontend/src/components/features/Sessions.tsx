@@ -15,6 +15,7 @@ import {
   useStopRemoteSession,
   usePauseRemoteSession,
   useResumeRemoteSession,
+  useTools,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -132,16 +133,17 @@ export const Sessions: React.FC = () => {
       }
     : null;
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const tools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Filter options
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
-      { value: 'codex', label: 'Codex' },
+      ...tools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [tools, language]
   );
 
   const statusOptions = useMemo(
