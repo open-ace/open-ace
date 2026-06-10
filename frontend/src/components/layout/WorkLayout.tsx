@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useLanguage, useAppStore, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
@@ -45,7 +45,6 @@ interface WorkLayoutProps {
 
 export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
   const language = useLanguage();
-  const navigate = useNavigate();
   const location = useLocation();
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
@@ -91,10 +90,6 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
   };
 
   const activeNavItem = getActiveNavItem();
-
-  const handleNavClick = (item: NavItem) => {
-    navigate(item.path);
-  };
 
   // Handle ESC key to exit fullscreen
   useEffect(() => {
@@ -158,15 +153,15 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
           {/* Work Navigation */}
           <nav className="work-nav">
             {visibleNavItems.map((item) => (
-              <button
+              <Link
                 key={item.id}
+                to={item.path}
                 className={cn('work-nav-item', activeNavItem === item.id && 'active')}
-                onClick={() => handleNavClick(item)}
                 title={t(item.label, language)}
               >
                 <i className={cn('bi', item.icon)} />
                 {!leftPanelCollapsed && <span>{t(item.label, language)}</span>}
-              </button>
+              </Link>
             ))}
           </nav>
 

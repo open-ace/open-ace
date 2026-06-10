@@ -160,18 +160,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 // Legacy App Content (for backward compatibility with old routes)
 const LegacyAppContent: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const language = useAppStore((state) => state.language);
 
   // Get active section from path
   const getActiveSection = () => {
     const path = location.pathname.replace('/', '') || 'dashboard';
     return path;
-  };
-
-  // Handle navigation
-  const handleNavigate = (section: string) => {
-    navigate(`/${section}`);
   };
 
   // Section titles
@@ -222,7 +216,6 @@ const LegacyAppContent: React.FC = () => {
     <Layout
       activeSection={activeSection}
       title={t(sectionTitles[activeSection] || activeSection, language)}
-      onNavigate={handleNavigate}
     >
       {renderSection()}
     </Layout>
