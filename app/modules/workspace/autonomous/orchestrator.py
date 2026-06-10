@@ -1242,12 +1242,15 @@ class AutonomousOrchestrator:
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
         test_retries = wf.get("test_retries", 0)
+        skip_retries = wf.get("skip_retries", 0)
 
-        # ── Development phase (skipped on test-only retry) ──
-        if test_retries > 0:
+        # ── Development phase (skipped on test-only/skip retry) ──
+        if test_retries > 0 or skip_retries > 0:
             logger.info(
-                "Test-only retry %d for dev round %d, skipping development phase",
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
+                "skipping development phase",
                 test_retries,
+                skip_retries,
                 dev_round,
             )
         else:
@@ -1591,7 +1594,7 @@ class AutonomousOrchestrator:
             skip_retries = wf.get("skip_retries", 0) + 1
             if skip_retries <= 1:
                 logger.warning(
-                    "Tests were skipped (not actually run) for dev round %d, " "retry %d/1",
+                    "Tests were skipped (not actually run) for dev round %d, retry %d/1",
                     dev_round,
                     skip_retries,
                 )
@@ -1679,7 +1682,7 @@ class AutonomousOrchestrator:
                 return
 
         # Tests passed — clear retry counters
-        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0})
+        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0, "skip_retries": 0})
 
         # Dev completed milestone
         self._create_milestone(
