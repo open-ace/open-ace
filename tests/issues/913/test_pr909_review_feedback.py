@@ -138,109 +138,99 @@ class TestPollCIStatus:
         assert mock_time.sleep.call_count == 0  # never slept — timed out immediately
 
 
-# ── Test pre-existing CI detection ──────────────────────────────────────
+# ── Test _is_pre_existing_ci_failure ──────────────────────────────────────
 
 
-class TestPreExistingCIDetection:
-    """Test the structured CI_STATUS detection logic."""
+class TestIsPreExistingCIFailure:
+    """Test the extracted _is_pre_existing_ci_failure static method."""
 
     def test_detects_structured_tag(self):
         """Matches CI_STATUS: pre-existing structured output."""
-        import re
-
-        fix_response = "Fixed the issue.\nCI_STATUS: pre-existing"
-        has_preexisting = bool(
-            re.search(r"CI_STATUS:\s*pre-existing", fix_response)
-            or "预先存在" in fix_response
-            or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure(
+            "Fixed the issue.\nCI_STATUS: pre-existing"
         )
-        assert has_preexisting is True
+        assert result is True
 
     def test_detects_legacy_chinese(self):
         """Matches legacy '预先存在' pattern for backwards compat."""
-        import re
-
-        fix_response = "这个问题是预先存在的，不是本PR引入的。"
-        has_preexisting = bool(
-            re.search(r"CI_STATUS:\s*pre-existing", fix_response)
-            or "预先存在" in fix_response
-            or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure(
+            "这个问题是预先存在的，不是本PR引入的。"
         )
-        assert has_preexisting is True
+        assert result is True
 
     def test_detects_legacy_english(self):
         """Matches 'pre-existing' or 'pre existing' in English."""
-        import re
-
         for text in [
             "This is a pre-existing issue.",
             "This is a pre existing issue.",
         ]:
-            has_preexisting = bool(
-                re.search(r"CI_STATUS:\s*pre-existing", text)
-                or "预先存在" in text
-                or re.search(r"pre[\s-]?existing", text, re.IGNORECASE)
-            )
-            assert has_preexisting is True, f"Failed for: {text}"
+            result = AutonomousOrchestrator._is_pre_existing_ci_failure(text)
+            assert result is True, f"Failed for: {text}"
 
     def test_no_match_when_introduced(self):
         """No match when CI failure was introduced by this PR."""
-        import re
-
-        fix_response = "Fixed the bug and tests pass now.\nCI_STATUS: introduced"
-        has_preexisting = bool(
-            re.search(r"CI_STATUS:\s*pre-existing", fix_response)
-            or "预先存在" in fix_response
-            or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure(
+            "Fixed the bug and tests pass now.\nCI_STATUS: introduced"
         )
-        assert has_preexisting is False
+        assert result is False
 
     def test_no_match_on_unrelated_text(self):
         """No false positives on unrelated text."""
-        import re
-
-        fix_response = "All tests passed. Changes committed and pushed."
-        has_preexisting = bool(
-            re.search(r"CI_STATUS:\s*pre-existing", fix_response)
-            or "预先存在" in fix_response
-            or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure(
+            "All tests passed. Changes committed and pushed."
         )
-        assert has_preexisting is False
+        assert result is False
+
+    def test_no_match_on_none(self):
+        """None input returns False."""
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure(None)
+        assert result is False
+
+    def test_no_match_on_empty(self):
+        """Empty string returns False."""
+        result = AutonomousOrchestrator._is_pre_existing_ci_failure("")
+        assert result is False
 
 
-# ── Test truncation logic ───────────────────────────────────────────────
+# ── Test truncation logic with constant ───────────────────────────────────
 
 
 class TestTruncationNotice:
     """Test the truncation notice for previous review feedback."""
 
     def test_notice_shown_when_truncated(self):
-        cleaned = "x" * 3100
-        truncated = cleaned[:3000]
+        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
+
+        cleaned = "x" * (PREV_REVIEW_MAX_LENGTH + 100)
+        truncated = cleaned[:PREV_REVIEW_MAX_LENGTH]
         notice = (
             "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > 3000
+            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
             else ""
         )
         assert "⚠️" in notice
-        assert len(truncated) == 3000
+        assert len(truncated) == PREV_REVIEW_MAX_LENGTH
 
     def test_no_notice_when_not_truncated(self):
+        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
+
         cleaned = "Short review content"
-        truncated = cleaned[:3000]
+        truncated = cleaned[:PREV_REVIEW_MAX_LENGTH]
         notice = (
             "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > 3000
+            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
             else ""
         )
         assert notice == ""
         assert truncated == "Short review content"
 
     def test_no_notice_at_exact_boundary(self):
-        cleaned = "x" * 3000
+        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
+
+        cleaned = "x" * PREV_REVIEW_MAX_LENGTH
         notice = (
             "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > 3000
+            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
             else ""
         )
         assert notice == ""

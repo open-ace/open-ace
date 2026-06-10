@@ -127,6 +127,11 @@ PHASE_STATUS_MAP = {
 CI_POLL_INTERVAL = 30  # seconds between polls
 CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
+# Maximum character length for previous review feedback included in
+# the review prompt.  Reviews longer than this are truncated with a
+# notice so the reviewer knows content was omitted.
+PREV_REVIEW_MAX_LENGTH = 3000
+
 
 def _next_phase(current_phase: str) -> str:
     """Return the phase that follows current_phase."""
@@ -253,6 +258,23 @@ class AutonomousOrchestrator:
 
         return "\n".join(result_parts)
 
+    @staticmethod
+    def _is_pre_existing_ci_failure(response: str) -> bool:
+        """Whether the agent identified CI failures as pre-existing.
+
+        Checks for (in order of priority):
+          1. Structured ``CI_STATUS: pre-existing`` tag
+          2. Legacy Chinese keyword ``预先存在``
+          3. Legacy English ``pre-existing`` / ``pre existing``
+        """
+        if not response:
+            return False
+        return bool(
+            re.search(r"CI_STATUS:\s*pre-existing", response)
+            or "预先存在" in response
+            or re.search(r"pre[\s-]?existing", response, re.IGNORECASE)
+        )
+
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
     ) -> Optional[dict]:
@@ -310,7 +332,14 @@ class AutonomousOrchestrator:
         """
         deadline = time.monotonic() + CI_POLL_MAX_WAIT
         while True:
-            checks = gh.get_pr_checks(pr_number)
+            try:
+                checks = gh.get_pr_checks(pr_number)
+            except Exception:
+                logger.warning("CI check query failed for PR #%s, will retry...", pr_number)
+                if time.monotonic() >= deadline:
+                    return []
+                time.sleep(CI_POLL_INTERVAL)
+                continue
             if not checks:
                 # No checks configured or parse failure — nothing to wait for.
                 return checks
@@ -1439,10 +1468,10 @@ class AutonomousOrchestrator:
                     break
             if last_review_text:
                 cleaned_review = self._clean_plan_output(last_review_text)
-                truncated = cleaned_review[:3000]
+                truncated = cleaned_review[:PREV_REVIEW_MAX_LENGTH]
                 truncation_notice = (
                     "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-                    if len(cleaned_review) > 3000
+                    if len(cleaned_review) > PREV_REVIEW_MAX_LENGTH
                     else ""
                 )
                 review_prompt += (
@@ -1593,15 +1622,7 @@ class AutonomousOrchestrator:
                 try:
                     comment = f"✅ Addressed review feedback (round {round_num})"
                     # Note pre-existing CI failures if fix agent identified them.
-                    # Matches both the structured `CI_STATUS: pre-existing` tag
-                    # and legacy natural-language patterns for backwards compat.
-                    fix_response = fix_result.response_text or ""
-                    has_preexisting = bool(
-                        re.search(r"CI_STATUS:\s*pre-existing", fix_response)
-                        or "预先存在" in fix_response
-                        or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
-                    )
-                    if has_preexisting:
+                    if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
                         comment += (
                             "\n\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。"
                         )
