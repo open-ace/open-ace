@@ -6,7 +6,6 @@ Provides fast dashboard queries by maintaining a summary table.
 """
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 

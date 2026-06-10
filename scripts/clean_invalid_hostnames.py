@@ -45,9 +45,7 @@ _UUID_PATTERN = re.compile(
 )
 _NUMERIC_PATTERN = re.compile(r"^\d{11,}$")
 _PLACEHOLDER_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
-_HOSTNAME_VALID_PATTERN = re.compile(
-    r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$"
-)
+_HOSTNAME_VALID_PATTERN = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$")
 
 # Whitelist hostnames that should be preserved
 WHITELIST = {"localhost"}
@@ -171,9 +169,7 @@ def clean_invalid_hostnames(db: Database, table: str, invalid_hostnames: list[st
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Clean invalid hostnames from historical data"
-    )
+    parser = argparse.ArgumentParser(description="Clean invalid hostnames from historical data")
     parser.add_argument("--backup", action="store_true", help="Create backup before cleaning")
     parser.add_argument(
         "--dry-run",

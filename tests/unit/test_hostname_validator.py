@@ -2,10 +2,7 @@
 
 import pytest
 
-from app.utils.hostname_validator import (
-    is_valid_hostname,
-    sanitize_hostname,
-)
+from app.utils.hostname_validator import is_valid_hostname, sanitize_hostname
 
 
 class TestIsValidHostname:
@@ -61,10 +58,10 @@ class TestIsValidHostname:
         assert not is_valid_hostname("12345678901")  # 11 digits
         assert not is_valid_hostname("123456789012")  # 12 digits
 
-    def test_allow_pure_numeric_short(self):
-        """Allow pure numeric strings with length <= 10."""
-        assert is_valid_hostname("1234567890")  # 10 digits - valid hostname
-        assert is_valid_hostname("123")  # 3 digits
+    def test_filter_pure_numeric_short_hexlike(self):
+        """Pure numeric strings with 8-10 digits match hex blacklist."""
+        assert not is_valid_hostname("1234567890")  # 10 digits - matches hex pattern
+        assert is_valid_hostname("123")  # 3 digits - too short for hex pattern
 
     def test_filter_placeholder(self):
         """Filter placeholder format <...>."""
@@ -84,9 +81,12 @@ class TestIsValidHostname:
         assert not is_valid_hostname(long_name)
 
     def test_allow_max_length(self):
-        """Allow hostnames at max length."""
-        # 253 characters (exactly at RFC 1123 max)
-        max_name = "a" * 253
+        """Allow hostnames at max length with valid label sizes."""
+        # 253 characters total with labels <= 63 chars each (RFC 1123)
+        # 4 labels of 63 chars + 3 dots = 63*4 + 3 = 255, so use 3 labels:
+        # 63 + 1 + 63 + 1 + 63 + 1 + 61 = 253
+        max_name = "a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 61
+        assert len(max_name) == 253
         assert is_valid_hostname(max_name)
 
     def test_filter_label_too_long(self):

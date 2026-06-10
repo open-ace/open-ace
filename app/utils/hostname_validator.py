@@ -36,9 +36,7 @@ _PLACEHOLDER_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 # - Starts and ends with alphanumeric
 # - Middle can contain alphanumeric, hyphens, and dots
 # - Length 1-253 (configurable minimum, default 1)
-_HOSTNAME_FORWARD_PATTERN = re.compile(
-    r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$"
-)
+_HOSTNAME_FORWARD_PATTERN = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$")
 
 # Minimum hostname length (configurable)
 MIN_HOSTNAME_LENGTH = 1
@@ -133,12 +131,7 @@ def _validate_rfc1123(name: str) -> bool:
         return False
 
     # Check each label length (max 63 chars per label)
-    labels = name.split(".")
-    for label in labels:
-        if len(label) > 63:
-            return False
-
-    return True
+    return all(len(label) <= 63 for label in name.split("."))
 
 
 def sanitize_hostname(

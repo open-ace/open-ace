@@ -1242,16 +1242,21 @@ class AutonomousOrchestrator:
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
         test_retries = wf.get("test_retries", 0)
+        skip_retries = wf.get("skip_retries", 0)
 
-        # ── Development phase (skipped on test-only retry) ──
-        if test_retries > 0:
+        # ── Development phase (skipped on test-only/skip retry) ──
+        if test_retries > 0 or skip_retries > 0:
             logger.info(
-                "Test-only retry %d for dev round %d, skipping development phase",
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
+                "skipping development phase",
                 test_retries,
+                skip_retries,
                 dev_round,
             )
         else:
             self._run_development_agent(wf, dev_round, gh)
+            # Post development completion comment (before tests)
+            self._post_dev_completion_comment(wf, dev_round, gh)
 
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)
@@ -1428,6 +1433,48 @@ class AutonomousOrchestrator:
             )
             return
 
+    def _post_dev_completion_comment(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Post development completion comment with file change stats to issue.
+
+        Posted BEFORE tests run, so the logical order on the issue is:
+        Plan → Dev Completed (this) → Test Results → PR Review.
+        """
+        issue_number = wf.get("github_issue_number")
+        if not issue_number:
+            return
+
+        # Collect diff stats (branch vs main)
+        branch = wf.get("branch_name", "")
+        diff_stats = {}
+        try:
+            if branch:
+                diff_stats = gh.get_diff_stats("main", branch)
+        except Exception:
+            pass
+
+        commit_sha = ""
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+
+        msg = f"## ✅ Development Round {dev_round} Completed\n\n"
+        if commit_sha:
+            msg += f"- **Commit**: `{commit_sha[:8]}`\n"
+        if branch:
+            msg += f"- **Branch**: `{branch}`\n"
+        if diff_stats:
+            msg += (
+                f"- **Changes**: {diff_stats.get('files', 0)} files "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
+            )
+        msg += "\nProgressing to test phase..."
+
+        try:
+            gh.add_issue_comment(issue_number, msg)
+        except Exception:
+            pass
+
     def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run tests, post results to issue, handle retries.
 
@@ -1445,7 +1492,17 @@ class AutonomousOrchestrator:
         test_prompt = (
             AUTONOMOUS_CONTEXT
             + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
-            "确保所有测试通过后再结束。"
+            "确保所有测试通过后再结束。\n\n"
+            "## 重要：测试执行策略\n"
+            "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
+            "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
+            "2. 如果 pytest 不可用，尝试 `python -m unittest discover -s tests`\n"
+            "3. 对于前端项目，尝试 `npm test` 或 `npx vitest run`\n"
+            "4. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
+            "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
+            "   - 手动验证核心功能逻辑\n"
+            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n"
         )
 
         test_result = self._run_agent(
@@ -1473,19 +1530,88 @@ class AutonomousOrchestrator:
             },
         )
 
+        # Detect if tests were actually skipped (agent couldn't run them)
+        test_response_text = test_result.response_text or ""
+        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
+        _skipped_keywords = [
+            "pytest 未安装",
+            "pytest was not installed",
+            "命令被阻止",
+            "commands were blocked",
+            "pip install failed",
+            "pip install 被阻止",
+            "权限批准",
+            "所有测试框架都不可用",
+            "no test framework available",
+            "could not run tests",
+            "unable to execute tests",
+            "test framework not found",
+        ]
+        has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
+        # Negative detection: if response contains no test-result keywords at
+        # all (passed, failed, error, test, assertion, PASSED, FAILED), the
+        # agent likely never ran tests.
+        _test_result_keywords = [
+            "passed",
+            "failed",
+            "PASSED",
+            "FAILED",
+            "assertion",
+            "AssertionError",
+            "error",
+            "test",
+        ]
+        has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
+        tests_actually_skipped = (
+            any(m in test_response_text for m in _skipped_markers)
+            or (test_result.success and has_skip_keyword)
+            or (test_result.success and not has_test_result)
+        )
+
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
             try:
-                test_summary = self._clean_agent_text(test_result.response_text or "")[:800]
+                test_summary = self._clean_agent_text(test_response_text)[:800]
+                if tests_actually_skipped:
+                    status_line = "⚠️ Tests were not actually run — see details below"
+                elif test_result.success:
+                    status_line = "✅ All tests passed"
+                else:
+                    status_line = "❌ Tests failed"
                 test_comment = (
                     f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
-                    f"{'✅ All tests passed' if test_result.success else '❌ Tests failed'}\n\n"
+                    f"{status_line}\n\n"
                     f"{test_summary}"
                 )
                 gh.add_issue_comment(issue_number, test_comment)
             except Exception:
                 pass
+
+        # Treat skipped tests as failure — tests must actually run.
+        # Allow 1 retry in case of transient environment issues.
+        if tests_actually_skipped:
+            skip_retries = wf.get("skip_retries", 0) + 1
+            if skip_retries <= 1:
+                logger.warning(
+                    "Tests were skipped (not actually run) for dev round %d, retry %d/1",
+                    dev_round,
+                    skip_retries,
+                )
+                self._update_workflow({"skip_retries": skip_retries})
+                return  # Scheduler will re-call _run_test_phase
+            logger.warning("Tests were skipped after retry for dev round %d", dev_round)
+            self._update_workflow(
+                {
+                    "status": "failed",
+                    "error_message": (
+                        "Tests were not actually run — agent could not execute "
+                        "any test framework. This may indicate a permission or "
+                        "environment issue."
+                    ),
+                }
+            )
+            return
 
         # Handle test failure with retry logic
         if not test_result.success:
@@ -1556,7 +1682,7 @@ class AutonomousOrchestrator:
                 return
 
         # Tests passed — clear retry counters
-        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0})
+        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0, "skip_retries": 0})
 
         # Dev completed milestone
         self._create_milestone(
@@ -1567,16 +1693,15 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round} completed",
         )
 
-        # Post development status to issue
+        # Post test-passed status to issue
         if issue_number:
             try:
                 branch = wf.get("branch_name", "")
                 status_msg = (
-                    f"## ✅ Development Round {dev_round} Completed\n\n"
-                    f"- **Status**: Development finished, tests passed\n"
+                    f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
+                    f"- **Status**: Development + tests completed successfully\n"
                     f"- **Branch**: `{branch}`\n"
-                    f"- **Next**: Creating PR and running code review\n\n"
-                    f"Progressing to PR review phase..."
+                    f"- **Next**: Creating PR and running code review\n"
                 )
                 gh.add_issue_comment(issue_number, status_msg)
             except Exception:
@@ -1909,8 +2034,18 @@ class AutonomousOrchestrator:
 
             if pr_number:
                 try:
-                    # Extract fix summary from agent response
-                    fix_summary = self._clean_agent_text(fix_result.response_text or "")[:600]
+                    # Extract fix summary from agent response (no hard truncation —
+                    # _clean_agent_text already strips noise; only cap at 5000 chars
+                    # to avoid excessively long comments, breaking at paragraph boundary).
+                    fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                    if len(fix_summary) > 5000:
+                        # Truncate at last paragraph break within limit
+                        truncated = fix_summary[:5000]
+                        last_break = max(truncated.rfind("\n\n"), truncated.rfind("\n##"), 0)
+                        if last_break > 1000:
+                            fix_summary = truncated[:last_break].rstrip() + "\n\n..."
+                        else:
+                            fix_summary = truncated.rstrip() + "..."
                     comment = (
                         f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
                         f"### Changes Made\n{fix_summary}\n\n"
