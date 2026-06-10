@@ -1445,7 +1445,17 @@ class AutonomousOrchestrator:
         test_prompt = (
             AUTONOMOUS_CONTEXT
             + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
-            "确保所有测试通过后再结束。"
+            "确保所有测试通过后再结束。\n\n"
+            "## 重要：测试执行策略\n"
+            "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
+            "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
+            "2. 如果 pytest 不可用，尝试 `python -m unittest discover -s tests`\n"
+            "3. 对于前端项目，尝试 `npm test` 或 `npx vitest run`\n"
+            "4. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
+            "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
+            "   - 手动验证核心功能逻辑\n"
+            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n"
         )
 
         test_result = self._run_agent(
@@ -1473,19 +1483,56 @@ class AutonomousOrchestrator:
             },
         )
 
+        # Detect if tests were actually skipped (agent couldn't run them)
+        test_response_text = test_result.response_text or ""
+        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
+        _skipped_keywords = [
+            "pytest 未安装",
+            "pytest was not installed",
+            "命令被阻止",
+            "commands were blocked",
+            "pip install",
+            "权限批准",
+            "所有测试框架都不可用",
+        ]
+        tests_actually_skipped = any(m in test_response_text for m in _skipped_markers) or (
+            test_result.success and any(kw in test_response_text for kw in _skipped_keywords)
+        )
+
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
             try:
-                test_summary = self._clean_agent_text(test_result.response_text or "")[:800]
+                test_summary = self._clean_agent_text(test_response_text)[:800]
+                if tests_actually_skipped:
+                    status_line = "⚠️ Tests were not actually run — see details below"
+                elif test_result.success:
+                    status_line = "✅ All tests passed"
+                else:
+                    status_line = "❌ Tests failed"
                 test_comment = (
                     f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
-                    f"{'✅ All tests passed' if test_result.success else '❌ Tests failed'}\n\n"
+                    f"{status_line}\n\n"
                     f"{test_summary}"
                 )
                 gh.add_issue_comment(issue_number, test_comment)
             except Exception:
                 pass
+
+        # Treat skipped tests as failure — tests must actually run
+        if tests_actually_skipped:
+            logger.warning("Tests were skipped (not actually run) for dev round %d", dev_round)
+            self._update_workflow(
+                {
+                    "status": "failed",
+                    "error_message": (
+                        "Tests were not actually run — agent could not execute "
+                        "any test framework. This may indicate a permission or "
+                        "environment issue."
+                    ),
+                }
+            )
+            return
 
         # Handle test failure with retry logic
         if not test_result.success:
