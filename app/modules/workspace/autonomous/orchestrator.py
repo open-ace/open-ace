@@ -2191,6 +2191,8 @@ class AutonomousOrchestrator:
 
         If user_feedback is stored on the workflow (from cancel-with-feedback),
         resume immediately from the cancelled milestone's phase.
+
+        If auto_merge is enabled and PR exists, skip waiting and proceed to merge.
         """
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
@@ -2224,6 +2226,27 @@ class AutonomousOrchestrator:
             self._emit(
                 "phase_change",
                 {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True},
+            )
+            return
+
+        # Auto merge check for batch workflows
+        auto_merge = wf.get("auto_merge", True)
+        github_pr_number = wf.get("github_pr_number")
+        if auto_merge and github_pr_number:
+            # PR exists and auto_merge enabled - skip waiting, go directly to merge
+            logger.info(
+                "Auto merge enabled for workflow %s, proceeding to merge phase",
+                self._workflow_id[:8],
+            )
+            self._update_workflow(
+                {
+                    "current_phase": "merge",
+                    "status": "merging",
+                }
+            )
+            self._emit(
+                "phase_change",
+                {"phase": "merge", "auto_merge": True},
             )
             return
 
