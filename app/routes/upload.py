@@ -8,7 +8,6 @@ import hmac
 import json
 import logging
 import os
-import re
 from functools import wraps
 from typing import Any, Optional
 
@@ -16,23 +15,25 @@ from flask import Blueprint, jsonify, request
 
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
-
-# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
-_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
-
-
-def _is_placeholder_host_name(host_name: Optional[str]) -> bool:
-    """Check if host_name is a placeholder like <HOST_NAME>."""
-    if not host_name:
-        return False
-    return bool(_PLACEHOLDER_HOST_PATTERN.match(host_name))
+from app.utils.hostname_validator import sanitize_hostname
 
 
 def _sanitize_host_name(host_name: Optional[str]) -> str:
-    """Sanitize host_name, replacing placeholders/invalid values with localhost."""
-    if not host_name or _is_placeholder_host_name(host_name):
-        return "localhost"
-    return host_name
+    """
+    Sanitize host_name, replacing invalid values with empty string.
+
+    Invalid hostnames (hex strings, UUIDs, placeholders, etc.) are filtered out.
+    Logs warning for audit trail when invalid hostnames are detected.
+
+    Args:
+        host_name: The hostname to sanitize.
+
+    Returns:
+        str: Valid hostname, or empty string if invalid.
+    """
+    result = sanitize_hostname(host_name, log_warnings=True)
+    # Return empty string for invalid hostnames (no longer default to 'localhost')
+    return result if result else ""
 
 
 upload_bp = Blueprint("upload", __name__)

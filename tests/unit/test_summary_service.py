@@ -187,3 +187,49 @@ class TestSummaryService:
         assert len(result) == 1
         assert result[0]["tool_name"] == "qwen"
         assert result[0]["total_tokens"] == 1500
+
+    def test_get_all_hosts_filters_invalid(self):
+        """Test that get_all_hosts filters out invalid hostnames."""
+        svc, mock_db, _ = self._make_service()
+        # Mock data includes both valid and invalid hostnames
+        mock_db.fetch_all.return_value = [
+            {"host_name": "valid-host.example.com"},
+            {"host_name": "node75.example.com"},
+            {"host_name": "localhost"},
+            {"host_name": "buildserver"},  # Short hostname - valid
+            {"host_name": "01a73659"},  # Hex string - invalid
+            {"host_name": "550e8400-e29b-41d4-a716-446655440000"},  # UUID - invalid
+            {"host_name": "<HOST_NAME>"},  # Placeholder - invalid
+        ]
+        result = svc.get_all_hosts()
+        # Only valid hostnames should be returned
+        assert len(result) == 4
+        assert "valid-host.example.com" in result
+        assert "node75.example.com" in result
+        assert "localhost" in result
+        assert "buildserver" in result
+        # Invalid hostnames should be filtered out
+        assert "01a73659" not in result
+        assert "550e8400-e29b-41d4-a716-446655440000" not in result
+        assert "<HOST_NAME>" not in result
+
+    def test_get_all_hosts_empty_result(self):
+        """Test get_all_hosts with empty data."""
+        svc, mock_db, _ = self._make_service()
+        mock_db.fetch_all.return_value = []
+        result = svc.get_all_hosts()
+        assert result == []
+
+    def test_get_all_hosts_all_valid(self):
+        """Test get_all_hosts with all valid hostnames."""
+        svc, mock_db, _ = self._make_service()
+        mock_db.fetch_all.return_value = [
+            {"host_name": "host1"},
+            {"host_name": "host2"},
+            {"host_name": "server.example.com"},
+        ]
+        result = svc.get_all_hosts()
+        assert len(result) == 3
+        assert "host1" in result
+        assert "host2" in result
+        assert "server.example.com" in result
