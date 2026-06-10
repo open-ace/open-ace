@@ -44,6 +44,7 @@ class AutonomousScheduler:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._in_progress_ids: set[str] = set()
+        self._in_progress_batch_ids: set[str] = set()  # Track batches being processed
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -102,11 +103,17 @@ class AutonomousScheduler:
         lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
         repo = _get_repo()
 
+        # Get workflow's batch_id for cleanup
+        workflow = repo.get_workflow(workflow_id)
+        batch_id = workflow.get("batch_id") if workflow else None
+
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
             logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
             return workflow_id
 
         orchestrator = None
@@ -132,6 +139,8 @@ class AutonomousScheduler:
                 logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
         return workflow_id
 
     @staticmethod
@@ -186,7 +195,11 @@ class AutonomousScheduler:
             _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
 
     def _process_workflows(self):
-        """Find and process active workflows using thread pool for concurrency."""
+        """Find and process active workflows using thread pool for concurrency.
+
+        For batch workflows, ensures only one workflow per batch is processed at a time
+        to prevent git conflicts when multiple workflows share the same project directory.
+        """
         from app.routes.autonomous import _get_repo
 
         repo = _get_repo()
@@ -198,14 +211,20 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
-        # Filter out paused and already-in-progress workflows
+        # Filter out paused, already-in-progress workflows, and batch workflows
+        # whose batch is already being processed
         with self._in_progress_lock:
-            active = [
-                wf
-                for wf in workflows
-                if wf.get("status") != "paused"
-                and wf.get("workflow_id", "") not in self._in_progress_ids
-            ]
+            active = []
+            for wf in workflows:
+                if wf.get("status") == "paused":
+                    continue
+                if wf.get("workflow_id", "") in self._in_progress_ids:
+                    continue
+                # For batch workflows, check if the batch is already being processed
+                batch_id = wf.get("batch_id")
+                if batch_id and batch_id in self._in_progress_batch_ids:
+                    continue
+                active.append(wf)
 
         if not active:
             return
@@ -225,10 +244,13 @@ class AutonomousScheduler:
         if not to_process:
             return
 
-        # Mark as in-progress and submit
+        # Mark workflows and their batches as in-progress
         with self._in_progress_lock:
             for wf in to_process:
                 self._in_progress_ids.add(wf.get("workflow_id", ""))
+                batch_id = wf.get("batch_id")
+                if batch_id:
+                    self._in_progress_batch_ids.add(batch_id)
 
         with ThreadPoolExecutor(
             max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
