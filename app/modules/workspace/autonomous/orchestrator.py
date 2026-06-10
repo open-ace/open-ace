@@ -262,21 +262,29 @@ class AutonomousOrchestrator:
         if match:
             text = text[match.start() :]
 
-        # Pass 2: strip leading agent intro lines
+        # Pass 2: strip leading agent intro lines, skipping headings/empty lines.
+        # Scan up to the first _INTRO_SCAN_LIMIT non-empty, non-heading lines.
+        _INTRO_SCAN_LIMIT = 5
         lines = text.split("\n")
-        start = 0
+        intro_end = 0  # line index after the last consecutive intro line
+        non_heading_count = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 continue
             is_heading = bool(re.match(r"^#{1,6}\s", stripped))
+            if is_heading:
+                continue  # skip headings, don't count toward limit
+            non_heading_count += 1
+            if non_heading_count > _INTRO_SCAN_LIMIT:
+                break  # past scan limit, stop
             is_intro = any(p.search(stripped) for p in _AGENT_INTRO_PATTERNS)
-            if is_intro and not is_heading:
-                start = i + 1
+            if is_intro:
+                intro_end = i + 1
             else:
-                break
-        if start > 0:
-            lines = lines[start:]
+                break  # non-intro content found, stop
+        if intro_end > 0:
+            lines = lines[intro_end:]
             text = "\n".join(lines)
 
         # Pass 3: strip trailing agent closing text.
@@ -562,7 +570,10 @@ class AutonomousOrchestrator:
 
         result = self._runner.run_agent_task(**kwargs)
 
-        # 429 rate limit retry — exponential backoff, max 30 minutes total
+        # 429 rate limit retry — exponential backoff, max 30 minutes total.
+        # Use interruptible sleep (check cancel signal every 5s) so the
+        # orchestrator can be paused/stopped during a retry wait.
+        _CANCEL_POLL_INTERVAL = 5  # seconds between cancel checks
         retry_start = time.monotonic()
         delay = API_RETRY_INITIAL_DELAY
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
@@ -586,7 +597,20 @@ class AutonomousOrchestrator:
                     "total_timeout": API_RETRY_TOTAL_TIMEOUT,
                 },
             )
-            time.sleep(delay)
+
+            # Interruptible sleep: check for cancellation every 5s
+            slept = 0
+            while slept < delay:
+                time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
+                slept += _CANCEL_POLL_INTERVAL
+                # Check if workflow was paused/stopped externally
+                wf_check = self.workflow
+                if wf_check and wf_check.get("status") in ("paused", "stopped"):
+                    logger.info("429 retry cancelled (workflow %s)", wf_check["status"])
+                    with self._session_lock:
+                        self._current_session_id = result.session_id
+                    return result
+
             delay = min(delay * 2, API_RETRY_MAX_DELAY)
 
             # Generate new session_id for retry
@@ -1200,10 +1224,35 @@ class AutonomousOrchestrator:
     # ── Phase: Development ────────────────────────────────────────
 
     def _do_development(self, wf: dict):
-        """Execute development based on finalized plan."""
+        """Execute development based on finalized plan.
+
+        When ``test_retries > 0``, the dev phase was already completed and
+        only the test step needs to be re-run (e.g. the test agent itself
+        timed out or hit an API error on the previous attempt).
+        """
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
+        test_retries = wf.get("test_retries", 0)
 
+        # ── Development phase (skipped on test-only retry) ──
+        if test_retries > 0:
+            logger.info(
+                "Test-only retry %d for dev round %d, skipping development phase",
+                test_retries,
+                dev_round,
+            )
+        else:
+            self._run_development_agent(wf, dev_round, gh)
+
+        # ── Test phase (always runs) ──
+        self._run_test_phase(wf, dev_round, gh)
+
+    def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Run the development agent, verify code changes, and return.
+
+        On failure, updates workflow status to 'failed' and returns.
+        Caller should check workflow status if needed.
+        """
         # Get the finalized plan
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
         final_plan = ""
@@ -1281,8 +1330,6 @@ class AutonomousOrchestrator:
 
         if not sha_changed:
             # SHA unchanged (or unavailable) — check for uncommitted changes
-            # regardless of result.success, because the agent may have edited
-            # files but failed for a secondary reason (e.g. couldn't git commit)
             has_uncommitted = False
             try:
                 has_uncommitted = gh.has_uncommitted_changes()
@@ -1290,7 +1337,6 @@ class AutonomousOrchestrator:
                 pass
 
             if has_uncommitted:
-                # Agent modified files but didn't commit — auto-commit
                 logger.info(
                     "Agent left uncommitted changes, auto-committing (success=%s)",
                     result.success,
@@ -1312,8 +1358,6 @@ class AutonomousOrchestrator:
                     has_uncommitted = False
 
         if not sha_changed and not has_uncommitted:
-            # No new commit from this session. Check if the branch already
-            # has commits relative to origin/main (from previous sessions).
             branch_has_changes_vs_base = False
             branch_name = wf.get("branch_name", "")
             base_diff_stats = {}
@@ -1325,7 +1369,6 @@ class AutonomousOrchestrator:
                 pass
 
             if branch_has_changes_vs_base:
-                # Branch has existing changes from prior sessions — treat as success
                 logger.info(
                     "No new commit this session, but branch '%s' has %d commits vs origin/main",
                     branch_name,
@@ -1338,7 +1381,6 @@ class AutonomousOrchestrator:
                     except Exception:
                         pass
             else:
-                # Truly no changes at all
                 logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
@@ -1377,7 +1419,12 @@ class AutonomousOrchestrator:
             )
             return
 
-        # Run tests
+    def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Run tests, post results to issue, handle retries.
+
+        On unrecoverable failure, updates workflow status to 'failed' and returns.
+        On success, transitions workflow to pr_review phase.
+        """
         test_ms = self._create_milestone(
             phase="development",
             dev_round=dev_round,
@@ -1444,7 +1491,7 @@ class AutonomousOrchestrator:
                     test_result.error,
                 )
                 self._update_workflow({"test_retries": test_retries})
-                return  # Scheduler will re-call _do_development
+                return  # Scheduler will re-call _do_development (skips dev)
             else:
                 self._update_workflow(
                     {
@@ -1459,16 +1506,18 @@ class AutonomousOrchestrator:
 
         # Situation B: test agent succeeded but reported unfixable failures
         test_response = test_result.response_text or ""
-        _unfixable_keywords = [
-            "无法修复",
-            "不可修复",
-            "无法解决",
-            "unfixable",
-            "cannot fix",
-            "cannot resolve",
-            "unable to fix",
-        ]
-        has_unfixable = any(kw in test_response.lower() for kw in _unfixable_keywords)
+        _unfixable_marker = "[UNFIXABLE]"
+        has_unfixable = _unfixable_marker in test_response
+        if not has_unfixable:
+            # Fallback: check legacy keywords for backward compatibility
+            _legacy_unfixable = [
+                "无法修复",
+                "不可修复",
+                "cannot fix",
+                "unable to fix",
+            ]
+            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
+
         if has_unfixable:
             dev_retries = wf.get("dev_retries_on_test_fail", 0) + 1
             if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
@@ -1484,7 +1533,7 @@ class AutonomousOrchestrator:
                         "dev_retries_on_test_fail": dev_retries,
                     }
                 )
-                return  # Scheduler will re-call _do_development with new dev_round
+                return
             else:
                 self._update_workflow(
                     {
@@ -1510,7 +1559,6 @@ class AutonomousOrchestrator:
         )
 
         # Post development status to issue
-        issue_number = wf.get("github_issue_number")
         if issue_number:
             try:
                 branch = wf.get("branch_name", "")
