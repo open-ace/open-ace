@@ -1,7 +1,7 @@
 """Add hostname validation indexes
 
-Revision ID: 056_add_hostname_validation_indexes
-Revises: 055_add_fork_and_cancel_feedback_fields
+Revision ID: 056_hostname_indexes
+Revises: 056_autonomous_batch_fields
 Create Date: 2026-06-10
 
 This migration adds indexes for hostname validation:
@@ -16,8 +16,8 @@ from typing import Union
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "056_add_hostname_validation_indexes"
-down_revision: Union[str, None] = "055_add_fork_and_cancel_feedback_fields"
+revision: str = "056_hostname_indexes"
+down_revision: Union[str, None] = "056_autonomous_batch_fields"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -35,11 +35,10 @@ def upgrade() -> None:
     # SQLite doesn't support conditional indexes, so we create a regular index
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
-        # PostgreSQL: Create conditional index with CONCURRENTLY
-        # CONCURRENTLY requires raw SQL (not supported by create_index)
+        # PostgreSQL: Create conditional index (without CONCURRENTLY for dev environment)
         op.execute(
             """
-            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_summary_host_name_valid
+            CREATE INDEX IF NOT EXISTS idx_usage_summary_host_name_valid
             ON usage_summary (host_name)
             WHERE host_name IS NOT NULL
               AND host_name != ''
@@ -62,10 +61,10 @@ def downgrade() -> None:
     # Drop the hostname validation index
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
-        # PostgreSQL: Drop index with CONCURRENTLY
+        # PostgreSQL: Drop index
         op.execute(
             """
-            DROP INDEX CONCURRENTLY IF EXISTS idx_usage_summary_host_name_valid
+            DROP INDEX IF EXISTS idx_usage_summary_host_name_valid
             """
         )
     else:
