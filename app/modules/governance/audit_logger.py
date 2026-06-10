@@ -347,7 +347,10 @@ class AuditLogger:
     def count(
         self,
         user_id: Optional[int] = None,
+        username: Optional[str] = None,
         action: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        severity: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> int:
@@ -356,7 +359,10 @@ class AuditLogger:
 
         Args:
             user_id: Filter by user ID.
+            username: Filter by username.
             action: Filter by action type.
+            resource_type: Filter by resource type.
+            severity: Filter by severity.
             start_time: Filter logs after this time.
             end_time: Filter logs before this time.
 
@@ -370,9 +376,21 @@ class AuditLogger:
             conditions.append("user_id = ?")
             params.append(user_id)
 
+        if username:
+            conditions.append("username = ?")
+            params.append(username)
+
         if action:
             conditions.append("action = ?")
             params.append(action)
+
+        if resource_type:
+            conditions.append("resource_type = ?")
+            params.append(resource_type)
+
+        if severity:
+            conditions.append("severity = ?")
+            params.append(severity)
 
         if start_time:
             conditions.append("timestamp >= ?")

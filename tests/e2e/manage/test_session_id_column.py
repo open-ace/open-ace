@@ -73,7 +73,23 @@ def test_session_id_column():
         f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
     )
     check("Login API", r.status_code == 200)
-    token = r.cookies.get("session_token")
+
+    # Extract session_token cookie value properly
+    token = None
+    for cookie in session.cookies:
+        if cookie.name == "session_token":
+            token = cookie.value
+            break
+
+    if not token:
+        # Try alternative extraction from response
+        token = r.cookies.get("session_token")
+        if isinstance(token, dict):
+            token = token.get("value", "")
+        elif token is None:
+            token = ""
+
+    check("Session token obtained", bool(token), f"(token length: {len(token) if token else 0})")
 
     # Get conversation history data to verify
     r = session.get(

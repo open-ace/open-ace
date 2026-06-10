@@ -555,6 +555,7 @@ def _create_pg_tables(db):
                 data_retention_days INTEGER DEFAULT 365,
                 sso_enabled BOOLEAN DEFAULT false,
                 sso_provider TEXT,
+                auto_provision_users BOOLEAN DEFAULT false,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id)
             )
         """
