@@ -4,11 +4,11 @@
 
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
-import { useMessages, useMessageCount, useHosts, useSenders } from '@/hooks';
+import { useMessages, useMessageCount, useHosts, useSenders, useTools } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import { Card, Select, SearchableSelect, Loading, Error, EmptyState } from '@/components/common';
-import { formatDateTime, formatDate, formatTokens } from '@/utils';
+import { formatDateTime, formatDate, formatTokens, formatToolName } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
 const ITEMS_PER_PAGE = 20;
@@ -49,15 +49,17 @@ export const Messages: React.FC = () => {
   const messages = data?.data ?? [];
   const pagination = data?.pagination;
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const tools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Tool options
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
+      ...tools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [tools, language]
   );
 
   // Host options

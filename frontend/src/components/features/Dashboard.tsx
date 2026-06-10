@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo, startTransition } from 'react';
 import { cn } from '@/utils';
-import { useDashboard } from '@/hooks';
+import { useDashboard, useTools } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -17,7 +17,7 @@ import {
   DashboardSkeleton,
   TextInput,
 } from '@/components/common';
-import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -167,15 +167,17 @@ export const Dashboard: React.FC = () => {
     [hosts, language]
   );
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const dynamicTools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Tool options for select
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: t('dashboardFilterOpenclaw', language) },
-      { value: 'claude', label: t('dashboardFilterClaude', language) },
-      { value: 'qwen', label: t('dashboardFilterQwen', language) },
+      ...dynamicTools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [dynamicTools, language]
   );
 
   // Date range preset options

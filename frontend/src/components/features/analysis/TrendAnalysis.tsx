@@ -31,8 +31,8 @@ import {
   DoughnutChart,
   Skeleton,
 } from '@/components/common';
-import { formatTokens } from '@/utils';
-import { useBatchAnalysis, useHosts } from '@/hooks';
+import { formatTokens, formatToolName } from '@/utils';
+import { useBatchAnalysis, useHosts, useTools } from '@/hooks';
 
 // Skeleton components
 const MetricsSkeleton: React.FC = () => (
@@ -123,15 +123,17 @@ export const TrendAnalysis: React.FC = () => {
     }
   }, [isLoading, batchData]);
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const filterTools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Tool options
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
+      ...filterTools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [filterTools, language]
   );
 
   // Host options
