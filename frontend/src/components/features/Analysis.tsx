@@ -19,7 +19,7 @@ import {
   DoughnutChart,
   SimpleTabs,
 } from '@/components/common';
-import { formatTokens, formatDate } from '@/utils';
+import { formatTokens, formatDate, formatToolName } from '@/utils';
 import {
   useKeyMetrics,
   useDailyHourlyUsage,
@@ -30,6 +30,7 @@ import {
   useRecommendations,
   useHosts,
   useUserSegmentation,
+  useTools,
 } from '@/hooks';
 import { ConversationHistory } from './ConversationHistory';
 
@@ -123,15 +124,17 @@ export const Analysis: React.FC = () => {
     []
   );
 
+  // Get tools for filter
+  const { data: toolsData } = useTools();
+  const dynamicTools = useMemo(() => toolsData ?? [], [toolsData]);
+
   // Tool options
   const toolOptions = useMemo(
     () => [
       { value: '', label: t('dashboardFilterAllTools', language) },
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude', label: 'Claude' },
-      { value: 'qwen', label: 'Qwen' },
+      ...dynamicTools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
     ],
-    [language]
+    [dynamicTools, language]
   );
 
   // Host options
