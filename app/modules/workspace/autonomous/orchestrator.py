@@ -2000,8 +2000,18 @@ class AutonomousOrchestrator:
 
             if pr_number:
                 try:
-                    # Extract fix summary from agent response
-                    fix_summary = self._clean_agent_text(fix_result.response_text or "")[:600]
+                    # Extract fix summary from agent response (no hard truncation —
+                    # _clean_agent_text already strips noise; only cap at 5000 chars
+                    # to avoid excessively long comments, breaking at paragraph boundary).
+                    fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                    if len(fix_summary) > 5000:
+                        # Truncate at last paragraph break within limit
+                        truncated = fix_summary[:5000]
+                        last_break = max(truncated.rfind("\n\n"), truncated.rfind("\n##"), 0)
+                        if last_break > 1000:
+                            fix_summary = truncated[:last_break].rstrip() + "\n\n..."
+                        else:
+                            fix_summary = truncated.rstrip() + "..."
                     comment = (
                         f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
                         f"### Changes Made\n{fix_summary}\n\n"

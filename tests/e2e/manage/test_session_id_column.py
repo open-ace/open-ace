@@ -20,7 +20,9 @@ import os
 import sys
 import time
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, PROJECT_ROOT)
 
 import requests
@@ -80,7 +82,11 @@ def test_session_id_column():
     )
     ch_data = r.json() if r.status_code == 200 else {}
     conversations = ch_data.get("data", [])
-    check("GET conversation-history API", r.status_code == 200, f"(found {len(conversations)} conversations)")
+    check(
+        "GET conversation-history API",
+        r.status_code == 200,
+        f"(found {len(conversations)} conversations)",
+    )
 
     if conversations:
         first_conv_id = conversations[0].get("conversation_id", "")
@@ -119,12 +125,18 @@ def test_session_id_column():
         print(f"  Headers: {header_texts}")
 
         # Check Session ID is first column
-        session_id_header_found = any("Session ID" in h or "会话 ID" in h or "sessionId" in h.lower() for h in header_texts)
+        session_id_header_found = any(
+            "Session ID" in h or "会话 ID" in h or "sessionId" in h.lower() for h in header_texts
+        )
         check("Session ID header present", session_id_header_found, f"(headers: {header_texts})")
 
         if header_texts:
             first_header = header_texts[0]
-            is_first = "Session ID" in first_header or "会话 ID" in first_header or "sessionId" in first_header.lower()
+            is_first = (
+                "Session ID" in first_header
+                or "会话 ID" in first_header
+                or "sessionId" in first_header.lower()
+            )
             check("Session ID is first column", is_first, f"(first header: {first_header})")
 
         print("\n[4] Session ID truncated display")
@@ -141,20 +153,34 @@ def test_session_id_column():
 
                     # Check truncated format (8 chars + ...)
                     truncated_pattern = conversations[0]["conversation_id"][:8] + "..."
-                    has_truncated = truncated_pattern in cell_text or cell_text.startswith(conversations[0]["conversation_id"][:8])
-                    check("Session ID truncated (8 chars + ...)", has_truncated, f"(expected: {truncated_pattern})")
+                    has_truncated = truncated_pattern in cell_text or cell_text.startswith(
+                        conversations[0]["conversation_id"][:8]
+                    )
+                    check(
+                        "Session ID truncated (8 chars + ...)",
+                        has_truncated,
+                        f"(expected: {truncated_pattern})",
+                    )
 
                     # Check hover tooltip shows full UUID
                     session_id_span = first_cell.locator("span[title]")
                     if session_id_span.count() > 0:
                         title_attr = session_id_span.first.get_attribute("title")
-                        check("Hover tooltip shows full UUID", title_attr == conversations[0]["conversation_id"], f"(title: {title_attr})")
+                        check(
+                            "Hover tooltip shows full UUID",
+                            title_attr == conversations[0]["conversation_id"],
+                            f"(title: {title_attr})",
+                        )
                     else:
                         # Try alternative selector
                         span = first_cell.locator("span")
                         if span.count() > 0:
                             title_attr = span.first.get_attribute("title")
-                            check("Hover tooltip exists", title_attr is not None and len(title_attr) == 36, f"(title length: {len(title_attr or '')})")
+                            check(
+                                "Hover tooltip exists",
+                                title_attr is not None and len(title_attr) == 36,
+                                f"(title length: {len(title_attr or '')})",
+                            )
 
         print("\n[5] Copy button")
         # Find copy button in first row
@@ -217,8 +243,12 @@ def test_session_id_column():
 
                 # Verify column is hidden
                 headers_after = page.locator("table thead th")
-                header_texts_after = [headers_after.nth(i).inner_text() for i in range(headers_after.count())]
-                session_id_hidden = not any("Session ID" in h or "会话 ID" in h for h in header_texts_after)
+                header_texts_after = [
+                    headers_after.nth(i).inner_text() for i in range(headers_after.count())
+                ]
+                session_id_hidden = not any(
+                    "Session ID" in h or "会话 ID" in h for h in header_texts_after
+                )
                 check("Session ID column hidden after toggle off", session_id_hidden)
 
                 # Toggle back on
@@ -229,8 +259,12 @@ def test_session_id_column():
                 page.wait_for_timeout(500)
 
                 headers_final = page.locator("table thead th")
-                header_texts_final = [headers_final.nth(i).inner_text() for i in range(headers_final.count())]
-                session_id_restored = any("Session ID" in h or "会话 ID" in h for h in header_texts_final)
+                header_texts_final = [
+                    headers_final.nth(i).inner_text() for i in range(headers_final.count())
+                ]
+                session_id_restored = any(
+                    "Session ID" in h or "会话 ID" in h for h in header_texts_final
+                )
                 check("Session ID column restored after toggle on", session_id_restored)
 
                 shot(page, "04_column_toggle")
@@ -254,7 +288,8 @@ def test_session_id_column():
             if download_path:
                 # Read CSV content
                 import csv
-                with open(download_path, 'r', encoding='utf-8-sig') as f:
+
+                with open(download_path, encoding="utf-8-sig") as f:
                     reader = csv.reader(f)
                     rows_csv = list(reader)
 
@@ -262,8 +297,14 @@ def test_session_id_column():
                     headers_csv = rows_csv[0]
                     print(f"  CSV headers: {headers_csv}")
 
-                    session_id_in_csv = any("Session ID" in h or "会话 ID" in h for h in headers_csv)
-                    check("Session ID included in CSV export", session_id_in_csv, f"(headers: {headers_csv})")
+                    session_id_in_csv = any(
+                        "Session ID" in h or "会话 ID" in h for h in headers_csv
+                    )
+                    check(
+                        "Session ID included in CSV export",
+                        session_id_in_csv,
+                        f"(headers: {headers_csv})",
+                    )
 
                     # Verify Session ID is first column in CSV
                     if headers_csv:
