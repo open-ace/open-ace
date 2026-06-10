@@ -259,6 +259,7 @@ def create_workflow():
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
+        "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
     }
 
     try:

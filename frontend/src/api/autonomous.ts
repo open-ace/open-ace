@@ -31,6 +31,7 @@ export interface AutonomousWorkflow {
   batch_id: string | null;
   batch_order: number | null;
   batch_total: number | null;
+  auto_merge: boolean;
   current_phase: string;
   current_round: number;
   dev_round: number;
@@ -116,6 +117,7 @@ export interface CreateWorkflowRequest {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
+  auto_merge?: boolean;  // Auto merge PR for batch workflows
 }
 
 // ── API Client ─────────────────────────────────────────────────────
