@@ -209,3 +209,60 @@ class TestSchedulerProcessWorkflows:
 
                 # Only wf-2 should be processed (wf-1 is in progress)
                 assert mock_orch.advance.call_count == 1
+
+    def test_promotes_next_queued_workflow_after_waiting(self):
+        """Queued batch workflow should start once previous sibling reaches waiting."""
+        scheduler = AutonomousScheduler()
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = [
+            {"workflow_id": "wf-2", "status": "queued", "batch_id": "batch-1", "batch_order": 2}
+        ]
+        mock_repo.list_batch_workflows.return_value = [
+            {"workflow_id": "wf-1", "status": "waiting", "batch_id": "batch-1", "batch_order": 1},
+            {"workflow_id": "wf-2", "status": "queued", "batch_id": "batch-1", "batch_order": 2},
+        ]
+
+        scheduler._promote_queued_workflows(mock_repo)
+
+        mock_repo.update_workflow.assert_called_once_with("wf-2", {"status": "pending"})
+
+    def test_does_not_promote_queued_workflow_when_previous_paused(self):
+        """Queued batch workflow should remain queued when previous sibling is paused."""
+        scheduler = AutonomousScheduler()
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = [
+            {"workflow_id": "wf-2", "status": "queued", "batch_id": "batch-1", "batch_order": 2}
+        ]
+        mock_repo.list_batch_workflows.return_value = [
+            {"workflow_id": "wf-1", "status": "paused", "batch_id": "batch-1", "batch_order": 1},
+            {"workflow_id": "wf-2", "status": "queued", "batch_id": "batch-1", "batch_order": 2},
+        ]
+
+        scheduler._promote_queued_workflows(mock_repo)
+
+        mock_repo.update_workflow.assert_not_called()
+
+    def test_pending_workflows_are_prioritized_ahead_of_waiting(self):
+        """Execution slots should prefer pending work over wait-phase polling."""
+        scheduler = AutonomousScheduler()
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            {"workflow_id": "wf-wait", "status": "waiting", "created_at": "2026-06-10 00:00:00"},
+            {"workflow_id": "wf-pending", "status": "pending", "created_at": "2026-06-10 00:01:00"},
+        ]
+
+        with patch(
+            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            return_value=mock_repo,
+        ):
+            with patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls:
+                mock_orch = MagicMock()
+                mock_orch_cls.return_value = mock_orch
+
+                scheduler._process_workflows()
+
+                called_ids = [call.args[0] for call in mock_orch_cls.call_args_list]
+                assert called_ids[0] == "wf-pending"

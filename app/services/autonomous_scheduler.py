@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 # Maximum concurrent workflow executions
 MAX_CONCURRENT_WORKFLOWS = 3
+RUNNING_BATCH_STATUSES = {
+    "pending",
+    "preparing",
+    "planning",
+    "developing",
+    "pr_review",
+    "reporting",
+    "merging",
+}
+QUEUE_ADVANCE_STATUSES = {"waiting", "completed", "failed", "planning_timeout"}
+QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 
 
 class AutonomousScheduler:
@@ -123,11 +134,63 @@ class AutonomousScheduler:
                 self._in_progress_ids.discard(workflow_id)
         return workflow_id
 
+    @staticmethod
+    def _batch_has_running_workflow(batch_workflows: list[dict]) -> bool:
+        """Whether a batch currently has a workflow actively executing."""
+        return any(wf.get("status") in RUNNING_BATCH_STATUSES for wf in batch_workflows)
+
+    def _promote_queued_workflows(self, repo) -> None:
+        """Promote the next queued workflow in each eligible batch."""
+        from app.routes.autonomous import _emit_event_safe
+
+        try:
+            queued_workflows = repo.get_queued_workflows()
+        except Exception as e:
+            logger.error("Failed to query queued workflows: %s", e)
+            return
+
+        seen_batches: set[str] = set()
+        for workflow in queued_workflows:
+            batch_id = workflow.get("batch_id") or ""
+            if not batch_id or batch_id in seen_batches:
+                continue
+            seen_batches.add(batch_id)
+
+            batch_workflows = repo.list_batch_workflows(batch_id)
+            if not batch_workflows or self._batch_has_running_workflow(batch_workflows):
+                continue
+
+            queued_index = next(
+                (
+                    index
+                    for index, item in enumerate(batch_workflows)
+                    if item.get("workflow_id") == workflow.get("workflow_id")
+                ),
+                None,
+            )
+            if queued_index is None:
+                continue
+            if queued_index == 0:
+                repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
+                _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
+                continue
+
+            previous_workflow = batch_workflows[queued_index - 1]
+            previous_status = previous_workflow.get("status")
+            if previous_status in QUEUE_BLOCKING_STATUSES or previous_status == "queued":
+                continue
+            if previous_status not in QUEUE_ADVANCE_STATUSES:
+                continue
+
+            repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
+            _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
+
     def _process_workflows(self):
         """Find and process active workflows using thread pool for concurrency."""
         from app.routes.autonomous import _get_repo
 
         repo = _get_repo()
+        self._promote_queued_workflows(repo)
 
         try:
             workflows = repo.get_active_workflows()
@@ -146,6 +209,13 @@ class AutonomousScheduler:
 
         if not active:
             return
+
+        active.sort(
+            key=lambda wf: (
+                1 if wf.get("status") == "waiting" else 0,
+                wf.get("created_at") or "",
+            )
+        )
 
         # Limit to concurrency cap, accounting for already-running workflows
         with self._in_progress_lock:

@@ -18,6 +18,7 @@ interface AutonomousWorkflowListProps {
 }
 
 const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: string }> = {
+  queued: { variant: 'secondary', icon: 'bi-hourglass-split', labelKey: 'autoStatusQueued' },
   pending: { variant: 'secondary', icon: 'bi-hourglass', labelKey: 'autoStatusPending' },
   preparing: { variant: 'info', icon: 'bi-gear', labelKey: 'autoStatusPreparing' },
   planning: { variant: 'info', icon: 'bi-lightbulb', labelKey: 'autoStatusPlanning' },
@@ -52,7 +53,7 @@ export const ACTIVE_WORKFLOW_STATUSES = [
 const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
   {
-    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
+    key: 'queued,pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
     labelKey: 'autoFilterActive',
   },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
@@ -155,6 +156,11 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
               {t(statusCfg.labelKey, language)}
             </Badge>
             {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
+            {workflow.batch_order && workflow.batch_total && (
+              <Badge variant="light">
+                {workflow.batch_order}/{workflow.batch_total}
+              </Badge>
+            )}
             {isForkChild && (
               <Badge variant="info" style={{ fontSize: '0.6rem' }}>
                 {t('autoForkedFrom', language)}
