@@ -72,7 +72,9 @@ def upgrade() -> None:
             op.create_table(
                 "usage_summary",
                 sa.Column("tool_name", sa.String(50), nullable=False),
-                sa.Column("host_name", sa.String(100), nullable=True),  # Empty string '' for global summary
+                sa.Column(
+                    "host_name", sa.String(100), nullable=True
+                ),  # Empty string '' for global summary
                 sa.Column("days_count", sa.Integer, nullable=False, default=0),
                 sa.Column("total_tokens", sa.BigInteger, nullable=False, default=0),
                 sa.Column("avg_tokens", sa.BigInteger, nullable=False, default=0),
@@ -102,7 +104,9 @@ def upgrade() -> None:
             op.create_table(
                 "usage_summary",
                 sa.Column("tool_name", sa.String(50), nullable=False),
-                sa.Column("host_name", sa.String(100), nullable=True),  # Empty string '' for global summary
+                sa.Column(
+                    "host_name", sa.String(100), nullable=True
+                ),  # Empty string '' for global summary
                 sa.Column("days_count", sa.Integer, nullable=False, default=0),
                 sa.Column("total_tokens", sa.BigInteger, nullable=False, default=0),
                 sa.Column("avg_tokens", sa.BigInteger, nullable=False, default=0),
