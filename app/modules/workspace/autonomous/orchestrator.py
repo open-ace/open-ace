@@ -192,6 +192,21 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
+    def _clean_plan_output(text: str) -> str:
+        """Strip introductory agent output, keep only the structured plan.
+
+        Agent responses often begin with thinking/intro text like
+        "我来分析代码库..." before the actual plan content.  This method
+        removes everything before the first markdown heading (# Title).
+        """
+        if not text:
+            return text
+        match = re.search(r"^#\s", text, re.MULTILINE)
+        if match:
+            return text[match.start() :]
+        return text
+
+    @staticmethod
     def _smart_truncate_diff(
         diff_text: str, max_chars: int = 32000, per_file_lines: int = 200
     ) -> str:
@@ -784,7 +799,8 @@ class AutonomousOrchestrator:
         if issue_number:
             try:
                 gh.add_issue_comment(
-                    issue_number, f"## 📋 Implementation Plan (Round {round_num})\n\n{plan_text}"
+                    issue_number,
+                    f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_plan_output(plan_text)}",
                 )
             except GitHubOpsError:
                 pass
@@ -891,15 +907,55 @@ class AutonomousOrchestrator:
                 if final_plan and last_review:
                     break
 
+            # If the review approved the plan but contained improvement
+            # suggestions, run a one-time refinement step to incorporate
+            # them into the final plan.
+            review_approved = last_review and "方案通过审查" in last_review
+            review_has_suggestions = review_approved and len(last_review.strip()) > 200
+            if review_has_suggestions and final_plan:
+                refine_prompt = (
+                    PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
+                    "请根据建议优化方案。直接输出优化后的完整方案，"
+                    "不要输出思考过程或其他引导文字。\n\n"
+                    f"## 已通过的方案\n{final_plan}\n\n"
+                    f"## 审查建议\n{last_review}\n\n"
+                    "重要约束：只输出高层设计方案和实现步骤描述，"
+                    "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
+                )
+                planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
+                refine_result = self._run_agent(
+                    wf=wf,
+                    workflow_id=self._workflow_id,
+                    cli_tool=wf.get("cli_tool", "claude-code"),
+                    model=wf.get("model", ""),
+                    project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                    prompt=refine_prompt,
+                    workspace_type=wf.get("workspace_type", "local"),
+                    remote_machine_id=wf.get("remote_machine_id"),
+                    permission_mode=wf.get("permission_mode", "auto-edit"),
+                    allowed_tools=planning_allowed,
+                    timeout=PLANNING_TIMEOUT,
+                )
+                self._accumulate_tokens(refine_result)
+                if refine_result.success and refine_result.response_text:
+                    final_plan = refine_result.response_text
+
+            # Clean up agent intro text (e.g. "我来分析代码库...")
+            final_plan = self._clean_plan_output(final_plan)
+
             issue_number = wf.get("github_issue_number")
             if issue_number and final_plan:
                 try:
                     final_comment = (
                         f"## 📋 Final Implementation Plan\n\n"
-                        f"Plan review completed after {max_rounds} round(s).\n\n"
+                        f"Plan review completed after {round_num} round(s).\n\n"
                         f"{final_plan}"
                     )
-                    if last_review:
+                    if (
+                        last_review
+                        and round_num >= max_rounds
+                        and "方案通过审查" not in last_review
+                    ):
                         final_comment += (
                             f"\n\n---\n\n"
                             f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"

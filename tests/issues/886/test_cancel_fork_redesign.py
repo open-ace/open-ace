@@ -13,6 +13,7 @@ Covers:
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -21,56 +22,109 @@ import pytest
 import app.repositories.database as db_mod
 from app.repositories.database import Database
 
+# Modules that import is_postgresql/adapt_sql via "from ... import" and hold
+# local references that patch.object on db_mod alone will NOT reach.  We must
+# patch them in every module that has already performed the import.
+_IS_PG_TARGETS = [
+    "app.repositories.database",
+    "app.repositories.autonomous_repo",
+    "app.modules.workspace.autonomous",
+    "app.modules.workspace.autonomous.orchestrator",
+]
+
+_ADAPT_SQL_TARGETS = [
+    "app.repositories.database",
+    "app.repositories.autonomous_repo",
+]
+
+
+def _patch_is_postgresql():
+    """Return a list of patchers that force is_postgresql() → False everywhere."""
+    patchers = []
+    for mod_path in _IS_PG_TARGETS:
+        mod = sys.modules.get(mod_path)
+        if mod is not None and hasattr(mod, "is_postgresql"):
+            patchers.append(patch.object(mod, "is_postgresql", return_value=False))
+    return patchers
+
+
+def _replace_adapt_sql():
+    """Replace adapt_sql with passthrough in all target modules; return originals."""
+    originals = {}
+    passthrough = lambda q: q
+    for mod_path in _ADAPT_SQL_TARGETS:
+        mod = sys.modules.get(mod_path)
+        if mod is not None and hasattr(mod, "adapt_sql"):
+            originals[mod_path] = mod.adapt_sql
+            mod.adapt_sql = passthrough
+    return originals
+
+
+def _restore_adapt_sql(originals):
+    """Restore original adapt_sql functions."""
+    for mod_path, orig_fn in originals.items():
+        mod = sys.modules.get(mod_path)
+        if mod is not None:
+            mod.adapt_sql = orig_fn
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def auto_db(tmp_path):
-    """Create a temporary SQLite database with autonomous tables."""
-    with patch.object(db_mod, "is_postgresql", return_value=False):
-        orig = db_mod.adapt_sql
-        db_mod.adapt_sql = lambda q: q
+    """Create a temporary SQLite database with autonomous tables.
+
+    Patches is_postgresql and adapt_sql in *all* modules that hold local
+    references so the test is isolated regardless of import order.
+    """
+    is_pg_patchers = _patch_is_postgresql()
+    for p in is_pg_patchers:
+        p.start()
+    adapt_originals = _replace_adapt_sql()
+    try:
+        db_path = str(tmp_path / "test_cancel_fork.db")
+        db = Database(db_url=f"sqlite:///{db_path}")
+        conn = db.get_connection()
         try:
-            db_path = str(tmp_path / "test_cancel_fork.db")
-            db = Database(db_url=f"sqlite:///{db_path}")
-            conn = db.get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        role TEXT DEFAULT 'user',
-                        is_active INTEGER DEFAULT 1,
-                        created_at TEXT,
-                        updated_at TEXT
-                    )
-                    """
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT DEFAULT 'user',
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT,
+                    updated_at TEXT
                 )
-                cursor.execute(
-                    "INSERT INTO users (username, email, password_hash, role) "
-                    "VALUES (?, ?, ?, ?)",
-                    ("admin", "admin@test.com", "hash123", "admin"),
-                )
-                conn.commit()
+                """
+            )
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, role) "
+                "VALUES (?, ?, ?, ?)",
+                ("admin", "admin@test.com", "hash123", "admin"),
+            )
+            conn.commit()
 
-                from app.modules.workspace.autonomous import get_ddl_statements
+            from app.modules.workspace.autonomous import get_ddl_statements
 
-                for sql in get_ddl_statements():
-                    cursor.execute(sql)
-                conn.commit()
-            finally:
-                conn.close()
-            yield db
+            for sql in get_ddl_statements():
+                cursor.execute(sql)
+            conn.commit()
         finally:
-            db_mod.adapt_sql = orig
-            try:
-                os.unlink(db_path)
-            except OSError:
-                pass
+            conn.close()
+        yield db
+    finally:
+        _restore_adapt_sql(adapt_originals)
+        for p in reversed(is_pg_patchers):
+            p.stop()
+        try:
+            os.unlink(db_path)
+        except OSError:
+            pass
 
 
 def _mock_auth(user_id=1, role="admin"):

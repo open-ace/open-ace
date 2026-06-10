@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatToolName, TOOL_DISPLAY_NAMES } from './index';
+import { formatToolName, TOOL_DISPLAY_NAMES } from '.';
 
 describe('formatToolName', () => {
   it('should return display name for known tools', () => {
