@@ -78,7 +78,8 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     const data: CreateWorkflowRequest = {
       title: title || undefined,
       requirements_text: requirementsMode === 'text' ? requirementsText : undefined,
-      requirements_issue_url: requirementsMode === 'url' ? requirementsUrl : undefined,
+      requirements_issue_input: requirementsMode === 'url' ? requirementsUrl : undefined,
+      requirements_issue_url: undefined,
       cli_tool: cliTool,
       model: model || undefined,
       workspace_type: workspaceType,
@@ -203,13 +204,22 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               onChange={(e) => setRequirementsText(e.target.value)}
             />
           ) : (
-            <input
-              type="url"
-              className="form-control"
-              placeholder="https://github.com/owner/repo/issues/123"
-              value={requirementsUrl}
-              onChange={(e) => setRequirementsUrl(e.target.value)}
-            />
+            <>
+              <textarea
+                className="form-control"
+                rows={3}
+                placeholder={
+                  t('autoIssueInputPlaceholder', language) ||
+                  '123 125,128-130 or https://github.com/owner/repo/issues/123'
+                }
+                value={requirementsUrl}
+                onChange={(e) => setRequirementsUrl(e.target.value)}
+              />
+              <div className="form-text">
+                {t('autoIssueInputHint', language) ||
+                  'Supports commas, spaces, new lines, ranges like 12-15, and mixed GitHub issue URLs.'}
+              </div>
+            </>
           )}
         </div>
 

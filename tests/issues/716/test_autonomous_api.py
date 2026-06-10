@@ -114,6 +114,29 @@ def _make_repo():
 # ── Workflow CRUD Tests ──────────────────────────────────────────────────
 
 
+class TestIssueSelectorParser:
+    """Tests for mixed GitHub issue selector parsing."""
+
+    def test_parse_mixed_tokens(self):
+        from app.routes.autonomous import _parse_issue_selectors
+
+        selectors, ignored = _parse_issue_selectors(
+            "12 14-15 https://github.com/open-ace/open-ace/issues/20 15"
+        )
+
+        assert [item["issue_number"] for item in selectors] == [12, 14, 15, 20]
+        assert ignored == []
+        assert selectors[-1]["requirements_issue_url"].endswith("/issues/20")
+
+    def test_parse_invalid_tokens_are_ignored(self):
+        from app.routes.autonomous import _parse_issue_selectors
+
+        selectors, ignored = _parse_issue_selectors("abc 7-3 0 -1")
+
+        assert selectors == []
+        assert ignored == ["abc", "7-3", "0", "-1"]
+
+
 class TestCreateWorkflow:
     """Tests for POST /api/autonomous/workflows."""
 
@@ -172,6 +195,72 @@ class TestCreateWorkflow:
                     },
                 )
         assert resp.status_code == 201
+
+    def test_create_with_multiple_issue_selectors(self, client):
+        repo = _make_repo()
+        repo.create_workflow.side_effect = [
+            {
+                "workflow_id": "wf-1",
+                "title": "Batch Task (#12)",
+                "status": "pending",
+                "github_issue_number": 12,
+                "batch_id": "batch-1",
+                "batch_order": 1,
+                "batch_total": 3,
+            },
+            {
+                "workflow_id": "wf-2",
+                "title": "Batch Task (#14)",
+                "status": "queued",
+                "github_issue_number": 14,
+                "batch_id": "batch-1",
+                "batch_order": 2,
+                "batch_total": 3,
+            },
+            {
+                "workflow_id": "wf-3",
+                "title": "Batch Task (#15)",
+                "status": "queued",
+                "github_issue_number": 15,
+                "batch_id": "batch-1",
+                "batch_order": 3,
+                "batch_total": 3,
+            },
+        ]
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.post(
+                    "/api/autonomous/workflows",
+                    json={
+                        "title": "Batch Task",
+                        "requirements_issue_input": "12 14-15 bad-token",
+                        "cli_tool": "claude-code",
+                        "project_path": "/tmp/test",
+                    },
+                )
+        assert resp.status_code == 201
+        data = resp.get_json()
+        assert data["workflow"]["workflow_id"] == "wf-1"
+        assert [wf["workflow_id"] for wf in data["workflows"]] == ["wf-1", "wf-2", "wf-3"]
+        assert data["ignored_issue_tokens"] == ["bad-token"]
+
+        call_payloads = [call.args[0] for call in repo.create_workflow.call_args_list]
+        assert [payload["github_issue_number"] for payload in call_payloads] == [12, 14, 15]
+        assert [payload["status"] for payload in call_payloads] == ["pending", "queued", "queued"]
+
+    def test_create_with_only_invalid_issue_selectors(self, client):
+        repo = _make_repo()
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.post(
+                    "/api/autonomous/workflows",
+                    json={
+                        "requirements_issue_input": "abc 9-3 nope",
+                        "cli_tool": "claude-code",
+                        "project_path": "/tmp/test",
+                    },
+                )
+        assert resp.status_code == 400
 
     def test_create_new_project_no_path_needed(self, client):
         repo = _make_repo()
@@ -359,6 +448,25 @@ class TestStopWorkflow:
         assert resp.status_code == 200
         call_args = repo.update_workflow.call_args[0]
         assert call_args[1]["status"] == "cancelled"
+
+    def test_stop_cancels_queued_batch_siblings(self, client):
+        repo = _make_repo()
+        repo.get_workflow.return_value = {
+            "workflow_id": "wf-1",
+            "user_id": 1,
+            "status": "planning",
+            "batch_id": "batch-1",
+        }
+        repo.cancel_queued_batch_workflows.return_value = 1
+        repo.list_batch_workflows.return_value = [
+            {"workflow_id": "wf-1", "status": "cancelled"},
+            {"workflow_id": "wf-2", "status": "cancelled"},
+        ]
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.post("/api/autonomous/workflows/wf-1/stop")
+        assert resp.status_code == 200
+        repo.cancel_queued_batch_workflows.assert_called_once_with("batch-1", "wf-1")
 
 
 class TestMarkDone:
