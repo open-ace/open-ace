@@ -51,7 +51,10 @@ def _patch_is_postgresql():
 def _replace_adapt_sql():
     """Replace adapt_sql with passthrough in all target modules; return originals."""
     originals = {}
-    passthrough = lambda q: q
+
+    def passthrough(q):
+        return q
+
     for mod_path in _ADAPT_SQL_TARGETS:
         mod = sys.modules.get(mod_path)
         if mod is not None and hasattr(mod, "adapt_sql"):
@@ -103,8 +106,7 @@ def auto_db(tmp_path):
                 """
             )
             cursor.execute(
-                "INSERT INTO users (username, email, password_hash, role) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO users (username, email, password_hash, role) " "VALUES (?, ?, ?, ?)",
                 ("admin", "admin@test.com", "hash123", "admin"),
             )
             conn.commit()
