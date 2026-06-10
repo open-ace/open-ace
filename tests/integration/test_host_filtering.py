@@ -1,10 +1,11 @@
 """Integration tests for hostname filtering."""
 
 import pytest
-from app.repositories.database import Database
-from app.services.summary_service import SummaryService
-from app.routes.upload import upload_bp
 from flask import Flask
+
+from app.repositories.database import Database
+from app.routes.upload import upload_bp
+from app.services.summary_service import SummaryService
 
 
 @pytest.fixture
