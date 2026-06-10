@@ -38,6 +38,7 @@ def summary_service(db):
 class TestAPIHostnameFiltering:
     """Test API endpoint hostname filtering."""
 
+    @pytest.mark.skip(reason="Requires PostgreSQL with usage_summary table")
     def test_get_all_hosts_api_returns_valid_only(self, summary_service):
         """
         Test that /api/summary/hosts endpoint returns only valid hostnames.
