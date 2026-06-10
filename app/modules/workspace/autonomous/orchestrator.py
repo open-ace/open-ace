@@ -1441,15 +1441,14 @@ class AutonomousOrchestrator:
             return
 
         # Collect diff stats (branch vs main)
+        branch = wf.get("branch_name", "")
         diff_stats = {}
         try:
-            branch = wf.get("branch_name", "")
             if branch:
                 diff_stats = gh.get_diff_stats("main", branch)
         except Exception:
             pass
 
-        branch = wf.get("branch_name", "")
         commit_sha = ""
         try:
             commit_sha = gh.get_current_commit()
@@ -1536,12 +1535,34 @@ class AutonomousOrchestrator:
             "pytest was not installed",
             "命令被阻止",
             "commands were blocked",
-            "pip install",
+            "pip install failed",
+            "pip install 被阻止",
             "权限批准",
             "所有测试框架都不可用",
+            "no test framework available",
+            "could not run tests",
+            "unable to execute tests",
+            "test framework not found",
         ]
-        tests_actually_skipped = any(m in test_response_text for m in _skipped_markers) or (
-            test_result.success and any(kw in test_response_text for kw in _skipped_keywords)
+        has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
+        # Negative detection: if response contains no test-result keywords at
+        # all (passed, failed, error, test, assertion, PASSED, FAILED), the
+        # agent likely never ran tests.
+        _test_result_keywords = [
+            "passed",
+            "failed",
+            "PASSED",
+            "FAILED",
+            "assertion",
+            "AssertionError",
+            "error",
+            "test",
+        ]
+        has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
+        tests_actually_skipped = (
+            any(m in test_response_text for m in _skipped_markers)
+            or (test_result.success and has_skip_keyword)
+            or (test_result.success and not has_test_result)
         )
 
         # Post test results to issue
@@ -1564,9 +1585,19 @@ class AutonomousOrchestrator:
             except Exception:
                 pass
 
-        # Treat skipped tests as failure — tests must actually run
+        # Treat skipped tests as failure — tests must actually run.
+        # Allow 1 retry in case of transient environment issues.
         if tests_actually_skipped:
-            logger.warning("Tests were skipped (not actually run) for dev round %d", dev_round)
+            skip_retries = wf.get("skip_retries", 0) + 1
+            if skip_retries <= 1:
+                logger.warning(
+                    "Tests were skipped (not actually run) for dev round %d, " "retry %d/1",
+                    dev_round,
+                    skip_retries,
+                )
+                self._update_workflow({"skip_retries": skip_retries})
+                return  # Scheduler will re-call _run_test_phase
+            logger.warning("Tests were skipped after retry for dev round %d", dev_round)
             self._update_workflow(
                 {
                     "status": "failed",
