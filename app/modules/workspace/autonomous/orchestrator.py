@@ -1336,6 +1336,24 @@ class AutonomousOrchestrator:
                 )
                 raise
 
+            # Check CI status after PR creation
+            if pr_number:
+                try:
+                    ci_checks_post = gh.get_pr_checks(pr_number)
+                    ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
+                    if ci_fails_post:
+                        ci_summary = "\n".join(
+                            f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
+                        )
+                        gh.add_pr_comment(
+                            pr_number,
+                            "## ⚠️ CI 检查状态\n\n"
+                            f"以下 CI 检查未通过：\n{ci_summary}\n\n"
+                            "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
+                        )
+                except Exception:
+                    pass
+
         pr_number = wf.get("github_pr_number")
         if not pr_number:
             pr_number = self.workflow.get("github_pr_number")
@@ -1357,18 +1375,61 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
+        # Check CI status for the PR
+        ci_checks: list = []
+        ci_failures: list = []
+        if pr_number:
+            try:
+                ci_checks = gh.get_pr_checks(pr_number)
+                ci_failures = [c for c in ci_checks if c.get("bucket") == "fail"]
+            except Exception:
+                pass
+
         review_prompt = (
             AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
             f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
             f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
-            f"请检查：\n"
-            f"1. 代码质量和可读性\n"
-            f"2. 潜在 bug 和安全问题\n"
-            f"3. 测试覆盖率\n"
-            f"4. 性能影响\n"
-            f"5. 与需求的对齐程度\n\n"
-            f"如果没有重大问题，请明确说明'代码审查通过'。"
         )
+
+        # Include previous review feedback for rounds > 1
+        if round_num > 1:
+            prev_review_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
+            last_review_text = ""
+            for ms in reversed(prev_review_milestones):
+                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
+                    last_review_text = ms["review_content"]
+                    break
+            if last_review_text:
+                review_prompt += (
+                    f"## 上一轮审查意见（Round {round_num - 1}）\n\n"
+                    f"{self._clean_plan_output(last_review_text)[:3000]}\n\n"
+                    "**请逐条确认上一轮审查意见是否已被落实：**\n"
+                    "- 已落实：说明如何修改\n"
+                    "- 未落实：说明原因\n"
+                    "- 不适用：说明理由\n\n"
+                )
+
+        review_prompt += (
+            "请检查：\n"
+            "1. 代码质量和可读性\n"
+            "2. 潜在 bug 和安全问题\n"
+            "3. 测试覆盖率\n"
+            "4. 性能影响\n"
+            "5. 与需求的对齐程度\n"
+            "6. 上一轮审查意见的落实情况（如有）\n\n"
+            "如果没有重大问题，请明确说明'代码审查通过'。"
+        )
+
+        # Include CI failures in review prompt if any
+        if ci_failures:
+            ci_summary = "\n".join(
+                f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
+            )
+            review_prompt += (
+                f"\n\n## ⚠️ CI 检查失败\n\n以下 CI 检查未通过：\n{ci_summary}\n\n"
+                "请在审查时分析这些 CI 失败是否由本 PR 的代码变更引入。\n"
+                "如果是预先存在的问题，在审查结论中明确说明。"
+            )
 
         review_result = self._run_agent(
             wf=wf,
@@ -1398,7 +1459,8 @@ class AutonomousOrchestrator:
         if pr_number:
             try:
                 gh.add_pr_comment(
-                    pr_number, f"## 🔍 Code Review (Round {round_num})\n\n{review_text}"
+                    pr_number,
+                    f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_plan_output(review_text)}",
                 )
             except GitHubOpsError:
                 pass
@@ -1427,9 +1489,23 @@ class AutonomousOrchestrator:
             )
 
             fix_prompt = (
-                AUTONOMOUS_CONTEXT + f"根据以下代码审查意见修改代码：\n\n{review_text}\n\n"
-                f"修改后提交 git commit 并推送。"
+                AUTONOMOUS_CONTEXT
+                + f"根据以下代码审查意见修改代码：\n\n{self._clean_plan_output(review_text)}\n\n"
+                "重要要求：\n"
+                "1. 修改完成后，运行项目测试确保所有测试通过\n"
+                "2. 如果测试失败，分析失败原因：\n"
+                "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
+                "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复中说明原因\n"
+                "3. 确认测试通过后提交 git commit 并推送\n"
             )
+            if ci_failures:
+                ci_summary = "\n".join(
+                    f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
+                )
+                fix_prompt += (
+                    f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
+                    "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。"
+                )
 
             fix_result = self._run_agent(
                 wf=wf,
@@ -1467,9 +1543,14 @@ class AutonomousOrchestrator:
 
             if pr_number:
                 try:
-                    gh.add_pr_comment(
-                        pr_number, f"✅ Addressed review feedback (round {round_num})"
-                    )
+                    comment = f"✅ Addressed review feedback (round {round_num})"
+                    # Note pre-existing CI failures if fix agent identified them
+                    fix_response = fix_result.response_text or ""
+                    if "预先存在" in fix_response or "pre-existing" in fix_response.lower():
+                        comment += (
+                            "\n\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。"
+                        )
+                    gh.add_pr_comment(pr_number, comment)
                 except GitHubOpsError:
                     pass
 
@@ -1717,9 +1798,17 @@ class AutonomousOrchestrator:
         # Clean up branch/worktree
         branch_name = wf.get("branch_name", "")
         worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
         try:
             if worktree_path:
-                gh.remove_worktree(worktree_path)
+                # Must use main repo's gh to remove worktree
+                # (can't remove a worktree from within itself)
+                main_gh = GitHubOps(project_path)
+                main_gh.remove_worktree(worktree_path)
+                self._update_workflow({"worktree_path": ""})
+                # Reinitialize gh to point at main repo for branch deletion
+                self._gh = GitHubOps(project_path)
+                gh = self._gh
             if branch_name:
                 gh.delete_branch(branch_name)
             self._create_milestone(
