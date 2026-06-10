@@ -379,7 +379,9 @@ class GitHubOps:
         )
         try:
             return json.loads(result.stdout)
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            raw = result.stdout if result.stdout else ""
+            logger.warning("Failed to parse CI checks for PR #%s: %s", pr_number, raw[:200])
             return []
 
     # ── Diff Operations ─────────────────────────────────────────────

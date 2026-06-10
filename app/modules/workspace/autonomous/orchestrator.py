@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -119,6 +120,12 @@ PHASE_STATUS_MAP = {
     "report": "reporting",
     "merge": "merging",
 }
+
+# CI check polling configuration.
+# After a PR is created or code is pushed, CI checks may still be pending.
+# These control how long we wait before proceeding with the review.
+CI_POLL_INTERVAL = 30  # seconds between polls
+CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
 
 def _next_phase(current_phase: str) -> str:
@@ -294,6 +301,37 @@ class AutonomousOrchestrator:
             },
         )
         return ms
+
+    def _poll_ci_status(self, gh: GitHubOps, pr_number: int) -> list:
+        """Poll CI checks until all are non-pending or timeout is reached.
+
+        Returns the final list of CI check dicts (may still contain pending
+        items if the timeout was reached).
+        """
+        deadline = time.monotonic() + CI_POLL_MAX_WAIT
+        while True:
+            checks = gh.get_pr_checks(pr_number)
+            if not checks:
+                # No checks configured or parse failure — nothing to wait for.
+                return checks
+            pending = [c for c in checks if c.get("bucket") == "pending"]
+            if not pending:
+                return checks
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    "CI polling timed out after %ds for PR #%s (%d checks still pending)",
+                    CI_POLL_MAX_WAIT,
+                    pr_number,
+                    len(pending),
+                )
+                return checks
+            logger.info(
+                "CI still running for PR #%s (%d pending), waiting %ds...",
+                pr_number,
+                len(pending),
+                CI_POLL_INTERVAL,
+            )
+            time.sleep(CI_POLL_INTERVAL)
 
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
@@ -1336,10 +1374,10 @@ class AutonomousOrchestrator:
                 )
                 raise
 
-            # Check CI status after PR creation
+            # Check CI status after PR creation — poll until finished or timeout
             if pr_number:
                 try:
-                    ci_checks_post = gh.get_pr_checks(pr_number)
+                    ci_checks_post = self._poll_ci_status(gh, pr_number)
                     ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
                     if ci_fails_post:
                         ci_summary = "\n".join(
@@ -1375,12 +1413,12 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        # Check CI status for the PR
+        # Check CI status for the PR — poll until checks finish or timeout
         ci_checks: list = []
         ci_failures: list = []
         if pr_number:
             try:
-                ci_checks = gh.get_pr_checks(pr_number)
+                ci_checks = self._poll_ci_status(gh, pr_number)
                 ci_failures = [c for c in ci_checks if c.get("bucket") == "fail"]
             except Exception:
                 pass
@@ -1400,9 +1438,17 @@ class AutonomousOrchestrator:
                     last_review_text = ms["review_content"]
                     break
             if last_review_text:
+                cleaned_review = self._clean_plan_output(last_review_text)
+                truncated = cleaned_review[:3000]
+                truncation_notice = (
+                    "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
+                    if len(cleaned_review) > 3000
+                    else ""
+                )
                 review_prompt += (
                     f"## 上一轮审查意见（Round {round_num - 1}）\n\n"
-                    f"{self._clean_plan_output(last_review_text)[:3000]}\n\n"
+                    f"{truncated}\n"
+                    f"{truncation_notice}\n"
                     "**请逐条确认上一轮审查意见是否已被落实：**\n"
                     "- 已落实：说明如何修改\n"
                     "- 未落实：说明原因\n"
@@ -1495,7 +1541,8 @@ class AutonomousOrchestrator:
                 "1. 修改完成后，运行项目测试确保所有测试通过\n"
                 "2. 如果测试失败，分析失败原因：\n"
                 "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
-                "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复中说明原因\n"
+                "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
+                "单独一行输出 `CI_STATUS: pre-existing`\n"
                 "3. 确认测试通过后提交 git commit 并推送\n"
             )
             if ci_failures:
@@ -1504,7 +1551,8 @@ class AutonomousOrchestrator:
                 )
                 fix_prompt += (
                     f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
-                    "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。"
+                    "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。\n"
+                    "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
                 )
 
             fix_result = self._run_agent(
@@ -1544,9 +1592,16 @@ class AutonomousOrchestrator:
             if pr_number:
                 try:
                     comment = f"✅ Addressed review feedback (round {round_num})"
-                    # Note pre-existing CI failures if fix agent identified them
+                    # Note pre-existing CI failures if fix agent identified them.
+                    # Matches both the structured `CI_STATUS: pre-existing` tag
+                    # and legacy natural-language patterns for backwards compat.
                     fix_response = fix_result.response_text or ""
-                    if "预先存在" in fix_response or "pre-existing" in fix_response.lower():
+                    has_preexisting = bool(
+                        re.search(r"CI_STATUS:\s*pre-existing", fix_response)
+                        or "预先存在" in fix_response
+                        or re.search(r"pre[\s-]?existing", fix_response, re.IGNORECASE)
+                    )
+                    if has_preexisting:
                         comment += (
                             "\n\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。"
                         )
