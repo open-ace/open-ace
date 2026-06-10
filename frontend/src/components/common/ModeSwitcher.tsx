@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useAppMode, useLanguage } from '@/store';
 import { useAppStore } from '@/store';
@@ -20,7 +20,6 @@ interface ModeSwitcherProps {
 export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ className }) => {
   const appMode = useAppMode();
   const language = useLanguage();
-  const navigate = useNavigate();
   const { user } = useAuth();
 
   const isAdmin = user?.role === 'admin';
@@ -30,35 +29,30 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ className }) => {
     return null;
   }
 
-  const handleModeChange = (mode: AppMode) => {
+  const handleModeClick = (mode: AppMode) => {
     useAppStore.getState().setAppMode(mode);
-
-    // Navigate to the appropriate route based on mode
-    if (mode === 'work') {
-      navigate('/work');
-    } else {
-      navigate('/manage/dashboard');
-    }
   };
 
   return (
     <div className={cn('mode-switcher', className)}>
-      <button
+      <Link
+        to="/work"
         className={cn('mode-btn', appMode === 'work' && 'active')}
-        onClick={() => handleModeChange('work')}
+        onClick={() => handleModeClick('work')}
         title={t('workMode', language)}
       >
         <i className="bi bi-rocket" />
         <span className="mode-label">{t('workMode', language)}</span>
-      </button>
-      <button
+      </Link>
+      <Link
+        to="/manage/dashboard"
         className={cn('mode-btn', appMode === 'manage' && 'active')}
-        onClick={() => handleModeChange('manage')}
+        onClick={() => handleModeClick('manage')}
         title={t('manageMode', language)}
       >
         <i className="bi bi-bar-chart" />
         <span className="mode-label">{t('manageMode', language)}</span>
-      </button>
+      </Link>
     </div>
   );
 };
