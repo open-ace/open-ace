@@ -74,12 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeSection, mobileOpen }) =
     // External link: use <a> tag
     if (item.href) {
       return (
-        <a
-          href={item.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          {...commonProps}
-        >
+        <a href={item.href} target="_blank" rel="noopener noreferrer" {...commonProps}>
           <i className={cn('bi', item.icon, 'me-2')} />
           {!collapsed && <span>{t(item.label, language)}</span>}
         </a>

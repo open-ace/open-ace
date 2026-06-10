@@ -294,10 +294,7 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       <ul className="assist-items list-unstyled">
         {aiTools.map((tool) => (
           <li key={tool.id}>
-            <Link
-              to={tool.url}
-              className="assist-item assist-item-clickable"
-            >
+            <Link to={tool.url} className="assist-item assist-item-clickable">
               <i className={`bi ${tool.icon} me-2`} />
               <span>{tool.name}</span>
             </Link>
