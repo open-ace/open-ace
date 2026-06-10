@@ -99,6 +99,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: 'Last 7 Days',
+    dateRangeLast30Days: 'Last 30 Days',
+    dateRangeThisMonth: 'This Month',
+    dateRangeLastMonth: 'Last Month',
+    dateRangeCustom: 'Custom',
+    dateRangeSeparator: 'to',
+    dateRangeStartDate: 'Start Date',
+    dateRangeEndDate: 'End Date',
+    dateRangeErrorInvalid: 'Start date cannot be after end date',
+    dateRangeErrorFuture: 'Cannot select future dates',
+
     // Tokens
     token: 'Token',
     tokens: 'tokens',
@@ -1132,6 +1144,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: '最近 7 天',
+    dateRangeLast30Days: '最近 30 天',
+    dateRangeThisMonth: '本月',
+    dateRangeLastMonth: '上月',
+    dateRangeCustom: '自定义',
+    dateRangeSeparator: '至',
+    dateRangeStartDate: '开始日期',
+    dateRangeEndDate: '结束日期',
+    dateRangeErrorInvalid: '开始日期不能晚于结束日期',
+    dateRangeErrorFuture: '不能选择未来日期',
+
     // Tokens
     token: 'Token',
     tokens: 'tokens',
@@ -2143,6 +2167,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: '過去7日間',
+    dateRangeLast30Days: '過去30日間',
+    dateRangeThisMonth: '今月',
+    dateRangeLastMonth: '先月',
+    dateRangeCustom: 'カスタム',
+    dateRangeSeparator: 'から',
+    dateRangeStartDate: '開始日',
+    dateRangeEndDate: '終了日',
+    dateRangeErrorInvalid: '開始日は終了日より後にできません',
+    dateRangeErrorFuture: '未来の日付を選択できません',
+
     // Tokens
     token: 'トークン',
     tokens: 'tokens',
@@ -2852,6 +2888,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterOpenclaw: 'OpenClaw',
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
+
+    // Date Range Presets
+    dateRangeLast7Days: '지난 7일',
+    dateRangeLast30Days: '지난 30일',
+    dateRangeThisMonth: '이번 달',
+    dateRangeLastMonth: '지난 달',
+    dateRangeCustom: '사용자 지정',
+    dateRangeSeparator: '부터',
+    dateRangeStartDate: '시작일',
+    dateRangeEndDate: '종료일',
+    dateRangeErrorInvalid: '시작일은 종료일 이후일 수 없습니다',
+    dateRangeErrorFuture: '미래 날짜를 선택할 수 없습니다',
 
     // Tokens
     token: '토큰',

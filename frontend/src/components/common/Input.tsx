@@ -24,6 +24,8 @@ interface TextInputProps extends BaseInputProps {
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
+  id?: string;
+  'aria-describedby'?: string;
 }
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
@@ -42,13 +44,15 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       icon,
       iconPosition = 'left',
       className,
+      id,
+      'aria-describedby': ariaDescribedBy,
     },
     ref
   ) => {
     return (
       <div className={cn('form-group', className)}>
         {label && (
-          <label className="form-label">
+          <label className="form-label" htmlFor={id}>
             {label}
             {required && <span className="text-danger ms-1">*</span>}
           </label>
@@ -58,6 +62,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
           <input
             ref={ref}
             type={type}
+            id={id}
             className={cn('form-control', error && 'is-invalid')}
             placeholder={placeholder}
             value={value}
@@ -65,6 +70,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             onKeyDown={onKeyDown}
             disabled={disabled}
             required={required}
+            aria-describedby={ariaDescribedBy}
           />
           {icon && iconPosition === 'right' && <span className="input-icon">{icon}</span>}
           {error && <div className="invalid-feedback">{error}</div>}
