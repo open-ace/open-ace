@@ -196,7 +196,9 @@ def create_workflow():
     requirements_text = (data.get("requirements_text") or "").strip()
     requirements_issue_input = (data.get("requirements_issue_input") or "").strip()
     requirements_issue_url = (data.get("requirements_issue_url") or "").strip()
-    is_issue_mode = not requirements_text and bool(requirements_issue_input or requirements_issue_url)
+    is_issue_mode = not requirements_text and bool(
+        requirements_issue_input or requirements_issue_url
+    )
 
     # Rate limit: max 10 workflows per user per hour
     if not _workflow_rate_limiter.is_allowed(user_id):
@@ -477,7 +479,10 @@ def stop_workflow(workflow_id):
         cancelled_count = _get_repo().cancel_queued_batch_workflows(batch_id, workflow_id)
         if cancelled_count:
             for sibling in _get_repo().list_batch_workflows(batch_id):
-                if sibling.get("workflow_id") == workflow_id or sibling.get("status") != "cancelled":
+                if (
+                    sibling.get("workflow_id") == workflow_id
+                    or sibling.get("status") != "cancelled"
+                ):
                     continue
                 _emit_event_safe(sibling["workflow_id"], "status_change", {"status": "cancelled"})
 
