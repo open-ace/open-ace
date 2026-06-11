@@ -415,7 +415,13 @@ class TestOrchestratorPlanning:
 
         # Review says not approved
         plan_result = _make_agent_result(text="Plan v1")
-        review_result = _make_agent_result(text="There are issues with this plan. Needs work.")
+        review_result = _make_agent_result(
+            text=(
+                "There are issues with this plan. It is missing rollback handling, "
+                "test coverage details, and concrete implementation sequencing. "
+                "Needs another refinement pass."
+            )
+        )
         orch._runner = MagicMock()
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh
@@ -1136,9 +1142,7 @@ class TestOrchestratorPrReview:
 
         orch._do_pr_review(wf)
 
-        mock_repo.update_workflow_tokens.assert_called()
-        token_call = mock_repo.update_workflow_tokens.call_args
-        assert token_call[0][1]["total_tokens"] == 300
+        mock_repo.refresh_workflow_usage_from_sessions.assert_called_with(wf["workflow_id"])
 
     def test_pr_review_pushes_branch_before_pr(self):
         """Branch is pushed to remote before PR creation."""

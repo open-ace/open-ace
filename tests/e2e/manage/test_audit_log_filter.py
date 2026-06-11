@@ -102,10 +102,10 @@ def test_audit_log_filter():
     )
 
     # Analyze baseline data for available filter values
-    action_set = set(log.get("action") for log in baseline_logs if log.get("action"))
-    resource_type_set = set(
+    action_set = {log.get("action") for log in baseline_logs if log.get("action")}
+    resource_type_set = {
         log.get("resource_type") for log in baseline_logs if log.get("resource_type")
-    )
+    }
     print(f"  Available actions: {list(action_set)[:10]}")
     print(f"  Available resource_types: {list(resource_type_set)[:10]}")
 
@@ -183,7 +183,9 @@ def test_audit_log_filter():
     if baseline_logs:
         first_user_id = baseline_logs[0].get("user_id")
         if first_user_id:
-            r = session.get(f"{BASE_URL}/api/audit/user/{first_user_id}/activity", params={"days": 30})
+            r = session.get(
+                f"{BASE_URL}/api/audit/user/{first_user_id}/activity", params={"days": 30}
+            )
             check(
                 "User activity API still works",
                 r.status_code == 200,
@@ -197,7 +199,7 @@ def test_audit_log_filter():
     check(
         "Audit export API still works",
         r.status_code == 200,
-        f"(format=json)",
+        "(format=json)",
     )
 
     # Playwright UI test
@@ -235,10 +237,13 @@ def test_audit_log_filter():
             print(f"  Total display text: '{total_display}'")
             # Extract number from text
             import re
-            numbers = re.findall(r'\d+', total_display)
+
+            numbers = re.findall(r"\d+", total_display)
             if numbers:
                 displayed_total = int(numbers[0])
-                check("Total count displayed", displayed_total > 0, f"(displayed: {displayed_total})")
+                check(
+                    "Total count displayed", displayed_total > 0, f"(displayed: {displayed_total})"
+                )
         else:
             check("Total count displayed", False, "- no total text found")
 
@@ -262,10 +267,13 @@ def test_audit_log_filter():
                     # Verify all table rows have the selected action
                     rows = page.locator("table tbody tr")
                     if rows.count() > 0:
-                        first_row_action = rows.first.locator("td").nth(2).inner_text()  # Action column is 3rd
+                        first_row_action = (
+                            rows.first.locator("td").nth(2).inner_text()
+                        )  # Action column is 3rd
                         check(
                             "Action filter applied to table",
-                            second_option_value in first_row_action.lower() or first_row_action.lower() in second_option_value,
+                            second_option_value in first_row_action.lower()
+                            or first_row_action.lower() in second_option_value,
                             f"(selected={second_option_value}, row_action={first_row_action})",
                         )
                     else:
@@ -281,7 +289,11 @@ def test_audit_log_filter():
             resource_select = selects.nth(1)
             options = resource_select.locator("option")
             option_count = options.count()
-            check("Resource type select has options", option_count > 1, f"(found {option_count} options)")
+            check(
+                "Resource type select has options",
+                option_count > 1,
+                f"(found {option_count} options)",
+            )
 
             if option_count > 1:
                 second_option_value = options.nth(1).get_attribute("value")
@@ -297,7 +309,8 @@ def test_audit_log_filter():
                         first_row_rt = rows.first.locator("td").nth(3).inner_text()
                         check(
                             "Resource type filter applied to table",
-                            second_option_value in first_row_rt.lower() or first_row_rt.lower() in second_option_value,
+                            second_option_value in first_row_rt.lower()
+                            or first_row_rt.lower() in second_option_value,
                             f"(selected={second_option_value}, row_rt={first_row_rt})",
                         )
                     else:
@@ -318,7 +331,10 @@ def test_audit_log_filter():
                 action_value = selects.first.input_value()
                 resource_value = selects.nth(1).input_value()
                 check("Action filter reset to empty", action_value == "" or action_value == "All")
-                check("Resource type filter reset to empty", resource_value == "" or resource_value == "All")
+                check(
+                    "Resource type filter reset to empty",
+                    resource_value == "" or resource_value == "All",
+                )
         else:
             check("Reset button found", False)
 

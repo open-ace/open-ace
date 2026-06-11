@@ -96,9 +96,7 @@ class AnalysisService:
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
             ): "total_requests",
-            _executor.submit(
-                self.daily_stats_repo.get_data_range
-            ): "data_range",
+            _executor.submit(self.daily_stats_repo.get_data_range): "data_range",
         }
 
         # Collect results

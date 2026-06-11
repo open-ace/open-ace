@@ -4,7 +4,7 @@ Covers:
   - activity_callback invocation in agent_runner
   - _on_agent_activity forwarding to emitter
   - _link_session_to_current_milestone immediate session_id write
-  - Token real-time update via usage events
+  - Workflow usage refresh via linked real sessions
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ class TestActivityCallback:
 
 
 class TestOrchestratorActivityForwarding:
-    """Verify orchestrator _on_agent_activity forwards to emitter and updates tokens."""
+    """Verify orchestrator _on_agent_activity forwards to emitter and refreshes usage."""
 
     def test_emits_agent_activity_event(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -155,7 +155,7 @@ class TestOrchestratorActivityForwarding:
         assert args[2]["session_id"] == "sess-456"
         assert args[2]["type"] == "tool_use"
 
-    def test_updates_tokens_on_usage_event(self):
+    def test_refreshes_usage_on_usage_event(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -173,16 +173,29 @@ class TestOrchestratorActivityForwarding:
             },
         )
 
-        orch.repo.update_workflow_tokens.assert_called_once_with(
-            "wf-123",
+        orch.repo.refresh_workflow_usage_from_sessions.assert_called_once_with("wf-123")
+
+    def test_resolves_session_on_session_resolved_event(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch._workflow_id = "wf-123"
+        orch.emitter = MagicMock()
+        orch.repo = MagicMock()
+        orch._link_session_to_current_milestone = MagicMock()
+
+        orch._on_agent_activity(
+            "sess-real-456",
             {
-                "total_tokens": 10000,
-                "total_input_tokens": 8000,
-                "total_output_tokens": 2000,
+                "type": "session_resolved",
+                "session_id": "sess-real-456",
             },
         )
 
-    def test_no_token_update_on_non_usage_event(self):
+        orch._link_session_to_current_milestone.assert_called_once_with("sess-real-456")
+        orch.repo.refresh_workflow_usage_from_sessions.assert_called_once_with("wf-123")
+
+    def test_no_usage_refresh_on_non_usage_event(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -198,7 +211,7 @@ class TestOrchestratorActivityForwarding:
             },
         )
 
-        orch.repo.update_workflow_tokens.assert_not_called()
+        orch.repo.refresh_workflow_usage_from_sessions.assert_not_called()
 
 
 class TestLinkSessionToMilestone:
@@ -220,6 +233,27 @@ class TestLinkSessionToMilestone:
         orch.repo.update_milestone.assert_called_once_with(
             "ms-789",
             {"session_id": "sess-456"},
+        )
+
+    def test_links_review_session_to_review_field(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch._workflow_id = "wf-123"
+        orch.repo = MagicMock()
+
+        ms = {
+            "milestone_id": "ms-review",
+            "status": "in_progress",
+            "milestone_type": "plan_reviewed",
+        }
+        orch.repo.list_milestones.return_value = [ms]
+
+        orch._link_session_to_current_milestone("sess-review-456")
+
+        orch.repo.update_milestone.assert_called_once_with(
+            "ms-review",
+            {"review_session_id": "sess-review-456"},
         )
 
     def test_no_error_when_no_in_progress_milestones(self):

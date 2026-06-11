@@ -58,13 +58,23 @@ def _make_workflow(**overrides):
     return base
 
 
-def _make_agent_result(session_id="sess-abc123", success=True, text="Done", tokens=100, error=None):
+def _make_agent_result(
+    session_id="sess-abc123",
+    tracking_session_id=None,
+    success=True,
+    text="Done",
+    tokens=100,
+    error=None,
+    request_count=1,
+):
     return AgentTaskResult(
         session_id=session_id,
+        tracking_session_id=tracking_session_id or session_id,
         response_text=text,
         total_tokens=tokens,
         total_input_tokens=tokens // 2,
         total_output_tokens=tokens // 2,
+        request_count=request_count,
         success=success,
         error=error,
     )
@@ -91,6 +101,7 @@ def _make_orchestrator(wf_data):
         mock_repo.create_event.return_value = {"id": 1}
         mock_repo.update_workflow.return_value = wf_data
         mock_repo.update_workflow_tokens.return_value = None
+        mock_repo.refresh_workflow_usage_from_sessions.return_value = None
         mock_repo_cls.return_value = mock_repo
         mock_sm_cls.return_value = MagicMock()
 
@@ -102,6 +113,9 @@ def _make_orchestrator(wf_data):
     orch._runner = MagicMock()
     orch._runner.run_agent_task.return_value = _make_agent_result()
     orch._runner.stop_session = MagicMock()
+    orch._runner._uses_sidebar_session_source.side_effect = (
+        lambda cli_tool, workspace_type: cli_tool == "claude-code" and workspace_type == "local"
+    )
 
     # Mock GitHubOps
     with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps") as mock_gh_cls:
@@ -148,7 +162,9 @@ class TestSessionManagerWiring:
 
             AutonomousOrchestrator("test-wf-id")
 
-            mock_runner_cls.assert_called_once_with(session_manager=mock_sm)
+            call_kwargs = mock_runner_cls.call_args[1]
+            assert call_kwargs["session_manager"] is mock_sm
+            assert "activity_callback" in call_kwargs
 
     def test_session_manager_none_triggers_default(self):
         """Without our fix, runner would get session_manager=None (regression guard)."""
@@ -191,8 +207,11 @@ class TestRunAgentWrapper:
         wf = _make_workflow()
         orch, mock_repo = _make_orchestrator(wf)
 
-        expected_session = "sess-tracked-123"
-        orch._runner.run_agent_task.return_value = _make_agent_result(session_id=expected_session)
+        expected_tracking_session = "sess-tracked-123"
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            session_id="sess-real-123",
+            tracking_session_id=expected_tracking_session,
+        )
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build X"},
@@ -201,7 +220,7 @@ class TestRunAgentWrapper:
         # Call _do_development which uses _run_agent
         orch._do_development(wf)
 
-        assert orch._current_session_id == expected_session
+        assert orch._current_session_id == expected_tracking_session
 
     def test_run_agent_updates_on_each_call(self):
         """_current_session_id should update with each _run_agent call."""
@@ -210,15 +229,18 @@ class TestRunAgentWrapper:
 
         # Planning calls _run_agent twice (plan + review)
         orch._runner.run_agent_task.side_effect = [
-            _make_agent_result(session_id="sess-plan-1"),
-            _make_agent_result(session_id="sess-review-1"),
+            _make_agent_result(session_id="sess-plan-1", tracking_session_id="track-plan-1"),
+            _make_agent_result(
+                session_id="sess-review-1",
+                tracking_session_id="track-review-1",
+            ),
         ]
         mock_repo.list_milestones.return_value = []
 
         orch._do_planning(wf)
 
         # Should track the last session_id
-        assert orch._current_session_id == "sess-review-1"
+        assert orch._current_session_id == "track-review-1"
 
     def test_session_id_available_before_run_agent_task_returns(self):
         """session_id must be set BEFORE run_agent_task returns (Critical fix).
@@ -235,7 +257,10 @@ class TestRunAgentWrapper:
             nonlocal captured_session_id
             # Simulate: during execution, the session_id should already be set
             captured_session_id = orch._current_session_id
-            return _make_agent_result(session_id=kwargs.get("session_id", "default"))
+            return _make_agent_result(
+                session_id="real-sidebar-session",
+                tracking_session_id=kwargs.get("session_id", "default"),
+            )
 
         orch._runner.run_agent_task.side_effect = fake_run_agent_task
         mock_repo.list_milestones.return_value = [
@@ -603,7 +628,7 @@ class TestStopPauseCancelsTask:
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
