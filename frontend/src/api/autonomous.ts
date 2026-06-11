@@ -117,16 +117,14 @@ export interface CreateWorkflowRequest {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
-  auto_merge?: boolean;  // Auto merge PR for batch workflows
+  auto_merge?: boolean; // Auto merge PR for batch workflows
 }
 
 // ── API Client ─────────────────────────────────────────────────────
 
 export const autonomousApi = {
   // Workflow CRUD
-  async createWorkflow(
-    data: CreateWorkflowRequest
-  ): Promise<{
+  async createWorkflow(data: CreateWorkflowRequest): Promise<{
     success: boolean;
     workflow: AutonomousWorkflow;
     workflows?: AutonomousWorkflow[];

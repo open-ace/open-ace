@@ -42,7 +42,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [maxPlanRounds, setMaxPlanRounds] = useState(3);
   const [maxPRReviewRounds, setMaxPRReviewRounds] = useState(5);
   const [title, setTitle] = useState('');
-  const [autoMerge, setAutoMerge] = useState(true);  // Auto merge for batch workflows
+  const [autoMerge, setAutoMerge] = useState(true); // Auto merge for batch workflows
   const [errorMessage, setErrorMessage] = useState('');
 
   // Data
@@ -429,7 +429,8 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                 {t('autoMergeAfterPR', language) || 'Auto merge after PR created'}
               </label>
               <div className="form-text">
-                {t('autoMergeHint', language) || 'Automatically merge PR and proceed to next workflow in batch'}
+                {t('autoMergeHint', language) ||
+                  'Automatically merge PR and proceed to next workflow in batch'}
               </div>
             </div>
           </div>

@@ -61,13 +61,21 @@ const TableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
     <table className="table table-hover">
       <thead>
         <tr>
-          {['Session ID', 'Date', 'Tool', 'Host', 'Sender', 'Messages', 'Tokens', 'Last Message', 'Actions'].map(
-            (header) => (
-              <th key={header}>
-                <Skeleton height={16} width="80%" />
-              </th>
-            )
-          )}
+          {[
+            'Session ID',
+            'Date',
+            'Tool',
+            'Host',
+            'Sender',
+            'Messages',
+            'Tokens',
+            'Last Message',
+            'Actions',
+          ].map((header) => (
+            <th key={header}>
+              <Skeleton height={16} width="80%" />
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
@@ -546,7 +554,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
 
   const renderCell = (key: string) => {
     switch (key) {
-      case 'conversation_id':
+      case 'conversation_id': {
         const sessionId = conversation.conversation_id;
         const truncatedId = sessionId.substring(0, 8);
         return (
@@ -565,6 +573,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
             </Button>
           </div>
         );
+      }
       case 'date':
         return conversation.date;
       case 'tool_name':

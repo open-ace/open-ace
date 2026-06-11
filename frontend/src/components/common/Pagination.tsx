@@ -162,21 +162,24 @@ export const Pagination: React.FC<PaginationProps> = ({
   }, [inputValue, totalPages, language, handlePageChange]);
 
   // Handle input change
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setInputValue(value);
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setInputValue(value);
 
-    // Clear error when input is empty or valid
-    if (!value) {
-      setError(null);
-      return;
-    }
+      // Clear error when input is empty or valid
+      if (!value) {
+        setError(null);
+        return;
+      }
 
-    const pageNum = parseInt(value, 10);
-    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-      setError(null);
-    }
-  }, [totalPages]);
+      const pageNum = parseInt(value, 10);
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+        setError(null);
+      }
+    },
+    [totalPages]
+  );
 
   // Handle Enter key
   const handleInputKeyDown = useCallback(
@@ -250,7 +253,7 @@ export const Pagination: React.FC<PaginationProps> = ({
                     className="page-link"
                     onClick={() => handlePageChange(page)}
                     onKeyDown={(e) => handleKeyDown(e, page)}
-                    aria-label={t('goToPage', language).replace('{page}', String(page))}
+                    aria-label={`${t('goToPage', language)} ${page}`}
                     aria-current={isActive ? 'page' : undefined}
                   >
                     {page}
