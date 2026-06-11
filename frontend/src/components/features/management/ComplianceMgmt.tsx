@@ -23,6 +23,7 @@ import {
   Badge,
   PageRefreshControl,
 } from '@/components/common';
+import { ReportPreviewModal } from './ReportPreviewModal';
 import { formatDateTime, createMatcherConfig } from '@/utils';
 import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 import {
@@ -38,6 +39,8 @@ import { usePageRefresh } from '@/hooks';
 const FORMAT_OPTIONS = [
   { value: 'json', label: 'JSON' },
   { value: 'csv', label: 'CSV' },
+  { value: 'html', label: 'HTML' },
+  { value: 'excel', label: 'Excel' },
 ];
 
 const DATA_TYPES = [
@@ -83,12 +86,20 @@ export const ComplianceMgmt: React.FC = () => {
   const [retentionError, setRetentionError] = useState<string | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showCleanupPreviewModal, setShowCleanupPreviewModal] = useState(false);
+  const [showReportPreviewModal, setShowReportPreviewModal] = useState(false);
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
   const [editAction, setEditAction] = useState<'delete' | 'archive'>('delete');
   const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Report preview state
+  const [previewHtmlContent, setPreviewHtmlContent] = useState<string>('');
+  const [previewReportType, setPreviewReportType] = useState<string>('');
+  const [previewReportId, setPreviewReportId] = useState<string>('');
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewLanguage, setPreviewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
 
   // Initialize dates for reports
   useEffect(() => {
@@ -161,20 +172,40 @@ export const ComplianceMgmt: React.FC = () => {
         report_type: selectedType,
         period_start: startDate,
         period_end: endDate,
-        format: format as 'json' | 'csv',
+        format: format as 'json' | 'csv' | 'html' | 'excel',
+        language: previewLanguage,
       });
 
-      // Download the report
-      const isCsv = format === 'csv';
-      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
-        type: isCsv ? 'text/csv' : 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Handle different formats
+      if (format === 'html') {
+        // Preview HTML content
+        setPreviewHtmlContent(report as string);
+        setPreviewReportType(selectedType);
+        setPreviewReportId('');
+        setShowReportPreviewModal(true);
+      } else if (format === 'excel') {
+        // Download Excel file
+        const blob = report as Blob;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${selectedType}_${timestamp}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // JSON or CSV - download
+        const isCsv = format === 'csv';
+        const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+          type: isCsv ? 'text/csv' : 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.${format}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
 
       // Refresh saved reports
       const reports = await complianceApi.getSavedReports();
@@ -186,19 +217,63 @@ export const ComplianceMgmt: React.FC = () => {
     }
   };
 
-  const handleDownload = async (reportId: string, reportFormat: 'json' | 'csv') => {
+  // Preview saved report
+  const handlePreviewSavedReport = async (reportId: string, reportType: string) => {
+    setIsPreviewLoading(true);
     try {
-      const report = await complianceApi.getSavedReport(reportId, reportFormat);
-      const isCsv = reportFormat === 'csv';
-      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
-        type: isCsv ? 'text/csv' : 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `compliance_report_${reportId}.${reportFormat}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const htmlContent = await complianceApi.getSavedReport(reportId, 'html', previewLanguage);
+      setPreviewHtmlContent(htmlContent as string);
+      setPreviewReportType(reportType);
+      setPreviewReportId(reportId);
+      setShowReportPreviewModal(true);
+    } catch (err) {
+      console.error('Failed to preview report:', err);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  // Download saved report in different formats
+  const handleDownloadSavedReport = async (
+    reportId: string,
+    reportType: string,
+    downloadFormat: 'json' | 'csv' | 'html' | 'excel'
+  ) => {
+    try {
+      const report = await complianceApi.getSavedReport(reportId, downloadFormat, previewLanguage);
+
+      if (downloadFormat === 'excel') {
+        const blob = report as Blob;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${reportId}_${timestamp}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (downloadFormat === 'html') {
+        const htmlContent = report as string;
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${reportId}_${timestamp}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const isCsv = downloadFormat === 'csv';
+        const blob = new Blob(
+          [isCsv ? (report as string) : JSON.stringify(report, null, 2)],
+          { type: isCsv ? 'text/csv' : 'application/json' }
+        );
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compliance_report_${reportId}.${downloadFormat}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
     } catch (err) {
       console.error('Failed to download report:', err);
     }
@@ -233,7 +308,7 @@ export const ComplianceMgmt: React.FC = () => {
     try {
       const result = await complianceApi.runCleanup(true);
       setPreviewResult(result);
-      setShowPreviewModal(true);
+      setShowCleanupPreviewModal(true);
     } catch (err) {
       console.error('Failed to preview cleanup:', err);
     } finally {
@@ -246,7 +321,7 @@ export const ComplianceMgmt: React.FC = () => {
     setIsRunning(true);
     try {
       await complianceApi.runCleanup(false);
-      setShowPreviewModal(false);
+      setShowCleanupPreviewModal(false);
       fetchRetentionData();
     } catch (err) {
       console.error('Failed to execute cleanup:', err);
@@ -370,18 +445,41 @@ export const ComplianceMgmt: React.FC = () => {
                       <td>
                         <div className="btn-group btn-group-sm">
                           <Button
+                            variant="outline-info"
+                            size="sm"
+                            onClick={() => handlePreviewSavedReport(report.report_id, report.report_type)}
+                            loading={isPreviewLoading}
+                            title={t('preview', language)}
+                          >
+                            <i className="bi bi-eye" />
+                          </Button>
+                          <Button
                             variant="outline-primary"
                             size="sm"
-                            onClick={() => handleDownload(report.report_id, 'json')}
+                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'json')}
                           >
                             <i className="bi bi-filetype-json" />
                           </Button>
                           <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => handleDownload(report.report_id, 'csv')}
+                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'csv')}
                           >
                             <i className="bi bi-filetype-csv" />
+                          </Button>
+                          <Button
+                            variant="outline-warning"
+                            size="sm"
+                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'html')}
+                          >
+                            <i className="bi bi-filetype-html" />
+                          </Button>
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'excel')}
+                          >
+                            <i className="bi bi-filetype-xlsx" />
                           </Button>
                         </div>
                       </td>
@@ -607,15 +705,15 @@ export const ComplianceMgmt: React.FC = () => {
           </div>
         </Modal>
 
-        {/* Preview Modal */}
+        {/* Cleanup Preview Modal */}
         <Modal
-          isOpen={showPreviewModal}
-          onClose={() => setShowPreviewModal(false)}
+          isOpen={showCleanupPreviewModal}
+          onClose={() => setShowCleanupPreviewModal(false)}
           title={t('cleanupPreview', language)}
           size="lg"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setShowPreviewModal(false)}>
+              <Button variant="secondary" onClick={() => setShowCleanupPreviewModal(false)}>
                 {t('cancel', language)}
               </Button>
               <Button variant="danger" onClick={handleExecuteCleanup} loading={isRunning}>
@@ -631,6 +729,24 @@ export const ComplianceMgmt: React.FC = () => {
             </div>
           )}
         </Modal>
+
+        {/* Report Preview Modal */}
+        <ReportPreviewModal
+          isOpen={showReportPreviewModal}
+          onClose={() => setShowReportPreviewModal(false)}
+          htmlContent={previewHtmlContent}
+          reportType={previewReportType}
+          reportId={previewReportId}
+          onDownload={(fmt) => {
+            if (previewReportId) {
+              handleDownloadSavedReport(previewReportId, previewReportType, fmt);
+            } else {
+              // For newly generated report without saved ID, generate and download
+              handleGenerate();
+            }
+          }}
+          isDownloading={isGenerating}
+        />
       </>
     );
   };

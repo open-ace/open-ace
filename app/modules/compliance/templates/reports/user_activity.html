@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'components/summary_table.html' %}
+
+{% if details | length > 0 %}
+<div class="details-section">
+    <h2>User Activity Details</h2>
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">User ID</th>
+                <th scope="col">Username</th>
+                <th scope="col">Email</th>
+                <th scope="col">Role</th>
+                <th scope="col">Active Days</th>
+                <th scope="col">Total Tokens</th>
+                <th scope="col">Total Requests</th>
+                <th scope="col">First Activity</th>
+                <th scope="col">Last Activity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detail in details %}
+            <tr>
+                <td>{{ detail.user_id | e }}</td>
+                <td>{{ detail.username | e }}</td>
+                <td>{{ detail.email | e }}</td>
+                <td>
+                    <span class="badge badge-secondary">{{ detail.role | e }}</span>
+                </td>
+                <td>{{ detail.active_days | default(0) }}</td>
+                <td>{{ detail.total_tokens | default(0) }}</td>
+                <td>{{ detail.total_requests | default(0) }}</td>
+                <td>{{ detail.first_activity | e }}</td>
+                <td>{{ detail.last_activity | e }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon" aria-hidden="true">&#128196;</div>
+    <p>No user activity data available for this period</p>
+</div>
+{% endif %}
+
+{% include 'components/compliance_checks.html' %}
+{% include 'components/recommendations.html' %}
+{% endblock %}

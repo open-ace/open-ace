@@ -1,0 +1,29 @@
+<div class="summary-card">
+    <h2>Summary</h2>
+    <div class="summary-grid">
+        {% for key, value in summary.items() %}
+        {% if key != 'period' %}
+        <div class="summary-item">
+            <div class="summary-label">{{ key | title | e }}</div>
+            <div class="summary-value">
+                {% if value is dict %}
+                {% for sub_key, sub_value in value.items() %}
+                {% if sub_value is number %}
+                {{ sub_key | title | e }}: {{ sub_value }}
+                {% endif %}
+                {% endfor %}
+                {% elif value is number %}
+                {{ value }}
+                {% elif value is string %}
+                {{ value | e }}
+                {% elif value is list %}
+                {{ value | length }} items
+                {% else %}
+                {{ value | e }}
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>

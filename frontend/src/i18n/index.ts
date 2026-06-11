@@ -612,6 +612,25 @@ const translations: Record<Language, Translations> = {
     comprehensiveReport: 'Comprehensive',
     comprehensiveReportDesc: 'Full compliance report covering all aspects',
 
+    // Report Preview and Download
+    reportPreview: 'Report Preview',
+    preview: 'Preview',
+    printReport: 'Print Report',
+    print: 'Print',
+    downloadHtml: 'Download HTML',
+    downloadExcel: 'Download Excel',
+    reportId: 'Report ID',
+    loadingPreview: 'Loading preview...',
+    printTip: 'Tip: Use browser print settings to adjust paper size and margins for best results.',
+    format: 'Format',
+    selectReportType: 'Select Report Type',
+    generateReport: 'Generate Report',
+    savedReports: 'Saved Reports',
+    noSavedReports: 'No saved reports found',
+    reportName: 'Report Name',
+    generatedAt: 'Generated At',
+    period: 'Period',
+
     // Personal Settings (Issue #121)
     personalSettings: 'Personal Settings',
     workspaceSettings: 'Workspace Settings',
@@ -1756,6 +1775,25 @@ const translations: Record<Language, Translations> = {
     comprehensiveReport: '综合报告',
     comprehensiveReportDesc: '涵盖所有方面的完整合规报告',
 
+    // Report Preview and Download
+    reportPreview: '报告预览',
+    preview: '预览',
+    printReport: '打印报告',
+    print: '打印',
+    downloadHtml: '下载 HTML',
+    downloadExcel: '下载 Excel',
+    reportId: '报告 ID',
+    loadingPreview: '正在加载预览...',
+    printTip: '提示：使用浏览器打印设置调整纸张大小和边距以获得最佳效果。',
+    format: '格式',
+    selectReportType: '选择报告类型',
+    generateReport: '生成报告',
+    savedReports: '已保存报告',
+    noSavedReports: '无已保存报告',
+    reportName: '报告名称',
+    generatedAt: '生成时间',
+    period: '时间段',
+
     // Personal Settings (Issue #121)
     personalSettings: '个人设置',
     workspaceSettings: '工作区设置',
@@ -2485,6 +2523,25 @@ const translations: Record<Language, Translations> = {
     quotaUsageReportDesc: 'クォータ制限と使用量詳細',
     comprehensiveReport: '包括レポート',
     comprehensiveReportDesc: 'すべての側面をカバーする完全なコンプライアンスレポート',
+
+    // Report Preview and Download
+    reportPreview: 'レポートプレビュー',
+    preview: 'プレビュー',
+    printReport: 'レポート印刷',
+    print: '印刷',
+    downloadHtml: 'HTML ダウンロード',
+    downloadExcel: 'Excel ダウンロード',
+    reportId: 'レポート ID',
+    loadingPreview: 'プレビューを読み込み中...',
+    printTip: 'ヒント：ブラウザの印刷設定で用紙サイズと余白を調整すると、最適な結果が得られます。',
+    format: 'フォーマット',
+    selectReportType: 'レポートタイプを選択',
+    generateReport: 'レポート生成',
+    savedReports: '保存されたレポート',
+    noSavedReports: '保存されたレポートはありません',
+    reportName: 'レポート名',
+    generatedAt: '生成日時',
+    period: '期間',
 
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
@@ -3273,6 +3330,25 @@ const translations: Record<Language, Translations> = {
     quotaUsageReportDesc: '할당량 제한 및 사용량 분석',
     comprehensiveReport: '종합 보고서',
     comprehensiveReportDesc: '모든 측면을 포함한 완전한 규정 준수 보고서',
+
+    // Report Preview and Download
+    reportPreview: '보고서 미리보기',
+    preview: '미리보기',
+    printReport: '보고서 인쇄',
+    print: '인쇄',
+    downloadHtml: 'HTML 다운로드',
+    downloadExcel: 'Excel 다운로드',
+    reportId: '보고서 ID',
+    loadingPreview: '미리보기 로딩 중...',
+    printTip: '힌트: 브라우저 인쇄 설정에서 용지 크기와 여백을 조정하여 최상의 결과를 얻으세요.',
+    format: '형식',
+    selectReportType: '보고서 유형 선택',
+    generateReport: '보고서 생성',
+    savedReports: '저장된 보고서',
+    noSavedReports: '저장된 보고서 없음',
+    reportName: '보고서 이름',
+    generatedAt: '생성 시간',
+    period: '기간',
 
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',

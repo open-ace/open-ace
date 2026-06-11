@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Comprehensive Compliance Report</h2>
+
+{% if summary.usage %}
+<div class="summary-card">
+    <h3>Usage Summary</h3>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <div class="summary-label">Total Tokens</div>
+            <div class="summary-value">{{ summary.usage.totals.tokens | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Total Requests</div>
+            <div class="summary-value">{{ summary.usage.totals.requests | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Unique Users</div>
+            <div class="summary-value">{{ summary.usage.totals.unique_users | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Tools Used</div>
+            <div class="summary-value">{{ summary.usage.totals.tools_used | default(0) }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if summary.users %}
+<div class="summary-card">
+    <h3>User Activity Summary</h3>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <div class="summary-label">Total Users</div>
+            <div class="summary-value">{{ summary.users.totals.total_users | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Active Users</div>
+            <div class="summary-value">{{ summary.users.totals.active_users | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Inactive Users</div>
+            <div class="summary-value">{{ summary.users.totals.inactive_users | default(0) }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if summary.security %}
+<div class="summary-card">
+    <h3>Security Summary</h3>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <div class="summary-label">Failed Logins</div>
+            <div class="summary-value">{{ summary.security.security_events.failed_logins | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Password Changes</div>
+            <div class="summary-value">{{ summary.security.security_events.password_changes | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Role Changes</div>
+            <div class="summary-value">{{ summary.security.security_events.role_changes | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Content Blocked</div>
+            <div class="summary-value">{{ summary.security.security_events.content_blocked | default(0) }}</div>
+        </div>
+    </div>
+    {% if summary.security.risk_indicators | length > 0 %}
+    <div class="risk-indicators">
+        <h4>Risk Indicators</h4>
+        <ul>
+            {% for indicator in summary.security.risk_indicators %}
+            <li>
+                {% if indicator.level == 'warning' %}
+                <span class="recommendation-review">{{ indicator.message | e }}</span>
+                {% else %}
+                {{ indicator.message | e }}
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if summary.quota %}
+<div class="summary-card">
+    <h3>Quota Usage Summary</h3>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <div class="summary-label">Total Alerts</div>
+            <div class="summary-value">{{ summary.quota.alerts.total | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Warnings</div>
+            <div class="summary-value">{{ summary.quota.alerts.warnings | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Critical</div>
+            <div class="summary-value">{{ summary.quota.alerts.critical | default(0) }}</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-label">Exceeded</div>
+            <div class="summary-value">{{ summary.quota.alerts.exceeded | default(0) }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if details | length > 0 %}
+<div class="details-section">
+    <h3>Audit Trail Details</h3>
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Timestamp</th>
+                <th scope="col">Action</th>
+                <th scope="col">User ID</th>
+                <th scope="col">Severity</th>
+                <th scope="col">Resource Type</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detail in details %}
+            <tr>
+                <td>{{ detail.timestamp | e }}</td>
+                <td>{{ detail.action | e }}</td>
+                <td>{{ detail.user_id | e }}</td>
+                <td>
+                    {% if detail.severity == 'high' %}
+                    <span class="badge badge-danger">{{ detail.severity | e }}</span>
+                    {% elif detail.severity == 'medium' %}
+                    <span class="badge badge-warning">{{ detail.severity | e }}</span>
+                    {% else %}
+                    <span class="badge badge-secondary">{{ detail.severity | e }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ detail.resource_type | e }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon" aria-hidden="true">&#128196;</div>
+    <p>No detailed data available for this period</p>
+</div>
+{% endif %}
+
+{% include 'components/compliance_checks.html' %}
+{% include 'components/recommendations.html' %}
+{% endblock %}
