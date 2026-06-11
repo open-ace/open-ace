@@ -177,9 +177,10 @@ export const RequestDashboard: React.FC = () => {
         </Button>
       </div>
 
-      {/* Today's Stats */}
-      <div className="row g-3 mb-4">
-        <div className="col-md-3">
+      {/* Today's Stats Section */}
+      {/* Row 1: Today Stats Cards */}
+      <div className="row g-3 mb-3">
+        <div className="col-md-4 col-sm-6 col-12">
           <StatCard
             label={t('todayRequests', language)}
             value={formatNumber(todayStats?.total_requests ?? 0)}
@@ -187,7 +188,7 @@ export const RequestDashboard: React.FC = () => {
             variant="primary"
           />
         </div>
-        <div className="col-md-3">
+        <div className="col-md-4 col-sm-6 col-12">
           <StatCard
             label={t('activeUsers', language)}
             value={formatNumber(aggregatedUserStats.length)}
@@ -195,7 +196,7 @@ export const RequestDashboard: React.FC = () => {
             variant="info"
           />
         </div>
-        <div className="col-md-3">
+        <div className="col-md-4 col-sm-6 col-12">
           <StatCard
             label={t('avgRequestsPerUser', language)}
             value={
@@ -212,19 +213,66 @@ export const RequestDashboard: React.FC = () => {
             variant="success"
           />
         </div>
-        <div className="col-md-3">
-          <StatCard
-            label={t('peakTool', language)}
-            value={
-              todayStats?.by_tool
-                ? Object.entries(todayStats.by_tool)
-                    .sort((a, b) => b[1] - a[1])[0]?.[0]
-                    ?.toUpperCase() || '-'
-                : '-'
-            }
-            icon={<i className="bi bi-bar-chart fs-4" />}
-            variant="warning"
-          />
+      </div>
+
+      {/* Row 2: Today by Tool Table */}
+      <div className="row g-3 mb-4">
+        <div className="col-md-12">
+          <Card>
+            <div className="d-flex align-items-center mb-3">
+              <h5 className="mb-0">{t('todayByTool', language)}</h5>
+              {(() => {
+                const peakTool = todayStats?.by_tool
+                  ? Object.entries(todayStats.by_tool)
+                      .sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
+                  : '-';
+                return (
+                  <Badge variant="warning" className="ms-2">
+                    {peakTool}
+                  </Badge>
+                );
+              })()}
+            </div>
+            {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
+              <div
+                className="table-responsive"
+                style={{ maxHeight: '200px', overflowY: 'auto' }}
+              >
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>{t('tool', language)}</th>
+                      <th className="text-end">{t('requests', language)}</th>
+                      <th className="text-end">{t('percentage', language)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(todayStats.by_tool)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([tool, count]) => {
+                        const percentage =
+                          todayStats.total_requests > 0
+                            ? ((count / todayStats.total_requests) * 100).toFixed(1)
+                            : '0';
+                        return (
+                          <tr key={tool}>
+                            <td>
+                              <Badge variant="info">{tool.toUpperCase()}</Badge>
+                            </td>
+                            <td className="text-end">{formatNumber(count)}</td>
+                            <td className="text-end">{percentage}%</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ minHeight: '150px' }}>
+                <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
+              </div>
+            )}
+          </Card>
         </div>
       </div>
 
@@ -274,10 +322,9 @@ export const RequestDashboard: React.FC = () => {
         </div>
       </Card>
 
-      {/* Charts Row */}
+      {/* Request Trend Chart - Full Width */}
       <div className="row g-4 mb-4">
-        {/* Request Trend Chart */}
-        <div className="col-lg-8">
+        <div className="col-lg-12 col-md-12 col-12">
           <Card title={t('requestTrend', language)}>
             {trendData.length > 0 ? (
               <LazyLineChart
@@ -287,46 +334,6 @@ export const RequestDashboard: React.FC = () => {
               />
             ) : (
               <EmptyState icon="bi-graph-up" title={t('noData', language)} />
-            )}
-          </Card>
-        </div>
-
-        {/* Today's By Tool */}
-        <div className="col-lg-4">
-          <Card title={t('todayByTool', language)}>
-            {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
-              <div className="table-responsive">
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>{t('tool', language)}</th>
-                      <th className="text-end">{t('requests', language)}</th>
-                      <th className="text-end">{t('percentage', language)}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(todayStats.by_tool)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([tool, count]) => {
-                        const percentage =
-                          todayStats.total_requests > 0
-                            ? ((count / todayStats.total_requests) * 100).toFixed(1)
-                            : '0';
-                        return (
-                          <tr key={tool}>
-                            <td>
-                              <Badge variant="info">{tool.toUpperCase()}</Badge>
-                            </td>
-                            <td className="text-end">{formatNumber(count)}</td>
-                            <td className="text-end">{percentage}%</td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
             )}
           </Card>
         </div>
