@@ -28,7 +28,7 @@ vi.mock('@/i18n', () => ({
       navigation: 'Navigation',
       previous: 'Previous',
       next: 'Next',
-      goToPage: 'Go to page',
+      goToPage: 'Go to page {page}',
       pageInfo: 'Page {current} of {total}',
       invalidPageNumber: 'Please enter a valid page number (1-{total})',
       previousPage: 'Previous page',
