@@ -16,6 +16,7 @@ import {
   Tooltip,
   Legend,
   Filler,
+  type TooltipItem,
 } from 'chart.js';
 import { Line, Bar, Pie, Doughnut } from 'react-chartjs-2';
 import { cn } from '@/utils';
@@ -154,8 +155,7 @@ export const LineChart: React.FC<LineChartProps> = ({
       },
       tooltip: {
         callbacks: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label: (context: any) => {
+          label: (context: TooltipItem<'line'>) => {
             const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
             if (unit !== 'none') {
@@ -283,8 +283,7 @@ export const BarChart: React.FC<BarChartProps> = ({
       },
       tooltip: {
         callbacks: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          title: (context: any[]) => {
+          title: (context: TooltipItem<'bar'>[]) => {
             // For horizontal bar charts with usernames, show username as title
             if (horizontal && usernames && context[0]) {
               const dataIndex = context[0].dataIndex ?? 0;
@@ -293,8 +292,7 @@ export const BarChart: React.FC<BarChartProps> = ({
             // Default: use label (ranking number or category)
             return context[0]?.label ?? '';
           },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label: (context: any) => {
+          label: (context: TooltipItem<'bar'>) => {
             // For horizontal bar charts with usernames, show "请求数: value"
             if (horizontal && usernames) {
               const value = context.parsed?.x;
@@ -468,8 +466,7 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
       },
       tooltip: {
         callbacks: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label: (context: any) => {
+          label: (context: TooltipItem<'doughnut'>) => {
             const label = context.label ?? '';
             const value = context.parsed ?? 0;
             const dataIndex = context.dataIndex ?? 0;
@@ -602,8 +599,7 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
       },
       tooltip: {
         callbacks: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          label: (context: any) => {
+          label: (context: TooltipItem<'line'>) => {
             const label = context.dataset?.label ?? '';
             const value = context.parsed?.y;
             return `${label}: ${value?.toFixed(2) ?? 0}M tokens`;
