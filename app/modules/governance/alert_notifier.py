@@ -27,6 +27,7 @@ from app.repositories.database import (
     get_database_url,
     is_postgresql,
 )
+from app.services.email_notification_service import get_email_notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,8 @@ class NotificationPreference:
     webhook_url: Optional[str] = None
     alert_types: list[str] = field(default_factory=lambda: ["quota", "system", "security"])
     min_severity: str = "warning"  # info, warning, critical
+    notification_email: Optional[str] = None  # User's notification email address
+    email_verified: bool = False  # Whether email has been verified
 
 
 class AlertNotifier:
@@ -145,7 +148,7 @@ class AlertNotifier:
 
         # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create alerts table
@@ -172,14 +175,16 @@ class AlertNotifier:
 
         # Create notification_preferences table
         cursor.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled {bool_true},
                 push_enabled {bool_true},
                 webhook_url TEXT,
                 alert_types TEXT,
-                min_severity TEXT DEFAULT 'warning'
+                min_severity TEXT DEFAULT 'warning',
+                notification_email TEXT,
+                email_verified {bool_false}
             )
         """
         )
@@ -271,6 +276,7 @@ class AlertNotifier:
         metadata: Optional[dict[str, Any]] = None,
         action_url: Optional[str] = None,
         action_text: Optional[str] = None,
+        language: str = "en",
     ) -> Alert:
         """
         Create a new alert.
@@ -286,6 +292,7 @@ class AlertNotifier:
             metadata: Optional additional metadata.
             action_url: Optional URL for action button.
             action_text: Optional text for action button.
+            language: Language for email notification (en, zh, ja, ko).
 
         Returns:
             Alert: The created alert.
@@ -317,8 +324,79 @@ class AlertNotifier:
             except Exception as e:
                 logger.error(f"Error in alert callback: {e}")
 
+        # Send email notification if user preferences allow
+        if user_id:
+            self._send_email_notification(alert, user_id, language)
+
         logger.info(f"Created alert: [{severity}] {title}")
         return alert
+
+    def _send_email_notification(
+        self,
+        alert: Alert,
+        user_id: int,
+        language: str = "en",
+    ) -> None:
+        """
+        Send email notification for an alert if user preferences allow.
+
+        Args:
+            alert: The alert to send.
+            user_id: User ID to send notification to.
+            language: Language for email template.
+        """
+        try:
+            # Get user notification preferences
+            prefs = self.get_notification_preferences(user_id)
+
+            # Check if email notifications are enabled
+            if not prefs.email_enabled:
+                logger.debug(f"Email notifications disabled for user {user_id}")
+                return
+
+            # Check notification email is set
+            if not prefs.notification_email:
+                logger.debug(f"No notification email set for user {user_id}")
+                return
+
+            # Check alert type is in user's preferences
+            if alert.alert_type not in prefs.alert_types:
+                logger.debug(
+                    f"Alert type {alert.alert_type} not in user {user_id} preferences: {prefs.alert_types}"
+                )
+                return
+
+            # Check severity meets minimum threshold
+            severity_order = {"info": 0, "warning": 1, "critical": 2}
+            if severity_order.get(alert.severity, 0) < severity_order.get(prefs.min_severity, 1):
+                logger.debug(
+                    f"Alert severity {alert.severity} below user {user_id} threshold {prefs.min_severity}"
+                )
+                return
+
+            # Prepare alert data for email
+            alert_data = alert.to_dict()
+
+            # Send email notification
+            email_service = get_email_notification_service()
+            result = email_service.send_alert_notification(
+                user_id=user_id,
+                recipient_email=prefs.notification_email,
+                alert_data=alert_data,
+                language=language,
+            )
+
+            if result["success"]:
+                logger.info(
+                    f"Email notification queued for alert {alert.alert_id} to user {user_id}"
+                )
+            else:
+                logger.warning(
+                    f"Failed to queue email notification for alert {alert.alert_id}: {result['message']}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error sending email notification for alert {alert.alert_id}: {e}")
 
     def _save_alert(self, alert: Alert) -> int:
         """Save alert to database."""
@@ -622,6 +700,8 @@ class AlertNotifier:
                     else ["quota", "system", "security"]
                 ),
                 min_severity=row["min_severity"] or "warning",
+                notification_email=row.get("notification_email"),
+                email_verified=bool(row.get("email_verified", False)),
             )
 
         # Return default preferences
@@ -644,14 +724,17 @@ class AlertNotifier:
             cursor.execute(
                 """
                 INSERT INTO notification_preferences
-                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types,
+                 min_severity, notification_email, email_verified)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     email_enabled = EXCLUDED.email_enabled,
                     push_enabled = EXCLUDED.push_enabled,
                     webhook_url = EXCLUDED.webhook_url,
                     alert_types = EXCLUDED.alert_types,
-                    min_severity = EXCLUDED.min_severity
+                    min_severity = EXCLUDED.min_severity,
+                    notification_email = EXCLUDED.notification_email,
+                    email_verified = EXCLUDED.email_verified
             """,
                 (
                     preferences.user_id,
@@ -660,14 +743,17 @@ class AlertNotifier:
                     preferences.webhook_url,
                     json.dumps(preferences.alert_types),
                     preferences.min_severity,
+                    preferences.notification_email,
+                    preferences.email_verified,
                 ),
             )
         else:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO notification_preferences
-                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types,
+                 min_severity, notification_email, email_verified)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     preferences.user_id,
@@ -676,6 +762,8 @@ class AlertNotifier:
                     preferences.webhook_url,
                     json.dumps(preferences.alert_types),
                     preferences.min_severity,
+                    preferences.notification_email,
+                    1 if preferences.email_verified else 0,
                 ),
             )
 
@@ -736,6 +824,7 @@ def create_quota_alert(
     username: str,
     usage_percent: float,
     quota_type: str = "tokens",
+    language: str = "en",
 ) -> Alert:
     """
     Create a quota alert.
@@ -745,6 +834,7 @@ def create_quota_alert(
         username: Username.
         usage_percent: Usage percentage.
         quota_type: Type of quota (tokens or requests).
+        language: Language for email notification.
 
     Returns:
         Created Alert.
@@ -781,6 +871,7 @@ def create_quota_alert(
         },
         action_url="/report",
         action_text="View Usage",
+        language=language,
     )
 
 
@@ -789,6 +880,7 @@ def create_system_alert(
     message: str,
     severity: str = AlertSeverity.WARNING.value,
     tool_name: Optional[str] = None,
+    language: str = "en",
 ) -> Alert:
     """
     Create a system alert.
@@ -798,6 +890,7 @@ def create_system_alert(
         message: Alert message.
         severity: Severity level.
         tool_name: Optional tool name.
+        language: Language for email notification.
 
     Returns:
         Created Alert.
@@ -809,6 +902,7 @@ def create_system_alert(
         title=title,
         message=message,
         tool_name=tool_name,
+        language=language,
     )
 
 
@@ -818,6 +912,7 @@ def create_security_alert(
     user_id: Optional[int] = None,
     username: Optional[str] = None,
     severity: str = AlertSeverity.CRITICAL.value,
+    language: str = "en",
 ) -> Alert:
     """
     Create a security alert.
@@ -828,6 +923,7 @@ def create_security_alert(
         user_id: Optional user ID.
         username: Optional username.
         severity: Severity level.
+        language: Language for email notification.
 
     Returns:
         Created Alert.
@@ -840,4 +936,5 @@ def create_security_alert(
         message=message,
         user_id=user_id,
         username=username,
+        language=language,
     )
