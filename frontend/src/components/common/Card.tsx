@@ -5,6 +5,7 @@
 import React from 'react';
 import { cn } from '@/utils';
 import type { CardProps } from '@/types';
+import { Tooltip } from './Tooltip';
 
 const variantClasses: Record<string, string> = {
   default: '',
@@ -26,6 +27,7 @@ export const Card: React.FC<CardProps> = ({
   id,
   style,
   'data-testid': testId,
+  helpTooltip,
 }) => {
   return (
     <div
@@ -34,13 +36,20 @@ export const Card: React.FC<CardProps> = ({
       style={style}
       className={cn('card', variantClasses[variant], className)}
     >
-      {(title ?? subtitle ?? icon) && (
+      {(title ?? subtitle ?? icon ?? helpTooltip) && (
         <div className="card-header d-flex align-items-center">
           {icon && <span className="me-2">{icon}</span>}
           <div>
             {title && <h5 className="card-title mb-0">{title}</h5>}
             {subtitle && <small className="text-muted">{subtitle}</small>}
           </div>
+          {helpTooltip && (
+            <Tooltip content={helpTooltip} placement="top">
+              <span className="ms-2">
+                <i className="bi bi-info-circle text-muted" style={{ cursor: 'pointer' }}></i>
+              </span>
+            </Tooltip>
+          )}
         </div>
       )}
       <div className="card-body">{children}</div>

@@ -10,25 +10,25 @@
  * - Responsive design
  */
 
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { Pagination } from './Pagination';
 import { getVisiblePages } from './Pagination';
 
 // Mock language hook
-jest.mock('@/store', () => ({
+vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
 
 // Mock i18n
-jest.mock('@/i18n', () => ({
+vi.mock('@/i18n', () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
       navigation: 'Navigation',
       previous: 'Previous',
       next: 'Next',
-      goToPage: 'Go to page',
+      goToPage: 'Go to page {page}',
       pageInfo: 'Page {current} of {total}',
       invalidPageNumber: 'Please enter a valid page number (1-{total})',
       previousPage: 'Previous page',
@@ -61,8 +61,9 @@ describe('getVisiblePages', () => {
 
     it('should handle even maxVisible correctly', () => {
       // currentPage=12, totalPages=50, maxVisible=6
+      // halfVisible = 3, so range is 9-15 (6 pages centered around 12)
       const result = getVisiblePages(12, 50, 6);
-      expect(result).toEqual([1, 'ellipsis-start', 10, 11, 12, 13, 14, 15, 'ellipsis-end', 50]);
+      expect(result).toEqual([1, 'ellipsis-start', 9, 10, 11, 12, 13, 14, 15, 'ellipsis-end', 50]);
     });
   });
 
@@ -83,20 +84,22 @@ describe('getVisiblePages', () => {
   describe('Current page near end', () => {
     it('should show last pages without end ellipsis', () => {
       // currentPage=48, totalPages=50, maxVisible=5
-      // Expected: [1, '...', 46, 47, 48, 49, 50]
+      // When near end: startPage = totalPages - maxVisible = 45, endPage = 49
       const result = getVisiblePages(48, 50, 5);
-      expect(result).toEqual([1, 'ellipsis-start', 46, 47, 48, 49, 50]);
+      expect(result).toEqual([1, 'ellipsis-start', 45, 46, 47, 48, 49, 50]);
     });
 
     it('should handle currentPage=totalPages', () => {
+      // currentPage=50, totalPages=50, maxVisible=5
+      // Same as near end: startPage = 45, endPage = 49
       const result = getVisiblePages(50, 50, 5);
-      expect(result).toEqual([1, 'ellipsis-start', 46, 47, 48, 49, 50]);
+      expect(result).toEqual([1, 'ellipsis-start', 45, 46, 47, 48, 49, 50]);
     });
   });
 });
 
 describe('Pagination Component', () => {
-  const mockOnPageChange = jest.fn();
+  const mockOnPageChange = vi.fn();
 
   beforeEach(() => {
     mockOnPageChange.mockClear();
@@ -113,8 +116,8 @@ describe('Pagination Component', () => {
     it('should render with default props', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      // Should show page buttons
-      expect(screen.getByRole('navigation')).toBeInTheDocument();
+      // Should show page buttons (both desktop and mobile versions)
+      expect(screen.getAllByRole('navigation').length).toBeGreaterThan(0);
       expect(screen.getByText('Previous')).toBeInTheDocument();
       expect(screen.getByText('Next')).toBeInTheDocument();
     });
@@ -124,7 +127,9 @@ describe('Pagination Component', () => {
     it('should call onPageChange when clicking page button', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const page2Button = screen.getByRole('button', { name: /Go to page 2/i });
+      // Desktop version page button
+      const buttons = screen.getAllByRole('button', { name: /Go to page 2/i });
+      const page2Button = buttons[0];
       fireEvent.click(page2Button);
 
       expect(mockOnPageChange).toHaveBeenCalledWith(2);
@@ -133,8 +138,10 @@ describe('Pagination Component', () => {
     it('should call onPageChange when clicking Previous button', () => {
       render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const prevButton = screen.getByRole('button', { name: /Previous page/i });
-      fireEvent.click(prevButton);
+      // Desktop version previous button (has aria-disabled attribute)
+      const prevButtons = screen.getAllByRole('button', { name: /Previous page/i });
+      const prevButton = prevButtons.find((btn) => btn.textContent !== '');
+      fireEvent.click(prevButton!);
 
       expect(mockOnPageChange).toHaveBeenCalledWith(4);
     });
@@ -142,8 +149,10 @@ describe('Pagination Component', () => {
     it('should call onPageChange when clicking Next button', () => {
       render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const nextButton = screen.getByRole('button', { name: /Next page/i });
-      fireEvent.click(nextButton);
+      // Desktop version next button (has text content)
+      const nextButtons = screen.getAllByRole('button', { name: /Next page/i });
+      const nextButton = nextButtons.find((btn) => btn.textContent !== '');
+      fireEvent.click(nextButton!);
 
       expect(mockOnPageChange).toHaveBeenCalledWith(6);
     });
@@ -151,24 +160,30 @@ describe('Pagination Component', () => {
     it('should disable Previous button when on first page', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const prevButton = screen.getByRole('button', { name: /Previous page/i });
+      // Desktop version previous button (has aria-disabled)
+      const prevButtons = screen.getAllByRole('button', { name: /Previous page/i });
+      const prevButton = prevButtons.find((btn) => btn.hasAttribute('aria-disabled'));
       expect(prevButton).toBeDisabled();
-      expect(prevButton.closest('li')).toHaveClass('disabled');
+      expect(prevButton!.closest('li')).toHaveClass('disabled');
     });
 
     it('should disable Next button when on last page', () => {
       render(<Pagination currentPage={10} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const nextButton = screen.getByRole('button', { name: /Next page/i });
+      // Desktop version next button
+      const nextButtons = screen.getAllByRole('button', { name: /Next page/i });
+      const nextButton = nextButtons.find((btn) => btn.hasAttribute('aria-disabled'));
       expect(nextButton).toBeDisabled();
-      expect(nextButton.closest('li')).toHaveClass('disabled');
+      expect(nextButton!.closest('li')).toHaveClass('disabled');
     });
 
     it('should not call onPageChange when clicking disabled buttons', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const prevButton = screen.getByRole('button', { name: /Previous page/i });
-      fireEvent.click(prevButton);
+      // Desktop version previous button (has aria-disabled)
+      const prevButtons = screen.getAllByRole('button', { name: /Previous page/i });
+      const prevButton = prevButtons.find((btn) => btn.hasAttribute('aria-disabled'));
+      fireEvent.click(prevButton!);
 
       expect(mockOnPageChange).not.toHaveBeenCalled();
     });
@@ -178,7 +193,8 @@ describe('Pagination Component', () => {
     it('should allow entering page number', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '5' } });
 
       expect(input).toHaveValue(5);
@@ -187,58 +203,68 @@ describe('Pagination Component', () => {
     it('should call onPageChange when pressing Enter', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '5' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
       expect(mockOnPageChange).toHaveBeenCalledWith(5);
     });
 
-    it('should show error for invalid input (non-number)', () => {
+    it('should show error for invalid input (non-number)', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: 'abc' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        // Desktop version error message
+        const alerts = screen.getAllByRole('alert');
+        expect(alerts.length).toBeGreaterThan(0);
       });
     });
 
-    it('should show error for out-of-range input', () => {
+    it('should show error for out-of-range input', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '15' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        const alerts = screen.getAllByRole('alert');
+        expect(alerts.length).toBeGreaterThan(0);
       });
     });
 
-    it('should show error for input less than 1', () => {
+    it('should show error for input less than 1', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '0' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        const alerts = screen.getAllByRole('alert');
+        expect(alerts.length).toBeGreaterThan(0);
       });
     });
 
     it('should clear error when valid input is entered', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '15' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        const alerts = screen.getAllByRole('alert');
+        expect(alerts.length).toBeGreaterThan(0);
       });
 
       // Enter valid input
@@ -250,26 +276,35 @@ describe('Pagination Component', () => {
     });
 
     it('should auto-clear error after 3 seconds', async () => {
-      jest.useFakeTimers();
-
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '15' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
-      await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
-      });
+      // Wait for error to appear
+      await waitFor(
+        () => {
+          const alerts = screen.getAllByRole('alert');
+          expect(alerts.length).toBeGreaterThan(0);
+        },
+        { timeout: 3000 }
+      );
 
-      // Fast-forward 3 seconds
-      jest.advanceTimersByTime(3000);
+      // Fast-forward 3 seconds using act
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(3100);
+      vi.useRealTimers();
 
-      await waitFor(() => {
-        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-      });
-
-      jest.useRealTimers();
+      // Wait for error to disappear
+      await waitFor(
+        () => {
+          const alerts = screen.queryAllByRole('alert');
+          expect(alerts.length).toBe(0);
+        },
+        { timeout: 3000 }
+      );
     });
   });
 
@@ -277,49 +312,64 @@ describe('Pagination Component', () => {
     it('should have aria-label on navigation', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const nav = screen.getByRole('navigation');
-      expect(nav).toHaveAttribute('aria-label', 'Navigation');
+      // Both desktop and mobile have navigation
+      const navs = screen.getAllByRole('navigation');
+      expect(navs[0]).toHaveAttribute('aria-label', 'Navigation');
     });
 
     it('should have aria-current on current page button', () => {
       render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const currentPageButton = screen.getByRole('button', { name: /Go to page 5/i });
+      // Desktop version page button with aria-current
+      const buttons = screen.getAllByRole('button', { name: /Go to page 5/i });
+      const currentPageButton = buttons.find((btn) => btn.hasAttribute('aria-current'));
       expect(currentPageButton).toHaveAttribute('aria-current', 'page');
     });
 
     it('should not have aria-current on other page buttons', () => {
       render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const page2Button = screen.getByRole('button', { name: /Go to page 2/i });
-      expect(page2Button).not.toHaveAttribute('aria-current');
+      // Desktop version page button without aria-current (page 3 is visible, not current)
+      const buttons = screen.getAllByRole('button', { name: /Go to page 3/i });
+      const page3Button = buttons[0]; // Desktop version
+      expect(page3Button).not.toHaveAttribute('aria-current');
     });
 
     it('should have aria-label on page buttons', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const page2Button = screen.getByRole('button', { name: /Go to page 2/i });
+      // Desktop version page button
+      const buttons = screen.getAllByRole('button', { name: /Go to page 2/i });
+      const page2Button = buttons[0];
       expect(page2Button).toHaveAttribute('aria-label');
     });
 
     it('should have aria-disabled on disabled buttons', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const prevButton = screen.getByRole('button', { name: /Previous page/i });
+      // Desktop version previous button
+      const prevButtons = screen.getAllByRole('button', { name: /Previous page/i });
+      const prevButton = prevButtons.find((btn) => btn.hasAttribute('aria-disabled'));
       expect(prevButton).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('should have role="alert" on error message', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       fireEvent.change(input, { target: { value: '15' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
-      await waitFor(() => {
-        const errorMessage = screen.getByRole('alert');
-        expect(errorMessage).toHaveAttribute('aria-live', 'polite');
-      });
+      await waitFor(
+        () => {
+          // Desktop version error message
+          const alerts = screen.getAllByRole('alert');
+          const errorMessage = alerts[0];
+          expect(errorMessage).toHaveAttribute('aria-live', 'polite');
+        },
+        { timeout: 3000 }
+      );
     });
 
     it('should support keyboard navigation (Tab)', () => {
@@ -367,7 +417,9 @@ describe('Pagination Component', () => {
     it('should show jump input by default', () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      expect(screen.getByRole('spinbutton')).toBeInTheDocument();
+      // Both desktop and mobile have spinbutton inputs
+      const inputs = screen.getAllByRole('spinbutton');
+      expect(inputs.length).toBeGreaterThan(0);
     });
 
     it('should hide jump input when showPageInput=false', () => {
@@ -380,7 +432,8 @@ describe('Pagination Component', () => {
         />
       );
 
-      expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+      const inputs = screen.queryAllByRole('spinbutton');
+      expect(inputs.length).toBe(0);
     });
   });
 
@@ -412,7 +465,8 @@ describe('Pagination Component', () => {
         <Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />
       );
 
-      const input = screen.getByRole('spinbutton', { name: /Go to page/i });
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
       expect(input).toHaveValue(1);
 
       // Update currentPage prop

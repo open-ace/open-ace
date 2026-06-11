@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
-import { t, type Language } from '@/i18n';
+import { t } from '@/i18n';
 
 interface PaginationProps {
   /** Current page number (1-based) */
@@ -28,8 +28,6 @@ interface PaginationProps {
   showPageInfo?: boolean;
   /** Maximum visible page numbers, default 5 */
   maxVisiblePages?: number;
-  /** Whether to sync page to URL params, default false */
-  syncToUrl?: boolean;
   /** Additional CSS class */
   className?: string;
 }
@@ -108,7 +106,6 @@ export const Pagination: React.FC<PaginationProps> = ({
   showPageInput = true,
   showPageInfo = true,
   maxVisiblePages = 5,
-  syncToUrl = false,
   className,
 }) => {
   const language = useLanguage();
@@ -165,21 +162,24 @@ export const Pagination: React.FC<PaginationProps> = ({
   }, [inputValue, totalPages, language, handlePageChange]);
 
   // Handle input change
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setInputValue(value);
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setInputValue(value);
 
-    // Clear error when input is empty or valid
-    if (!value) {
-      setError(null);
-      return;
-    }
+      // Clear error when input is empty or valid
+      if (!value) {
+        setError(null);
+        return;
+      }
 
-    const pageNum = parseInt(value, 10);
-    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-      setError(null);
-    }
-  }, [totalPages]);
+      const pageNum = parseInt(value, 10);
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+        setError(null);
+      }
+    },
+    [totalPages]
+  );
 
   // Handle Enter key
   const handleInputKeyDown = useCallback(
@@ -208,6 +208,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       const timer = setTimeout(() => setError(null), 3000);
       return () => clearTimeout(timer);
     }
+    return undefined;
   }, [error]);
 
   // Don't render if only one page

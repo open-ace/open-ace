@@ -337,11 +337,13 @@ class AgentTaskResult:
     """Result from running an agent task."""
 
     session_id: str = ""
+    tracking_session_id: str = ""
     response_text: str = ""
     messages: list = field(default_factory=list)
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    request_count: int = 0
     tool_calls: list = field(default_factory=list)
     success: bool = False
     error: Optional[str] = None

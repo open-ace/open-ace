@@ -267,6 +267,10 @@ class DailyStatsRepository:
             conditions.append("ds.host_name = ?")
             params.append(host_name)
 
+        # Filter out Feishu Open IDs (ou_ prefix + length > 10)
+        # Keep in sync with app/utils/senders.py is_valid_sender()
+        conditions.append("NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)")
+
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
         if is_postgresql():
@@ -504,6 +508,10 @@ class DailyStatsRepository:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+        # Feishu ID filter condition for unique_users (keep in sync with is_valid_sender)
+        # Exclude sender_name starting with "ou_" and longer than 10 chars
+        feishu_filter = "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)"
+
         if is_postgresql():
             # PostgreSQL: use subquery for user_id resolution
             # Fallback to sender_name when user_id cannot be resolved
@@ -515,12 +523,12 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
                          LIMIT 1),
-                        sender_name)) as unique_users,
+                        sender_name) END) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}
@@ -536,12 +544,12 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
                          LIMIT 1),
-                        sender_name)) as unique_users,
+                        sender_name) END) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}
@@ -717,6 +725,40 @@ class DailyStatsRepository:
                 return True
 
         return False
+
+    def get_data_range(self) -> Optional[dict]:
+        """
+        Get the actual data range (min and max dates) from daily_stats.
+
+        This method returns the real date range of data in the database,
+        which can be used by the frontend "All" button to show the actual
+        data span instead of a hardcoded 365 days.
+
+        The data range is always global (not filtered by host) by design.
+        The "All" button represents the system's complete data range,
+        providing a consistent global perspective even when users switch
+        between hosts.
+
+        Returns:
+            Optional[Dict]: Data range with min_date and max_date, or None if table is empty.
+            Example: {"min_date": "2024-01-01", "max_date": "2024-12-31"}
+        """
+        query = """
+            SELECT
+                MIN(date) as min_date,
+                MAX(date) as max_date
+            FROM daily_stats
+        """
+
+        result = self.db.fetch_one(query)
+
+        if not result or not result.get("min_date"):
+            return None
+
+        return {
+            "min_date": result["min_date"],
+            "max_date": result["max_date"],
+        }
 
     def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
         """

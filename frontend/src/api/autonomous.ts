@@ -172,9 +172,7 @@ export interface WorkflowListResponse {
 
 export const autonomousApi = {
   // Workflow CRUD
-  async createWorkflow(
-    data: CreateWorkflowRequest
-  ): Promise<{
+  async createWorkflow(data: CreateWorkflowRequest): Promise<{
     success: boolean;
     workflow: AutonomousWorkflow;
     workflows?: AutonomousWorkflow[];

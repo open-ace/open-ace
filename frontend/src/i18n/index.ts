@@ -390,6 +390,16 @@ const translations: Record<Language, Translations> = {
     tokenTrend: 'Token Trend',
     topTools: 'Top Tools',
     userSegmentation: 'User Segmentation',
+    userSegmentationHigh: 'High Usage',
+    userSegmentationMedium: 'Medium Usage',
+    userSegmentationLow: 'Low Usage',
+    userSegmentationDormant: 'Dormant',
+    userSegmentationHighDesc: 'Token > 10K, Power Users',
+    userSegmentationMediumDesc: 'Token 1K-10K, Regular Users',
+    userSegmentationLowDesc: 'Token < 1K, Occasional Users',
+    userSegmentationDormantDesc: 'Inactive Recently',
+    userSegmentationStandard:
+      'User Segmentation Standard: Based on Token usage. High Usage (>10K), Medium Usage (1K-10K), Low Usage (<1K), Dormant (no recent activity)',
     toolComparison: 'Tool Comparison',
 
     // Request Statistics
@@ -1459,6 +1469,16 @@ const translations: Record<Language, Translations> = {
     tokenTrend: 'Token 趋势',
     topTools: '热门工具',
     userSegmentation: '用户分层',
+    userSegmentationHigh: '高使用量',
+    userSegmentationMedium: '中等使用量',
+    userSegmentationLow: '低使用量',
+    userSegmentationDormant: '休眠',
+    userSegmentationHighDesc: 'Token > 10K，重度用户',
+    userSegmentationMediumDesc: 'Token 1K-10K，定期使用',
+    userSegmentationLowDesc: 'Token < 1K，偶尔使用',
+    userSegmentationDormantDesc: '近期未使用',
+    userSegmentationStandard:
+      '用户分层标准：基于 Token 使用量划分。高使用量（>10K）、中等使用量（1K-10K）、低使用量（<1K）、休眠用户（近期无活动）',
     toolComparison: '工具对比',
 
     // Request Statistics
@@ -2524,6 +2544,16 @@ const translations: Record<Language, Translations> = {
     tokenTrend: 'トークントレンド',
     topTools: 'トップツール',
     userSegmentation: 'ユーザーセグメンテーション',
+    userSegmentationHigh: '高使用量',
+    userSegmentationMedium: '中程度使用量',
+    userSegmentationLow: '低使用量',
+    userSegmentationDormant: '休眠',
+    userSegmentationHighDesc: 'Token > 10K、ヘビーユーザー',
+    userSegmentationMediumDesc: 'Token 1K-10K、定期利用',
+    userSegmentationLowDesc: 'Token < 1K、時々利用',
+    userSegmentationDormantDesc: '最近未使用',
+    userSegmentationStandard:
+      'ユーザー層別基準：Token使用量に基づく。高使用量（>10K）、中程度（1K-10K）、低使用量（<1K）、休眠（最近の活動なし）',
     toolComparison: 'ツール比較',
 
     // Sessions
@@ -3274,6 +3304,16 @@ const translations: Record<Language, Translations> = {
     tokenTrend: '토큰 트렌드',
     topTools: '상위 도구',
     userSegmentation: '사용자 세그먼테이션',
+    userSegmentationHigh: '높은 사용량',
+    userSegmentationMedium: '보통 사용량',
+    userSegmentationLow: '낮은 사용량',
+    userSegmentationDormant: '휴면',
+    userSegmentationHighDesc: 'Token > 10K, 파워 유저',
+    userSegmentationMediumDesc: 'Token 1K-10K, 정기 사용자',
+    userSegmentationLowDesc: 'Token < 1K, 가끔 사용자',
+    userSegmentationDormantDesc: '최근 미사용',
+    userSegmentationStandard:
+      '사용자 세그먼테이션 기준: Token 사용량 기반. 높은 사용량 (>10K), 보통 (1K-10K), 낮은 사용량 (<1K), 휴면 (최근 활동 없음)',
     toolComparison: '도구 비교',
 
     // Sessions

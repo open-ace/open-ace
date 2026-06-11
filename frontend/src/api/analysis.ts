@@ -103,6 +103,12 @@ export interface AnomalyTrendResponse {
   total_anomalies: number;
 }
 
+// Data range type
+export interface DataRange {
+  min_date: string;
+  max_date: string;
+}
+
 // Batch response type
 export interface BatchAnalysisResponse {
   key_metrics: KeyMetrics;
@@ -112,6 +118,7 @@ export interface BatchAnalysisResponse {
   conversation_stats: ConversationStats;
   tool_comparison: ToolComparison;
   user_segmentation: UserSegmentation;
+  data_range?: DataRange;
 }
 
 // API

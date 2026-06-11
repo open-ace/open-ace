@@ -70,3 +70,29 @@ class TestDailyStats:
 
         rows = pg_db.fetch_all("SELECT * FROM hourly_stats WHERE date = %s", ("2025-06-15",))
         assert len(rows) >= 1
+
+    def test_get_data_range(self, pg_db):
+        """Test get_data_range returns the actual date range from database."""
+        repo = DailyStatsRepository(db=pg_db)
+        # Insert data spanning multiple dates
+        _insert_daily_message(pg_db, "2025-06-10", tokens=100)
+        _insert_daily_message(pg_db, "2025-06-15", tokens=200)
+        _insert_daily_message(pg_db, "2025-06-20", tokens=150)
+
+        # Refresh stats to populate daily_stats table
+        repo.refresh_stats()
+
+        # Get data range
+        result = repo.get_data_range()
+        assert result is not None
+        assert result["min_date"] == "2025-06-10"
+        assert result["max_date"] == "2025-06-20"
+
+    def test_get_data_range_empty_table(self, pg_db):
+        """Test get_data_range returns None when daily_stats is empty."""
+        repo = DailyStatsRepository(db=pg_db)
+        # Ensure daily_stats is empty
+        pg_db.execute("DELETE FROM daily_stats")
+
+        result = repo.get_data_range()
+        assert result is None

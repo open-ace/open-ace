@@ -240,24 +240,30 @@ class TestAgentTaskResult:
     def test_default_values(self):
         r = AgentTaskResult()
         assert r.session_id == ""
+        assert r.tracking_session_id == ""
         assert r.response_text == ""
         assert r.success is False
         assert r.error is None
         assert r.total_tokens == 0
+        assert r.request_count == 0
         assert r.messages == []
         assert r.tool_calls == []
 
     def test_success_result(self):
         r = AgentTaskResult(
             session_id="sess-1",
+            tracking_session_id="track-1",
             response_text="Done",
             total_tokens=500,
             total_input_tokens=300,
             total_output_tokens=200,
+            request_count=3,
             success=True,
         )
         assert r.success is True
+        assert r.tracking_session_id == "track-1"
         assert r.total_tokens == 500
+        assert r.request_count == 3
 
     def test_error_result(self):
         r = AgentTaskResult(

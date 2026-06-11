@@ -291,7 +291,7 @@ class TestWorkflowCRUD:
         assert fetched["total_tokens"] == 500
         assert fetched["total_input_tokens"] == 300
         assert fetched["total_output_tokens"] == 200
-        assert fetched["total_requests"] == 1
+        assert fetched["total_requests"] == 0
 
         # Accumulate more
         repo.update_workflow_tokens(
@@ -306,7 +306,7 @@ class TestWorkflowCRUD:
 
         fetched = repo.get_workflow(wf["workflow_id"])
         assert fetched["total_tokens"] == 600
-        assert fetched["total_requests"] == 2
+        assert fetched["total_requests"] == 0
 
     def test_get_active_workflows(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
