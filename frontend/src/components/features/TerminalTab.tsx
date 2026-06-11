@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
-import { useLanguage } from '@/store';
+import { useLanguage, useTheme } from '@/store';
 import { t } from '@/i18n';
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -39,6 +39,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   onReattachNeeded,
 }) => {
   const language = useLanguage();
+  const theme = useTheme();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -206,16 +207,27 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       const { FitAddon } = await import('@xterm/addon-fit');
       const { WebLinksAddon } = await import('@xterm/addon-web-links');
 
+      // Dynamic theme based on application theme mode (Issue #637)
+      const terminalTheme =
+        theme === 'dark'
+          ? {
+              background: '#1e1e2e',
+              foreground: '#cdd6f4',
+              cursor: '#f5e0dc',
+              selectionBackground: '#585b7066',
+            }
+          : {
+              background: '#ffffff',
+              foreground: '#1e1e2e',
+              cursor: '#1e1e2e',
+              selectionBackground: '#add8e666',
+            };
+
       terminal = new Terminal({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: {
-          background: '#1e1e2e',
-          foreground: '#cdd6f4',
-          cursor: '#f5e0dc',
-          selectionBackground: '#585b7066',
-        },
+        theme: terminalTheme,
         allowProposedApi: true,
       });
 
@@ -261,7 +273,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         terminal.dispose();
       }
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   // Connect when xterm is ready or wsUrl/token change
   useEffect(() => {
@@ -320,6 +333,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   // Always render terminal div to allow xterm.js initialization
   // The terminal will show "waiting for connection" state if wsUrl is empty
 
+  // Dynamic styles based on theme (Issue #637)
+  const terminalBgColor = theme === 'dark' ? '#1e1e2e' : '#ffffff';
+  const statusBarBgColor = theme === 'dark' ? '#181825' : '#f8fafc';
+  const statusBarBorderColor = theme === 'dark' ? '#313244' : '#e2e8f0';
+  const statusBarTextColor = theme === 'dark' ? '#a6adc8' : '#475569';
+
   return (
     <div className="d-flex flex-column h-100">
       {/* Terminal area */}
@@ -327,7 +346,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         ref={terminalRef}
         className="flex-grow-1"
         style={{
-          backgroundColor: '#1e1e2e',
+          backgroundColor: terminalBgColor,
           padding: '4px',
           minHeight: 0,
         }}
@@ -337,10 +356,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       <div
         className="d-flex align-items-center px-2 py-1"
         style={{
-          backgroundColor: '#181825',
-          borderTop: '1px solid #313244',
+          backgroundColor: statusBarBgColor,
+          borderTop: `1px solid ${statusBarBorderColor}`,
           fontSize: '0.75rem',
-          color: '#a6adc8',
+          color: statusBarTextColor,
           flexShrink: 0,
         }}
       >
