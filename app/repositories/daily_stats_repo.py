@@ -16,6 +16,12 @@ from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
+# SQL-layer equivalent of is_valid_sender() from app/utils/senders.py.
+# Filters out sender names that look like system-generated IDs (e.g., Feishu Open IDs).
+# Keep in sync with _INVALID_SENDER_PATTERNS in senders.py.
+FEISHU_FILTER_SQL = "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)"
+FEISHU_FILTER_SQL_DS = "NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)"
+
 
 class DailyStatsRepository:
     """Repository for pre-aggregated daily statistics."""
@@ -268,8 +274,8 @@ class DailyStatsRepository:
             params.append(host_name)
 
         # Filter out Feishu Open IDs (ou_ prefix + length > 10)
-        # Keep in sync with app/utils/senders.py is_valid_sender()
-        conditions.append("NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)")
+        # Uses module-level constant to stay in sync with other filter sites
+        conditions.append(FEISHU_FILTER_SQL_DS)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
@@ -395,6 +401,15 @@ class DailyStatsRepository:
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.
 
+        NOTE: The returned ``total_conversations`` is an approximation
+        (``unique_dates * unique_tools``) and is NOT a real count.  The
+        actual caller ``AnalysisService.get_batch_analysis()`` overrides
+        this value with the real conversation count obtained from
+        ``message_repo.count_conversations()`` which queries
+        ``daily_messages`` directly.  The ``average_*`` fields here are
+        also based on the approximation and should not be treated as
+        accurate per-session averages.
+
         Args:
             host_name: Optional host name filter.
 
@@ -508,10 +523,6 @@ class DailyStatsRepository:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        # Feishu ID filter condition for unique_users (keep in sync with is_valid_sender)
-        # Exclude sender_name starting with "ou_" and longer than 10 chars
-        feishu_filter = "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)"
-
         if is_postgresql():
             # PostgreSQL: use subquery for user_id resolution
             # Fallback to sender_name when user_id cannot be resolved
@@ -523,7 +534,7 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {FEISHU_FILTER_SQL} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
@@ -544,7 +555,7 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {FEISHU_FILTER_SQL} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username

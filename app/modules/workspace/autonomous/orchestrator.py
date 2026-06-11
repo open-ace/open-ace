@@ -2018,6 +2018,18 @@ class AutonomousOrchestrator:
 
             commit_sha = ""
             try:
+                # Auto-commit any uncommitted changes left by the agent
+                # (agent may not have permission to run git commit under acceptEdits mode)
+                if gh.has_uncommitted_changes():
+                    logger.info(
+                        "PR fixes left uncommitted changes, auto-committing (round %d)",
+                        round_num,
+                    )
+                    gh.git_add_all()
+                    gh.git_commit(
+                        f"auto: PR fixes round {round_num}",
+                        no_verify=True,
+                    )
                 gh.git_push()
                 commit_sha = gh.get_current_commit()
             except Exception:

@@ -99,6 +99,10 @@ class AnalysisService:
             _executor.submit(
                 self.daily_stats_repo.get_data_range
             ): "data_range",
+            _executor.submit(
+                self.message_repo.count_conversations, start_date=start_date, end_date=end_date,
+                host_name=host_name
+            ): "real_conversation_count",
         }
 
         # Collect results
@@ -109,7 +113,12 @@ class AnalysisService:
                 results[key] = future.result()
             except Exception as e:
                 logger.error(f"Query {key} failed: {e}")
-                results[key] = {} if key in ["aggregates", "conversation_stats"] else []
+                if key == "real_conversation_count":
+                    results[key] = 0
+                elif key in ["aggregates", "conversation_stats"]:
+                    results[key] = {}
+                else:
+                    results[key] = []
 
         # Extract results
         aggregates = results.get("aggregates", {})
@@ -120,6 +129,7 @@ class AnalysisService:
         conversation_stats = results.get("conversation_stats", {})
         total_requests = results.get("total_requests", 0)
         data_range = results.get("data_range")
+        real_conversation_count = results.get("real_conversation_count", 0)
 
         # Use aggregates directly instead of computing from raw data
         total_tokens = aggregates.get("total_tokens", 0)
@@ -139,8 +149,8 @@ class AnalysisService:
             for tool, count in sorted(merged_tools.items(), key=lambda x: -x[1])[:5]:
                 top_tools.append({"tool": tool, "count": count})
 
-        # Sessions = unique days * unique tools (approximation)
-        total_sessions = aggregates.get("unique_days", 1) * unique_tools if unique_tools > 0 else 1
+        # Use real conversation count from daily_messages instead of approximation
+        total_sessions = real_conversation_count if real_conversation_count > 0 else 1
 
         # Key metrics
         key_metrics = {
@@ -160,6 +170,13 @@ class AnalysisService:
             ),
             "date_range": {"start": start_date, "end": end_date},
         }
+
+        # Override conversation_stats total_conversations with real count from daily_messages
+        # Note: We do NOT recalculate average_* fields in conversation_stats because
+        # get_conversation_stats() does not accept date filters (constraint C2),
+        # so its total_messages/total_tokens are full-range while count_conversations
+        # is date-filtered. Use key_metrics avg_* for accurate per-session averages.
+        conversation_stats["total_conversations"] = real_conversation_count
 
         # Daily/Hourly usage - use pre-aggregated data
         daily_totals = {}
@@ -223,7 +240,7 @@ class AnalysisService:
                 continue
             users.append(
                 {
-                    "user_id": i + 1,
+                    "user_id": len(users) + 1,
                     "username": username,
                     "tokens": user_data.get("total_tokens", 0),
                     "requests": user_data.get("message_count", 0),
