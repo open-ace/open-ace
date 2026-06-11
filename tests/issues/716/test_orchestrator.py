@@ -415,7 +415,13 @@ class TestOrchestratorPlanning:
 
         # Review says not approved
         plan_result = _make_agent_result(text="Plan v1")
-        review_result = _make_agent_result(text="There are issues with this plan. Needs work.")
+        review_result = _make_agent_result(
+            text=(
+                "There are issues with this plan. It is missing rollback handling, "
+                "test coverage details, and concrete implementation sequencing. "
+                "Needs another refinement pass."
+            )
+        )
         orch._runner = MagicMock()
         orch._runner.run_agent_task.side_effect = [plan_result, review_result]
         orch._gh = mock_gh

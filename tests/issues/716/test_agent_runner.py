@@ -8,7 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+from app.modules.workspace.autonomous.agent_runner import (
+    AutonomousAgentRunner,
+    _LocalSession,
+    _ensure_usage_parser,
+)
 
 
 class TestAgentRunnerInit:
@@ -38,6 +42,10 @@ class TestAgentRunnerRunTask:
     def setup_method(self):
         self.sm = MagicMock()
         self.runner = AutonomousAgentRunner(session_manager=self.sm)
+        # Reset cached usage parser so each test re-imports via mock
+        import app.modules.workspace.autonomous.agent_runner as _ar_mod
+
+        _ar_mod._extract_stream_usage = None
 
     def test_run_local_missing_executable(self):
         """Should fail gracefully when CLI tool not found."""
@@ -45,8 +53,12 @@ class TestAgentRunnerRunTask:
         mock_adapter.get_executable_name.return_value = "nonexistent-tool"
         mock_cli_adapters = MagicMock()
         mock_cli_adapters.get_adapter.return_value = mock_adapter
+        mock_usage_parser = MagicMock()
 
-        with patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}):
+        with patch.dict(
+            "sys.modules",
+            {"cli_adapters": mock_cli_adapters, "cli_adapters.usage_parser": mock_usage_parser},
+        ):
             with patch("shutil.which", return_value=None):
                 result = self.runner.run_agent_task(
                     workflow_id="wf-1",
@@ -66,6 +78,20 @@ class TestAgentRunnerRunTask:
         mock_adapter.build_start_args.return_value = ["test-tool", "--model", "m1"]
         mock_cli_adapters = MagicMock()
         mock_cli_adapters.get_adapter.return_value = mock_adapter
+        mock_usage_parser = MagicMock()
+
+        def _fake_extract_usage(cli_tool, parsed):
+            """Simulate the usage parser extracting tokens from a result event."""
+            data = parsed.get("data", {})
+            usage = data.get("usage") if isinstance(data, dict) else None
+            if not isinstance(usage, dict):
+                return None
+            return {
+                "input": int(usage.get("input_tokens", 0) or 0),
+                "output": int(usage.get("output_tokens", 0) or 0),
+            }
+
+        mock_usage_parser.extract_stream_usage = _fake_extract_usage
 
         # Build stdout lines that simulate a real agent session:
         # assistant text -> tool_use -> result with usage
@@ -94,7 +120,10 @@ class TestAgentRunnerRunTask:
         mock_stderr = MagicMock()
         mock_stderr.readline = MagicMock(return_value=b"")
 
-        with patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}):
+        with patch.dict(
+            "sys.modules",
+            {"cli_adapters": mock_cli_adapters, "cli_adapters.usage_parser": mock_usage_parser},
+        ):
             with patch("shutil.which", return_value="/usr/bin/test-tool"):
                 with patch("subprocess.Popen") as mock_popen:
                     proc = MagicMock()
@@ -230,6 +259,24 @@ class TestStdoutParsing:
     def setup_method(self):
         self.runner = AutonomousAgentRunner()
         self.mock_process = MagicMock()
+        # Provide a real-ish usage parser for _read_stdout
+        import app.modules.workspace.autonomous.agent_runner as _ar_mod
+
+        def _fake_extract(cli_tool, parsed):
+            data = parsed.get("data", {})
+            usage = data.get("usage") if isinstance(data, dict) else None
+            if not isinstance(usage, dict):
+                msg = parsed.get("message", {})
+                if isinstance(msg, dict):
+                    usage = msg.get("usage")
+            if not isinstance(usage, dict):
+                return None
+            return {
+                "input": int(usage.get("input_tokens", 0) or 0),
+                "output": int(usage.get("output_tokens", 0) or 0),
+            }
+
+        _ar_mod._extract_stream_usage = _fake_extract
 
     def _run_read_stdout(self, lines):
         """Helper: create a session with mock stdout containing the given lines, then call _read_stdout."""

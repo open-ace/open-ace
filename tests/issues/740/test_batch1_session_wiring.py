@@ -148,7 +148,10 @@ class TestSessionManagerWiring:
 
             AutonomousOrchestrator("test-wf-id")
 
-            mock_runner_cls.assert_called_once_with(session_manager=mock_sm)
+            mock_runner_cls.assert_called_once_with(
+                session_manager=mock_sm,
+                activity_callback=mock_runner_cls.call_args[1]["activity_callback"],
+            )
 
     def test_session_manager_none_triggers_default(self):
         """Without our fix, runner would get session_manager=None (regression guard)."""
@@ -603,7 +606,7 @@ class TestStopPauseCancelsTask:
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
