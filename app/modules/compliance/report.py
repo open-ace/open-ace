@@ -1020,6 +1020,11 @@ class ReportGenerator:
                     INSERT INTO compliance_reports
                     (report_id, report_type, generated_at, period_start, period_end,
                      generated_by, tenant_id, report_data)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """ if self.db.is_postgresql else """
+                    INSERT INTO compliance_reports
+                    (report_id, report_type, generated_at, period_start, period_end,
+                     generated_by, tenant_id, report_data)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
@@ -1045,33 +1050,38 @@ class ReportGenerator:
     def get_saved_reports(
         self, report_type: Optional[str] = None, tenant_id: Optional[int] = None, limit: int = 50
     ) -> list[dict[str, Any]]:
-        """Get saved reports."""
+        """Get saved reports.
+
+        Raises:
+            Exception: If database query fails.
+        """
+        conditions = []
+        params: list[Any] = []
+
+        if report_type:
+            conditions.append("report_type = ?")
+            params.append(report_type)
+
+        if tenant_id:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        query = f"""
+            SELECT report_id, report_type, generated_at, period_start, period_end
+            FROM compliance_reports
+            WHERE {where_clause}
+            ORDER BY generated_at DESC
+            LIMIT ?
+        """
+
         try:
-            conditions = []
-            params: list[Any] = []
-
-            if report_type:
-                conditions.append("report_type = ?")
-                params.append(report_type)
-
-            if tenant_id:
-                conditions.append("tenant_id = ?")
-                params.append(tenant_id)
-
-            where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-            query = f"""
-                SELECT report_id, report_type, generated_at, period_start, period_end
-                FROM compliance_reports
-                WHERE {where_clause}
-                ORDER BY generated_at DESC
-                LIMIT ?
-            """
-
             rows = self.db.fetch_all(query, tuple(params + [limit]))
             return [dict(r) for r in rows]
-        except Exception:
-            return []
+        except Exception as e:
+            logger.error(f"Failed to query saved reports: {e}")
+            raise
 
     def get_saved_report(self, report_id: str) -> Optional[ComplianceReport]:
         """Get a saved report by ID."""

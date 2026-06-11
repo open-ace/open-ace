@@ -211,6 +211,8 @@ export const ComplianceMgmt: React.FC = () => {
       const reports = await complianceApi.getSavedReports();
       setSavedReports(reports);
     } catch (err) {
+      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to generate report';
+      setReportsError(errorMessage);
       console.error('Failed to generate report:', err);
     } finally {
       setIsGenerating(false);
