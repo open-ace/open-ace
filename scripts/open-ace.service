@@ -17,7 +17,7 @@ StandardError=journal
 # Environment variables
 Environment=AI_TOKEN_WEB_PORT=__PORT__
 Environment=AI_TOKEN_WEB_HOST=__HOST__
-Environment=HOME=/home/__USER__
+Environment=HOME=__HOME__
 
 # Security settings
 NoNewPrivileges=true

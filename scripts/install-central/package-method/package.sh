@@ -470,7 +470,8 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
         # Download packages for current Python version
         # Wheels will match the packaging machine's Python version
         # Use --only-binary=:all: to avoid source builds that may fail on older systems
-        # Note: If target system has different Python version, install.sh will fall back to network install
+        # Warning: If target system has different Python version, vendor wheels will not install.
+        #          Ensure packaging and target systems use the same Python version.
         echo -e "${YELLOW}Downloading packages for current Python version...${NC}"
 
         # Use --prefer-binary only if pip version >= 20

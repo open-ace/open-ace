@@ -1830,6 +1830,15 @@ install_systemd_service() {
     # Get user's primary group
     local group=$(id -gn "$user")
 
+    # Get user's HOME directory dynamically (handles non-standard paths like /var/lib/username)
+    local home_dir=$(getent passwd "$user" | cut -d: -f6)
+    if [ -z "$home_dir" ]; then
+        # Fallback to standard path if getent fails
+        home_dir="/home/$user"
+        print_warning "Could not determine HOME directory for $user, using fallback: $home_dir"
+    fi
+    print_info "User HOME directory: $home_dir"
+
     # Detect Python path (use the same Python that runs the install script)
     local python_path=""
     if command -v python3 &>/dev/null; then
@@ -1850,6 +1859,7 @@ install_systemd_service() {
         -e "s|__PORT__|$port|g" \
         -e "s|__HOST__|$host|g" \
         -e "s|__PYTHON__|$python_path|g" \
+        -e "s|__HOME__|$home_dir|g" \
         "$service_template" > "$service_file"
 
     if [ $? -ne 0 ]; then
@@ -1925,6 +1935,16 @@ install_systemd_service_remote() {
     # Get user's primary group
     local group=$(id -gn "$user")
 
+    # Get user's HOME directory dynamically from remote system
+    print_info "Detecting HOME directory on remote system..."
+    local home_dir=$(ssh "$remote" "getent passwd '$user' | cut -d: -f6")
+    if [ -z "$home_dir" ]; then
+        # Fallback to standard path if getent fails
+        home_dir="/home/$user"
+        print_warning "Could not determine HOME directory for $user on remote, using fallback: $home_dir"
+    fi
+    print_info "User HOME directory on remote: $home_dir"
+
     # Detect Python path on remote system
     print_info "Detecting Python on remote system..."
     local python_path=$(ssh "$remote" "which python3 || which python")
@@ -1941,6 +1961,7 @@ install_systemd_service_remote() {
         -e "s|__PORT__|$port|g" \
         -e "s|__HOST__|$host|g" \
         -e "s|__PYTHON__|$python_path|g" \
+        -e "s|__HOME__|$home_dir|g" \
         "$service_template")
 
     # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
