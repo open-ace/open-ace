@@ -68,17 +68,31 @@ def navigate_to_analysis(page):
 def change_language(page, language_code):
     """Change the language setting."""
     print(f"\n[Language] Changing to {language_code}...")
-    # Find language dropdown
-    lang_dropdown = page.locator('[data-testid="language-select"], .language-dropdown, select[id*="language"]')
-    if lang_dropdown.count() > 0:
-        lang_dropdown.first.select_option(language_code)
-        time.sleep(1)
-    else:
-        # Try clicking language button in navbar
-        lang_btn = page.locator(f'button:has-text("{language_code.upper()}"), a:has-text("{language_code.upper()}")')
-        if lang_btn.count() > 0:
-            lang_btn.first.click()
-            time.sleep(1)
+    # Find language dropdown in header (globe icon dropdown)
+    globe_icon = page.locator('.bi-globe').first
+    if globe_icon.is_visible():
+        globe_icon.click()
+        time.sleep(0.5)
+
+        # Find the dropdown item for the specified language
+        # Language codes: en, zh, ja, ko
+        language_names = {
+            'en': ['English', '英语'],
+            'zh': ['Chinese', '中文'],
+            'ja': ['Japanese', '日语'],
+            'ko': ['Korean', '韩语']
+        }
+
+        for name in language_names.get(language_code, [language_code]):
+            lang_option = page.locator('.dropdown-item').filter(has_text=name)
+            if lang_option.count() > 0:
+                lang_option.first.click()
+                time.sleep(1)
+                print(f"  ✓ Language changed to {language_code}")
+                return True
+
+    print("  ⚠ Language change not successful")
+    return False
 
 
 def test_user_segmentation_tooltip():
