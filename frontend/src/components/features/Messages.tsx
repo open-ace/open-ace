@@ -7,7 +7,7 @@ import { cn } from '@/utils';
 import { useMessages, useMessageCount, useHosts, useSenders, useTools } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, Select, SearchableSelect, Loading, Error, EmptyState } from '@/components/common';
+import { Card, Select, SearchableSelect, Loading, Error, EmptyState, Pagination } from '@/components/common';
 import { formatDateTime, formatDate, formatTokens, formatToolName } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
@@ -182,7 +182,7 @@ export const Messages: React.FC = () => {
                 onChange={(e) => handleRoleChange('user', e.target.checked)}
               />
               <label className="form-check-label" htmlFor="roleUser">
-                User
+                {t('messageRoleUser', language)}
               </label>
             </div>
             <div className="form-check form-check-inline mb-0">
@@ -194,7 +194,7 @@ export const Messages: React.FC = () => {
                 onChange={(e) => handleRoleChange('assistant', e.target.checked)}
               />
               <label className="form-check-label" htmlFor="roleAssistant">
-                Assistant
+                {t('messageRoleAssistant', language)}
               </label>
             </div>
             <div className="form-check form-check-inline mb-0">
@@ -206,7 +206,7 @@ export const Messages: React.FC = () => {
                 onChange={(e) => handleRoleChange('system', e.target.checked)}
               />
               <label className="form-check-label" htmlFor="roleSystem">
-                System
+                {t('messageRoleSystem', language)}
               </label>
             </div>
           </div>
@@ -260,40 +260,12 @@ export const Messages: React.FC = () => {
 
           {/* Pagination */}
           {pagination && pagination.totalPages > 1 && (
-            <div className="d-flex justify-content-center mt-4">
-              <nav>
-                <ul className="pagination">
-                  <li className={cn('page-item', page === 1 && 'disabled')}>
-                    <button
-                      className="page-link"
-                      onClick={() => setPage(page - 1)}
-                      disabled={page === 1}
-                    >
-                      Previous
-                    </button>
-                  </li>
-                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button className="page-link" onClick={() => setPage(pageNum)}>
-                          {pageNum}
-                        </button>
-                      </li>
-                    );
-                  })}
-                  <li className={cn('page-item', page === pagination.totalPages && 'disabled')}>
-                    <button
-                      className="page-link"
-                      onClick={() => setPage(page + 1)}
-                      disabled={page === pagination.totalPages}
-                    >
-                      Next
-                    </button>
-                  </li>
-                </ul>
-              </nav>
-            </div>
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+              className="mt-4"
+            />
           )}
         </>
       )}

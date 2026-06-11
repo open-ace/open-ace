@@ -1679,8 +1679,6 @@ def get_ddl_statements() -> list[str]:
         "CREATE INDEX IF NOT EXISTS idx_registration_tokens_hash ON registration_tokens(token_hash)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tokens_machine ON agent_tokens(machine_id)",
-        # --- ALTER TABLE for legacy_mode column (idempotent) ---
-        "ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0",
     ]
 
 

@@ -358,42 +358,7 @@ def _get_pg_base_url():
 
 def _create_pg_tables(db):
     """Create all tables needed by integration tests (PostgreSQL DDL)."""
-    conn = db.get_connection()
-    try:
-        cursor = conn.cursor()
-
-        # Reuse DDL functions that already emit PostgreSQL-compatible SQL
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
-        from app.modules.sso.manager import get_ddl_statements as sso_ddl
-        from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
-        from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
-        from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
-        from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
-        from app.services.auth_service import get_ddl_statements as auth_ddl
-        from app.services.permission_service import get_ddl_statements as ps_ddl
-
-        for ddl_fn in [
-            sm_ddl,
-            collab_ddl,
-            pl_ddl,
-            akp_ddl,
-            ram_ddl,
-            sso_ddl,
-            ret_ddl,
-            ps_ddl,
-            auth_ddl,
-        ]:
-            try:
-                for sql in ddl_fn():
-                    cursor.execute(sql)
-            except Exception as exc:
-                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
-
-        conn.commit()
-    finally:
-        conn.close()
-
+    # First, create base tables that DDL functions depend on (tenants, users)
     conn = db.get_connection()
     try:
         cursor = conn.cursor()
@@ -653,6 +618,43 @@ def _create_pg_tables(db):
             )
         """
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Second, execute DDL functions that depend on base tables
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Reuse DDL functions that already emit PostgreSQL-compatible SQL
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
+        from app.modules.sso.manager import get_ddl_statements as sso_ddl
+        from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
+        from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
+        from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
+        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
+        from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
+        from app.services.auth_service import get_ddl_statements as auth_ddl
+        from app.services.permission_service import get_ddl_statements as ps_ddl
+
+        for ddl_fn in [
+            sm_ddl,
+            collab_ddl,
+            pl_ddl,
+            akp_ddl,
+            ram_ddl,
+            sso_ddl,
+            ret_ddl,
+            ps_ddl,
+            auth_ddl,
+        ]:
+            try:
+                for sql in ddl_fn():
+                    cursor.execute(sql)
+            except Exception as exc:
+                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
+
         conn.commit()
     finally:
         conn.close()
