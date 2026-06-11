@@ -718,6 +718,46 @@ class DailyStatsRepository:
 
         return False
 
+    def get_data_range(self, host_name: Optional[str] = None) -> Optional[dict]:
+        """
+        Get the actual data range (min and max dates) from daily_stats.
+
+        This method returns the real date range of data in the database,
+        which can be used by the frontend "All" button to show the actual
+        data span instead of a hardcoded 365 days.
+
+        Note: This method does NOT apply host_name filter by design.
+        The "All" button should represent the system's complete data range,
+        not filtered by host. This provides a consistent global perspective
+        even when users switch between hosts.
+
+        Args:
+            host_name: Optional host name filter (not used in implementation).
+
+        Returns:
+            Optional[Dict]: Data range with min_date and max_date, or None if table is empty.
+            Example: {"min_date": "2024-01-01", "max_date": "2024-12-31"}
+        """
+        # Query min and max dates from daily_stats
+        # Note: We intentionally ignore host_name filter here
+        # to provide global data range perspective
+        query = """
+            SELECT
+                MIN(date) as min_date,
+                MAX(date) as max_date
+            FROM daily_stats
+        """
+
+        result = self.db.fetch_one(query)
+
+        if not result or not result.get("min_date"):
+            return None
+
+        return {
+            "min_date": result["min_date"],
+            "max_date": result["max_date"],
+        }
+
     def refresh_hourly_stats(self, date: Optional[str] = None) -> bool:
         """
         Refresh hourly_stats from daily_messages.

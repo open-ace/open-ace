@@ -477,3 +477,59 @@ class TestDailyStatsRepository:
         self.db.execute.side_effect = Exception("DB error")
         result = self.repo.refresh_hourly_stats()
         assert result is False
+
+    # -------------------------------------------------------------------------
+    # get_data_range
+    # -------------------------------------------------------------------------
+
+    def test_get_data_range_basic(self):
+        """Test get_data_range returns min and max dates."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        result = self.repo.get_data_range()
+        assert result is not None
+        assert result["min_date"] == "2024-01-01"
+        assert result["max_date"] == "2024-12-31"
+
+    def test_get_data_range_empty_table(self):
+        """Test get_data_range returns None when table is empty."""
+        self.db.fetch_one.return_value = {"min_date": None, "max_date": None}
+        result = self.repo.get_data_range()
+        assert result is None
+
+    def test_get_data_range_no_result(self):
+        """Test get_data_range returns None when query returns no result."""
+        self.db.fetch_one.return_value = None
+        result = self.repo.get_data_range()
+        assert result is None
+
+    def test_get_data_range_query_structure(self):
+        """Test that get_data_range uses correct SQL structure."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        self.repo.get_data_range()
+        query = self.db.fetch_one.call_args[0][0]
+        # Should query MIN and MAX of date column
+        assert "MIN(date)" in query
+        assert "MAX(date)" in query
+        assert "FROM daily_stats" in query
+        # Should NOT have WHERE clause (global data range)
+        assert "WHERE" not in query
+
+    def test_get_data_range_ignores_host_filter(self):
+        """Test that get_data_range intentionally ignores host_name parameter."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        # Pass host_name parameter (should be ignored)
+        result = self.repo.get_data_range(host_name="host1")
+        assert result is not None
+        # Query should NOT contain host_name filter
+        query = self.db.fetch_one.call_args[0][0]
+        assert "host_name" not in query
+        assert "WHERE" not in query
