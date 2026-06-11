@@ -45,6 +45,7 @@ class AutonomousScheduler:
         self._stop_event = threading.Event()
         self._in_progress_ids: set[str] = set()
         self._in_progress_batch_ids: set[str] = set()  # Track batches being processed
+        self._in_progress_paths: set[str] = set()  # Track project paths being processed
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -103,9 +104,10 @@ class AutonomousScheduler:
         lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
         repo = _get_repo()
 
-        # Get workflow's batch_id for cleanup
+        # Get workflow's batch_id and project_path for cleanup
         workflow = repo.get_workflow(workflow_id)
         batch_id = workflow.get("batch_id") if workflow else None
+        project_path = workflow.get("project_path", "") if workflow else ""
 
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
@@ -114,6 +116,8 @@ class AutonomousScheduler:
                 self._in_progress_ids.discard(workflow_id)
                 if batch_id:
                     self._in_progress_batch_ids.discard(batch_id)
+                if project_path:
+                    self._in_progress_paths.discard(project_path)
             return workflow_id
 
         orchestrator = None
@@ -141,6 +145,8 @@ class AutonomousScheduler:
                 self._in_progress_ids.discard(workflow_id)
                 if batch_id:
                     self._in_progress_batch_ids.discard(batch_id)
+                if project_path:
+                    self._in_progress_paths.discard(project_path)
         return workflow_id
 
     @staticmethod
@@ -197,7 +203,8 @@ class AutonomousScheduler:
     def _process_workflows(self):
         """Find and process active workflows using thread pool for concurrency.
 
-        For batch workflows, ensures only one workflow per batch is processed at a time
+        For batch workflows, ensures only one workflow per batch is processed at a time.
+        Additionally, ensures only one workflow per project_path is processed at a time
         to prevent git conflicts when multiple workflows share the same project directory.
         """
         from app.routes.autonomous import _get_repo
@@ -211,8 +218,9 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
-        # Filter out paused, already-in-progress workflows, and batch workflows
-        # whose batch is already being processed
+        # Filter out paused, already-in-progress workflows, batch workflows
+        # whose batch is already being processed, and workflows whose
+        # project_path is already being processed by another workflow
         with self._in_progress_lock:
             active = []
             for wf in workflows:
@@ -223,6 +231,10 @@ class AutonomousScheduler:
                 # For batch workflows, check if the batch is already being processed
                 batch_id = wf.get("batch_id")
                 if batch_id and batch_id in self._in_progress_batch_ids:
+                    continue
+                # Check if the project_path is already being processed
+                project_path = wf.get("project_path", "")
+                if project_path and project_path in self._in_progress_paths:
                     continue
                 active.append(wf)
 
@@ -244,13 +256,16 @@ class AutonomousScheduler:
         if not to_process:
             return
 
-        # Mark workflows and their batches as in-progress
+        # Mark workflows, their batches, and project_paths as in-progress
         with self._in_progress_lock:
             for wf in to_process:
                 self._in_progress_ids.add(wf.get("workflow_id", ""))
                 batch_id = wf.get("batch_id")
                 if batch_id:
                     self._in_progress_batch_ids.add(batch_id)
+                project_path = wf.get("project_path", "")
+                if project_path:
+                    self._in_progress_paths.add(project_path)
 
         with ThreadPoolExecutor(
             max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
