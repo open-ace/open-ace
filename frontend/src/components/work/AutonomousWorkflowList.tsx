@@ -116,12 +116,6 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   }, [searchInput]);
 
   useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
-
-  useEffect(() => {
     onListStateChange?.({
       total,
       isLoading,
@@ -133,6 +127,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
 
   useEffect(() => {
     if (isLoading || !data) return;
+    if (page > totalPages) {
+      setPage(totalPages);
+      return;
+    }
 
     const shouldReconcileSelection =
       !preserveInitialSelection || hasUserChangedView || !selectedId;
@@ -154,8 +152,10 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     isLoading,
     onClearSelection,
     onSelect,
+    page,
     preserveInitialSelection,
     selectedId,
+    totalPages,
     workflows,
   ]);
 

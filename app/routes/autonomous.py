@@ -462,15 +462,11 @@ def list_workflows():
             limit=limit,
             offset=offset,
         )
-        total = len(workflows)
-        if hasattr(repo, "count_workflows"):
-            total_raw = repo.count_workflows(
-                user_id=filter_user_id,
-                status=status,
-                search=search,
-            )
-            if isinstance(total_raw, int) and not isinstance(total_raw, bool):
-                total = total_raw
+        total = repo.count_workflows(
+            user_id=filter_user_id,
+            status=status,
+            search=search,
+        )
         return jsonify(
             {
                 "success": True,

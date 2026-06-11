@@ -151,4 +151,74 @@ describe('AutonomousWorkflowList', () => {
     expect(lastFilters?.limit).toBe('50');
     expect(lastFilters?.offset).toBe('50');
   });
+
+  it('resets to the last available page before reconciling selection', () => {
+    const onSelect = vi.fn();
+    const onClearSelection = vi.fn();
+    let shrinkResults = false;
+
+    mockUseWorkflows.mockImplementation((filters) => {
+      const offset = filters?.offset ?? '0';
+      if (offset === '50') {
+        if (shrinkResults) {
+          return {
+            data: {
+              success: true,
+              workflows: [],
+              total: 1,
+              limit: 50,
+              offset: 50,
+            },
+            isLoading: false,
+          } as ReturnType<typeof useWorkflows>;
+        }
+
+        return {
+          data: {
+            success: true,
+            workflows: [workflow({ workflow_id: 'wf-51', title: 'Second page workflow' })],
+            total: 75,
+            limit: 50,
+            offset: 50,
+          },
+          isLoading: false,
+        } as ReturnType<typeof useWorkflows>;
+      }
+
+      return {
+        data: {
+          success: true,
+          workflows: [workflow()],
+          total: shrinkResults ? 1 : 75,
+          limit: 50,
+          offset: 0,
+        },
+        isLoading: false,
+      } as ReturnType<typeof useWorkflows>;
+    });
+
+    const { rerender } = render(
+      <AutonomousWorkflowList
+        selectedId="wf-51"
+        onSelect={onSelect}
+        onClearSelection={onClearSelection}
+        preserveInitialSelection
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    shrinkResults = true;
+
+    rerender(
+      <AutonomousWorkflowList
+        selectedId="wf-51"
+        onSelect={onSelect}
+        onClearSelection={onClearSelection}
+        preserveInitialSelection
+      />
+    );
+
+    expect(onClearSelection).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: 'wf-1' }));
+  });
 });
