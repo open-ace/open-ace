@@ -2,7 +2,7 @@
  * AutonomousDev Component - AI Autonomous Development page
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, Loading, EmptyState } from '@/components/common';
@@ -14,17 +14,18 @@ import type { AutonomousWorkflow } from '@/api/autonomous';
 
 export const AutonomousDev: React.FC = () => {
   const language = useLanguage();
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
-  const [showNewModal, setShowNewModal] = useState(false);
-
-  // Deep linking: read workflow ID from URL query param on mount
-  useEffect(() => {
+  const initialWorkflowId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    const wfId = params.get('workflow');
-    if (wfId) {
-      setSelectedWorkflowId(wfId);
-    }
+    return params.get('workflow');
   }, []);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [workflowListState, setWorkflowListState] = useState({
+    total: 0,
+    isLoading: true,
+    hasLoaded: false,
+    hasActiveFilters: false,
+  });
 
   // Update URL when selection changes
   const updateUrl = useCallback((workflowId: string | null) => {
@@ -54,6 +55,39 @@ export const AutonomousDev: React.FC = () => {
     [updateUrl]
   );
 
+  const handleClearWorkflow = useCallback(() => {
+    setSelectedWorkflowId(null);
+    updateUrl(null);
+  }, [updateUrl]);
+
+  const handleListStateChange = useCallback(
+    (state: {
+      total: number;
+      isLoading: boolean;
+      hasLoaded: boolean;
+      hasActiveFilters: boolean;
+      workflows: AutonomousWorkflow[];
+    }) => {
+      setWorkflowListState((prev) => {
+        if (
+          prev.total === state.total &&
+          prev.isLoading === state.isLoading &&
+          prev.hasLoaded === state.hasLoaded &&
+          prev.hasActiveFilters === state.hasActiveFilters
+        ) {
+          return prev;
+        }
+        return {
+          total: state.total,
+          isLoading: state.isLoading,
+          hasLoaded: state.hasLoaded,
+          hasActiveFilters: state.hasActiveFilters,
+        };
+      });
+    },
+    []
+  );
+
   const handleWorkflowCreated = useCallback(
     (workflow: AutonomousWorkflow) => {
       setSelectedWorkflowId(workflow.workflow_id);
@@ -78,7 +112,13 @@ export const AutonomousDev: React.FC = () => {
           </Button>
         </div>
         <div className="flex-grow-1 overflow-auto">
-          <AutonomousWorkflowList selectedId={selectedWorkflowId} onSelect={handleSelectWorkflow} />
+          <AutonomousWorkflowList
+            selectedId={selectedWorkflowId}
+            onSelect={handleSelectWorkflow}
+            onClearSelection={handleClearWorkflow}
+            preserveInitialSelection={!!initialWorkflowId}
+            onListStateChange={handleListStateChange}
+          />
         </div>
       </div>
 
@@ -95,6 +135,26 @@ export const AutonomousDev: React.FC = () => {
         ) : selectedWorkflowId && workflowLoading ? (
           <div className="d-flex align-items-center justify-content-center h-100">
             <Loading />
+          </div>
+        ) : !workflowListState.hasLoaded || workflowListState.isLoading ? (
+          <div className="d-flex align-items-center justify-content-center h-100">
+            <Loading />
+          </div>
+        ) : workflowListState.total > 0 ? (
+          <div className="d-flex align-items-center justify-content-center h-100">
+            <EmptyState
+              icon="bi-list-check"
+              title={t('autonomousDev', language)}
+              description={t('autoSelectWorkflowPrompt', language)}
+            />
+          </div>
+        ) : workflowListState.hasActiveFilters ? (
+          <div className="d-flex align-items-center justify-content-center h-100">
+            <EmptyState
+              icon="bi-search"
+              title={t('autonomousDev', language)}
+              description={t('autoNoMatchingWorkflows', language)}
+            />
           </div>
         ) : (
           <div className="d-flex align-items-center justify-content-center h-100">

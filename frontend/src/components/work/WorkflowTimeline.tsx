@@ -37,7 +37,11 @@ import ForkFromHereModal from './ForkFromHereModal';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { formatTokens } from '@/utils';
-import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
+import type {
+  AutonomousWorkflow,
+  WorkflowDefinitionSnapshot,
+  WorkflowMilestone,
+} from '@/api/autonomous';
 
 interface WorkflowTimelineProps {
   workflow: AutonomousWorkflow;
@@ -100,6 +104,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   } | null>(null);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
+  const [showDefinitionSnapshot, setShowDefinitionSnapshot] = useState(false);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -128,6 +133,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const activities = useWorkflowActivity(workflow.workflow_id, isWorkflowActive);
 
   const milestones = timelineData?.milestones ?? [];
+  const definitionSnapshot = workflow.definition_snapshot;
 
   const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const isPaused = workflow.status === 'paused';
@@ -346,6 +352,43 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     setShowBranchSelector(false);
   };
   const handleRetry = () => retryMutation.mutate(workflow.workflow_id);
+
+  const formatDefinitionValue = (value: unknown) => {
+    if (value === null || value === undefined || value === '') {
+      return '-';
+    }
+    if (typeof value === 'boolean') {
+      return value ? t('autoYes', language) : t('autoNo', language);
+    }
+    return String(value);
+  };
+
+  const renderDefinitionRows = (
+    rows: Array<[string, unknown]>,
+    snapshot: WorkflowDefinitionSnapshot
+  ) => (
+    <div className="row g-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="col-md-6">
+          <div className="border rounded p-2 h-100">
+            <div className="text-muted small mb-1">{label}</div>
+            <div className="fw-semibold text-break">{formatDefinitionValue(value)}</div>
+          </div>
+        </div>
+      ))}
+      {snapshot.batch_id && (
+        <div className="col-12">
+          <div className="border rounded p-2">
+            <div className="text-muted small mb-1">{t('autoBatchInfo', language)}</div>
+            <div className="d-flex flex-wrap gap-2">
+              <Badge variant="light">{snapshot.batch_order}/{snapshot.batch_total}</Badge>
+              <code>{snapshot.batch_id}</code>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   const toggleExpand = (milestoneId: string) => {
     setExpandedMilestone((prev) => (prev === milestoneId ? null : milestoneId));
@@ -758,6 +801,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             </div>
           </div>
           <div className="d-flex gap-2">
+            {definitionSnapshot && (
+              <Button
+                size="sm"
+                variant="outline-secondary"
+                onClick={() => setShowDefinitionSnapshot(true)}
+              >
+                <i className="bi bi-file-earmark-text me-1"></i>
+                {t('autoViewDefinition', language)}
+              </Button>
+            )}
             {workflow.status === 'planning_timeout' && (
               <>
                 <Button
@@ -1065,6 +1118,108 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           ))}
         </div>
       </Modal>
+
+      {/* Definition Snapshot Modal */}
+      {definitionSnapshot && (
+        <Modal
+          isOpen={showDefinitionSnapshot}
+          onClose={() => setShowDefinitionSnapshot(false)}
+          title={t('autoWorkflowDefinition', language)}
+          size="lg"
+          footer={
+            <Button variant="secondary" onClick={() => setShowDefinitionSnapshot(false)}>
+              {t('close', language)}
+            </Button>
+          }
+        >
+          {(() => {
+            const snapshot = definitionSnapshot;
+            const rawIssueInput =
+              snapshot.requirements_issue_input_raw || snapshot.requirements_issue_url_raw;
+            const requirementText =
+              snapshot.requirements_mode === 'text'
+                ? snapshot.requirements_text
+                : rawIssueInput;
+            const creationRows: Array<[string, unknown]> = [
+              [t('autoTaskTitle', language), snapshot.title],
+              [t('autoAgentTool', language), snapshot.cli_tool],
+              [t('autoModel', language), snapshot.model || t('autoDefaultModel', language)],
+              [t('autoWorkspaceType', language), snapshot.workspace_type],
+              [t('autoRemoteMachine', language), snapshot.remote_machine_id],
+              [t('autoProjectPath', language), snapshot.project_path],
+              [t('autoRepoUrl', language), snapshot.project_repo_url],
+              [t('autoBranchStrategy', language), snapshot.branch_strategy],
+              [t('autoBranchName', language), snapshot.branch_name],
+              [t('autoMaxPlanRounds', language), snapshot.max_plan_rounds],
+              [t('autoMaxPRReviewRounds', language), snapshot.max_pr_review_rounds],
+              [t('autoMergeAfterPR', language), snapshot.auto_merge],
+              [t('autoResolvedIssue', language), snapshot.resolved_issue_number],
+              [t('autoResolvedIssueUrl', language), snapshot.resolved_issue_url],
+            ];
+
+            return (
+              <div className="d-flex flex-column gap-3">
+                <div>
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <Badge variant="secondary">
+                      {snapshot.requirements_mode === 'text'
+                        ? t('autoTextDescription', language)
+                        : t('autoGithubIssue', language)}
+                    </Badge>
+                    {snapshot.ignored_issue_tokens && snapshot.ignored_issue_tokens.length > 0 && (
+                      <Badge variant="warning">
+                        {t('autoIgnoredIssueTokens', language)}:{' '}
+                        {snapshot.ignored_issue_tokens.join(', ')}
+                      </Badge>
+                    )}
+                  </div>
+                  <pre
+                    className="bg-light border rounded p-3 mb-0"
+                    style={{
+                      fontSize: '0.82rem',
+                      maxHeight: '220px',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {requirementText || '-'}
+                  </pre>
+                </div>
+
+                {Array.isArray(snapshot.parsed_issue_selectors) &&
+                  snapshot.parsed_issue_selectors.length > 0 && (
+                    <div>
+                      <div className="text-muted small mb-2">
+                        {t('autoParsedIssueSelectors', language)}
+                      </div>
+                      <div className="d-flex flex-wrap gap-2">
+                        {snapshot.parsed_issue_selectors.map((selector) => (
+                          <Badge
+                            key={`${selector.issue_number}-${selector.requirements_issue_url ?? ''}`}
+                            variant={
+                              selector.issue_number === snapshot.resolved_issue_number
+                                ? 'primary'
+                                : 'light'
+                            }
+                          >
+                            #{selector.issue_number}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                <div>
+                  <div className="text-muted small mb-2">
+                    {t('autoCreationParameters', language)}
+                  </div>
+                  {renderDefinitionRows(creationRows, snapshot)}
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
 
       {/* Diff Viewer Modal */}
       {viewingDiff && (
