@@ -131,6 +131,7 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the review prompt.  Reviews longer than this are truncated with a
 # notice so the reviewer knows content was omitted.
 PREV_REVIEW_MAX_LENGTH = 3000
+REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 
 def _next_phase(current_phase: str) -> str:
@@ -367,9 +368,8 @@ class AutonomousOrchestrator:
         self.repo.update_workflow(self._workflow_id, updates)
         self._emit("workflow_updated", updates)
 
-    def _accumulate_tokens(self, result: AgentTaskResult):
+    def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
-        del result
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _on_agent_activity(self, session_id: str, activity: dict):
@@ -403,7 +403,7 @@ class AutonomousOrchestrator:
                 ms = milestones[-1]  # most recent
                 field_name = (
                     "review_session_id"
-                    if "review" in (ms.get("milestone_type", "") or "")
+                    if ms.get("milestone_type") in REVIEW_SESSION_MILESTONE_TYPES
                     else "session_id"
                 )
                 self.repo.update_milestone(

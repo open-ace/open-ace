@@ -354,82 +354,44 @@ class AutonomousWorkflowRepository:
         self.db.execute(
             adapt_sql(
                 """
+                WITH linked_sessions AS (
+                    SELECT DISTINCT sid FROM (
+                        SELECT NULLIF(session_id, '') AS sid
+                        FROM workflow_milestones
+                        WHERE workflow_id = ?
+                        UNION
+                        SELECT NULLIF(review_session_id, '') AS sid
+                        FROM workflow_milestones
+                        WHERE workflow_id = ?
+                    ) linked
+                    WHERE sid IS NOT NULL
+                )
                 UPDATE autonomous_workflows SET
                     total_tokens = COALESCE((
                         SELECT SUM(COALESCE(s.total_tokens, 0))
                         FROM agent_sessions s
-                        WHERE s.session_id IN (
-                            SELECT DISTINCT sid FROM (
-                                SELECT NULLIF(session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                                UNION
-                                SELECT NULLIF(review_session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                            ) linked
-                            WHERE sid IS NOT NULL
-                        )
+                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
                     ), 0),
                     total_input_tokens = COALESCE((
                         SELECT SUM(COALESCE(s.total_input_tokens, 0))
                         FROM agent_sessions s
-                        WHERE s.session_id IN (
-                            SELECT DISTINCT sid FROM (
-                                SELECT NULLIF(session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                                UNION
-                                SELECT NULLIF(review_session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                            ) linked
-                            WHERE sid IS NOT NULL
-                        )
+                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
                     ), 0),
                     total_output_tokens = COALESCE((
                         SELECT SUM(COALESCE(s.total_output_tokens, 0))
                         FROM agent_sessions s
-                        WHERE s.session_id IN (
-                            SELECT DISTINCT sid FROM (
-                                SELECT NULLIF(session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                                UNION
-                                SELECT NULLIF(review_session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                            ) linked
-                            WHERE sid IS NOT NULL
-                        )
+                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
                     ), 0),
                     total_requests = COALESCE((
                         SELECT SUM(COALESCE(s.request_count, 0))
                         FROM agent_sessions s
-                        WHERE s.session_id IN (
-                            SELECT DISTINCT sid FROM (
-                                SELECT NULLIF(session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                                UNION
-                                SELECT NULLIF(review_session_id, '') AS sid
-                                FROM workflow_milestones
-                                WHERE workflow_id = ?
-                            ) linked
-                            WHERE sid IS NOT NULL
-                        )
+                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
                     ), 0),
                     updated_at = ?
                 WHERE workflow_id = ?
                 """
             ),
             (
-                workflow_id,
-                workflow_id,
-                workflow_id,
-                workflow_id,
-                workflow_id,
-                workflow_id,
                 workflow_id,
                 workflow_id,
                 now,

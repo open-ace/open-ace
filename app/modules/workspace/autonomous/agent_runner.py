@@ -99,7 +99,6 @@ class _LocalSession:
     remote_machine_id: str | None = None
     started_at_epoch: float = 0.0
     persisted_session_id: str = ""
-    persisted_session_ready: threading.Event = field(default_factory=threading.Event)
 
 
 class AutonomousAgentRunner:
@@ -136,7 +135,11 @@ class AutonomousAgentRunner:
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:
-        """Match the encoded project path used by sidebar session history."""
+        """Best-effort match for the encoded project path used by Claude session history.
+
+        Today Claude stores absolute paths by replacing "/" with "-". Keep this logic
+        isolated here because it is an implementation detail outside our control.
+        """
         return project_path.replace("/", "-") if project_path.startswith("/") else project_path
 
     def _find_latest_claude_session_id(
@@ -144,7 +147,12 @@ class AutonomousAgentRunner:
         encoded_project_path: str,
         min_mtime_epoch: float,
     ) -> str:
-        """Find the latest Claude JSONL session created for the active worktree."""
+        """Find the latest Claude JSONL session created for the active worktree.
+
+        This is best-effort discovery based on the encoded worktree path and file mtime.
+        It assumes only one local autonomous Claude task is creating a new session for a
+        given worktree at a time; concurrent tasks on the same worktree can still race.
+        """
         if not encoded_project_path:
             return ""
 
@@ -183,7 +191,6 @@ class AutonomousAgentRunner:
             return ""
 
         session.persisted_session_id = persisted_id
-        session.persisted_session_ready.set()
 
         if self.session_manager:
             try:
@@ -798,7 +805,8 @@ class AutonomousAgentRunner:
                 session.output_lines.append(line)
 
                 try:
-                    self._ensure_sidebar_session(session)
+                    if not session.persisted_session_id:
+                        self._ensure_sidebar_session(session)
                     parsed = json.loads(line)
                     msg_type = parsed.get("type", "")
 
