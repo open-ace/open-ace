@@ -522,7 +522,10 @@ export const TrendAnalysis: React.FC = () => {
           </Card>
         </div>
         <div className="col-md-6">
-          <Card title={t('userSegmentation', language)}>
+          <Card
+            title={t('userSegmentation', language)}
+            helpTooltip={t('userSegmentationStandard', language)}
+          >
             {userSegmentation &&
             userSegmentation.high +
               userSegmentation.medium +
@@ -530,7 +533,12 @@ export const TrendAnalysis: React.FC = () => {
               userSegmentation.dormant >
               0 ? (
               <DoughnutChart
-                labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
+                labels={[
+                  `${t('userSegmentationHigh', language)} (>10K)`,
+                  `${t('userSegmentationMedium', language)} (1K-10K)`,
+                  `${t('userSegmentationLow', language)} (<1K)`,
+                  t('userSegmentationDormant', language),
+                ]}
                 data={[
                   userSegmentation.high || 0,
                   userSegmentation.medium || 0,
@@ -543,6 +551,13 @@ export const TrendAnalysis: React.FC = () => {
                   'rgba(75, 192, 192, 0.8)',
                   'rgba(201, 203, 207, 0.8)',
                 ]}
+                descriptions={[
+                  t('userSegmentationHighDesc', language),
+                  t('userSegmentationMediumDesc', language),
+                  t('userSegmentationLowDesc', language),
+                  t('userSegmentationDormantDesc', language),
+                ]}
+                showPercentage={true}
                 height={200}
               />
             ) : (

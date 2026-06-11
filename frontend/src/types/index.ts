@@ -290,6 +290,8 @@ export interface CardProps extends BaseComponentProps {
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** Help tooltip text displayed next to title */
+  helpTooltip?: string;
 }
 
 // Button types
