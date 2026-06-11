@@ -596,6 +596,22 @@ const translations: Record<Language, Translations> = {
     complianceReport: 'Compliance Report',
     settings: 'Settings',
 
+    // Report Types
+    usageSummary: 'Usage Summary',
+    usageSummaryDesc: 'Overview of token and request usage statistics',
+    userActivity: 'User Activity',
+    userActivityDesc: 'Detailed user activity and behavior patterns',
+    auditTrail: 'Audit Trail',
+    auditTrailDesc: 'Complete audit log and security events',
+    dataAccess: 'Data Access',
+    dataAccessDesc: 'Data access patterns and permissions audit',
+    securityReport: 'Security Report',
+    securityReportDesc: 'Security posture and vulnerability assessment',
+    quotaUsageReport: 'Quota Usage',
+    quotaUsageReportDesc: 'Quota limits and usage breakdown',
+    comprehensiveReport: 'Comprehensive',
+    comprehensiveReportDesc: 'Full compliance report covering all aspects',
+
     // Personal Settings (Issue #121)
     personalSettings: 'Personal Settings',
     workspaceSettings: 'Workspace Settings',
@@ -1724,6 +1740,22 @@ const translations: Record<Language, Translations> = {
     complianceReport: '合规报告',
     settings: '设置',
 
+    // Report Types
+    usageSummary: '使用统计',
+    usageSummaryDesc: 'Token 和请求使用统计概览',
+    userActivity: '用户活动',
+    userActivityDesc: '详细的用户活动和行为模式',
+    auditTrail: '审计轨迹',
+    auditTrailDesc: '完整的审计日志和安全事件',
+    dataAccess: '数据访问',
+    dataAccessDesc: '数据访问模式和权限审计',
+    securityReport: '安全报告',
+    securityReportDesc: '安全态势和漏洞评估',
+    quotaUsageReport: '配额使用',
+    quotaUsageReportDesc: '配额限制和使用明细',
+    comprehensiveReport: '综合报告',
+    comprehensiveReportDesc: '涵盖所有方面的完整合规报告',
+
     // Personal Settings (Issue #121)
     personalSettings: '个人设置',
     workspaceSettings: '工作区设置',
@@ -2437,6 +2469,22 @@ const translations: Record<Language, Translations> = {
     quotaAndAlerts: 'クォータとアラート',
     complianceManagement: 'コンプライアンス',
     securityCenter: 'セキュリティセンター',
+
+    // Report Types
+    usageSummary: '使用統計',
+    usageSummaryDesc: 'トークンとリクエスト使用統計の概要',
+    userActivity: 'ユーザー活動',
+    userActivityDesc: '詳細なユーザー活動と行動パターン',
+    auditTrail: '監査履歴',
+    auditTrailDesc: '完全な監査ログとセキュリティイベント',
+    dataAccess: 'データアクセス',
+    dataAccessDesc: 'データアクセスパターンと権限監査',
+    securityReport: 'セキュリティレポート',
+    securityReportDesc: 'セキュリティ状況と脆弱性評価',
+    quotaUsageReport: 'クォータ使用量',
+    quotaUsageReportDesc: 'クォータ制限と使用量詳細',
+    comprehensiveReport: '包括レポート',
+    comprehensiveReportDesc: 'すべての側面をカバーする完全なコンプライアンスレポート',
 
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
@@ -3209,6 +3257,22 @@ const translations: Record<Language, Translations> = {
     quotaAndAlerts: '할당량 및 알림',
     complianceManagement: '규정 준수',
     securityCenter: '보안 센터',
+
+    // Report Types
+    usageSummary: '사용 통계',
+    usageSummaryDesc: '토큰 및 요청 사용 통계 개요',
+    userActivity: '사용자 활동',
+    userActivityDesc: '상세 사용자 활동 및 행동 패턴',
+    auditTrail: '감사 기록',
+    auditTrailDesc: '완전한 감사 로그 및 보안 이벤트',
+    dataAccess: '데이터 접근',
+    dataAccessDesc: '데이터 접근 패턴 및 권한 감사',
+    securityReport: '보안 보고서',
+    securityReportDesc: '보안 상태 및 취약성 평가',
+    quotaUsageReport: '할당량 사용',
+    quotaUsageReportDesc: '할당량 제한 및 사용량 분석',
+    comprehensiveReport: '종합 보고서',
+    comprehensiveReportDesc: '모든 측면을 포함한 완전한 규정 준수 보고서',
 
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',

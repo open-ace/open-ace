@@ -14,7 +14,7 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import gevent
 from gevent.event import Event
@@ -1071,7 +1071,7 @@ class RemoteAgentManager:
         with self._lock:
             self._pending_requests.pop(request_id, None)
 
-        return cast(Optional[dict], result)
+        return cast("dict | None", result)
 
     def handle_command_response(self, data: dict) -> None:
         """

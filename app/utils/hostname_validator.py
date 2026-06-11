@@ -103,10 +103,7 @@ def _is_blacklisted(name: str) -> bool:
         return True
 
     # Placeholder format
-    if _PLACEHOLDER_PATTERN.match(name):
-        return True
-
-    return False
+    return bool(_PLACEHOLDER_PATTERN.match(name))
 
 
 def _validate_rfc1123(name: str) -> bool:

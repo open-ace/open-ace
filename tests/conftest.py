@@ -20,7 +20,7 @@ if shared_path not in sys.path:
     sys.path.insert(0, shared_path)
 
 # Configure pytest-asyncio
-pytest_plugins = ("pytest_asyncio", "tests.integration.conftest")
+pytest_plugins = ("pytest_asyncio",)
 
 
 @pytest.fixture(autouse=True)

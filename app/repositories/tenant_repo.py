@@ -710,10 +710,10 @@ class TenantRepository:
             if key in settings_dict:
                 fields.append(f"{key} = {p}")
                 value = settings_dict[key]
-                if cast_type == bool:
+                if cast_type is bool:
                     # SQLite uses 1/0 for boolean
                     value = 1 if value else 0
-                elif cast_type == int and isinstance(value, bool):
+                elif cast_type is int and isinstance(value, bool):
                     value = 1 if value else 0
                 values.append(value)
 
@@ -766,7 +766,7 @@ class TenantRepository:
             if key in quota_dict:
                 fields.append(f"{key} = {p}")
                 value = quota_dict[key]
-                if cast_type == int and isinstance(value, bool):
+                if cast_type is int and isinstance(value, bool):
                     value = 1 if value else 0
                 values.append(value)
 

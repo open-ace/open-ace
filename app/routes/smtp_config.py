@@ -14,8 +14,8 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
-from app.services.smtp_config_service import get_smtp_config_service
 from app.services.email_notification_service import get_email_notification_service
+from app.services.smtp_config_service import get_smtp_config_service
 
 logger = logging.getLogger(__name__)
 

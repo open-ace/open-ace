@@ -9,8 +9,8 @@ import smtplib
 from email.mime.text import MIMEText
 from typing import Any, Optional
 
-from app.repositories.smtp_config_repository import get_smtp_config_repository
 from app.repositories.email_notification_log_repository import get_email_log_repository
+from app.repositories.smtp_config_repository import get_smtp_config_repository
 
 logger = logging.getLogger(__name__)
 
