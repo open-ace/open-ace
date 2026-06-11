@@ -228,6 +228,48 @@ export const RequestDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Today's By Tool */}
+      <div className="row g-4 mb-4">
+        <div className="col-12">
+          <Card title={t('todayByTool', language)}>
+            {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
+              <div className="table-responsive">
+                <table className="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>{t('tool', language)}</th>
+                      <th className="text-end">{t('requests', language)}</th>
+                      <th className="text-end">{t('percentage', language)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(todayStats.by_tool)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([tool, count]) => {
+                        const percentage =
+                          todayStats.total_requests > 0
+                            ? ((count / todayStats.total_requests) * 100).toFixed(1)
+                            : '0';
+                        return (
+                          <tr key={tool}>
+                            <td>
+                              <Badge variant="info">{tool.toUpperCase()}</Badge>
+                            </td>
+                            <td className="text-end">{formatNumber(count)}</td>
+                            <td className="text-end">{percentage}%</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
+            )}
+          </Card>
+        </div>
+      </div>
+
       {/* Date Range Selector */}
       <Card className="mb-4">
         <div className="d-flex flex-wrap gap-2 align-items-center">
@@ -274,10 +316,9 @@ export const RequestDashboard: React.FC = () => {
         </div>
       </Card>
 
-      {/* Charts Row */}
+      {/* Request Trend Chart */}
       <div className="row g-4 mb-4">
-        {/* Request Trend Chart */}
-        <div className="col-lg-8">
+        <div className="col-12">
           <Card title={t('requestTrend', language)}>
             {trendData.length > 0 ? (
               <LazyLineChart
@@ -287,46 +328,6 @@ export const RequestDashboard: React.FC = () => {
               />
             ) : (
               <EmptyState icon="bi-graph-up" title={t('noData', language)} />
-            )}
-          </Card>
-        </div>
-
-        {/* Today's By Tool */}
-        <div className="col-lg-4">
-          <Card title={t('todayByTool', language)}>
-            {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
-              <div className="table-responsive">
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>{t('tool', language)}</th>
-                      <th className="text-end">{t('requests', language)}</th>
-                      <th className="text-end">{t('percentage', language)}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(todayStats.by_tool)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([tool, count]) => {
-                        const percentage =
-                          todayStats.total_requests > 0
-                            ? ((count / todayStats.total_requests) * 100).toFixed(1)
-                            : '0';
-                        return (
-                          <tr key={tool}>
-                            <td>
-                              <Badge variant="info">{tool.toUpperCase()}</Badge>
-                            </td>
-                            <td className="text-end">{formatNumber(count)}</td>
-                            <td className="text-end">{percentage}%</td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
             )}
           </Card>
         </div>
