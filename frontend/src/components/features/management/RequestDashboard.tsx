@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import { usePageRefresh } from '@/hooks';
 import {
   Card,
   StatCard,
@@ -20,6 +21,7 @@ import {
   EmptyState,
   Badge,
   TextInput,
+  PageRefreshControl,
 } from '@/components/common';
 import { LazyLineChart, LazyBarChart } from '@/components/common/LazyCharts';
 import { getToolColor } from '@/components/common/chartColors';
@@ -29,7 +31,7 @@ import {
   type RequestTrendByToolData,
   type RequestStatsByUser,
 } from '@/api/request';
-import { formatNumber } from '@/utils';
+import { formatNumber, createMatcherConfig } from '@/utils';
 
 // Date range presets
 const DATE_RANGE_PRESETS = [
@@ -93,6 +95,15 @@ export const RequestDashboard: React.FC = () => {
       setIsLoading(false);
     }
   }, [dateRange, useCustomRange, customStartDate, customEndDate]);
+
+  // Page refresh control - manages auto refresh for request dashboard queries
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/request-dashboard',
+    refreshKey: createMatcherConfig([['analysis', 'request-dashboard']], 'prefix'),
+    interval: 60000, // 1 minute default
+    enabled: true, // Enable by default for real-time data
+    onRefresh: fetchData,
+  });
 
   useEffect(() => {
     fetchData();
@@ -171,10 +182,11 @@ export const RequestDashboard: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('requestStatistics', language)}</h2>
-        <Button variant="outline-primary" size="sm" onClick={fetchData}>
-          <i className="bi bi-arrow-clockwise me-1" />
-          {t('refresh', language)}
-        </Button>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          showLastRefreshTime={true}
+          showNextRefreshTime={false}
+        />
       </div>
 
       {/* Today's Stats */}

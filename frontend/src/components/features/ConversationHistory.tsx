@@ -7,13 +7,14 @@
  */
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import {
   useConversationHistory,
   useConversationTimeline,
   useHosts,
   useSenders,
   useTools,
+  usePageRefresh,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -29,6 +30,7 @@ import {
   Dropdown,
   LineChart,
   Skeleton,
+  PageRefreshControl,
 } from '@/components/common';
 import { formatDateTime, formatTokens, formatToolName, copyToClipboard } from '@/utils';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
@@ -105,6 +107,14 @@ export const ConversationHistory: React.FC = () => {
   const [page, setPage] = useState(1);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Page refresh control - manual refresh for conversation history
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/conversation-history',
+    refreshKey: createMatcherConfig([['conversation-history']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   // ESC key to exit fullscreen (Issue #103)
   useEffect(() => {
@@ -518,8 +528,15 @@ export const ConversationHistory: React.FC = () => {
   return (
     <div className="conversation-history">
       {/* Page Header */}
-      <div className="page-header mb-4">
+      <div className="page-header mb-4 d-flex justify-content-between align-items-center">
         <h2>{t('conversationHistory', language)}</h2>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
       {tableContent}
       {/* Conversation Detail Modal */}

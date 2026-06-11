@@ -3,7 +3,7 @@
  */
 
 import React, { useState } from 'react';
-import { useQuotaUsage, useUpdateQuota } from '@/hooks';
+import { useQuotaUsage, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -16,8 +16,9 @@ import {
   EmptyState,
   Progress,
   useToast,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens } from '@/utils';
+import { formatTokens, createMatcherConfig } from '@/utils';
 import {
   QuotaType,
   TOKEN_QUOTA_MULTIPLIER,
@@ -34,6 +35,14 @@ export const QuotaManagement: React.FC = () => {
   const toast = useToast();
   const { data: quotaData, isLoading, isFetching, isError, error, refetch } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
+
+  // Page refresh control - manages manual refresh for quota data
+  const pageRefresh = usePageRefresh({
+    page: '/manage/quota',
+    refreshKey: createMatcherConfig([['quota']], 'prefix'),
+    interval: 0, // Manual refresh only for configuration data
+    enabled: false,
+  });
 
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
@@ -210,10 +219,13 @@ export const QuotaManagement: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h5>{t('quotaUsage', language)}</h5>
-        <Button variant="primary" size="sm" onClick={() => refetch()} loading={isFetching}>
-          {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
-          {t('refresh', language)}
-        </Button>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          compact={true}
+          showLastRefreshTime={true}
+        />
       </div>
 
       {/* Quota Cards */}

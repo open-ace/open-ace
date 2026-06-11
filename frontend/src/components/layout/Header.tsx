@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useAuth, useTheme, useLanguage, useGlobalFetch, useAppMode } from '@/hooks';
+import { useAuth, useTheme, useLanguage, useAppMode } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
 import { UserSettingsModal, Avatar } from '@/components/common';
@@ -19,7 +19,6 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const theme = useTheme();
   const language = useLanguage();
   const appMode = useAppMode();
-  const { status, autoRefresh, setAutoRefresh, refreshAll } = useGlobalFetch();
   const [showSettings, setShowSettings] = useState(false);
 
   const handleThemeToggle = () => {
@@ -36,13 +35,6 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
     // 3. Sync i18next for Workspace iframe WebUI
     localStorage.setItem('i18nextLng', lang);
   };
-
-  const handleRefresh = async () => {
-    await refreshAll();
-  };
-
-  // Only show refresh controls in manage mode
-  const showRefreshControls = appMode === 'manage';
 
   // Content for right side (language, theme, user menu)
   const rightContent = (
@@ -160,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   // In normal mode (ManageLayout), return full header with left and right content
   return (
     <header className="header">
-      {/* Left side - Hamburger + Refresh controls */}
+      {/* Left side - Hamburger */}
       <div className="d-flex align-items-center">
         <button
           className="hamburger-btn btn btn-link p-0 me-2"
@@ -169,47 +161,6 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
         >
           <i className="bi bi-list fs-4" />
         </button>
-        {showRefreshControls && (
-          <>
-            {/* Global Auto-refresh toggle */}
-            <div className="form-check form-switch d-flex align-items-center mb-0 me-2">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="globalAutoRefresh"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-              />
-              <label className="form-check-label small text-muted ms-1" htmlFor="globalAutoRefresh">
-                {t('autoRefresh', language)}
-              </label>
-            </div>
-
-            {/* Global Refresh button */}
-            <button
-              className="btn btn-outline-primary btn-sm"
-              onClick={handleRefresh}
-              disabled={status.is_running}
-              title={t('refresh', language)}
-            >
-              {status.is_running ? (
-                <>
-                  <span
-                    className="spinner-border spinner-border-sm me-1"
-                    role="status"
-                    aria-hidden="true"
-                  />
-                  {t('refreshing', language) || 'Refreshing...'}
-                </>
-              ) : (
-                <>
-                  <i className="bi bi-arrow-clockwise me-1" />
-                  {t('refresh', language)}
-                </>
-              )}
-            </button>
-          </>
-        )}
       </div>
 
       {/* Right side */}

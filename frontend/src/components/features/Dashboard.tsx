@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo, startTransition } from 'react';
 import { cn } from '@/utils';
-import { useDashboard, useTools } from '@/hooks';
+import { useDashboard, useTools, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -16,8 +16,9 @@ import {
   TokenDistributionChart,
   DashboardSkeleton,
   TextInput,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName, createMatcherConfig } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -171,13 +172,25 @@ export const Dashboard: React.FC = () => {
   };
 
   // Use combined dashboard hook with trend data for parallel fetching
+  // Note: autoRefresh parameter is deprecated - use usePageRefresh instead
   const { todayData, summaryData, hosts, trendData, isLoading, isError, error, refetch } =
     useDashboard({
       tool: selectedTool || undefined,
       host: selectedHost || undefined,
       startDate,
       endDate,
+      // DEPRECATED: autoRefresh parameter - will be removed in future versions
+      // Use PageRefreshControl component for refresh management
+      autoRefresh: false,
     });
+
+  // Page refresh control - manages auto refresh for dashboard queries
+  const pageRefresh = usePageRefresh({
+    page: '/manage/dashboard',
+    refreshKey: createMatcherConfig([['dashboard']], 'prefix', [['dashboard', 'hosts']]),
+    interval: 60000, // 1 minute default
+    enabled: true, // Enable by default for real-time data
+  });
 
   // Sort handler - use startTransition for non-urgent updates (rerender-transitions optimization)
   const handleSort = (key: SortKey) => {
@@ -249,6 +262,13 @@ export const Dashboard: React.FC = () => {
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
         <div className="page-header-controls d-flex gap-2 align-items-center flex-wrap">
+          {/* Page Refresh Control */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            showLastRefreshTime={true}
+            showNextRefreshTime={false}
+          />
+
           {/* Date Range Selector */}
           <Select
             options={dateRangeOptions}

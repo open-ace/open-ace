@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
-import { useMessages, useMessageCount, useHosts, useSenders, useTools } from '@/hooks';
+import { useMessages, useMessageCount, useHosts, useSenders, useTools, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -15,8 +15,9 @@ import {
   Error,
   EmptyState,
   Pagination,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatDateTime, formatDate, formatTokens, formatToolName } from '@/utils';
+import { formatDateTime, formatDate, formatTokens, formatToolName, createMatcherConfig } from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
 const ITEMS_PER_PAGE = 20;
@@ -56,6 +57,14 @@ export const Messages: React.FC = () => {
 
   const messages = data?.data ?? [];
   const pagination = data?.pagination;
+
+  // Page refresh control - manages auto refresh for messages queries
+  const pageRefresh = usePageRefresh({
+    page: '/manage/messages',
+    refreshKey: createMatcherConfig([['messages']], 'prefix'),
+    interval: 60000, // 1 minute default
+    enabled: false, // Disable by default for historical messages
+  });
 
   // Get tools for filter
   const { data: toolsData } = useTools();
@@ -116,6 +125,12 @@ export const Messages: React.FC = () => {
       {/* Header */}
       <div className="messages-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('messages', language)}</h2>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          showLastRefreshTime={true}
+          showNextRefreshTime={false}
+          compact={true}
+        />
       </div>
 
       {/* Filters - Nested flex for column alignment */}
