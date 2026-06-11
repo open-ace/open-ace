@@ -95,8 +95,19 @@ export const TrendAnalysis: React.FC = () => {
     error,
   } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
 
-  // Extract dataRange from batchData - must be defined BEFORE useMemo that uses it
-  const dataRange = batchData?.data_range;
+  // Extract dataRange from batchData - use useRef for stable reference
+  // to avoid unnecessary useMemo recalculation when API returns new object
+  // with the same min_date/max_date values
+  const dataRangeRef = useRef<{ min_date: string; max_date: string } | null>(null);
+  const rawDataRange = batchData?.data_range;
+  if (
+    rawDataRange &&
+    (dataRangeRef.current?.min_date !== rawDataRange.min_date ||
+      dataRangeRef.current?.max_date !== rawDataRange.max_date)
+  ) {
+    dataRangeRef.current = rawDataRange;
+  }
+  const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
   // Uses dataRange for 'all' case, fallback to 365 days if dataRange unavailable
@@ -511,7 +522,10 @@ export const TrendAnalysis: React.FC = () => {
           </Card>
         </div>
         <div className="col-md-6">
-          <Card title={t('userSegmentation', language)}>
+          <Card
+            title={t('userSegmentation', language)}
+            helpTooltip={t('userSegmentationStandard', language)}
+          >
             {userSegmentation &&
             userSegmentation.high +
               userSegmentation.medium +
@@ -519,7 +533,12 @@ export const TrendAnalysis: React.FC = () => {
               userSegmentation.dormant >
               0 ? (
               <DoughnutChart
-                labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
+                labels={[
+                  `${t('userSegmentationHigh', language)} (>10K)`,
+                  `${t('userSegmentationMedium', language)} (1K-10K)`,
+                  `${t('userSegmentationLow', language)} (<1K)`,
+                  t('userSegmentationDormant', language),
+                ]}
                 data={[
                   userSegmentation.high || 0,
                   userSegmentation.medium || 0,
@@ -532,6 +551,13 @@ export const TrendAnalysis: React.FC = () => {
                   'rgba(75, 192, 192, 0.8)',
                   'rgba(201, 203, 207, 0.8)',
                 ]}
+                descriptions={[
+                  t('userSegmentationHighDesc', language),
+                  t('userSegmentationMediumDesc', language),
+                  t('userSegmentationLowDesc', language),
+                  t('userSegmentationDormantDesc', language),
+                ]}
+                showPercentage={true}
                 height={200}
               />
             ) : (

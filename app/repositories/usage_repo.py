@@ -827,6 +827,12 @@ class UsageRepository:
         results = []
         for row in rows:
             username = row.get("unified_username") or row.get("sender_name") or "unknown"
+
+            # Skip unidentifiable users, only return valid user data
+            # This fixes Issue #811 where "unknown" user appears in stats
+            if username == "unknown":
+                continue
+
             results.append(
                 {
                     "user": username,
