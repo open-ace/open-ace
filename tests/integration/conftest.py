@@ -48,6 +48,7 @@ def _create_sqlite_tables(db):
         cursor = conn.cursor()
 
         from app.modules.compliance.retention import get_ddl_statements as ret_ddl
+        from app.modules.compliance.report import get_ddl_statements as report_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -65,6 +66,7 @@ def _create_sqlite_tables(db):
             ram_ddl,
             sso_ddl,
             ret_ddl,
+            report_ddl,
             ps_ddl,
             auth_ddl,
         ]:
@@ -629,6 +631,7 @@ def _create_pg_tables(db):
 
         # Reuse DDL functions that already emit PostgreSQL-compatible SQL
         from app.modules.compliance.retention import get_ddl_statements as ret_ddl
+        from app.modules.compliance.report import get_ddl_statements as report_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -646,6 +649,7 @@ def _create_pg_tables(db):
             ram_ddl,
             sso_ddl,
             ret_ddl,
+            report_ddl,
             ps_ddl,
             auth_ddl,
         ]:
@@ -713,3 +717,41 @@ def pg_db():
             conn.cursor().execute(f'DROP DATABASE IF EXISTS "{test_db_name}"')
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Flask app fixtures for API tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app(tmp_db):
+    """Create Flask app for testing with temporary database."""
+    from flask import Flask
+    from app.routes.compliance import compliance_bp
+
+    app = Flask(__name__)
+    app.register_blueprint(compliance_bp)
+    app.config["TESTING"] = True
+
+    # Patch database to use tmp_db
+    with patch("app.repositories.database.Database", return_value=tmp_db):
+        with patch("app.routes.compliance.report_generator.db", tmp_db):
+            yield app
+
+
+@pytest.fixture
+def client(app):
+    """Create test client."""
+    return app.test_client()
+
+
+@pytest.fixture
+def auth_headers():
+    """Headers for authenticated user (simulates login)."""
+    # For admin_required decorator, we need to mock g.user_id
+    from flask import g
+    from unittest.mock import patch
+
+    # In tests, we'll patch g.user_id before each request
+    return {"Content-Type": "application/json"}

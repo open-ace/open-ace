@@ -12,6 +12,13 @@ Tests cover:
 import pytest
 from datetime import datetime, timezone
 
+# Check if openpyxl is available for Excel tests
+try:
+    import openpyxl
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
 from app.modules.compliance.report import (
     ComplianceReport,
     ReportMetadata,
@@ -135,17 +142,19 @@ class TestReportToHtml:
         malicious_report = ComplianceReport(
             metadata=sample_report_metadata,
             summary={"test": "<script>alert('xss')</script>"},
-            details=[{"name": "<img src=x onerror=alert('xss')>"}],
+            details=[{"tool_name": "<img src=x onerror=alert('xss')>"}],
             compliance_checks=[],
             recommendations=["<a href='javascript:alert(1)'>click</a>"],
         )
         html = malicious_report.to_html()
-        # XSS payloads should be escaped
+        # XSS payloads should be escaped - HTML tags converted to entities
         assert "<script>" not in html
-        assert "onerror=" not in html
-        assert "javascript:" not in html
+        assert "<img" not in html
+        assert "<a href" not in html
         # Escaped versions should be present
-        assert "&lt;script" in html or "alert" in html
+        assert "&lt;script" in html
+        assert "&lt;img" in html
+        assert "&lt;a href" in html
 
     def test_to_html_empty_details(self, sample_report_metadata):
         """Test HTML with empty details."""
@@ -223,6 +232,7 @@ class TestReportToHtml:
             assert len(html) > 0
 
 
+@pytest.mark.skipif(not HAS_OPENPYXL, reason="openpyxl required for Excel tests")
 class TestReportToExcel:
     """Test Excel report generation."""
 

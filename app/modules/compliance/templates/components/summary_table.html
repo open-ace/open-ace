@@ -6,7 +6,7 @@
         <div class="summary-item">
             <div class="summary-label">{{ key | title | e }}</div>
             <div class="summary-value">
-                {% if value is dict %}
+                {% if value is mapping %}
                 {% for sub_key, sub_value in value.items() %}
                 {% if sub_value is number %}
                 {{ sub_key | title | e }}: {{ sub_value }}
@@ -16,7 +16,7 @@
                 {{ value }}
                 {% elif value is string %}
                 {{ value | e }}
-                {% elif value is list %}
+                {% elif value is sequence and value is not string %}
                 {{ value | length }} items
                 {% else %}
                 {{ value | e }}

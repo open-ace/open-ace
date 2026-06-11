@@ -15,6 +15,7 @@ from app.auth.decorators import admin_required
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
 from app.modules.compliance.retention import DataRetentionManager
+from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
 from app.repositories.governance_repo import GovernanceRepository
 
@@ -164,7 +165,10 @@ def generate_report():
     )
 
     # Save report
-    report_generator.save_report(report)
+    saved = report_generator.save_report(report)
+    if not saved:
+        logger.error(f"Failed to save report {report.metadata.report_id}")
+        return jsonify({"error": "Failed to save report to database"}), 500
 
     # Return format
     output_format = data.get("format", "json")
@@ -255,18 +259,22 @@ def list_saved_reports():
     tenant_id = request.args.get("tenant_id", type=int)
     limit = request.args.get("limit", 50, type=int)
 
-    reports = report_generator.get_saved_reports(
-        report_type=report_type,
-        tenant_id=tenant_id,
-        limit=limit,
-    )
+    try:
+        reports = report_generator.get_saved_reports(
+            report_type=report_type,
+            tenant_id=tenant_id,
+            limit=limit,
+        )
 
-    return jsonify(
-        {
-            "reports": reports,
-            "count": len(reports),
-        }
-    )
+        return jsonify(
+            {
+                "reports": reports,
+                "count": len(reports),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to list saved reports: {e}")
+        return jsonify({"error": "Failed to query saved reports from database"}), 500
 
 
 @compliance_bp.route("/reports/<report_id>", methods=["GET"])
