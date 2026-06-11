@@ -856,10 +856,10 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   // Role filter options
   const roleFilterOptions = [
     { value: 'all', label: t('all', language) },
-    { value: 'user', label: 'User' },
-    { value: 'assistant', label: 'Assistant' },
-    { value: 'system', label: 'System' },
-    { value: 'toolResult', label: 'Tool Result' },
+    { value: 'user', label: t('messageRoleUser', language) },
+    { value: 'assistant', label: t('messageRoleAssistant', language) },
+    { value: 'system', label: t('messageRoleSystem', language) },
+    { value: 'toolResult', label: t('messageRoleToolResult', language) },
   ];
 
   return (

@@ -27,6 +27,7 @@ import {
   TextInput,
   Textarea,
   useToast,
+  Pagination,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 
@@ -292,27 +293,12 @@ export const Prompts: React.FC = () => {
 
           {/* Pagination */}
           {total > ITEMS_PER_PAGE && (
-            <div className="d-flex justify-content-center align-items-center gap-2 mt-3">
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                disabled={page === 1}
-                onClick={() => setPage(page - 1)}
-              >
-                {t('previous', language)}
-              </Button>
-              <span className="text-muted">
-                {t('page', language) || 'Page'} {page} / {Math.ceil(total / ITEMS_PER_PAGE)}
-              </span>
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                disabled={page >= Math.ceil(total / ITEMS_PER_PAGE)}
-                onClick={() => setPage(page + 1)}
-              >
-                {t('next', language)}
-              </Button>
-            </div>
+            <Pagination
+              currentPage={page}
+              totalPages={Math.ceil(total / ITEMS_PER_PAGE)}
+              onPageChange={setPage}
+              className="mt-3"
+            />
           )}
 
           {/* Total count */}
