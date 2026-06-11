@@ -83,6 +83,78 @@ class ComplianceReport:
     compliance_checks: list[dict[str, Any]]
     recommendations: list[str]
 
+    # Maximum cell length for Excel (Excel has a 32,767 character limit per cell)
+    MAX_CELL_LENGTH = 32000
+
+    # Key fields to preserve when truncating long JSON strings
+    KEY_FIELDS = ["ip_address", "action", "timestamp", "user_id", "resource_type"]
+
+    def _flatten_value(self, value: Any) -> Any:
+        """
+        Flatten a single value for CSV/Excel export.
+
+        Handles:
+        - Nested dict/list → JSON string
+        - datetime → ISO format string
+        - None → empty string
+        - Super long JSON → truncation with key fields preserved
+        - Other types → str(value)
+
+        Args:
+            value: The value to flatten.
+
+        Returns:
+            Flattened value suitable for CSV/Excel cell.
+        """
+        if value is None:
+            return ""
+
+        if isinstance(value, dict):
+            json_str = json.dumps(value, ensure_ascii=False)
+            # Check if JSON string is too long
+            if len(json_str) > self.MAX_CELL_LENGTH:
+                # Extract key fields if present
+                key_fields_data = {}
+                for key in self.KEY_FIELDS:
+                    if key in value:
+                        key_fields_data[key] = value[key]
+
+                if key_fields_data:
+                    # Preserve key fields and truncate the rest
+                    key_json = json.dumps(key_fields_data, ensure_ascii=False)
+                    truncated = json_str[:self.MAX_CELL_LENGTH - len(key_json) - 20]
+                    return f"{key_json}...[TRUNCATED]...{truncated[-100:]}"
+                else:
+                    # No key fields, simple truncation
+                    return json_str[:self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
+            return json_str
+
+        if isinstance(value, list):
+            json_str = json.dumps(value, ensure_ascii=False)
+            if len(json_str) > self.MAX_CELL_LENGTH:
+                return json_str[:self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
+            return json_str
+
+        if isinstance(value, datetime):
+            return value.isoformat()
+
+        return str(value)
+
+    def _flatten_row(self, row: dict) -> dict:
+        """
+        Flatten a dictionary row for CSV/Excel export.
+
+        Args:
+            row: The row dictionary to flatten.
+
+        Returns:
+            Flattened dictionary with all values processed.
+        """
+        flattened = {}
+        for key, value in row.items():
+            flattened[key] = self._flatten_value(value)
+        return flattened
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
@@ -102,6 +174,7 @@ class ComplianceReport:
 
         Handles both list format (single section) and dict format (multiple sections).
         For dict format, adds a 'section' column to identify the data source.
+        Flattens nested fields (dict/list) to JSON strings for proper CSV export.
         """
         if not self.details:
             return ""
@@ -128,7 +201,9 @@ class ComplianceReport:
                         # Add section column to each row
                         row_copy = dict(row)
                         row_copy["section"] = section_key
-                        all_rows.append(row_copy)
+                        # Flatten nested fields
+                        flattened_row = self._flatten_row(row_copy)
+                        all_rows.append(flattened_row)
 
             if not all_rows:
                 return ""
@@ -144,9 +219,11 @@ class ComplianceReport:
             writer.writerows(all_rows)
         else:
             # List format: single section (backward compatible)
-            writer = csv.DictWriter(output, fieldnames=self.details[0].keys())
+            # Flatten nested fields for each row
+            flattened_details = [self._flatten_row(row) for row in self.details]
+            writer = csv.DictWriter(output, fieldnames=flattened_details[0].keys())
             writer.writeheader()
-            writer.writerows(self.details)
+            writer.writerows(flattened_details)
 
         return output.getvalue()
 
@@ -484,10 +561,12 @@ class ComplianceReport:
 
                     # Write data rows
                     for detail in section_data:
+                        # Flatten nested fields for each row
+                        flattened_detail = self._flatten_row(detail)
                         cell = ws_details.cell(row=row_idx, column=1, value=section_key)
                         cell.border = border
                         for col_idx, header in enumerate(headers[1:], 2):
-                            value = detail.get(header)
+                            value = flattened_detail.get(header)
                             cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
                             cell.border = border
                         row_idx += 1
@@ -511,10 +590,11 @@ class ComplianceReport:
                     cell.alignment = header_alignment
                     cell.border = border
 
-                # Write data
+                # Write data (flatten nested fields for each row)
                 for row_idx, detail in enumerate(self.details, 2):
+                    flattened_detail = self._flatten_row(detail)
                     for col_idx, header in enumerate(headers, 1):
-                        value = detail.get(header)
+                        value = flattened_detail.get(header)
                         cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
                         cell.border = border
 
