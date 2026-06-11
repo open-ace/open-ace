@@ -9,17 +9,15 @@ Provides:
 - Email templates
 """
 
-import json
 import logging
 import queue
+import smtplib
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Optional
-
-import smtplib
 
 from app.repositories.email_notification_log_repository import get_email_log_repository
 from app.repositories.smtp_config_repository import get_smtp_config_repository
