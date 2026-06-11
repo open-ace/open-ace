@@ -95,6 +95,9 @@ class AnalysisService:
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
             ): "total_requests",
+            _executor.submit(
+                self.daily_stats_repo.get_data_range, None
+            ): "data_range",
         }
 
         # Collect results
@@ -115,6 +118,7 @@ class AnalysisService:
         hourly_data = results.get("hourly_data", [])
         conversation_stats = results.get("conversation_stats", {})
         total_requests = results.get("total_requests", 0)
+        data_range = results.get("data_range")
 
         # Use aggregates directly instead of computing from raw data
         total_tokens = aggregates.get("total_tokens", 0)
@@ -279,6 +283,7 @@ class AnalysisService:
             "conversation_stats": conversation_stats,
             "tool_comparison": tool_comparison,
             "user_segmentation": user_segmentation,
+            "data_range": data_range,
         }
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])

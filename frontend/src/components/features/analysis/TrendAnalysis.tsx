@@ -69,7 +69,37 @@ export const TrendAnalysis: React.FC = () => {
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
 
+  // Track if this is the initial load
+  const isInitialLoad = useRef(true);
+
+  // Initial date range for first render (before batchData is available)
+  // This is needed to bootstrap the batch analysis request
+  const initialDateRange = useMemo(() => {
+    const end = new Date();
+    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default 30 days
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    };
+  }, []);
+
+  const [startDate, setStartDate] = useState(initialDateRange.start);
+  const [endDate, setEndDate] = useState(initialDateRange.end);
+
+  // Fetch all data in a single batch request
+  // NOTE: This hook call must be BEFORE useMemo that uses dataRange from batchData
+  const {
+    data: batchData,
+    isLoading,
+    isError,
+    error,
+  } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
+
+  // Extract dataRange from batchData - must be defined BEFORE useMemo that uses it
+  const dataRange = batchData?.data_range;
+
   // Date range based on quick range selection
+  // Uses dataRange for 'all' case, fallback to 365 days if dataRange unavailable
   const dateRange = useMemo(() => {
     const end = new Date();
     let start: Date;
@@ -86,7 +116,15 @@ export const TrendAnalysis: React.FC = () => {
         break;
       case 'all':
       default:
-        start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        // Use actual data range from API if available, otherwise fallback to 365 days
+        if (dataRange?.min_date && dataRange?.max_date) {
+          start = new Date(dataRange.min_date);
+          // Use the actual max date from data range
+          end.setTime(new Date(dataRange.max_date).getTime());
+        } else {
+          // Fallback: 365 days ago when data_range is not available or invalid
+          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        }
         break;
     }
 
@@ -94,27 +132,13 @@ export const TrendAnalysis: React.FC = () => {
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
     };
-  }, [quickRange]);
-
-  const [startDate, setStartDate] = useState(dateRange.start);
-  const [endDate, setEndDate] = useState(dateRange.end);
-
-  // Track if this is the initial load
-  const isInitialLoad = useRef(true);
+  }, [quickRange, dataRange]);
 
   // Update date range when quick range changes
   useEffect(() => {
     setStartDate(dateRange.start);
     setEndDate(dateRange.end);
   }, [dateRange]);
-
-  // Fetch all data in a single batch request
-  const {
-    data: batchData,
-    isLoading,
-    isError,
-    error,
-  } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
 
   // Mark initial load complete
   useEffect(() => {
@@ -153,6 +177,7 @@ export const TrendAnalysis: React.FC = () => {
   const conversationStats = batchData?.conversation_stats;
   const toolComparison = batchData?.tool_comparison;
   const userSegmentation = batchData?.user_segmentation;
+  // Note: dataRange is already extracted above (before useMemo for dateRange)
 
   // Prepare chart data
   const dailyTrend = dailyHourly?.daily ?? [];
