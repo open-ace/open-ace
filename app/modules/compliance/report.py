@@ -98,14 +98,55 @@ class ComplianceReport:
         return json.dumps(self.to_dict(), indent=indent, default=str)
 
     def to_csv(self) -> str:
-        """Convert details to CSV string."""
+        """Convert details to CSV string.
+
+        Handles both list format (single section) and dict format (multiple sections).
+        For dict format, adds a 'section' column to identify the data source.
+        """
         if not self.details:
             return ""
 
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=self.details[0].keys())
-        writer.writeheader()
-        writer.writerows(self.details)
+
+        # Check if details is dict format (comprehensive report) or list format
+        if isinstance(self.details, dict):
+            # Dict format: multiple sections
+            # Collect all rows with section column
+            all_rows = []
+            sections_order = [
+                "usage_summary",
+                "user_activity",
+                "audit_trail",
+                "security_events",
+                "quota_alerts",
+            ]
+
+            for section_key in sections_order:
+                section_data = self.details.get(section_key, [])
+                if section_data and isinstance(section_data, list):
+                    for row in section_data:
+                        # Add section column to each row
+                        row_copy = dict(row)
+                        row_copy["section"] = section_key
+                        all_rows.append(row_copy)
+
+            if not all_rows:
+                return ""
+
+            # Get all fieldnames (union of all keys) with section as first column
+            all_fieldnames = set()
+            for row in all_rows:
+                all_fieldnames.update(row.keys())
+            fieldnames = ["section"] + sorted([f for f in all_fieldnames if f != "section"])
+
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(all_rows)
+        else:
+            # List format: single section (backward compatible)
+            writer = csv.DictWriter(output, fieldnames=self.details[0].keys())
+            writer.writeheader()
+            writer.writerows(self.details)
 
         return output.getvalue()
 
@@ -161,6 +202,11 @@ class ComplianceReport:
                 "securityReport": "Security Report",
                 "quotaUsage": "Quota Usage Report",
                 "comprehensive": "Comprehensive Report",
+                "sectionUsageSummary": "Usage Summary",
+                "sectionUserActivity": "User Activity",
+                "sectionAuditTrail": "Audit Trail",
+                "sectionSecurityEvents": "Security Events",
+                "sectionQuotaAlerts": "Quota Alerts",
             },
             "zh": {
                 "reportTitle": "合规报告",
@@ -171,6 +217,11 @@ class ComplianceReport:
                 "securityReport": "安全报告",
                 "quotaUsage": "配额使用报告",
                 "comprehensive": "综合报告",
+                "sectionUsageSummary": "使用统计",
+                "sectionUserActivity": "用户活动",
+                "sectionAuditTrail": "审计轨迹",
+                "sectionSecurityEvents": "安全事件",
+                "sectionQuotaAlerts": "配额告警",
             },
             "ja": {
                 "reportTitle": "コンプライアンスレポート",
@@ -181,6 +232,11 @@ class ComplianceReport:
                 "securityReport": "セキュリティレポート",
                 "quotaUsage": "クォータ使用レポート",
                 "comprehensive": "総合レポート",
+                "sectionUsageSummary": "使用統計",
+                "sectionUserActivity": "ユーザー活動",
+                "sectionAuditTrail": "監査履歴",
+                "sectionSecurityEvents": "セキュリティイベント",
+                "sectionQuotaAlerts": "クォータアラート",
             },
             "ko": {
                 "reportTitle": "준수 보고서",
@@ -191,6 +247,11 @@ class ComplianceReport:
                 "securityReport": "보안 보고서",
                 "quotaUsage": "할당량 사용 보고서",
                 "comprehensive": "종합 보고서",
+                "sectionUsageSummary": "사용량 요약",
+                "sectionUserActivity": "사용자 활동",
+                "sectionAuditTrail": "감사 추적",
+                "sectionSecurityEvents": "보안 이벤트",
+                "sectionQuotaAlerts": "할당량 경고",
             },
         }
 
@@ -221,6 +282,7 @@ class ComplianceReport:
             "details": self.details,
             "checks": self.compliance_checks,
             "recommendations": self.recommendations,
+            "trans": lang_trans,  # Add translations for template
         }
 
         # Get generator name if available
@@ -264,6 +326,12 @@ class ComplianceReport:
                 "status": "Status",
                 "message": "Message",
                 "noData": "No data available",
+                "section": "Section",
+                "sectionUsageSummary": "Usage Summary",
+                "sectionUserActivity": "User Activity",
+                "sectionAuditTrail": "Audit Trail",
+                "sectionSecurityEvents": "Security Events",
+                "sectionQuotaAlerts": "Quota Alerts",
             },
             "zh": {
                 "summary": "汇总",
@@ -275,6 +343,12 @@ class ComplianceReport:
                 "status": "状态",
                 "message": "消息",
                 "noData": "无数据",
+                "section": "部分",
+                "sectionUsageSummary": "使用统计",
+                "sectionUserActivity": "用户活动",
+                "sectionAuditTrail": "审计轨迹",
+                "sectionSecurityEvents": "安全事件",
+                "sectionQuotaAlerts": "配额告警",
             },
             "ja": {
                 "summary": "サマリー",
@@ -286,6 +360,12 @@ class ComplianceReport:
                 "status": "状態",
                 "message": "メッセージ",
                 "noData": "データなし",
+                "section": "セクション",
+                "sectionUsageSummary": "使用統計",
+                "sectionUserActivity": "ユーザー活動",
+                "sectionAuditTrail": "監査履歴",
+                "sectionSecurityEvents": "セキュリティイベント",
+                "sectionQuotaAlerts": "クォータアラート",
             },
             "ko": {
                 "summary": "요약",
@@ -297,6 +377,12 @@ class ComplianceReport:
                 "status": "상태",
                 "message": "메시지",
                 "noData": "데이터 없음",
+                "section": "섹션",
+                "sectionUsageSummary": "사용량 요약",
+                "sectionUserActivity": "사용자 활동",
+                "sectionAuditTrail": "감사 추적",
+                "sectionSecurityEvents": "보안 이벤트",
+                "sectionQuotaAlerts": "할당량 경고",
             },
         }
 
@@ -360,33 +446,89 @@ class ComplianceReport:
         ws_details = wb.create_sheet(lang_trans["details"])
 
         if self.details:
-            # Write headers
-            headers = list(self.details[0].keys())
-            for col_idx, header in enumerate(headers, 1):
-                cell = ws_details.cell(row=1, column=col_idx, value=header)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_alignment
-                cell.border = border
+            # Check if details is dict format (comprehensive report) or list format
+            if isinstance(self.details, dict):
+                # Dict format: multiple sections
+                # Add Section column translation
+                section_trans = lang_trans.get("section", "Section")
 
-            # Write data
-            for row_idx, detail in enumerate(self.details, 2):
+                # Section order and translations
+                sections_order = [
+                    ("usage_summary", lang_trans.get("sectionUsageSummary", "Usage Summary")),
+                    ("user_activity", lang_trans.get("sectionUserActivity", "User Activity")),
+                    ("audit_trail", lang_trans.get("sectionAuditTrail", "Audit Trail")),
+                    ("security_events", lang_trans.get("sectionSecurityEvents", "Security Events")),
+                    ("quota_alerts", lang_trans.get("sectionQuotaAlerts", "Quota Alerts")),
+                ]
+
+                row_idx = 1
+                for section_key, section_title in sections_order:
+                    section_data = self.details.get(section_key, [])
+                    if not section_data or not isinstance(section_data, list):
+                        continue
+
+                    # Add section header row
+                    section_header_cell = ws_details.cell(row=row_idx, column=1, value=f"=== {section_title} ===")
+                    section_header_cell.font = Font(bold=True, size=14)
+                    row_idx += 1
+
+                    # Write column headers with Section column
+                    headers = ["Section"] + list(section_data[0].keys())
+                    for col_idx, header in enumerate(headers, 1):
+                        cell = ws_details.cell(row=row_idx, column=col_idx, value=header)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                        cell.border = border
+                    row_idx += 1
+
+                    # Write data rows
+                    for detail in section_data:
+                        cell = ws_details.cell(row=row_idx, column=1, value=section_key)
+                        cell.border = border
+                        for col_idx, header in enumerate(headers[1:], 2):
+                            value = detail.get(header)
+                            cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
+                            cell.border = border
+                        row_idx += 1
+
+                    # Add blank row between sections
+                    row_idx += 1
+
+                # Auto-adjust column widths if any data was written
+                if row_idx > 1:
+                    for col_idx in range(1, 10):  # Check first 10 columns
+                        col_letter = get_column_letter(col_idx)
+                        ws_details.column_dimensions[col_letter].width = 15
+            else:
+                # List format: single section (backward compatible)
+                # Write headers
+                headers = list(self.details[0].keys())
                 for col_idx, header in enumerate(headers, 1):
-                    value = detail.get(header)
-                    cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
+                    cell = ws_details.cell(row=1, column=col_idx, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
                     cell.border = border
 
-            # Auto-adjust column widths
-            for col_idx in range(1, len(headers) + 1):
-                col_letter = get_column_letter(col_idx)
-                max_length = max(
-                    len(str(ws_details.cell(row=1, column=col_idx).value or "")),
-                    max(
-                        len(str(ws_details.cell(row=r, column=col_idx).value or ""))
-                        for r in range(2, len(self.details) + 2)
-                    ),
-                )
-                ws_details.column_dimensions[col_letter].width = min(max_length + 2, 50)
+                # Write data
+                for row_idx, detail in enumerate(self.details, 2):
+                    for col_idx, header in enumerate(headers, 1):
+                        value = detail.get(header)
+                        cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
+                        cell.border = border
+
+                # Auto-adjust column widths
+                for col_idx in range(1, len(headers) + 1):
+                    col_letter = get_column_letter(col_idx)
+                    max_length = max(
+                        len(str(ws_details.cell(row=1, column=col_idx).value or "")),
+                        max(
+                            len(str(ws_details.cell(row=r, column=col_idx).value or ""))
+                            for r in range(2, len(self.details) + 2)
+                        ),
+                    )
+                    ws_details.column_dimensions[col_letter].width = min(max_length + 2, 50)
         else:
             ws_details["A1"] = lang_trans["noData"]
 
@@ -859,15 +1001,59 @@ class ReportGenerator:
     def _generate_comprehensive_report(
         self, period_start: datetime, period_end: datetime, tenant_id: Optional[int]
     ) -> tuple:
-        """Generate comprehensive compliance report."""
-        # Combine all report types
-        usage_summary, _ = self._generate_usage_summary(period_start, period_end, tenant_id)
-        user_activity, _ = self._generate_user_activity(period_start, period_end, tenant_id)
-        audit_summary, audit_details = self._generate_audit_trail(
-            period_start, period_end, tenant_id
-        )
-        security_summary, _ = self._generate_security_report(period_start, period_end, tenant_id)
-        quota_summary, _ = self._generate_quota_usage(period_start, period_end, tenant_id)
+        """Generate comprehensive compliance report.
+
+        Returns:
+            tuple: (summary dict, details dict with sections)
+                details structure:
+                {
+                    "usage_summary": [...],
+                    "user_activity": [...],
+                    "audit_trail": [...],
+                    "security_events": [...],
+                    "quota_alerts": [...]
+                }
+        """
+        # Combine all report types - now keeping all details
+        try:
+            usage_summary, usage_details = self._generate_usage_summary(
+                period_start, period_end, tenant_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate usage summary: {e}")
+            usage_summary, usage_details = {}, []
+
+        try:
+            user_activity, user_details = self._generate_user_activity(
+                period_start, period_end, tenant_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate user activity: {e}")
+            user_activity, user_details = {}, []
+
+        try:
+            audit_summary, audit_details = self._generate_audit_trail(
+                period_start, period_end, tenant_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate audit trail: {e}")
+            audit_summary, audit_details = {}, []
+
+        try:
+            security_summary, security_details = self._generate_security_report(
+                period_start, period_end, tenant_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate security report: {e}")
+            security_summary, security_details = {}, []
+
+        try:
+            quota_summary, quota_details = self._generate_quota_usage(
+                period_start, period_end, tenant_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate quota usage: {e}")
+            quota_summary, quota_details = {}, []
 
         summary: dict[str, Any] = {
             "period": {
@@ -881,7 +1067,16 @@ class ReportGenerator:
             "quota": quota_summary,
         }
 
-        return summary, audit_details
+        # New dict structure for details with sections
+        details: dict[str, Any] = {
+            "usage_summary": usage_details,
+            "user_activity": user_details,
+            "audit_trail": audit_details,
+            "security_events": security_details,
+            "quota_alerts": quota_details,
+        }
+
+        return summary, details
 
     def _run_compliance_checks(
         self, report_type: str, summary: dict[str, Any], details: list[dict[str, Any]]
@@ -1084,7 +1279,11 @@ class ReportGenerator:
             raise
 
     def get_saved_report(self, report_id: str) -> Optional[ComplianceReport]:
-        """Get a saved report by ID."""
+        """Get a saved report by ID.
+
+        Handles backward compatibility for old format comprehensive reports
+        by converting list-style details to dict format.
+        """
         row = self.db.fetch_one(
             "SELECT report_data FROM compliance_reports WHERE report_id = ?", (report_id,)
         )
@@ -1104,10 +1303,26 @@ class ReportGenerator:
                     filters=data["metadata"].get("filters", {}),
                 )
 
+                # Handle backward compatibility for comprehensive report details
+                details = data["details"]
+                report_type = data["metadata"]["report_type"]
+
+                # If comprehensive report has old list format details, convert to dict format
+                if report_type == ReportType.COMPREHENSIVE.value and isinstance(details, list):
+                    # Convert old flat list to new dict format
+                    details = {
+                        "usage_summary": [],
+                        "user_activity": [],
+                        "audit_trail": details,  # Old details were audit_trail
+                        "security_events": [],
+                        "quota_alerts": [],
+                    }
+                    logger.info(f"Converted old format comprehensive report details for {report_id}")
+
                 return ComplianceReport(
                     metadata=metadata,
                     summary=data["summary"],
-                    details=data["details"],
+                    details=details,
                     compliance_checks=data["compliance_checks"],
                     recommendations=data["recommendations"],
                 )
