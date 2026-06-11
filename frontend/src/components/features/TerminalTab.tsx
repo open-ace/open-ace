@@ -49,6 +49,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
 
+  // Use ref for theme to avoid stale closure in async initTerminal (Issue #637)
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
   // Use refs for callbacks to avoid stale closures and unnecessary reconnects
   const onReattachNeededRef = useRef(onReattachNeeded);
   onReattachNeededRef.current = onReattachNeeded;
@@ -207,9 +211,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       const { FitAddon } = await import('@xterm/addon-fit');
       const { WebLinksAddon } = await import('@xterm/addon-web-links');
 
-      // Dynamic theme based on application theme mode (Issue #637)
-      const terminalTheme =
-        theme === 'dark'
+      // Use current theme for initial setup via ref (Issue #637)
+      const currentTheme = themeRef.current;
+      const initialTheme =
+        currentTheme === 'dark'
           ? {
               background: '#1e1e2e',
               foreground: '#cdd6f4',
@@ -227,7 +232,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         cursorBlink: true,
         fontSize: 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: terminalTheme,
+        theme: initialTheme,
         allowProposedApi: true,
       });
 
@@ -273,7 +278,28 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         terminal.dispose();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Dynamic theme update without restarting terminal (Issue #637)
+  useEffect(() => {
+    if (!xtermRef.current) return;
+
+    const terminalTheme =
+      theme === 'dark'
+        ? {
+            background: '#1e1e2e',
+            foreground: '#cdd6f4',
+            cursor: '#f5e0dc',
+            selectionBackground: '#585b7066',
+          }
+        : {
+            background: '#ffffff',
+            foreground: '#1e1e2e',
+            cursor: '#1e1e2e',
+            selectionBackground: '#add8e666',
+          };
+
+    xtermRef.current.options.theme = terminalTheme;
   }, [theme]);
 
   // Connect when xterm is ready or wsUrl/token change
