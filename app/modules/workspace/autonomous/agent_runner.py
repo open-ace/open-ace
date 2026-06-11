@@ -47,7 +47,7 @@ def _ensure_usage_parser():
                 "cli_adapters.usage_parser not available; token tracking disabled"
             )
 
-            def _noop_usage_parser(line: str) -> dict | None:
+            def _noop_usage_parser(*_args, **_kwargs) -> dict | None:
                 return None
 
             _extract_stream_usage = _noop_usage_parser
