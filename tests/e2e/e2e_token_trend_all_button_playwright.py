@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -114,7 +114,10 @@ def test_default_date_range(page):
     # Start date should be about 30 days ago
     start_value = start_input.input_value()
     expected_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-    check(start_value == expected_start, f"Start date shows 30 days ago ({start_value} vs {expected_start})")
+    check(
+        start_value == expected_start,
+        f"Start date shows 30 days ago ({start_value} vs {expected_start})",
+    )
 
     shot(page, "03-default-30-days")
 
@@ -135,7 +138,10 @@ def test_all_button_click(page):
     # Check that "All" button is now active (primary)
     active_button = page.locator(".btn-group .btn-primary")
     button_text = active_button.text_content()
-    check("All" in button_text or "全部" in button_text, f"'All' button is now active (text: '{button_text}')")
+    check(
+        "All" in button_text or "全部" in button_text,
+        f"'All' button is now active (text: '{button_text}')",
+    )
 
     shot(page, "04-all-button-active")
 
@@ -165,7 +171,9 @@ def test_all_button_date_range(page):
         check(True, f"Start date is NOT hardcoded 30 days ago (actual: {start_value})")
     else:
         # This could happen if database only has 30 days of data
-        print(f"    [INFO] Start date happens to equal 30 days ago - may be correct if data is limited")
+        print(
+            "    [INFO] Start date happens to equal 30 days ago - may be correct if data is limited"
+        )
 
     # Verify start date is NOT in the future
     start_date_obj = datetime.strptime(start_value, "%Y-%m-%d")
@@ -193,9 +201,6 @@ def test_chart_data_displayed(page):
 def test_api_response_data_range(page):
     """Test that API response includes data_range field."""
     print("\n[TEST] API response data_range...")
-
-    # Capture network response
-    api_response = None
 
     def handle_response(response):
         if "/api/analysis/batch" in response.url:
@@ -250,8 +255,10 @@ def test_date_inputs_manual_change(page):
     # Based on current implementation, manual change sets quickRange to 'all'
     active_button = page.locator(".btn-group .btn-primary")
     button_text = active_button.text_content()
-    check("All" in button_text or "全部" in button_text,
-          f"After manual change, 'All' button is active (text: '{button_text}')")
+    check(
+        "All" in button_text or "全部" in button_text,
+        f"After manual change, 'All' button is active (text: '{button_text}')",
+    )
 
     shot(page, "08-manual-date-change")
 

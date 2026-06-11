@@ -253,7 +253,7 @@ export const Pagination: React.FC<PaginationProps> = ({
                     className="page-link"
                     onClick={() => handlePageChange(page)}
                     onKeyDown={(e) => handleKeyDown(e, page)}
-                    aria-label={`${t('goToPage', language)} ${page}`}
+                    aria-label={t('goToPage', language).replace('{page}', String(page))}
                     aria-current={isActive ? 'page' : undefined}
                   >
                     {page}
@@ -395,6 +395,7 @@ export const Pagination: React.FC<PaginationProps> = ({
     </div>
   );
 };
+
 /**
  * Button Component (inline for Pagination use)
  * Minimal Button component for pagination jump submit

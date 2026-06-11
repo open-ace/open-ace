@@ -140,6 +140,7 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the review prompt.  Reviews longer than this are truncated with a
 # notice so the reviewer knows content was omitted.
 PREV_REVIEW_MAX_LENGTH = 3000
+REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Agent intro/closing text patterns for _clean_agent_text().
 # These match common Chinese agent narration phrases that should not
@@ -487,21 +488,12 @@ class AutonomousOrchestrator:
         self.repo.update_workflow(self._workflow_id, updates)
         self._emit("workflow_updated", updates)
 
-    def _accumulate_tokens(self, result: AgentTaskResult):
-        """Add agent task tokens to workflow totals."""
-        self.repo.update_workflow_tokens(
-            self._workflow_id,
-            {
-                "total_tokens": result.total_tokens,
-                "total_input_tokens": result.total_input_tokens,
-                "total_output_tokens": result.total_output_tokens,
-            },
-        )
-        # Recalculate request count from actual session_messages
-        self.repo.recalculate_workflow_requests(self._workflow_id)
+    def _accumulate_tokens(self, _result: AgentTaskResult):
+        """Refresh workflow totals from the sessions linked to milestones."""
+        self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _on_agent_activity(self, session_id: str, activity: dict):
-        """Forward agent activity to the SSE event stream and update tokens."""
+        """Forward agent activity to the SSE event stream and refresh usage."""
         self.emitter.emit(
             self._workflow_id,
             "agent_activity",
@@ -510,19 +502,18 @@ class AutonomousOrchestrator:
                 **activity,
             },
         )
-        # Real-time token update (only on usage events to avoid DB thrashing)
-        if activity.get("type") == "usage":
+        activity_type = activity.get("type")
+        if activity_type == "session_resolved":
             try:
-                self.repo.update_workflow_tokens(
-                    self._workflow_id,
-                    {
-                        "total_tokens": activity.get("total_tokens", 0),
-                        "total_input_tokens": activity.get("total_input_tokens", 0),
-                        "total_output_tokens": activity.get("total_output_tokens", 0),
-                    },
-                )
+                self._link_session_to_current_milestone(session_id)
+                self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
             except Exception:
-                logger.warning("Failed to update workflow tokens in real-time", exc_info=True)
+                logger.warning("Failed to resolve workflow session in real-time", exc_info=True)
+        elif activity_type == "usage":
+            try:
+                self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
+            except Exception:
+                logger.warning("Failed to refresh workflow tokens in real-time", exc_info=True)
 
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
@@ -530,10 +521,15 @@ class AutonomousOrchestrator:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if milestones:
                 ms = milestones[-1]  # most recent
+                field_name = (
+                    "review_session_id"
+                    if ms.get("milestone_type") in REVIEW_SESSION_MILESTONE_TYPES
+                    else "session_id"
+                )
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
                     {
-                        "session_id": session_id,
+                        field_name: session_id,
                     },
                 )
         except Exception:
@@ -561,22 +557,30 @@ class AutonomousOrchestrator:
         # before run_agent_task() returns
         if "session_id" not in kwargs:
             kwargs["session_id"] = str(uuid.uuid4())
+        tracking_session_id = kwargs["session_id"]
+        workflow_data = wf or self.workflow
+        if "user_id" not in kwargs and workflow_data:
+            kwargs["user_id"] = workflow_data.get("user_id")
 
         with self._session_lock:
-            self._current_session_id = kwargs["session_id"]
+            self._current_session_id = tracking_session_id
 
-        # Immediately link session to in_progress milestone so frontend
-        # can show session details while the agent is still running
-        self._link_session_to_current_milestone(kwargs["session_id"])
+        should_prelink_tracking_session = not self._runner._uses_sidebar_session_source(
+            kwargs.get("cli_tool", ""),
+            kwargs.get("workspace_type", "local"),
+        )
+        if should_prelink_tracking_session:
+            self._link_session_to_current_milestone(tracking_session_id)
 
         # Inject per-workflow timeout if specified
         if "timeout" not in kwargs:
-            workflow_data = wf or self.workflow
             task_timeout = (workflow_data or {}).get("task_timeout")
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
 
         result = self._runner.run_agent_task(**kwargs)
+        if result.session_id:
+            self._link_session_to_current_milestone(result.session_id)
 
         # 429 rate limit retry — exponential backoff, max 30 minutes total.
         # Use interruptible sleep (check cancel signal every 5s) so the
@@ -629,7 +633,7 @@ class AutonomousOrchestrator:
             result = self._runner.run_agent_task(**kwargs)
 
         with self._session_lock:
-            self._current_session_id = result.session_id
+            self._current_session_id = result.tracking_session_id or result.session_id
         return result
 
     def cancel_current_task(self):
