@@ -348,6 +348,95 @@ class AutonomousWorkflowRepository:
             ),
         )
 
+    def refresh_workflow_usage_from_sessions(self, workflow_id: str) -> None:
+        """Refresh workflow token/request totals from linked agent_sessions."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self.db.execute(
+            adapt_sql(
+                """
+                UPDATE autonomous_workflows SET
+                    total_tokens = COALESCE((
+                        SELECT SUM(COALESCE(s.total_tokens, 0))
+                        FROM agent_sessions s
+                        WHERE s.session_id IN (
+                            SELECT DISTINCT sid FROM (
+                                SELECT NULLIF(session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                                UNION
+                                SELECT NULLIF(review_session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                            ) linked
+                            WHERE sid IS NOT NULL
+                        )
+                    ), 0),
+                    total_input_tokens = COALESCE((
+                        SELECT SUM(COALESCE(s.total_input_tokens, 0))
+                        FROM agent_sessions s
+                        WHERE s.session_id IN (
+                            SELECT DISTINCT sid FROM (
+                                SELECT NULLIF(session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                                UNION
+                                SELECT NULLIF(review_session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                            ) linked
+                            WHERE sid IS NOT NULL
+                        )
+                    ), 0),
+                    total_output_tokens = COALESCE((
+                        SELECT SUM(COALESCE(s.total_output_tokens, 0))
+                        FROM agent_sessions s
+                        WHERE s.session_id IN (
+                            SELECT DISTINCT sid FROM (
+                                SELECT NULLIF(session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                                UNION
+                                SELECT NULLIF(review_session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                            ) linked
+                            WHERE sid IS NOT NULL
+                        )
+                    ), 0),
+                    total_requests = COALESCE((
+                        SELECT SUM(COALESCE(s.request_count, 0))
+                        FROM agent_sessions s
+                        WHERE s.session_id IN (
+                            SELECT DISTINCT sid FROM (
+                                SELECT NULLIF(session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                                UNION
+                                SELECT NULLIF(review_session_id, '') AS sid
+                                FROM workflow_milestones
+                                WHERE workflow_id = ?
+                            ) linked
+                            WHERE sid IS NOT NULL
+                        )
+                    ), 0),
+                    updated_at = ?
+                WHERE workflow_id = ?
+                """
+            ),
+            (
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                workflow_id,
+                now,
+                workflow_id,
+            ),
+        )
+
     def list_forks(self, workflow_id: str) -> list:
         """List all child workflows forked from the given parent."""
         return self.db.fetch_all(

@@ -58,6 +58,7 @@ class TestAgentRunnerRunTask:
 
         assert result.success is False
         assert "not found" in result.error
+        assert result.tracking_session_id
 
     def test_run_local_success(self):
         """Test successful local agent execution — verify return value fields."""
@@ -208,6 +209,88 @@ class TestAgentRunnerRunTask:
                 )
 
         self.sm.create_session.assert_called_once()
+
+    def test_local_claude_uses_single_sidebar_session(self):
+        """Local Claude should persist only the resolved sidebar session."""
+        mock_adapter = MagicMock()
+        mock_adapter.get_executable_name.return_value = "claude"
+        mock_adapter.build_start_args.return_value = ["claude", "--model", "m1"]
+        mock_cli_adapters = MagicMock()
+        mock_cli_adapters.get_adapter.return_value = mock_adapter
+
+        stdout_lines = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "id": "msg-1",
+                        "model": "claude-sonnet",
+                        "content": "Hello from Claude",
+                    },
+                }
+            ).encode(),
+            json.dumps(
+                {
+                    "type": "result",
+                    "data": {
+                        "usage": {"input_tokens": 120, "output_tokens": 30},
+                    },
+                }
+            ).encode(),
+            b"",
+        ]
+
+        mock_stdout = MagicMock()
+        mock_stdout.readline = MagicMock(side_effect=stdout_lines)
+        mock_stderr = MagicMock()
+        mock_stderr.readline = MagicMock(return_value=b"")
+
+        with (
+            patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}),
+            patch("shutil.which", return_value="/usr/bin/claude"),
+            patch("subprocess.Popen") as mock_popen,
+            patch.object(
+                self.runner,
+                "_find_latest_claude_session_id",
+                return_value="real-claude-session",
+            ),
+        ):
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.pid = 12345
+            proc.stdin = MagicMock()
+            proc.stdout = mock_stdout
+            proc.stderr = mock_stderr
+            mock_popen.return_value = proc
+
+            result = self.runner.run_agent_task(
+                workflow_id="wf-1",
+                cli_tool="claude-code",
+                model="m1",
+                project_path="/tmp/test",
+                prompt="Do something",
+                workspace_type="local",
+                user_id=42,
+                timeout=5,
+            )
+
+        assert result.success is True
+        assert result.session_id == "real-claude-session"
+        assert result.tracking_session_id
+
+        create_calls = self.sm.create_session.call_args_list
+        assert len(create_calls) == 1
+        assert create_calls[0].kwargs["session_id"] == "real-claude-session"
+        assert create_calls[0].kwargs["tool_name"] == "claude"
+        assert create_calls[0].kwargs["title"] == "claude - real-cla"
+        assert create_calls[0].kwargs["project_path"] == "-tmp-test"
+        assert create_calls[0].kwargs["user_id"] == 42
+
+        persisted_updates = [
+            call.args[0] for call in self.sm.update_session_fields.call_args_list if call.args
+        ]
+        assert "real-claude-session" in persisted_updates
+        assert "" not in persisted_updates
 
 
 class TestLocalSession:
