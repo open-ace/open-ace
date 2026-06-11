@@ -69,7 +69,7 @@ def change_language(page, language_code):
     """Change the language setting."""
     print(f"\n[Language] Changing to {language_code}...")
     # Find language dropdown in header (globe icon dropdown)
-    globe_icon = page.locator('.bi-globe').first
+    globe_icon = page.locator(".bi-globe").first
     if globe_icon.is_visible():
         globe_icon.click()
         time.sleep(0.5)
@@ -77,14 +77,14 @@ def change_language(page, language_code):
         # Find the dropdown item for the specified language
         # Language codes: en, zh, ja, ko
         language_names = {
-            'en': ['English', '英语'],
-            'zh': ['Chinese', '中文'],
-            'ja': ['Japanese', '日语'],
-            'ko': ['Korean', '韩语']
+            "en": ["English", "英语"],
+            "zh": ["Chinese", "中文"],
+            "ja": ["Japanese", "日语"],
+            "ko": ["Korean", "韩语"],
         }
 
         for name in language_names.get(language_code, [language_code]):
-            lang_option = page.locator('.dropdown-item').filter(has_text=name)
+            lang_option = page.locator(".dropdown-item").filter(has_text=name)
             if lang_option.count() > 0:
                 lang_option.first.click()
                 time.sleep(1)
@@ -120,12 +120,14 @@ def test_user_segmentation_tooltip():
 
             # Step 3: Find User Segmentation card
             print("\n[Step 3] Find User Segmentation card")
-            user_seg_card = page.locator('.card:has-text("User Segmentation"), .card:has-text("用户分层")')
+            user_seg_card = page.locator(
+                '.card:has-text("User Segmentation"), .card:has-text("用户分层")'
+            )
             if user_seg_card.count() > 0:
                 print("  ✓ User Segmentation card found")
 
                 # Check for info icon (help tooltip)
-                info_icon = user_seg_card.locator('.bi-info-circle')
+                info_icon = user_seg_card.locator(".bi-info-circle")
                 if info_icon.count() > 0:
                     print("  ✓ Info icon found for help tooltip")
 
@@ -146,7 +148,7 @@ def test_user_segmentation_tooltip():
 
                 # Step 4: Check doughnut chart canvas
                 print("\n[Step 4] Check doughnut chart")
-                chart_canvas = user_seg_card.locator('canvas')
+                chart_canvas = user_seg_card.locator("canvas")
                 if chart_canvas.count() > 0:
                     print("  ✓ Doughnut chart canvas found")
 
@@ -303,12 +305,14 @@ def test_user_segmentation_responsive():
 
             # Step 3: Check User Segmentation card layout
             print("\n[Step 3] Check User Segmentation card layout on mobile")
-            user_seg_card = page.locator('.card:has-text("User Segmentation"), .card:has-text("用户分层")')
+            user_seg_card = page.locator(
+                '.card:has-text("User Segmentation"), .card:has-text("用户分层")'
+            )
             if user_seg_card.count() > 0:
                 print("  ✓ User Segmentation card found")
 
                 # Check chart height
-                chart_container = user_seg_card.locator('.chart-container')
+                chart_container = user_seg_card.locator(".chart-container")
                 if chart_container.count() > 0:
                     print("  ✓ Chart container found")
                     screenshots.append(take_screenshot(page, "responsive_04_chart"))
