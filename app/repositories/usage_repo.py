@@ -387,19 +387,27 @@ class UsageRepository:
 
     def get_all_tools(self) -> list[str]:
         """
-        Get list of all tools.
+        Get list of all tools, including system-supported tools.
 
         Returns:
-            List[str]: List of tool names.
+            List[str]: List of tool names (static + dynamic).
         """
+        from app.utils.tool_names import TOOL_NAME_ALIASES
+
+        # Get tools from database (dynamic tools with usage records)
         query = """
             SELECT DISTINCT tool_name
             FROM daily_messages
             ORDER BY tool_name
         """
-
         rows = self.db.fetch_all(query)
-        return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
+        db_tools = {normalize_tool_name(row["tool_name"]) for row in rows}
+
+        # Get system-supported tools (static tools)
+        system_tools = set(TOOL_NAME_ALIASES.keys())
+
+        # Combine and return sorted list
+        return sorted(db_tools | system_tools)
 
     def get_all_hosts(self) -> list[str]:
         """
