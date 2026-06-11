@@ -158,13 +158,10 @@ export const RequestDashboard: React.FC = () => {
     };
   }, [aggregatedUserStats, language]);
 
-  // Calculate peak tool for today
-  const peakTool = useMemo(() => {
-    if (!todayStats?.by_tool) return '-';
-    return (
-      Object.entries(todayStats.by_tool).sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
-    );
-  }, [todayStats?.by_tool]);
+  // Calculate peak tool for today (simple sort, performance impact negligible)
+  const peakTool = todayStats?.by_tool
+    ? Object.entries(todayStats.by_tool).sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
+    : '-';
 
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
