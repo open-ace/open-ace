@@ -13,6 +13,7 @@ Tests cover:
 import pytest
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from functools import wraps
 
 # Check if openpyxl is available for Excel tests
 try:
@@ -23,9 +24,66 @@ except ImportError:
 
 
 @pytest.fixture
-def admin_headers(auth_headers):
-    """Headers for admin user (admin_required decorator)."""
-    return auth_headers
+def app(tmp_db):
+    """Create Flask app for testing with temporary database."""
+    from flask import Flask
+    from app.routes.compliance import compliance_bp
+    from unittest.mock import patch
+
+    app = Flask(__name__)
+    app.register_blueprint(compliance_bp)
+    app.config["TESTING"] = True
+    app.config["SECRET_KEY"] = "test-secret-key"
+
+    # Patch report_generator to use tmp_db
+    with patch("app.routes.compliance.report_generator.db", tmp_db):
+        yield app
+
+
+@pytest.fixture
+def client(app):
+    """Create test client with authentication."""
+    from unittest.mock import patch
+    from flask import g
+
+    test_client = app.test_client()
+
+    # Create a wrapper that patches authentication for each request
+    class AuthenticatedClient:
+        def __init__(self, client):
+            self._client = client
+
+        def get(self, *args, **kwargs):
+            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+                with patch("app.auth.decorators._load_user_from_token",
+                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                    return self._client.get(*args, **kwargs)
+
+        def post(self, *args, **kwargs):
+            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+                with patch("app.auth.decorators._load_user_from_token",
+                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                    return self._client.post(*args, **kwargs)
+
+        def put(self, *args, **kwargs):
+            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+                with patch("app.auth.decorators._load_user_from_token",
+                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                    return self._client.put(*args, **kwargs)
+
+        def delete(self, *args, **kwargs):
+            with patch("app.auth.decorators._extract_token", return_value="test-token"):
+                with patch("app.auth.decorators._load_user_from_token",
+                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                    return self._client.delete(*args, **kwargs)
+
+    return AuthenticatedClient(test_client)
+
+
+@pytest.fixture
+def admin_headers():
+    """Headers for admin user requests."""
+    return {"Content-Type": "application/json"}
 
 
 class TestReportGenerationAPI:
