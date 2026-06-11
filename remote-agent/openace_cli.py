@@ -275,7 +275,7 @@ def cmd_status(_: argparse.Namespace) -> int:
 def cmd_menu(args: argparse.Namespace) -> int:
     # Windows does not support termios module used by terminal_menu.py
     # Fall back to shell mode on Windows
-    if sys.platform == "win32":
+    if os.name == "nt":
         print("Note: Interactive menu is not supported on Windows.")
         print("Starting shell instead. You can run AI tools directly from the shell.\n")
         return cmd_shell(args)
@@ -294,11 +294,17 @@ def cmd_shell(args: argparse.Namespace) -> int:
     _apply_local_cli_settings(terminal)
     _write_active_terminal(terminal)
     env = _session_env(terminal)
-    shell = os.environ.get("SHELL") or "/bin/sh"
-    try:
+
+    # Windows: use COMSPEC (cmd.exe)
+    if os.name == "nt":
+        shell = os.environ.get("COMSPEC") or "cmd.exe"
+        subprocess.run([shell], env=env, cwd=work_dir, check=False)
+    else:
+        # Unix/Linux: login shell
+        shell = os.environ.get("SHELL") or "/bin/sh"
         subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
-    finally:
-        _clear_active_terminal()
+
+    _clear_active_terminal()
     return 0
 
 
