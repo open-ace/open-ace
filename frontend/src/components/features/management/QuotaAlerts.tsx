@@ -9,7 +9,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
-import { useQuotaUsage, useUpdateQuota } from '@/hooks';
+import { useQuotaUsage, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -25,8 +25,9 @@ import {
   Progress,
   Badge,
   useToast,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatDateTime, formatNumber } from '@/utils';
+import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
 import {
   QuotaType,
   TOKEN_QUOTA_MULTIPLIER,
@@ -78,6 +79,14 @@ export const QuotaAlerts: React.FC = () => {
     refetch,
   } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
+
+  // Page refresh control - manages manual refresh for quota and alerts data
+  const pageRefresh = usePageRefresh({
+    page: '/manage/quota',
+    refreshKey: createMatcherConfig([['quota'], ['alerts']], 'prefix'),
+    interval: 0, // Manual refresh only for configuration data
+    enabled: false,
+  });
 
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
@@ -935,6 +944,13 @@ export const QuotaAlerts: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('quotaAndAlerts', language)}</h2>
         <div className="d-flex gap-2">
+          <PageRefreshControl
+            refresh={pageRefresh}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            compact={true}
+            showLastRefreshTime={true}
+          />
           {activeTab === 'alerts' && (
             <>
               <Button variant="outline-secondary" size="sm" onClick={() => setShowPrefsModal(true)}>
@@ -946,12 +962,6 @@ export const QuotaAlerts: React.FC = () => {
                 {t('markAllRead', language)}
               </Button>
             </>
-          )}
-          {activeTab === 'quota' && (
-            <Button variant="primary" size="sm" onClick={() => refetch()} loading={isFetching}>
-              {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
-              {t('refresh', language)}
-            </Button>
           )}
         </div>
       </div>

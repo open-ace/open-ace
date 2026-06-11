@@ -252,7 +252,13 @@ export function initializeQueryKeyRegistry(): void {
     {
       key: ['quota'],
       page: '/manage/quota',
-      description: 'Quota and alerts',
+      description: 'Quota data',
+      refreshScope: 'page',
+    },
+    {
+      key: ['alerts'],
+      page: '/manage/quota',
+      description: 'Alerts data',
       refreshScope: 'page',
     },
   ]);
@@ -409,6 +415,16 @@ export const queryKeys = {
   // Security
   security: {
     data: () => ['security'],
+  },
+
+  // Quota
+  quota: {
+    usage: () => ['quota'],
+  },
+
+  // Alerts
+  alerts: {
+    list: () => ['alerts'],
   },
 
   // API Keys
