@@ -97,7 +97,6 @@ describe('getVisiblePages', () => {
     });
   });
 });
-
 describe('Pagination Component', () => {
   const mockOnPageChange = vi.fn();
 
