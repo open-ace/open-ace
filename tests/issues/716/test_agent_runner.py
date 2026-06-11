@@ -292,6 +292,100 @@ class TestAgentRunnerRunTask:
         assert "real-claude-session" in persisted_updates
         assert "" not in persisted_updates
 
+    def test_local_claude_waits_for_late_session_detection(self):
+        """Late JSONL detection after process completion should still resolve the real session."""
+        mock_adapter = MagicMock()
+        mock_adapter.get_executable_name.return_value = "claude"
+        mock_adapter.build_start_args.return_value = ["claude", "--model", "m1"]
+        mock_cli_adapters = MagicMock()
+        mock_cli_adapters.get_adapter.return_value = mock_adapter
+
+        stdout_lines = [
+            json.dumps({"type": "assistant", "message": {"content": "Hello from Claude"}}).encode(),
+            json.dumps(
+                {
+                    "type": "result",
+                    "data": {
+                        "usage": {"input_tokens": 120, "output_tokens": 30},
+                    },
+                }
+            ).encode(),
+            b"",
+        ]
+
+        mock_stdout = MagicMock()
+        mock_stdout.readline = MagicMock(side_effect=stdout_lines)
+        mock_stderr = MagicMock()
+        mock_stderr.readline = MagicMock(return_value=b"")
+
+        with (
+            patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}),
+            patch("shutil.which", return_value="/usr/bin/claude"),
+            patch("subprocess.Popen") as mock_popen,
+            patch.object(
+                self.runner,
+                "_find_latest_claude_session_id",
+                side_effect=["", "", "late-claude-session"],
+            ),
+            patch("time.sleep"),
+        ):
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.pid = 12345
+            proc.stdin = MagicMock()
+            proc.stdout = mock_stdout
+            proc.stderr = mock_stderr
+            mock_popen.return_value = proc
+
+            result = self.runner.run_agent_task(
+                workflow_id="wf-1",
+                cli_tool="claude-code",
+                model="m1",
+                project_path="/tmp/test",
+                prompt="Do something",
+                workspace_type="local",
+                user_id=42,
+                timeout=5,
+            )
+
+        assert result.success is True
+        assert result.session_id == "late-claude-session"
+        self.sm.create_session.assert_called_with(
+            session_id="late-claude-session",
+            session_type="chat",
+            title="claude - late-cla",
+            tool_name="claude",
+            user_id=42,
+            project_path="-tmp-test",
+            workspace_type="local",
+            remote_machine_id=None,
+            context={"workflow_id": "wf-1"},
+        )
+
+    def test_sidebar_session_not_marked_resolved_when_create_fails(self):
+        """A failed DB create should not leave a ghost persisted session id."""
+        self.sm.create_session.side_effect = RuntimeError("db down")
+        session = _LocalSession(
+            session_id="tracking-1",
+            process=MagicMock(),
+            cli_tool="claude-code",
+            project_path="/tmp/test",
+            encoded_project_path="-tmp-test",
+            workflow_id="wf-1",
+            user_id=42,
+        )
+
+        with patch.object(
+            self.runner,
+            "_find_latest_claude_session_id",
+            return_value="real-claude-session",
+        ):
+            resolved = self.runner._ensure_sidebar_session(session)
+
+        assert resolved == ""
+        assert session.persisted_session_id == ""
+        self.sm.update_session_fields.assert_not_called()
+
 
 class TestLocalSession:
     """Tests for _LocalSession dataclass."""
@@ -475,3 +569,47 @@ class TestStopSession:
         runner = AutonomousAgentRunner()
         # Should not raise
         runner.stop_session("nonexistent")
+
+
+class TestPersistLocalSessionMessages:
+    """Tests for local message persistence metadata."""
+
+    def test_event_log_persists_message_and_tool_metadata(self):
+        sm = MagicMock()
+        runner = AutonomousAgentRunner(session_manager=sm)
+
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        result = AgentTaskResult(
+            event_log=[
+                {
+                    "type": "assistant",
+                    "text": "hello",
+                    "message_id": "msg-123",
+                    "model": "claude-sonnet",
+                },
+                {
+                    "type": "tool_use",
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": "app.py"},
+                    "tool_use_id": "tool-456",
+                },
+            ]
+        )
+
+        runner._persist_local_session_messages("sess-1", result)
+
+        assert sm.add_message.call_count == 2
+        first_call = sm.add_message.call_args_list[0].kwargs
+        assert first_call["session_id"] == "sess-1"
+        assert first_call["role"] == "assistant"
+        assert first_call["model"] == "claude-sonnet"
+        assert first_call["metadata"] == {"message_id": "msg-123"}
+
+        second_call = sm.add_message.call_args_list[1].kwargs
+        assert second_call["session_id"] == "sess-1"
+        assert second_call["role"] == "tool"
+        assert second_call["metadata"] == {
+            "tool_name": "Read",
+            "tool_use_id": "tool-456",
+        }

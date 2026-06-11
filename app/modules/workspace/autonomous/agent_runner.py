@@ -67,6 +67,10 @@ except (ValueError, TypeError):
     logger.warning("Invalid AUTONOMOUS_TASK_TIMEOUT value, using default 3600")
     DEFAULT_TASK_TIMEOUT = 3600
 
+SESSION_DETECTION_GRACE_SECONDS = 5.0
+SESSION_DETECTION_WAIT_SECONDS = 5.0
+SESSION_DETECTION_POLL_INTERVAL = 0.25
+
 
 @dataclass
 class _LocalSession:
@@ -161,14 +165,17 @@ class AutonomousAgentRunner:
             return ""
 
         latest_file = None
-        latest_mtime = min_mtime_epoch - 1
+        latest_mtime = min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
         try:
             for candidate in project_dir.glob("*.jsonl"):
                 try:
                     stat = candidate.stat()
                 except OSError:
                     continue
-                if stat.st_mtime >= min_mtime_epoch - 1 and stat.st_mtime >= latest_mtime:
+                if (
+                    stat.st_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
+                    and stat.st_mtime >= latest_mtime
+                ):
                     latest_file = candidate
                     latest_mtime = stat.st_mtime
         except OSError:
@@ -190,8 +197,6 @@ class AutonomousAgentRunner:
         if not persisted_id:
             return ""
 
-        session.persisted_session_id = persisted_id
-
         if self.session_manager:
             try:
                 self.session_manager.create_session(
@@ -207,7 +212,9 @@ class AutonomousAgentRunner:
                 )
             except Exception as e:
                 logger.warning("Failed to create resolved sidebar session: %s", e)
+                return ""
 
+        session.persisted_session_id = persisted_id
         if self._activity_callback:
             self._activity_callback(
                 persisted_id,
@@ -219,13 +226,33 @@ class AutonomousAgentRunner:
 
         return persisted_id
 
+    def _resolve_sidebar_session(
+        self,
+        session: _LocalSession,
+        wait_timeout: float = 0.0,
+    ) -> str:
+        """Resolve the persisted sidebar session, optionally waiting for late JSONL flushes."""
+        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+            return session.session_id
+        if session.persisted_session_id:
+            return session.persisted_session_id
+
+        deadline = time.monotonic() + max(wait_timeout, 0.0)
+        while True:
+            persisted_id = self._ensure_sidebar_session(session)
+            if persisted_id:
+                return persisted_id
+            if time.monotonic() >= deadline:
+                return ""
+            time.sleep(SESSION_DETECTION_POLL_INTERVAL)
+
     def _sync_sidebar_session_totals(
         self, session: _LocalSession, status: str | None = None
     ) -> None:
         """Write the current local Claude usage into the persisted sidebar session."""
         if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
             return
-        persisted_id = session.persisted_session_id or self._ensure_sidebar_session(session)
+        persisted_id = session.persisted_session_id or self._resolve_sidebar_session(session)
         if not persisted_id or not self.session_manager:
             return
 
@@ -509,6 +536,16 @@ class AutonomousAgentRunner:
                     pass
 
         self._local_sessions.pop(session_id, None)
+
+        if (
+            completed
+            and self._uses_sidebar_session_source(cli_tool, workspace_type)
+            and not session.persisted_session_id
+        ):
+            self._resolve_sidebar_session(
+                session,
+                wait_timeout=min(SESSION_DETECTION_WAIT_SECONDS, max(timeout, 0)),
+            )
 
         resolved_session_id = (
             session.persisted_session_id
@@ -806,7 +843,7 @@ class AutonomousAgentRunner:
 
                 try:
                     if not session.persisted_session_id:
-                        self._ensure_sidebar_session(session)
+                        self._resolve_sidebar_session(session)
                     parsed = json.loads(line)
                     msg_type = parsed.get("type", "")
 
