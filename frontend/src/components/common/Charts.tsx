@@ -483,7 +483,7 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
             // Line 2: Percentage (if showPercentage is true)
             if (showPercentage && total > 0) {
               const percentage = ((value / total) * 100).toFixed(1);
-              lines.push(`占比: ${percentage}%`);
+              lines.push(`${percentage}%`);
             }
 
             // Line 3: Description (if provided)

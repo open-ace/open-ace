@@ -656,9 +656,21 @@ body.sidebar-mobile-open {
     max-height: 250px;
   }
 
+  /* Chart.js legend - smaller font on mobile */
+  #legend-container li,
+  .chart-legend li,
+  ul.chart-legend li {
+    font-size: 12px !important;
+  }
+
   /* User segmentation chart - adjust height */
   .trend-analysis .col-md-6 .card-body {
     min-height: 180px;
+  }
+
+  /* Doughnut chart height on small screens */
+  .trend-analysis .card-body .chart-container {
+    height: 200px !important;
   }
 }
 
@@ -666,6 +678,13 @@ body.sidebar-mobile-open {
 @media (min-width: 768px) {
   .chart-container {
     min-height: 250px;
+  }
+
+  /* Chart.js legend - normal font on larger screens */
+  #legend-container li,
+  .chart-legend li,
+  ul.chart-legend li {
+    font-size: 14px !important;
   }
 
   .trend-analysis .col-md-6 .card-body {
