@@ -5,16 +5,25 @@
  * Fork workflows are indented under their parent with a 🔀 icon.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Badge, Loading } from '@/components/common';
+import { Badge, Loading, Pagination } from '@/components/common';
 import { useWorkflows, useDeleteWorkflow } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 
 interface AutonomousWorkflowListProps {
   selectedId: string | null;
   onSelect: (workflow: AutonomousWorkflow) => void;
+  onClearSelection: () => void;
+  preserveInitialSelection?: boolean;
+  onListStateChange?: (state: {
+    total: number;
+    isLoading: boolean;
+    hasLoaded: boolean;
+    hasActiveFilters: boolean;
+    workflows: AutonomousWorkflow[];
+  }) => void;
 }
 
 const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: string }> = {
@@ -52,34 +61,113 @@ export const ACTIVE_WORKFLOW_STATUSES = [
 
 const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
+  { key: 'queued', labelKey: 'autoFilterQueued' },
   {
-    key: 'queued,pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
+    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,paused,planning_timeout',
     labelKey: 'autoFilterActive',
   },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
   { key: 'failed', labelKey: 'autoFilterFailed' },
 ];
 
+const PAGE_SIZE = 50;
+const EMPTY_WORKFLOWS: AutonomousWorkflow[] = [];
+
 export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   selectedId,
   onSelect,
+  onClearSelection,
+  preserveInitialSelection = false,
+  onListStateChange,
 }) => {
   const language = useLanguage();
   const [statusFilter, setStatusFilter] = useState('');
-  const { data, isLoading } = useWorkflows(statusFilter ? { status: statusFilter } : undefined);
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [hasUserChangedView, setHasUserChangedView] = useState(false);
+  const filters = useMemo(() => {
+    const params: Record<string, string> = {
+      limit: String(PAGE_SIZE),
+      offset: String((page - 1) * PAGE_SIZE),
+    };
+    if (statusFilter) {
+      params.status = statusFilter;
+    }
+    if (debouncedSearch.trim()) {
+      params.search = debouncedSearch.trim();
+    }
+    return params;
+  }, [debouncedSearch, page, statusFilter]);
+  const { data, isLoading } = useWorkflows(filters);
   const deleteMutation = useDeleteWorkflow();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const workflows = data?.workflows ?? [];
+  const workflows = data?.workflows ?? EMPTY_WORKFLOWS;
+  const total = data?.total ?? workflows.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasActiveFilters = Boolean(statusFilter || searchInput.trim());
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    onListStateChange?.({
+      total,
+      isLoading,
+      hasLoaded: !!data && !isLoading,
+      hasActiveFilters,
+      workflows,
+    });
+  }, [data, hasActiveFilters, isLoading, onListStateChange, total, workflows]);
+
+  useEffect(() => {
+    if (isLoading || !data) return;
+
+    const shouldReconcileSelection =
+      !preserveInitialSelection || hasUserChangedView || !selectedId;
+
+    if (workflows.length === 0) {
+      if (selectedId && shouldReconcileSelection) {
+        onClearSelection();
+      }
+      return;
+    }
+
+    const selectedIsVisible = workflows.some((wf) => wf.workflow_id === selectedId);
+    if (!selectedId || (shouldReconcileSelection && !selectedIsVisible)) {
+      onSelect(workflows[0]);
+    }
+  }, [
+    data,
+    hasUserChangedView,
+    isLoading,
+    onClearSelection,
+    onSelect,
+    preserveInitialSelection,
+    selectedId,
+    workflows,
+  ]);
 
   // Build fork tree: identify parents and children
   const { rootWorkflows, childrenMap } = useMemo(() => {
     const children: Record<string, AutonomousWorkflow[]> = {};
     const childIds = new Set<string>();
+    const workflowIds = new Set(workflows.map((wf) => wf.workflow_id));
 
     // First pass: identify fork children
     workflows.forEach((wf) => {
-      if (wf.parent_workflow_id) {
+      if (wf.parent_workflow_id && workflowIds.has(wf.parent_workflow_id)) {
         if (!children[wf.parent_workflow_id]) {
           children[wf.parent_workflow_id] = [];
         }
@@ -110,6 +198,23 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     } else {
       setConfirmDeleteId(workflowId);
     }
+  };
+
+  const handleStatusFilterChange = (filter: string) => {
+    setStatusFilter(filter);
+    setPage(1);
+    setHasUserChangedView(true);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    setPage(1);
+    setHasUserChangedView(true);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    setPage(nextPage);
+    setHasUserChangedView(true);
   };
 
   // Render a single workflow item
@@ -202,13 +307,36 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   return (
     <>
       {/* Status Filter Tabs */}
+      <div className="px-2 py-2 border-bottom">
+        <div className="input-group input-group-sm">
+          <span className="input-group-text bg-white">
+            <i className="bi bi-search"></i>
+          </span>
+          <input
+            className="form-control"
+            placeholder={t('autoSearchWorkflows', language)}
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+          />
+          {searchInput && (
+            <button
+              className="btn btn-outline-secondary"
+              type="button"
+              title={t('reset', language)}
+              onClick={() => handleSearchChange('')}
+            >
+              <i className="bi bi-x-lg"></i>
+            </button>
+          )}
+        </div>
+      </div>
       <div className="d-flex border-bottom px-2 pt-1" style={{ fontSize: '0.75rem' }}>
         {STATUS_FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
             className={`btn btn-sm px-2 py-1 border-0 rounded-0 ${statusFilter === tab.key ? 'fw-bold text-primary border-bottom border-2 border-primary' : 'text-muted'}`}
             style={{ borderBottomWidth: '2px' }}
-            onClick={() => setStatusFilter(tab.key)}
+            onClick={() => handleStatusFilterChange(tab.key)}
           >
             {t(tab.labelKey, language)}
           </button>
@@ -218,24 +346,42 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       {workflows.length === 0 ? (
         <div className="text-center text-muted p-4">
           <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-          <small>{t('autoNoWorkflows', language)}</small>
+          <small>
+            {searchInput || statusFilter
+              ? t('autoNoMatchingWorkflows', language)
+              : t('autoNoWorkflows', language)}
+          </small>
         </div>
       ) : (
-        <div className="list-group list-group-flush">
-          {rootWorkflows.map((workflow) => {
-            const forkChildren = childrenMap[workflow.workflow_id] || [];
+        <>
+          <div className="list-group list-group-flush">
+            {rootWorkflows.map((workflow) => {
+              const forkChildren = childrenMap[workflow.workflow_id] || [];
 
-            return (
-              <React.Fragment key={workflow.workflow_id}>
-                {/* Parent/root workflow item */}
-                {renderWorkflowItem(workflow, false)}
+              return (
+                <React.Fragment key={workflow.workflow_id}>
+                  {/* Parent/root workflow item */}
+                  {renderWorkflowItem(workflow, false)}
 
-                {/* Fork children indented under parent */}
-                {forkChildren.map((child) => renderWorkflowItem(child, true))}
-              </React.Fragment>
-            );
-          })}
-        </div>
+                  {/* Fork children indented under parent */}
+                  {forkChildren.map((child) => renderWorkflowItem(child, true))}
+                </React.Fragment>
+              );
+            })}
+          </div>
+          {totalPages > 1 && (
+            <div className="border-top p-2">
+              <Pagination
+                currentPage={page}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+                showPageInput={false}
+                showPageInfo={false}
+                maxVisiblePages={3}
+              />
+            </div>
+          )}
+        </>
       )}
     </>
   );

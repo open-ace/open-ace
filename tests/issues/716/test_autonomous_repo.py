@@ -81,6 +81,7 @@ class TestWorkflowCRUD:
             "cli_tool": "claude-code",
             "model": "claude-sonnet-4-6",
             "project_path": "/tmp/test-project",
+            "definition_snapshot": json.dumps({"requirements_mode": "text"}),
         }
         result = repo.create_workflow(data)
         assert result is not None
@@ -88,6 +89,7 @@ class TestWorkflowCRUD:
         assert result["title"] == "Test Task"
         assert result["status"] == "pending"
         assert result["cli_tool"] == "claude-code"
+        assert json.loads(result["definition_snapshot"])["requirements_mode"] == "text"
 
     def test_get_workflow(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
@@ -124,6 +126,7 @@ class TestWorkflowCRUD:
 
         workflows = repo.list_workflows()
         assert len(workflows) == 3
+        assert repo.count_workflows() == 3
 
     def test_list_workflows_filter_user(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
@@ -196,6 +199,34 @@ class TestWorkflowCRUD:
 
         result = repo.list_workflows(status="planning,developing")
         assert len(result) == 2
+
+    def test_list_workflows_search_and_pagination(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        first = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Batch Issue 123",
+                "requirements_text": "Add billing export",
+                "cli_tool": "claude-code",
+                "model": "sonnet",
+                "project_path": "/tmp/billing",
+                "branch_name": "feature/billing-export",
+            }
+        )
+        repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Other Task",
+                "requirements_text": "Unrelated",
+                "cli_tool": "codex",
+                "project_path": "/tmp/other",
+            }
+        )
+
+        result = repo.list_workflows(search="BILLING", limit=1, offset=0)
+        assert len(result) == 1
+        assert result[0]["workflow_id"] == first["workflow_id"]
+        assert repo.count_workflows(search="billing") == 1
 
     def test_update_workflow(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)

@@ -1,13 +1,8 @@
-"""Add auto_merge field for batch workflow automation
+"""Add definition snapshot to autonomous workflows
 
-Revision ID: 057_auto_merge
-Revises: 056_hostname_indexes
+Revision ID: 058_workflow_definition_snapshot
+Revises: 057_auto_merge
 Create Date: 2026-06-11
-
-This migration adds the auto_merge field to autonomous_workflows table,
-enabling batch workflows to automatically merge PRs and proceed to the next
-workflow without manual intervention.
-
 """
 
 from typing import Union
@@ -15,8 +10,8 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "057_auto_merge"
-down_revision: Union[str, None] = "056_hostname_indexes"
+revision: str = "058_workflow_definition_snapshot"
+down_revision: Union[str, None] = "057_auto_merge"
 branch_labels = None
 depends_on = None
 
@@ -38,22 +33,17 @@ def _column_exists(conn, table: str, column: str) -> bool:
 
 
 def upgrade() -> None:
-    """Add auto_merge column with default TRUE."""
+    """Add definition snapshot column."""
     conn = op.get_bind()
-    if not _column_exists(conn, "autonomous_workflows", "auto_merge"):
+    if not _column_exists(conn, "autonomous_workflows", "definition_snapshot"):
         op.add_column(
             "autonomous_workflows",
-            sa.Column(
-                "auto_merge",
-                sa.Boolean,
-                server_default=sa.text("TRUE"),
-                nullable=True,
-            ),
+            sa.Column("definition_snapshot", sa.Text, nullable=True),
         )
 
 
 def downgrade() -> None:
-    """Remove auto_merge column."""
+    """Remove definition snapshot column."""
     conn = op.get_bind()
-    if _column_exists(conn, "autonomous_workflows", "auto_merge"):
-        op.drop_column("autonomous_workflows", "auto_merge")
+    if _column_exists(conn, "autonomous_workflows", "definition_snapshot"):
+        op.drop_column("autonomous_workflows", "definition_snapshot")

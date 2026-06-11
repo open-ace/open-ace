@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
@@ -184,6 +185,89 @@ def _format_issue_title(base_title: str, issue_number: int, is_multi: bool) -> s
     return f"Issue #{issue_number}"
 
 
+def _serialize_definition_snapshot(snapshot: dict[str, Any]) -> str:
+    """Serialize a workflow definition snapshot for storage."""
+    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+
+def _build_definition_snapshot(
+    data: dict,
+    requirements_text: str,
+    requirements_issue_input: str,
+    requirements_issue_url: str,
+    issue_selectors: list[dict] | None = None,
+    ignored_issue_tokens: list[str] | None = None,
+    batch_id: str | None = None,
+    batch_order: int | None = None,
+    batch_total: int | None = None,
+    resolved_issue_number: int | None = None,
+    resolved_issue_url: str | None = None,
+) -> dict[str, Any]:
+    """Capture the creation-time workflow definition before runtime fields drift."""
+    return {
+        "title": data.get("title", ""),
+        "requirements_mode": "text" if requirements_text else "issue_input",
+        "requirements_text": data.get("requirements_text", ""),
+        "requirements_issue_input_raw": data.get("requirements_issue_input", ""),
+        "requirements_issue_url_raw": data.get("requirements_issue_url", ""),
+        "parsed_issue_selectors": issue_selectors or [],
+        "ignored_issue_tokens": ignored_issue_tokens or [],
+        "project_path": data.get("project_path", ""),
+        "project_repo_url": data.get("project_repo_url", ""),
+        "is_new_project": data.get("is_new_project", False),
+        "is_private": data.get("is_private", True),
+        "cli_tool": data.get("cli_tool", ""),
+        "model": data.get("model", ""),
+        "permission_mode": data.get("permission_mode", "auto-edit"),
+        "branch_strategy": data.get("branch_strategy", "new-branch"),
+        "branch_name": data.get("branch_name", ""),
+        "workspace_type": data.get("workspace_type", "local"),
+        "remote_machine_id": data.get("remote_machine_id", ""),
+        "max_plan_rounds": data.get("max_plan_rounds", 3),
+        "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
+        "auto_merge": data.get("auto_merge", True),
+        "batch_id": batch_id,
+        "batch_order": batch_order,
+        "batch_total": batch_total,
+        "resolved_issue_number": resolved_issue_number,
+        "resolved_issue_url": resolved_issue_url,
+    }
+
+
+def _parse_definition_snapshot(value: Any) -> dict[str, Any] | None:
+    """Parse a stored definition snapshot into the API response shape."""
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _workflow_response(workflow: dict | None) -> dict | None:
+    """Normalize workflow records before sending them over the API."""
+    if not workflow:
+        return workflow
+    normalized = dict(workflow)
+    normalized["definition_snapshot"] = _parse_definition_snapshot(
+        normalized.get("definition_snapshot")
+    )
+    return normalized
+
+
+def _parse_int_arg(name: str, default: int) -> int:
+    """Parse integer query params without turning bad input into a 500."""
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 # ── Workflow CRUD ───────────────────────────────────────────────────
 
 
@@ -277,6 +361,19 @@ def create_workflow():
 
             for index, selector in enumerate(issue_selectors, start=1):
                 workflow_data = dict(base_workflow_data)
+                definition_snapshot = _build_definition_snapshot(
+                    data,
+                    requirements_text,
+                    requirements_issue_input,
+                    requirements_issue_url,
+                    issue_selectors=issue_selectors,
+                    ignored_issue_tokens=ignored_issue_tokens,
+                    batch_id=batch_id,
+                    batch_order=index if is_multi_issue else None,
+                    batch_total=len(issue_selectors) if is_multi_issue else None,
+                    resolved_issue_number=selector["issue_number"],
+                    resolved_issue_url=selector["requirements_issue_url"],
+                )
                 workflow_data.update(
                     {
                         "title": _format_issue_title(
@@ -291,6 +388,9 @@ def create_workflow():
                         "batch_order": index if is_multi_issue else None,
                         "batch_total": len(issue_selectors) if is_multi_issue else None,
                         "status": "pending" if index == 1 else "queued",
+                        "definition_snapshot": _serialize_definition_snapshot(
+                            definition_snapshot
+                        ),
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)
@@ -305,14 +405,24 @@ def create_workflow():
 
             response_data = {
                 "success": True,
-                "workflow": created_workflows[0],
+                "workflow": _workflow_response(created_workflows[0]),
             }
             if is_multi_issue:
-                response_data["workflows"] = created_workflows
+                response_data["workflows"] = [
+                    _workflow_response(workflow) for workflow in created_workflows
+                ]
             if ignored_issue_tokens:
                 response_data["ignored_issue_tokens"] = ignored_issue_tokens
             return jsonify(response_data), 201
 
+        base_workflow_data["definition_snapshot"] = _serialize_definition_snapshot(
+            _build_definition_snapshot(
+                data,
+                requirements_text,
+                requirements_issue_input,
+                requirements_issue_url,
+            )
+        )
         workflow = repo.create_workflow(base_workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
@@ -323,7 +433,7 @@ def create_workflow():
             {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
         )
 
-        return jsonify({"success": True, "workflow": workflow}), 201
+        return jsonify({"success": True, "workflow": _workflow_response(workflow)}), 201
     except Exception as e:
         logger.error("Failed to create workflow: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -339,17 +449,37 @@ def list_workflows():
     # Non-admin users can only see their own workflows
     filter_user_id = None if is_admin else user_id
     status = request.args.get("status")
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = int(request.args.get("offset", 0))
+    search = (request.args.get("search") or "").strip() or None
+    limit = max(1, min(_parse_int_arg("limit", 50), 200))
+    offset = max(0, _parse_int_arg("offset", 0))
 
     try:
-        workflows = _get_repo().list_workflows(
+        repo = _get_repo()
+        workflows = repo.list_workflows(
             user_id=filter_user_id,
             status=status,
+            search=search,
             limit=limit,
             offset=offset,
         )
-        return jsonify({"success": True, "workflows": workflows})
+        total = len(workflows)
+        if hasattr(repo, "count_workflows"):
+            total_raw = repo.count_workflows(
+                user_id=filter_user_id,
+                status=status,
+                search=search,
+            )
+            if isinstance(total_raw, int) and not isinstance(total_raw, bool):
+                total = total_raw
+        return jsonify(
+            {
+                "success": True,
+                "workflows": [_workflow_response(workflow) for workflow in workflows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
     except Exception as e:
         logger.error("Failed to list workflows: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -367,7 +497,7 @@ def get_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    return jsonify({"success": True, "workflow": workflow})
+    return jsonify({"success": True, "workflow": _workflow_response(workflow)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>", methods=["DELETE"])
@@ -700,37 +830,46 @@ def fork_milestone(workflow_id, milestone_id):
     fork_phase = milestone.get("phase", "planning")
 
     # Create new workflow (copy settings from original)
-    fork_workflow = _get_repo().create_workflow(
-        {
-            "user_id": workflow.get("user_id"),
-            "title": f"{workflow.get('title', '')} [Fork]",
-            "requirements_text": workflow.get("requirements_text", ""),
-            "requirements_issue_url": workflow.get("requirements_issue_url", ""),
-            "project_path": workflow.get("project_path", ""),
-            "project_repo_url": workflow.get("project_repo_url", ""),
-            "is_new_project": False,
-            "is_private": workflow.get("is_private", True),
-            "cli_tool": workflow.get("cli_tool", "claude-code"),
-            "model": workflow.get("model", ""),
-            "permission_mode": workflow.get("permission_mode", "auto-edit"),
-            "branch_name": fork_branch,
-            "branch_strategy": "worktree",  # Force worktree for parallel execution
-            "workspace_type": workflow.get("workspace_type", "local"),
-            "remote_machine_id": workflow.get("remote_machine_id", ""),
-            "max_plan_rounds": workflow.get("max_plan_rounds", 3),
-            "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
-            "github_issue_number": workflow.get("github_issue_number"),
-            # Fork-specific fields
-            "parent_workflow_id": workflow_id,
-            "fork_milestone_id": milestone_id,
-            "user_feedback": user_feedback,
-            "original_branch_name": workflow.get("branch_name", ""),
-            # Start at the next phase (preparation handles worktree + phase jump)
-            "status": "pending",
-            "current_phase": "preparation",
-            "dev_round": milestone.get("dev_round", 1),
-        }
+    fork_workflow_data = {
+        "user_id": workflow.get("user_id"),
+        "title": f"{workflow.get('title', '')} [Fork]",
+        "requirements_text": workflow.get("requirements_text", ""),
+        "requirements_issue_url": workflow.get("requirements_issue_url", ""),
+        "project_path": workflow.get("project_path", ""),
+        "project_repo_url": workflow.get("project_repo_url", ""),
+        "is_new_project": False,
+        "is_private": workflow.get("is_private", True),
+        "cli_tool": workflow.get("cli_tool", "claude-code"),
+        "model": workflow.get("model", ""),
+        "permission_mode": workflow.get("permission_mode", "auto-edit"),
+        "branch_name": fork_branch,
+        "branch_strategy": "worktree",  # Force worktree for parallel execution
+        "workspace_type": workflow.get("workspace_type", "local"),
+        "remote_machine_id": workflow.get("remote_machine_id", ""),
+        "max_plan_rounds": workflow.get("max_plan_rounds", 3),
+        "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
+        "github_issue_number": workflow.get("github_issue_number"),
+        # Fork-specific fields
+        "parent_workflow_id": workflow_id,
+        "fork_milestone_id": milestone_id,
+        "user_feedback": user_feedback,
+        "original_branch_name": workflow.get("branch_name", ""),
+        # Start at the next phase (preparation handles worktree + phase jump)
+        "status": "pending",
+        "current_phase": "preparation",
+        "dev_round": milestone.get("dev_round", 1),
+    }
+    fork_workflow_data["definition_snapshot"] = _serialize_definition_snapshot(
+        _build_definition_snapshot(
+            fork_workflow_data,
+            fork_workflow_data["requirements_text"],
+            "",
+            fork_workflow_data["requirements_issue_url"],
+            resolved_issue_number=workflow.get("github_issue_number"),
+            resolved_issue_url=workflow.get("requirements_issue_url", ""),
+        )
     )
+    fork_workflow = _get_repo().create_workflow(fork_workflow_data)
 
     # Copy milestones up to fork point to new workflow
     _get_repo().copy_milestones_to_workflow(workflow_id, fork_workflow["workflow_id"], milestone_id)
@@ -782,7 +921,7 @@ def fork_milestone(workflow_id, milestone_id):
             "fork_milestone_id": milestone_id,
         },
     )
-    return jsonify({"success": True, "fork_workflow": fork_workflow})
+    return jsonify({"success": True, "fork_workflow": _workflow_response(fork_workflow)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/forks", methods=["GET"])

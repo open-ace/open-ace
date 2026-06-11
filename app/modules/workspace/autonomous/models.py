@@ -48,6 +48,7 @@ class AutonomousWorkflow:
     batch_order: Optional[int] = None
     batch_total: Optional[int] = None
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
+    definition_snapshot: Optional[dict] = None
     current_phase: str = (
         "preparation"  # preparation|planning|development|pr_review|report|wait|merge
     )
@@ -111,6 +112,7 @@ class AutonomousWorkflow:
             "batch_order": self.batch_order,
             "batch_total": self.batch_total,
             "auto_merge": self.auto_merge,
+            "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
             "current_round": self.current_round,
             "dev_round": self.dev_round,
@@ -158,6 +160,7 @@ class AutonomousWorkflow:
             batch_order=data.get("batch_order"),
             batch_total=data.get("batch_total"),
             auto_merge=bool(data.get("auto_merge", True)),
+            definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
             current_round=data.get("current_round", 0),
             dev_round=data.get("dev_round", 1),

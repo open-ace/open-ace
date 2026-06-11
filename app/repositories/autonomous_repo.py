@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app.repositories.database import Database, adapt_sql, is_postgresql
+from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class AutonomousWorkflowRepository:
         "batch_order",
         "batch_total",
         "auto_merge",
+        "definition_snapshot",
         "current_phase",
         "current_round",
         "dev_round",
@@ -127,12 +128,13 @@ class AutonomousWorkflowRepository:
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, github_issue_number, batch_id,
-                     batch_order, batch_total, auto_merge, current_phase, dev_round,
+                     batch_order, batch_total, auto_merge, definition_snapshot,
+                     current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -158,6 +160,7 @@ class AutonomousWorkflowRepository:
                     data.get("batch_order"),
                     data.get("batch_total"),
                     self._coerce_bool(data.get("auto_merge"), True),
+                    data.get("definition_snapshot"),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -181,12 +184,13 @@ class AutonomousWorkflowRepository:
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, github_issue_number, batch_id,
-                     batch_order, batch_total, auto_merge, current_phase, dev_round,
+                     batch_order, batch_total, auto_merge, definition_snapshot,
+                     current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -211,6 +215,7 @@ class AutonomousWorkflowRepository:
                     data.get("batch_order"),
                     data.get("batch_total"),
                     self._coerce_bool(data.get("auto_merge"), True),
+                    data.get("definition_snapshot"),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -248,24 +253,16 @@ class AutonomousWorkflowRepository:
         self,
         user_id: Optional[int] = None,
         status: Optional[str] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list:
         """List workflows with optional filters."""
-        conditions = []
-        params = []
-
-        if user_id is not None:
-            conditions.append("user_id = ?")
-            params.append(user_id)
-        if status is not None:
-            # Support comma-separated statuses
-            statuses = [s.strip() for s in status.split(",")]
-            placeholders = ",".join(["?"] * len(statuses))
-            conditions.append(f"status IN ({placeholders})")
-            params.extend(statuses)
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where, params = self._build_workflow_list_filters(
+            user_id=user_id,
+            status=status,
+            search=search,
+        )
         params.append(limit)
         params.append(offset)
 
@@ -273,6 +270,66 @@ class AutonomousWorkflowRepository:
             f"SELECT * FROM autonomous_workflows {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         )
+
+    def count_workflows(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """Count workflows with the same filters used by list_workflows."""
+        where, params = self._build_workflow_list_filters(
+            user_id=user_id,
+            status=status,
+            search=search,
+        )
+        result = self.db.fetch_one(
+            f"SELECT COUNT(*) AS total FROM autonomous_workflows {where}",
+            tuple(params),
+        )
+        return int(result["total"] if result else 0)
+
+    def _build_workflow_list_filters(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[str, list]:
+        """Build WHERE conditions for workflow list/count queries."""
+        conditions = []
+        params = []
+
+        if user_id is not None:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+        if status:
+            # Support comma-separated statuses.
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if statuses:
+                placeholders = ",".join(["?"] * len(statuses))
+                conditions.append(f"status IN ({placeholders})")
+                params.extend(statuses)
+        if search:
+            search_fields = (
+                "title",
+                "workflow_id",
+                "requirements_text",
+                "requirements_issue_url",
+                "project_path",
+                "cli_tool",
+                "model",
+                "branch_name",
+            )
+            search_pattern = f"%{escape_like(search.strip().lower())}%"
+            search_clauses = [
+                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'"
+                for field in search_fields
+            ]
+            conditions.append(f"({' OR '.join(search_clauses)})")
+            params.extend([search_pattern] * len(search_fields))
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params
 
     def get_active_workflows(self) -> list:
         """Get all workflows that need processing."""
