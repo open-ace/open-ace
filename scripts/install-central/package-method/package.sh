@@ -467,27 +467,25 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download packages compatible with Python 3.9+
-        # Use --python-version 3.9 to get compatible wheels
+        # Download packages for current Python version
+        # Wheels will match the packaging machine's Python version
         # Use --only-binary=:all: to avoid source builds that may fail on older systems
-        echo -e "${YELLOW}Downloading packages for Python 3.9+ compatibility...${NC}"
+        # Note: If target system has different Python version, install.sh will fall back to network install
+        echo -e "${YELLOW}Downloading packages for current Python version...${NC}"
 
         # Use --prefer-binary only if pip version >= 20
         if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --python-version 3.9 \
                 --only-binary=:all: \
                 --prefer-binary || \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --python-version 3.9 \
                 --only-binary=:all: || \
-            # Fallback: download without version constraint (for packages not available for py3.9)
+            # Fallback: download without constraints (for packages without pure wheels)
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
                 $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
         else
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --python-version 3.9 \
                 --only-binary=:all: || \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
@@ -511,7 +509,7 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     if [ -n "$PIP_CMD" ]; then
         echo -e "${YELLOW}Downloading build tools (setuptools, wheel)...${NC}"
         $PIP_CMD download setuptools wheel -d "$VENDOR_DIR" \
-            --python-version 3.9 --only-binary=:all: 2>/dev/null || \
+            --only-binary=:all: 2>/dev/null || \
             $PIP_CMD download setuptools wheel -d "$VENDOR_DIR" 2>/dev/null || \
             echo -e "${YELLOW}Warning: Failed to download build tools.${NC}"
     fi
