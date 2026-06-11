@@ -58,3 +58,11 @@ export type {
   ToolUsageChartProps,
   TokenDistributionChartProps,
 } from './LazyCharts';
+
+// Page refresh control
+export {
+  PageRefreshControl,
+  STANDARD_INTERVALS,
+  type IntervalOption,
+  type PageRefreshControlProps,
+} from './PageRefreshControl';

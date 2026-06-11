@@ -318,3 +318,13 @@ export const useWorkspaceTabsActions = () =>
     removeTab: state.removeWorkspaceTab,
     clearTabs: state.clearWorkspaceTabs,
   }));
+
+// Export page refresh store
+export {
+  usePageRefreshStore,
+  usePageConfig,
+  useGlobalPaused,
+  useSetPageConfig,
+  useRecordRefresh,
+  type PageRefreshConfig,
+} from './pageRefreshStore';

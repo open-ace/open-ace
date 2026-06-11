@@ -21,6 +21,10 @@ import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
+import { initializeQueryKeyRegistry } from '@/utils';
+
+// Initialize query key registry on app load
+initializeQueryKeyRegistry();
 
 // Lazy-loaded page components for code splitting
 // Each page is loaded only when navigated to, reducing initial bundle size
