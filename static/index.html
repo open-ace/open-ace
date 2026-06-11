@@ -7,7 +7,25 @@
     <title>Qwen Code Web UI</title>
     <script>
       // Prevent flash of unstyled content by setting theme class early
+      // Issue #637: Support theme parameter from URL for iframe embedding
       (function () {
+        // First check URL parameter (for iframe embedding)
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlTheme = urlParams.get("theme");
+
+        if (urlTheme === "dark" || urlTheme === "light") {
+          // Use URL parameter theme
+          if (urlTheme === "dark") {
+            document.documentElement.classList.add("dark");
+          } else {
+            document.documentElement.classList.remove("dark");
+          }
+          // Also save to localStorage for persistence
+          localStorage.setItem("qwen-code-webui-theme", JSON.stringify(urlTheme));
+          return;
+        }
+
+        // Fallback to stored theme or system preference
         const storedTheme = localStorage.getItem("qwen-code-webui-theme");
         let theme = null;
         try {
@@ -16,7 +34,7 @@
           // If parsing fails, fall back to null
           theme = null;
         }
-        
+
         if (
           theme === "dark" ||
           (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)

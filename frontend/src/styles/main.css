@@ -222,7 +222,7 @@
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
-  --text-muted: #64748b;
+  --text-muted: #a1a1aa; /* Issue #637: Improved contrast from #64748b (~3.5:1) to #a1a1aa (~4.7:1) */
 
   --border-color: #334155;
   --border-color-light: #1e293b;
