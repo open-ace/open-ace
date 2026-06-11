@@ -25,7 +25,7 @@ class AutonomousWorkflow:
     user_id: Optional[int] = None
     title: str = ""
     status: str = (
-        "pending"  # pending|preparing|planning|developing|pr_review|reporting|waiting|merging|completed|failed|cancelled|paused
+        "pending"  # queued|pending|preparing|planning|developing|pr_review|reporting|waiting|merging|completed|failed|cancelled|paused
     )
     requirements_text: str = ""
     requirements_issue_url: str = ""
@@ -44,6 +44,10 @@ class AutonomousWorkflow:
     github_issue_number: Optional[int] = None
     github_pr_number: Optional[int] = None
     github_pr_url: str = ""
+    batch_id: Optional[str] = None
+    batch_order: Optional[int] = None
+    batch_total: Optional[int] = None
+    auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     current_phase: str = (
         "preparation"  # preparation|planning|development|pr_review|report|wait|merge
     )
@@ -70,6 +74,7 @@ class AutonomousWorkflow:
         "reporting",
         "waiting",
         "merging",
+        "queued",
     )
 
     def is_active(self) -> bool:
@@ -102,6 +107,10 @@ class AutonomousWorkflow:
             "github_issue_number": self.github_issue_number,
             "github_pr_number": self.github_pr_number,
             "github_pr_url": self.github_pr_url,
+            "batch_id": self.batch_id,
+            "batch_order": self.batch_order,
+            "batch_total": self.batch_total,
+            "auto_merge": self.auto_merge,
             "current_phase": self.current_phase,
             "current_round": self.current_round,
             "dev_round": self.dev_round,
@@ -145,6 +154,10 @@ class AutonomousWorkflow:
             github_issue_number=data.get("github_issue_number"),
             github_pr_number=data.get("github_pr_number"),
             github_pr_url=data.get("github_pr_url", ""),
+            batch_id=data.get("batch_id"),
+            batch_order=data.get("batch_order"),
+            batch_total=data.get("batch_total"),
+            auto_merge=bool(data.get("auto_merge", True)),
             current_phase=data.get("current_phase", "preparation"),
             current_round=data.get("current_round", 0),
             dev_round=data.get("dev_round", 1),

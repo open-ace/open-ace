@@ -72,7 +72,13 @@ def api_get_audit_logs():
 
     # Get total count
     total = audit_logger.count(
-        user_id=user_id, action=action, start_time=start_time, end_time=end_time
+        user_id=user_id,
+        username=username,
+        action=action,
+        resource_type=resource_type,
+        severity=severity,
+        start_time=start_time,
+        end_time=end_time,
     )
 
     return jsonify(

@@ -67,7 +67,9 @@ PLANNING_CONTEXT = (
     "2. 不要使用需要交互式确认的 gh CLI 命令（如 gh pr create）\n"
     "3. 只进行分析、阅读代码、输出方案文本，不要修改任何文件或执行写操作\n"
     "4. 如果需要查看项目代码以制定方案，可以使用文件读取和搜索工具\n"
-    "5. 不要执行 git commit、git push、文件写入、文件编辑等操作\n\n"
+    "5. 不要执行 git commit、git push、文件写入、文件编辑等操作\n"
+    "6. 直接输出结构化方案内容，不要添加引导文字(如'我来...'、'让我...'、"
+    "'首先...'等)或结尾引导(如'下一步是否...'、'建议...'等)\n\n"
 )
 
 # Read-only tool sets for planning phase, keyed by CLI tool name.
@@ -108,6 +110,13 @@ PLANNING_TIMEOUT = 600
 # triggers a refinement round.
 REVIEW_FEEDBACK_MIN_LENGTH = 50
 
+# Minimum review text length (chars) for an approved review to be considered
+# as having substantive improvement suggestions.  A brief approval like
+# "审查结论：方案通过审查。" is ~12 chars — well below this threshold.
+# Reviews exceeding this length after approval likely contain actionable
+# suggestions worth incorporating via the refinement step.
+REVIEW_SUGGESTIONS_MIN_LENGTH = 200
+
 # Phase ordering — used by fork to determine the next phase after the fork point.
 PHASE_ORDER = ["preparation", "planning", "development", "pr_review", "report", "merge"]
 
@@ -133,6 +142,37 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 PREV_REVIEW_MAX_LENGTH = 3000
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
+# Agent intro/closing text patterns for _clean_agent_text().
+# These match common Chinese agent narration phrases that should not
+# appear in GitHub comments.
+_AGENT_INTRO_PATTERNS = [
+    re.compile(r"^我来[^\n]{0,30}[。！]"),
+    re.compile(r"^让我[^\n]{0,30}[。！]"),
+    re.compile(r"^首先[让我]*[^\n]{0,30}[。！]"),
+    re.compile(r"^现在[我来让]*[^\n]{0,30}[。！]"),
+    re.compile(r"^好的[，,][^\n]{0,30}[。！]"),
+    re.compile(r"^方案[已完]*[^\n]{0,20}[。，！]"),
+    re.compile(r"^探索完成[^\n]*"),
+    re.compile(r"^分析完成[^\n]*"),
+]
+_AGENT_CLOSING_PATTERNS = [
+    re.compile(r"下一步是否需要"),
+    re.compile(r"是否需要开始"),
+    re.compile(r"按照[^\n]*流程"),
+    re.compile(r"按照[^\n]*工作流"),
+    re.compile(r"建议[：:]\s*$"),
+]
+
+# 429 rate limit retry configuration.
+# Rate limit typically resolves within 30 minutes.
+API_RETRY_TOTAL_TIMEOUT = 1800  # max total retry duration (seconds)
+API_RETRY_INITIAL_DELAY = 30  # first retry delay (seconds)
+API_RETRY_MAX_DELAY = 300  # max single retry delay (seconds)
+
+# Test failure retry configuration.
+MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
+MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
+
 
 def _next_phase(current_phase: str) -> str:
     """Return the phase that follows current_phase."""
@@ -155,6 +195,7 @@ class AutonomousOrchestrator:
         self._workflow_id = workflow_id
         self._current_session_id: Optional[str] = None
         self._session_lock = threading.Lock()
+        self._cancel_requested = threading.Event()  # in-memory cancel signal
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -205,19 +246,98 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
-    def _clean_plan_output(text: str) -> str:
-        """Strip introductory agent output, keep only the structured plan.
+    def _clean_agent_text(text: str) -> str:
+        """Strip agent narration/intro/closing text, keep only structured content.
 
-        Agent responses often begin with thinking/intro text like
-        "我来分析代码库..." before the actual plan content.  This method
-        removes everything before the first markdown heading (# Title).
+        Performs three cleaning passes:
+        1. Strip everything before the first markdown heading (# Title).
+        2. Strip leading lines matching common agent intro patterns
+           (e.g. "我来为这个需求制定详细的实现方案。").
+        3. Strip trailing lines matching common agent closing patterns
+           (e.g. "下一步是否需要开始实施...").
         """
         if not text:
             return text
-        match = re.search(r"^#\s", text, re.MULTILINE)
+
+        # Pass 1: strip before first markdown heading
+        match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
         if match:
-            return text[match.start() :]
-        return text
+            text = text[match.start() :]
+
+        # Pass 2: strip leading agent intro lines, skipping headings/empty lines.
+        # Scan up to the first _INTRO_SCAN_LIMIT non-empty, non-heading lines.
+        # Only strip the FIRST contiguous intro block — once we see a heading
+        # after intro lines, stop so that legitimate sub-headings between
+        # intro lines are not deleted.
+        _INTRO_SCAN_LIMIT = 5
+        lines = text.split("\n")
+        intro_end = 0  # line index after the last contiguous intro line
+        non_heading_count = 0
+        seen_intro = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            is_heading = bool(re.match(r"^#{1,6}\s", stripped))
+            if is_heading:
+                if seen_intro:
+                    break  # stop — don't strip across sub-headings
+                continue  # skip initial headings before any intro
+            non_heading_count += 1
+            if non_heading_count > _INTRO_SCAN_LIMIT:
+                break  # past scan limit, stop
+            is_intro = any(p.search(stripped) for p in _AGENT_INTRO_PATTERNS)
+            if is_intro:
+                intro_end = i + 1
+                seen_intro = True
+            else:
+                break  # non-intro content found, stop
+        if intro_end > 0:
+            lines = lines[intro_end:]
+            text = "\n".join(lines)
+
+        # Pass 3: strip trailing agent closing text.
+        # Walk forward to find the first closing pattern match, then strip
+        # everything from that line to the end (including subsequent non-matching
+        # lines like numbered lists that are part of the closing block).
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and any(p.search(stripped) for p in _AGENT_CLOSING_PATTERNS):
+                # Strip empty lines before the closing text as well
+                while i > 0 and not lines[i - 1].strip():
+                    i -= 1
+                text = "\n".join(lines[:i])
+                break
+
+        return text.strip()
+
+    # Backward-compatible alias for existing tests (Issue #906, #910)
+    @staticmethod
+    def _clean_plan_output(text: str) -> str:
+        return AutonomousOrchestrator._clean_agent_text(text)
+
+    @staticmethod
+    def _should_show_review_warning(round_num: int, max_rounds: int, last_review: str) -> bool:
+        """Whether to append a "feedback not yet addressed" warning.
+
+        True when the planning loop exhausted all rounds without the
+        reviewer approving the plan (no "方案通过审查" in the last review).
+        """
+        return bool(last_review and round_num >= max_rounds and "方案通过审查" not in last_review)
+
+    @staticmethod
+    def _should_refine_plan(last_review: str) -> bool:
+        """Whether the approved review contains substantive suggestions.
+
+        True when the review approved the plan ("方案通过审查" present)
+        *and* the review text is long enough to contain actionable
+        improvement suggestions (exceeds REVIEW_SUGGESTIONS_MIN_LENGTH).
+        """
+        if not last_review:
+            return False
+        review_approved = "方案通过审查" in last_review
+        return review_approved and len(last_review.strip()) > REVIEW_SUGGESTIONS_MIN_LENGTH
 
     @staticmethod
     def _smart_truncate_diff(
@@ -415,8 +535,19 @@ class AutonomousOrchestrator:
         except Exception:
             logger.warning("Failed to link session to milestone", exc_info=True)
 
+    @staticmethod
+    def _is_rate_limited(response: str) -> bool:
+        """Detect 429 rate limit errors in agent response or error text."""
+        if not response:
+            return False
+        response_lower = response.lower()
+        return any(
+            p in response_lower
+            for p in ["429", "quota exceeded", "rate limit", "too many requests"]
+        )
+
     def _run_agent(self, wf: dict = None, **kwargs) -> AgentTaskResult:
-        """Run an agent task with session tracking for cancellation support.
+        """Run an agent task with session tracking and 429 retry support.
 
         Args:
             wf: Optional pre-fetched workflow dict to avoid extra DB queries.
@@ -451,12 +582,63 @@ class AutonomousOrchestrator:
         if result.session_id:
             self._link_session_to_current_milestone(result.session_id)
 
+        # 429 rate limit retry — exponential backoff, max 30 minutes total.
+        # Use interruptible sleep (check cancel signal every 5s) so the
+        # orchestrator can be paused/stopped during a retry wait.
+        _CANCEL_POLL_INTERVAL = 5  # seconds between cancel checks
+        retry_start = time.monotonic()
+        delay = API_RETRY_INITIAL_DELAY
+        while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
+            response_text = result.response_text or ""
+            error_text = result.error or ""
+            if not (self._is_rate_limited(response_text) or self._is_rate_limited(error_text)):
+                break  # Not a 429 error, no retry needed
+
+            elapsed = int(time.monotonic() - retry_start)
+            logger.warning(
+                "API rate limit (429) detected, retrying in %ds (elapsed: %ds / %ds)",
+                delay,
+                elapsed,
+                API_RETRY_TOTAL_TIMEOUT,
+            )
+            self._emit(
+                "rate_limit_retry",
+                {
+                    "delay": delay,
+                    "elapsed": elapsed,
+                    "total_timeout": API_RETRY_TOTAL_TIMEOUT,
+                },
+            )
+
+            # Interruptible sleep: check for cancellation every 5s.
+            # Use in-memory flag instead of DB query to avoid overhead.
+            slept = 0
+            self._cancel_requested.clear()
+            while slept < delay:
+                time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
+                slept += _CANCEL_POLL_INTERVAL
+                if self._cancel_requested.is_set():
+                    logger.info("429 retry cancelled (cancel requested)")
+                    with self._session_lock:
+                        self._current_session_id = result.session_id
+                    return result
+
+            delay = min(delay * 2, API_RETRY_MAX_DELAY)
+
+            # Generate new session_id for retry
+            kwargs["session_id"] = str(uuid.uuid4())
+            with self._session_lock:
+                self._current_session_id = kwargs["session_id"]
+            self._link_session_to_current_milestone(kwargs["session_id"])
+            result = self._runner.run_agent_task(**kwargs)
+
         with self._session_lock:
             self._current_session_id = result.tracking_session_id or result.session_id
         return result
 
     def cancel_current_task(self):
         """Cancel the currently running agent task (e.g. on pause/stop)."""
+        self._cancel_requested.set()  # signal 429 retry loop to stop
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:
@@ -870,7 +1052,7 @@ class AutonomousOrchestrator:
             try:
                 gh.add_issue_comment(
                     issue_number,
-                    f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_plan_output(plan_text)}",
+                    f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_agent_text(plan_text)}",
                 )
             except GitHubOpsError:
                 pass
@@ -884,7 +1066,9 @@ class AutonomousOrchestrator:
             f"4. 改进建议\n\n"
             f"## 方案\n{plan_text}\n\n"
             f"## 需求\n{requirements}\n\n"
-            f"如果方案没有重大问题，请明确说明'方案通过审查'。"
+            f"如果方案没有重大问题，请明确说明'方案通过审查'。\n\n"
+            f"重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
+            f"或结尾引导(如'下一步是否...'等)。"
         )
 
         review_ms = self._create_milestone(
@@ -940,7 +1124,8 @@ class AutonomousOrchestrator:
         if issue_number:
             try:
                 gh.add_issue_comment(
-                    issue_number, f"## 🔍 Plan Review (Round {round_num})\n\n{review_text}"
+                    issue_number,
+                    f"## 🔍 Plan Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
                 )
             except GitHubOpsError:
                 pass
@@ -980,9 +1165,7 @@ class AutonomousOrchestrator:
             # If the review approved the plan but contained improvement
             # suggestions, run a one-time refinement step to incorporate
             # them into the final plan.
-            review_approved = last_review and "方案通过审查" in last_review
-            review_has_suggestions = review_approved and len(last_review.strip()) > 200
-            if review_has_suggestions and final_plan:
+            if self._should_refine_plan(last_review) and final_plan:
                 refine_prompt = (
                     PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
                     "请根据建议优化方案。直接输出优化后的完整方案，"
@@ -1009,9 +1192,17 @@ class AutonomousOrchestrator:
                 self._accumulate_tokens(refine_result)
                 if refine_result.success and refine_result.response_text:
                     final_plan = refine_result.response_text
+                    # Record refinement as a milestone for crash recovery.
+                    self._create_milestone(
+                        phase="planning",
+                        milestone_type="plan_refined",
+                        title="Plan Refined (Review Suggestions Incorporated)",
+                        plan_content=final_plan,
+                        round_number=round_num,
+                    )
 
             # Clean up agent intro text (e.g. "我来分析代码库...")
-            final_plan = self._clean_plan_output(final_plan)
+            final_plan = self._clean_agent_text(final_plan)
 
             issue_number = wf.get("github_issue_number")
             if issue_number and final_plan:
@@ -1021,11 +1212,7 @@ class AutonomousOrchestrator:
                         f"Plan review completed after {round_num} round(s).\n\n"
                         f"{final_plan}"
                     )
-                    if (
-                        last_review
-                        and round_num >= max_rounds
-                        and "方案通过审查" not in last_review
-                    ):
+                    if self._should_show_review_warning(round_num, max_rounds, last_review):
                         final_comment += (
                             f"\n\n---\n\n"
                             f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
@@ -1050,10 +1237,40 @@ class AutonomousOrchestrator:
     # ── Phase: Development ────────────────────────────────────────
 
     def _do_development(self, wf: dict):
-        """Execute development based on finalized plan."""
+        """Execute development based on finalized plan.
+
+        When ``test_retries > 0``, the dev phase was already completed and
+        only the test step needs to be re-run (e.g. the test agent itself
+        timed out or hit an API error on the previous attempt).
+        """
         dev_round = wf.get("dev_round", 1)
         gh = self._get_gh()
+        test_retries = wf.get("test_retries", 0)
+        skip_retries = wf.get("skip_retries", 0)
 
+        # ── Development phase (skipped on test-only/skip retry) ──
+        if test_retries > 0 or skip_retries > 0:
+            logger.info(
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
+                "skipping development phase",
+                test_retries,
+                skip_retries,
+                dev_round,
+            )
+        else:
+            self._run_development_agent(wf, dev_round, gh)
+            # Post development completion comment (before tests)
+            self._post_dev_completion_comment(wf, dev_round, gh)
+
+        # ── Test phase (always runs) ──
+        self._run_test_phase(wf, dev_round, gh)
+
+    def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Run the development agent, verify code changes, and return.
+
+        On failure, updates workflow status to 'failed' and returns.
+        Caller should check workflow status if needed.
+        """
         # Get the finalized plan
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
         final_plan = ""
@@ -1131,8 +1348,6 @@ class AutonomousOrchestrator:
 
         if not sha_changed:
             # SHA unchanged (or unavailable) — check for uncommitted changes
-            # regardless of result.success, because the agent may have edited
-            # files but failed for a secondary reason (e.g. couldn't git commit)
             has_uncommitted = False
             try:
                 has_uncommitted = gh.has_uncommitted_changes()
@@ -1140,7 +1355,6 @@ class AutonomousOrchestrator:
                 pass
 
             if has_uncommitted:
-                # Agent modified files but didn't commit — auto-commit
                 logger.info(
                     "Agent left uncommitted changes, auto-committing (success=%s)",
                     result.success,
@@ -1162,8 +1376,6 @@ class AutonomousOrchestrator:
                     has_uncommitted = False
 
         if not sha_changed and not has_uncommitted:
-            # No new commit from this session. Check if the branch already
-            # has commits relative to origin/main (from previous sessions).
             branch_has_changes_vs_base = False
             branch_name = wf.get("branch_name", "")
             base_diff_stats = {}
@@ -1175,7 +1387,6 @@ class AutonomousOrchestrator:
                 pass
 
             if branch_has_changes_vs_base:
-                # Branch has existing changes from prior sessions — treat as success
                 logger.info(
                     "No new commit this session, but branch '%s' has %d commits vs origin/main",
                     branch_name,
@@ -1188,7 +1399,6 @@ class AutonomousOrchestrator:
                     except Exception:
                         pass
             else:
-                # Truly no changes at all
                 logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
@@ -1227,7 +1437,54 @@ class AutonomousOrchestrator:
             )
             return
 
-        # Run tests
+    def _post_dev_completion_comment(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Post development completion comment with file change stats to issue.
+
+        Posted BEFORE tests run, so the logical order on the issue is:
+        Plan → Dev Completed (this) → Test Results → PR Review.
+        """
+        issue_number = wf.get("github_issue_number")
+        if not issue_number:
+            return
+
+        # Collect diff stats (branch vs main)
+        branch = wf.get("branch_name", "")
+        diff_stats = {}
+        try:
+            if branch:
+                diff_stats = gh.get_diff_stats("main", branch)
+        except Exception:
+            pass
+
+        commit_sha = ""
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+
+        msg = f"## ✅ Development Round {dev_round} Completed\n\n"
+        if commit_sha:
+            msg += f"- **Commit**: `{commit_sha[:8]}`\n"
+        if branch:
+            msg += f"- **Branch**: `{branch}`\n"
+        if diff_stats:
+            msg += (
+                f"- **Changes**: {diff_stats.get('files', 0)} files "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
+            )
+        msg += "\nProgressing to test phase..."
+
+        try:
+            gh.add_issue_comment(issue_number, msg)
+        except Exception:
+            pass
+
+    def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
+        """Run tests, post results to issue, handle retries.
+
+        On unrecoverable failure, updates workflow status to 'failed' and returns.
+        On success, transitions workflow to pr_review phase.
+        """
         test_ms = self._create_milestone(
             phase="development",
             dev_round=dev_round,
@@ -1239,7 +1496,17 @@ class AutonomousOrchestrator:
         test_prompt = (
             AUTONOMOUS_CONTEXT
             + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
-            "确保所有测试通过后再结束。"
+            "确保所有测试通过后再结束。\n\n"
+            "## 重要：测试执行策略\n"
+            "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
+            "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
+            "2. 如果 pytest 不可用，尝试 `python -m unittest discover -s tests`\n"
+            "3. 对于前端项目，尝试 `npm test` 或 `npx vitest run`\n"
+            "4. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
+            "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
+            "   - 手动验证核心功能逻辑\n"
+            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n"
         )
 
         test_result = self._run_agent(
@@ -1267,11 +1534,159 @@ class AutonomousOrchestrator:
             },
         )
 
-        if not test_result.success:
+        # Detect if tests were actually skipped (agent couldn't run them)
+        test_response_text = test_result.response_text or ""
+        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
+        _skipped_keywords = [
+            "pytest 未安装",
+            "pytest was not installed",
+            "命令被阻止",
+            "commands were blocked",
+            "pip install failed",
+            "pip install 被阻止",
+            "权限批准",
+            "所有测试框架都不可用",
+            "no test framework available",
+            "could not run tests",
+            "unable to execute tests",
+            "test framework not found",
+        ]
+        has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
+        # Negative detection: if response contains no test-result keywords at
+        # all (passed, failed, error, test, assertion, PASSED, FAILED), the
+        # agent likely never ran tests.
+        _test_result_keywords = [
+            "passed",
+            "failed",
+            "PASSED",
+            "FAILED",
+            "assertion",
+            "AssertionError",
+            "error",
+            "test",
+        ]
+        has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
+        tests_actually_skipped = (
+            any(m in test_response_text for m in _skipped_markers)
+            or (test_result.success and has_skip_keyword)
+            or (test_result.success and not has_test_result)
+        )
+
+        # Post test results to issue
+        issue_number = wf.get("github_issue_number")
+        if issue_number:
+            try:
+                test_summary = self._clean_agent_text(test_response_text)[:800]
+                if tests_actually_skipped:
+                    status_line = "⚠️ Tests were not actually run — see details below"
+                elif test_result.success:
+                    status_line = "✅ All tests passed"
+                else:
+                    status_line = "❌ Tests failed"
+                test_comment = (
+                    f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
+                    f"{status_line}\n\n"
+                    f"{test_summary}"
+                )
+                gh.add_issue_comment(issue_number, test_comment)
+            except Exception:
+                pass
+
+        # Treat skipped tests as failure — tests must actually run.
+        # Allow 1 retry in case of transient environment issues.
+        if tests_actually_skipped:
+            skip_retries = wf.get("skip_retries", 0) + 1
+            if skip_retries <= 1:
+                logger.warning(
+                    "Tests were skipped (not actually run) for dev round %d, retry %d/1",
+                    dev_round,
+                    skip_retries,
+                )
+                self._update_workflow({"skip_retries": skip_retries})
+                return  # Scheduler will re-call _run_test_phase
+            logger.warning("Tests were skipped after retry for dev round %d", dev_round)
             self._update_workflow(
-                {"status": "failed", "error_message": f"Tests failed: {test_result.error}"}
+                {
+                    "status": "failed",
+                    "error_message": (
+                        "Tests were not actually run — agent could not execute "
+                        "any test framework. This may indicate a permission or "
+                        "environment issue."
+                    ),
+                }
             )
             return
+
+        # Handle test failure with retry logic
+        if not test_result.success:
+            # Situation A: test agent itself failed (timeout, API error, etc.)
+            test_retries = wf.get("test_retries", 0) + 1
+            if test_retries <= MAX_TEST_RETRIES:
+                logger.warning(
+                    "Test agent failed (round %d), retry %d/%d: %s",
+                    dev_round,
+                    test_retries,
+                    MAX_TEST_RETRIES,
+                    test_result.error,
+                )
+                self._update_workflow({"test_retries": test_retries})
+                return  # Scheduler will re-call _do_development (skips dev)
+            else:
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Test agent failed after {MAX_TEST_RETRIES} retries: "
+                            f"{test_result.error}"
+                        ),
+                    }
+                )
+                return
+
+        # Situation B: test agent succeeded but reported unfixable failures
+        test_response = test_result.response_text or ""
+        _unfixable_marker = "[UNFIXABLE]"
+        has_unfixable = _unfixable_marker in test_response
+        if not has_unfixable:
+            # Fallback: check legacy keywords for backward compatibility
+            _legacy_unfixable = [
+                "无法修复",
+                "不可修复",
+                "cannot fix",
+                "unable to fix",
+            ]
+            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
+
+        if has_unfixable:
+            dev_retries = wf.get("dev_retries_on_test_fail", 0) + 1
+            if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
+                logger.warning(
+                    "Tests have unfixable failures, starting dev round %d (retry %d/%d)",
+                    dev_round + 1,
+                    dev_retries,
+                    MAX_DEV_RETRIES_ON_TEST_FAIL,
+                )
+                self._update_workflow(
+                    {
+                        "dev_round": dev_round + 1,
+                        "dev_retries_on_test_fail": dev_retries,
+                    }
+                )
+                return
+            else:
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Tests have unfixable failures after "
+                            f"{MAX_DEV_RETRIES_ON_TEST_FAIL} dev retries"
+                        ),
+                    }
+                )
+                return
+
+        # Tests passed — clear retry counters
+        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0, "skip_retries": 0})
 
         # Dev completed milestone
         self._create_milestone(
@@ -1282,17 +1697,15 @@ class AutonomousOrchestrator:
             title=f"Development round {dev_round} completed",
         )
 
-        # Post development status to issue
-        issue_number = wf.get("github_issue_number")
+        # Post test-passed status to issue
         if issue_number:
             try:
                 branch = wf.get("branch_name", "")
                 status_msg = (
-                    f"## ✅ Development Round {dev_round} Completed\n\n"
-                    f"- **Status**: Development finished, tests passed\n"
+                    f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
+                    f"- **Status**: Development + tests completed successfully\n"
                     f"- **Branch**: `{branch}`\n"
-                    f"- **Next**: Creating PR and running code review\n\n"
-                    f"Progressing to PR review phase..."
+                    f"- **Next**: Creating PR and running code review\n"
                 )
                 gh.add_issue_comment(issue_number, status_msg)
             except Exception:
@@ -1470,7 +1883,7 @@ class AutonomousOrchestrator:
                     last_review_text = ms["review_content"]
                     break
             if last_review_text:
-                cleaned_review = self._clean_plan_output(last_review_text)
+                cleaned_review = self._clean_agent_text(last_review_text)
                 truncated = cleaned_review[:PREV_REVIEW_MAX_LENGTH]
                 truncation_notice = (
                     "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
@@ -1494,8 +1907,10 @@ class AutonomousOrchestrator:
             "3. 测试覆盖率\n"
             "4. 性能影响\n"
             "5. 与需求的对齐程度\n"
-            "6. 上一轮审查意见的落实情况（如有）\n\n"
-            "如果没有重大问题，请明确说明'代码审查通过'。"
+            "6. 上一轮审查意见的落实情况(如有)\n\n"
+            "如果没有重大问题，请明确说明'代码审查通过'。\n\n"
+            "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
+            "或结尾引导(如'下一步是否...'等)。"
         )
 
         # Include CI failures in review prompt if any
@@ -1538,7 +1953,7 @@ class AutonomousOrchestrator:
             try:
                 gh.add_pr_comment(
                     pr_number,
-                    f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_plan_output(review_text)}",
+                    f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
                 )
             except GitHubOpsError:
                 pass
@@ -1568,7 +1983,7 @@ class AutonomousOrchestrator:
 
             fix_prompt = (
                 AUTONOMOUS_CONTEXT
-                + f"根据以下代码审查意见修改代码：\n\n{self._clean_plan_output(review_text)}\n\n"
+                + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
                 "重要要求：\n"
                 "1. 修改完成后，运行项目测试确保所有测试通过\n"
                 "2. 如果测试失败，分析失败原因：\n"
@@ -1623,11 +2038,28 @@ class AutonomousOrchestrator:
 
             if pr_number:
                 try:
-                    comment = f"✅ Addressed review feedback (round {round_num})"
+                    # Extract fix summary from agent response (no hard truncation —
+                    # _clean_agent_text already strips noise; only cap at 5000 chars
+                    # to avoid excessively long comments, breaking at paragraph boundary).
+                    fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                    if len(fix_summary) > 5000:
+                        # Truncate at last paragraph break within limit
+                        truncated = fix_summary[:5000]
+                        last_break = max(truncated.rfind("\n\n"), truncated.rfind("\n##"), 0)
+                        if last_break > 1000:
+                            fix_summary = truncated[:last_break].rstrip() + "\n\n..."
+                        else:
+                            fix_summary = truncated.rstrip() + "..."
+                    comment = (
+                        f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
+                        f"### Changes Made\n{fix_summary}\n\n"
+                    )
+                    if commit_sha:
+                        comment += f"- Commit: `{commit_sha[:8]}`\n"
                     # Note pre-existing CI failures if fix agent identified them.
                     if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
                         comment += (
-                            "\n\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。"
+                            "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
                         )
                     gh.add_pr_comment(pr_number, comment)
                 except GitHubOpsError:
@@ -1641,15 +2073,16 @@ class AutonomousOrchestrator:
         gh = self._get_gh()
         issue_number = wf.get("github_issue_number")
         pr_number = wf.get("github_pr_number")
+        all_milestones = self.repo.list_milestones(self._workflow_id, dev_round=dev_round)
 
-        # Collect milestone summaries
-        milestones = self.repo.list_milestones(self._workflow_id, dev_round=dev_round)
-        summary_parts = []
-        for ms in milestones:
-            if ms.get("status") == "completed" and ms.get("result_summary"):
-                summary_parts.append(f"- {ms.get('title', '')}: {ms['result_summary'][:100]}")
+        # 1. Plan summary (from finalized plan)
+        plan_summary = ""
+        for ms in reversed(all_milestones):
+            if ms.get("plan_content") and ms.get("phase") == "planning":
+                plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
+                break
 
-        # Get diff stats
+        # 2. Diff stats
         diff_stats = {}
         try:
             branch = wf.get("branch_name", "")
@@ -1657,17 +2090,59 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        report = (
-            f"## 📊 Dev Round {dev_round} Progress Report\n\n"
-            f"### Completed\n" + "\n".join(summary_parts[:20]) + "\n\n"
-            f"### Stats\n"
-            f"- Tokens: {wf.get('total_tokens', 0):,}\n"
-            f"- Requests: {wf.get('total_requests', 0)}\n"
+        # 3. Test result summary (from test milestone)
+        test_summary = ""
+        for ms in all_milestones:
+            if ms.get("milestone_type") == "tests_run" and ms.get("result_summary"):
+                test_summary = self._clean_agent_text(ms["result_summary"])[:200]
+                break
+
+        # 4. Code review rounds
+        review_rounds = sum(
+            1
+            for ms in all_milestones
+            if ms.get("milestone_type") == "pr_reviewed" and ms.get("phase") == "pr_review"
         )
+        review_passed = any(
+            "代码审查通过" in (ms.get("review_content") or "")
+            for ms in all_milestones
+            if ms.get("milestone_type") == "pr_reviewed"
+        )
+
+        # Build report
+        report = f"## 📊 Dev Round {dev_round} Summary\n\n"
+
+        if plan_summary:
+            report += f"### 📋 Plan\n{plan_summary}\n\n"
+
+        # Changes section
+        report += "### 📝 Changes\n"
+        branch = wf.get("branch_name", "")
         if diff_stats:
-            report += f"- Changes: +{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)} ({diff_stats.get('files', 0)} files)\n"
+            report += (
+                f"- Files: {diff_stats.get('files', 0)} changed "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
+            )
+        if branch:
+            report += f"- Branch: `{branch}`\n"
+        report += "\n"
+
+        if test_summary:
+            report += f"### 🧪 Tests\n{test_summary}\n\n"
+
+        if review_rounds > 0:
+            report += "### 🔍 Code Review\n"
+            report += f"- Rounds: {review_rounds}\n"
+            report += f"- Final status: {'✅ Passed' if review_passed else '⚠️ Issues found'}\n\n"
+
         if pr_number:
-            report += f"- PR: #{pr_number}\n"
+            report += f"### 🔗 PR\n- PR #{pr_number}\n\n"
+
+        report += (
+            "### 📈 Resources\n"
+            f"- Tokens: {wf.get('total_tokens', 0):,}\n"
+            f"- API Requests: {wf.get('total_requests', 0)}\n"
+        )
 
         self._create_milestone(
             phase="report",
@@ -1720,6 +2195,8 @@ class AutonomousOrchestrator:
 
         If user_feedback is stored on the workflow (from cancel-with-feedback),
         resume immediately from the cancelled milestone's phase.
+
+        If auto_merge is enabled and PR exists, skip waiting and proceed to merge.
         """
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
@@ -1753,6 +2230,27 @@ class AutonomousOrchestrator:
             self._emit(
                 "phase_change",
                 {"phase": cancelled_phase, "dev_round": new_dev_round, "resumed": True},
+            )
+            return
+
+        # Auto merge check for batch workflows
+        auto_merge = wf.get("auto_merge", True)
+        github_pr_number = wf.get("github_pr_number")
+        if auto_merge and github_pr_number:
+            # PR exists and auto_merge enabled - skip waiting, go directly to merge
+            logger.info(
+                "Auto merge enabled for workflow %s, proceeding to merge phase",
+                self._workflow_id[:8],
+            )
+            self._update_workflow(
+                {
+                    "current_phase": "merge",
+                    "status": "merging",
+                }
+            )
+            self._emit(
+                "phase_change",
+                {"phase": "merge", "auto_merge": True},
             )
             return
 

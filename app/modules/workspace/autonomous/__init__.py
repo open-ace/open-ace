@@ -53,6 +53,9 @@ def get_ddl_statements():
             github_issue_number INTEGER,
             github_pr_number INTEGER,
             github_pr_url TEXT DEFAULT '',
+            batch_id TEXT,
+            batch_order INTEGER,
+            batch_total INTEGER,
             current_phase TEXT DEFAULT 'preparation',
             current_round INTEGER DEFAULT 0,
             dev_round INTEGER DEFAULT 1,
@@ -85,6 +88,10 @@ def get_ddl_statements():
         """
         CREATE INDEX IF NOT EXISTS idx_workflows_parent
             ON autonomous_workflows(parent_workflow_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_workflows_batch_order
+            ON autonomous_workflows(batch_id, batch_order)
         """,
         f"""
         CREATE TABLE IF NOT EXISTS workflow_milestones (

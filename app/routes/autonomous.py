@@ -11,8 +11,10 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
@@ -99,12 +101,87 @@ PHASE_TO_STATUS = {
     "merge": "merging",
 }
 
+ISSUE_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)(?:[/?#].*)?$", re.I)
+ISSUE_RANGE_RE = re.compile(r"^(\d+)-(\d+)$")
+
 
 def _get_event_emitter():
     """Get or lazily create the event emitter singleton."""
     from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 
     return AutonomousEventEmitter.instance()
+
+
+def _normalize_issue_url(value: str) -> str:
+    """Trim whitespace and trailing slash from an issue URL."""
+    return value.strip().rstrip("/")
+
+
+def _parse_issue_selectors(raw_input: str) -> tuple[list[dict], list[str]]:
+    """Parse issue selectors from mixed text/URL/range input."""
+    selectors: list[dict] = []
+    ignored_tokens: list[str] = []
+    seen_numbers: set[int] = set()
+
+    for token in [part.strip() for part in re.split(r"[\s,]+", raw_input or "") if part.strip()]:
+        url_match = ISSUE_URL_RE.match(token)
+        if url_match:
+            issue_number = int(url_match.group(1))
+            if issue_number not in seen_numbers:
+                selectors.append(
+                    {
+                        "issue_number": issue_number,
+                        "requirements_issue_url": _normalize_issue_url(token),
+                    }
+                )
+                seen_numbers.add(issue_number)
+            continue
+
+        range_match = ISSUE_RANGE_RE.match(token)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            if start <= 0 or end <= 0 or start > end:
+                ignored_tokens.append(token)
+                continue
+            for issue_number in range(start, end + 1):
+                if issue_number in seen_numbers:
+                    continue
+                selectors.append(
+                    {
+                        "issue_number": issue_number,
+                        "requirements_issue_url": "",
+                    }
+                )
+                seen_numbers.add(issue_number)
+            continue
+
+        if token.isdigit():
+            issue_number = int(token)
+            if issue_number <= 0:
+                ignored_tokens.append(token)
+                continue
+            if issue_number not in seen_numbers:
+                selectors.append(
+                    {
+                        "issue_number": issue_number,
+                        "requirements_issue_url": "",
+                    }
+                )
+                seen_numbers.add(issue_number)
+            continue
+
+        ignored_tokens.append(token)
+
+    return selectors, ignored_tokens
+
+
+def _format_issue_title(base_title: str, issue_number: int, is_multi: bool) -> str:
+    """Build a workflow title for issue-based batches."""
+    clean_title = (base_title or "").strip()
+    if clean_title:
+        return f"{clean_title} (#{issue_number})" if is_multi else clean_title
+    return f"Issue #{issue_number}"
 
 
 # ── Workflow CRUD ───────────────────────────────────────────────────
@@ -116,6 +193,12 @@ def create_workflow():
     """Create a new autonomous development workflow."""
     data = request.get_json(silent=True) or {}
     user_id = g.user_id
+    requirements_text = (data.get("requirements_text") or "").strip()
+    requirements_issue_input = (data.get("requirements_issue_input") or "").strip()
+    requirements_issue_url = (data.get("requirements_issue_url") or "").strip()
+    is_issue_mode = not requirements_text and bool(
+        requirements_issue_input or requirements_issue_url
+    )
 
     # Rate limit: max 10 workflows per user per hour
     if not _workflow_rate_limiter.is_allowed(user_id):
@@ -133,8 +216,15 @@ def create_workflow():
                 )
 
     # Validate required fields
-    if not data.get("requirements_text") and not data.get("requirements_issue_url"):
-        return jsonify({"error": "requirements_text or requirements_issue_url is required"}), 400
+    if not requirements_text and not requirements_issue_input and not requirements_issue_url:
+        return (
+            jsonify(
+                {
+                    "error": "requirements_text, requirements_issue_input, or requirements_issue_url is required"
+                }
+            ),
+            400,
+        )
 
     if not data.get("cli_tool"):
         return jsonify({"error": "cli_tool is required"}), 400
@@ -151,11 +241,11 @@ def create_workflow():
         if ".." in project_path.split(os.sep):
             return jsonify({"error": "project_path must not contain path traversal"}), 400
 
-    workflow_data = {
+    base_workflow_data = {
         "user_id": user_id,
         "title": data.get("title", ""),
-        "requirements_text": data.get("requirements_text", ""),
-        "requirements_issue_url": data.get("requirements_issue_url", ""),
+        "requirements_text": requirements_text,
+        "requirements_issue_url": requirements_issue_url,
         "project_path": data.get("project_path", ""),
         "project_repo_url": data.get("project_repo_url", ""),
         "is_new_project": data.get("is_new_project", False),
@@ -169,22 +259,69 @@ def create_workflow():
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
+        "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
     }
 
     try:
-        workflow = _get_repo().create_workflow(workflow_data)
+        repo = _get_repo()
+
+        if is_issue_mode:
+            raw_issue_input = requirements_issue_input or requirements_issue_url
+            issue_selectors, ignored_issue_tokens = _parse_issue_selectors(raw_issue_input)
+            if not issue_selectors:
+                return jsonify({"error": "No valid GitHub issue selectors found"}), 400
+
+            is_multi_issue = len(issue_selectors) > 1
+            batch_id = str(uuid.uuid4()) if is_multi_issue else None
+            created_workflows = []
+
+            for index, selector in enumerate(issue_selectors, start=1):
+                workflow_data = dict(base_workflow_data)
+                workflow_data.update(
+                    {
+                        "title": _format_issue_title(
+                            base_workflow_data.get("title", ""),
+                            selector["issue_number"],
+                            is_multi_issue,
+                        ),
+                        "requirements_text": "",
+                        "requirements_issue_url": selector["requirements_issue_url"],
+                        "github_issue_number": selector["issue_number"],
+                        "batch_id": batch_id,
+                        "batch_order": index if is_multi_issue else None,
+                        "batch_total": len(issue_selectors) if is_multi_issue else None,
+                        "status": "pending" if index == 1 else "queued",
+                    }
+                )
+                workflow = repo.create_workflow(workflow_data)
+                if not workflow:
+                    return jsonify({"error": "Failed to create workflow"}), 500
+                created_workflows.append(workflow)
+                _emit_event_safe(
+                    workflow["workflow_id"],
+                    "workflow_created",
+                    {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
+                )
+
+            response_data = {
+                "success": True,
+                "workflow": created_workflows[0],
+            }
+            if is_multi_issue:
+                response_data["workflows"] = created_workflows
+            if ignored_issue_tokens:
+                response_data["ignored_issue_tokens"] = ignored_issue_tokens
+            return jsonify(response_data), 201
+
+        workflow = repo.create_workflow(base_workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
 
-        # Emit event
-        try:
-            _get_event_emitter().emit(
-                workflow["workflow_id"],
-                "workflow_created",
-                {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
-            )
-        except Exception:
-            pass
+        _emit_event_safe(
+            workflow["workflow_id"],
+            "workflow_created",
+            {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
+        )
 
         return jsonify({"success": True, "workflow": workflow}), 201
     except Exception as e:
@@ -337,6 +474,19 @@ def stop_workflow(workflow_id):
     )
 
     _emit_event_safe(workflow_id, "status_change", {"status": "cancelled"})
+
+    batch_id = workflow.get("batch_id")
+    if batch_id:
+        cancelled_count = _get_repo().cancel_queued_batch_workflows(batch_id, workflow_id)
+        if cancelled_count:
+            for sibling in _get_repo().list_batch_workflows(batch_id):
+                if (
+                    sibling.get("workflow_id") == workflow_id
+                    or sibling.get("status") != "cancelled"
+                ):
+                    continue
+                _emit_event_safe(sibling["workflow_id"], "status_change", {"status": "cancelled"})
+
     return jsonify({"success": True})
 
 

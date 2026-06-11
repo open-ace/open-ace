@@ -477,3 +477,112 @@ class TestDailyStatsRepository:
         self.db.execute.side_effect = Exception("DB error")
         result = self.repo.refresh_hourly_stats()
         assert result is False
+
+    # -------------------------------------------------------------------------
+    # get_data_range
+    # -------------------------------------------------------------------------
+
+    def test_get_data_range_basic(self):
+        """Test get_data_range returns min and max dates."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        result = self.repo.get_data_range()
+        assert result is not None
+        assert result["min_date"] == "2024-01-01"
+        assert result["max_date"] == "2024-12-31"
+
+    def test_get_data_range_empty_table(self):
+        """Test get_data_range returns None when table is empty."""
+        self.db.fetch_one.return_value = {"min_date": None, "max_date": None}
+        result = self.repo.get_data_range()
+        assert result is None
+
+    def test_get_data_range_no_result(self):
+        """Test get_data_range returns None when query returns no result."""
+        self.db.fetch_one.return_value = None
+        result = self.repo.get_data_range()
+        assert result is None
+
+    def test_get_data_range_query_structure(self):
+        """Test that get_data_range uses correct SQL structure."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        self.repo.get_data_range()
+        query = self.db.fetch_one.call_args[0][0]
+        # Should query MIN and MAX of date column
+        assert "MIN(date)" in query
+        assert "MAX(date)" in query
+        assert "FROM daily_stats" in query
+        # Should NOT have WHERE clause (global data range)
+        assert "WHERE" not in query
+
+    def test_get_data_range_no_host_filter(self):
+        """Test that get_data_range always queries global data (no host filter)."""
+        self.db.fetch_one.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2024-12-31",
+        }
+        result = self.repo.get_data_range()
+        assert result is not None
+        # Query should NOT contain any host_name filter or WHERE clause
+        query = self.db.fetch_one.call_args[0][0]
+        assert "host_name" not in query
+        assert "WHERE" not in query
+
+    # -------------------------------------------------------------------------
+    # get_user_totals - Feishu ID filtering
+    # -------------------------------------------------------------------------
+
+    def test_get_user_totals_filters_feishu_ids(self):
+        """Verify get_user_totals() SQL includes ou_ filter condition."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_totals()
+        query = self.db.fetch_all.call_args[0][0]
+        # Should contain the ou_ filter condition
+        assert "NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)" in query
+
+    def test_get_user_totals_filters_ou_prefix_variants(self):
+        """Long ou_ names (length > 10) should be filtered in SQL."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_totals()
+        query = self.db.fetch_all.call_args[0][0]
+        # Verify both parts of the condition are present
+        assert "LIKE 'ou_%'" in query
+        assert "LENGTH(ds.sender_name) > 10" in query
+
+    def test_get_user_totals_keeps_valid_senders(self):
+        """Short ou_ names (length <= 10) should NOT be filtered."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_totals()
+        query = self.db.fetch_all.call_args[0][0]
+        # The filter uses NOT (...) so short ou_ names pass through
+        assert "NOT (" in query
+
+    # -------------------------------------------------------------------------
+    # get_batch_aggregates - unique_users excludes Feishu IDs
+    # -------------------------------------------------------------------------
+
+    def test_get_batch_aggregates_unique_users_excludes_feishu_ids(self):
+        """Verify unique_users calculation excludes ou_ prefix users."""
+        self.db.fetch_one.return_value = {
+            "total_messages": 1000,
+            "total_tokens": 50000,
+            "total_input_tokens": 30000,
+            "total_output_tokens": 20000,
+            "unique_tools": 3,
+            "unique_hosts": 2,
+            "unique_users": 8,
+            "unique_days": 30,
+        }
+        self.repo.get_batch_aggregates()
+        query = self.db.fetch_one.call_args[0][0]
+        # unique_users should use CASE WHEN with Feishu filter
+        assert "CASE WHEN" in query
+        assert "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)" in query
+        # total_messages/tokens should NOT have the CASE filter
+        assert "SUM(message_count)" in query
+        assert "SUM(total_tokens)" in query

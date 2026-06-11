@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 # Maximum concurrent workflow executions
 MAX_CONCURRENT_WORKFLOWS = 3
+RUNNING_BATCH_STATUSES = {
+    "pending",
+    "preparing",
+    "planning",
+    "developing",
+    "pr_review",
+    "reporting",
+    "merging",
+}
+QUEUE_ADVANCE_STATUSES = {"waiting", "completed", "failed", "planning_timeout"}
+QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 
 
 class AutonomousScheduler:
@@ -33,6 +44,8 @@ class AutonomousScheduler:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._in_progress_ids: set[str] = set()
+        self._in_progress_batch_ids: set[str] = set()  # Track batches being processed
+        self._in_progress_paths: set[str] = set()  # Track project paths being processed
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -91,11 +104,20 @@ class AutonomousScheduler:
         lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
         repo = _get_repo()
 
+        # Get workflow's batch_id and project_path for cleanup
+        workflow = repo.get_workflow(workflow_id)
+        batch_id = workflow.get("batch_id") if workflow else None
+        project_path = workflow.get("project_path", "") if workflow else ""
+
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
             logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
+                if project_path:
+                    self._in_progress_paths.discard(project_path)
             return workflow_id
 
         orchestrator = None
@@ -121,13 +143,74 @@ class AutonomousScheduler:
                 logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
             with self._in_progress_lock:
                 self._in_progress_ids.discard(workflow_id)
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
+                if project_path:
+                    self._in_progress_paths.discard(project_path)
         return workflow_id
 
+    @staticmethod
+    def _batch_has_running_workflow(batch_workflows: list[dict]) -> bool:
+        """Whether a batch currently has a workflow actively executing."""
+        return any(wf.get("status") in RUNNING_BATCH_STATUSES for wf in batch_workflows)
+
+    def _promote_queued_workflows(self, repo) -> None:
+        """Promote the next queued workflow in each eligible batch."""
+        from app.routes.autonomous import _emit_event_safe
+
+        try:
+            queued_workflows = repo.get_queued_workflows()
+        except Exception as e:
+            logger.error("Failed to query queued workflows: %s", e)
+            return
+
+        seen_batches: set[str] = set()
+        for workflow in queued_workflows:
+            batch_id = workflow.get("batch_id") or ""
+            if not batch_id or batch_id in seen_batches:
+                continue
+            seen_batches.add(batch_id)
+
+            batch_workflows = repo.list_batch_workflows(batch_id)
+            if not batch_workflows or self._batch_has_running_workflow(batch_workflows):
+                continue
+
+            queued_index = next(
+                (
+                    index
+                    for index, item in enumerate(batch_workflows)
+                    if item.get("workflow_id") == workflow.get("workflow_id")
+                ),
+                None,
+            )
+            if queued_index is None:
+                continue
+            if queued_index == 0:
+                repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
+                _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
+                continue
+
+            previous_workflow = batch_workflows[queued_index - 1]
+            previous_status = previous_workflow.get("status")
+            if previous_status in QUEUE_BLOCKING_STATUSES or previous_status == "queued":
+                continue
+            if previous_status not in QUEUE_ADVANCE_STATUSES:
+                continue
+
+            repo.update_workflow(workflow["workflow_id"], {"status": "pending"})
+            _emit_event_safe(workflow["workflow_id"], "status_change", {"status": "pending"})
+
     def _process_workflows(self):
-        """Find and process active workflows using thread pool for concurrency."""
+        """Find and process active workflows using thread pool for concurrency.
+
+        For batch workflows, ensures only one workflow per batch is processed at a time.
+        Additionally, ensures only one workflow per project_path is processed at a time
+        to prevent git conflicts when multiple workflows share the same project directory.
+        """
         from app.routes.autonomous import _get_repo
 
         repo = _get_repo()
+        self._promote_queued_workflows(repo)
 
         try:
             workflows = repo.get_active_workflows()
@@ -135,17 +218,35 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
-        # Filter out paused and already-in-progress workflows
+        # Filter out paused, already-in-progress workflows, batch workflows
+        # whose batch is already being processed, and workflows whose
+        # project_path is already being processed by another workflow
         with self._in_progress_lock:
-            active = [
-                wf
-                for wf in workflows
-                if wf.get("status") != "paused"
-                and wf.get("workflow_id", "") not in self._in_progress_ids
-            ]
+            active = []
+            for wf in workflows:
+                if wf.get("status") == "paused":
+                    continue
+                if wf.get("workflow_id", "") in self._in_progress_ids:
+                    continue
+                # For batch workflows, check if the batch is already being processed
+                batch_id = wf.get("batch_id")
+                if batch_id and batch_id in self._in_progress_batch_ids:
+                    continue
+                # Check if the project_path is already being processed
+                project_path = wf.get("project_path", "")
+                if project_path and project_path in self._in_progress_paths:
+                    continue
+                active.append(wf)
 
         if not active:
             return
+
+        active.sort(
+            key=lambda wf: (
+                1 if wf.get("status") == "waiting" else 0,
+                wf.get("created_at") or "",
+            )
+        )
 
         # Limit to concurrency cap, accounting for already-running workflows
         with self._in_progress_lock:
@@ -155,10 +256,16 @@ class AutonomousScheduler:
         if not to_process:
             return
 
-        # Mark as in-progress and submit
+        # Mark workflows, their batches, and project_paths as in-progress
         with self._in_progress_lock:
             for wf in to_process:
                 self._in_progress_ids.add(wf.get("workflow_id", ""))
+                batch_id = wf.get("batch_id")
+                if batch_id:
+                    self._in_progress_batch_ids.add(batch_id)
+                project_path = wf.get("project_path", "")
+                if project_path:
+                    self._in_progress_paths.add(project_path)
 
         with ThreadPoolExecutor(
             max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),

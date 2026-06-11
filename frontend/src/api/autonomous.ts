@@ -28,6 +28,10 @@ export interface AutonomousWorkflow {
   github_issue_number: number | null;
   github_pr_number: number | null;
   github_pr_url: string;
+  batch_id: string | null;
+  batch_order: number | null;
+  batch_total: number | null;
+  auto_merge: boolean;
   current_phase: string;
   current_round: number;
   dev_round: number;
@@ -98,6 +102,7 @@ export interface AgentTool {
 export interface CreateWorkflowRequest {
   title?: string;
   requirements_text?: string;
+  requirements_issue_input?: string;
   requirements_issue_url?: string;
   project_path?: string;
   project_repo_url?: string;
@@ -112,6 +117,7 @@ export interface CreateWorkflowRequest {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
+  auto_merge?: boolean;  // Auto merge PR for batch workflows
 }
 
 // ── API Client ─────────────────────────────────────────────────────
@@ -120,7 +126,12 @@ export const autonomousApi = {
   // Workflow CRUD
   async createWorkflow(
     data: CreateWorkflowRequest
-  ): Promise<{ success: boolean; workflow: AutonomousWorkflow }> {
+  ): Promise<{
+    success: boolean;
+    workflow: AutonomousWorkflow;
+    workflows?: AutonomousWorkflow[];
+    ignored_issue_tokens?: string[];
+  }> {
     return apiClient.post('/api/autonomous/workflows', data);
   },
 

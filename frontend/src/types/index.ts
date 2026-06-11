@@ -229,6 +229,7 @@ export interface BaseComponentProps {
   id?: string;
   style?: React.CSSProperties;
   'data-testid'?: string;
+  title?: string;
 }
 
 export interface LoadingProps extends BaseComponentProps {

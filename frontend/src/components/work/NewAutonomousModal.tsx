@@ -42,6 +42,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [maxPlanRounds, setMaxPlanRounds] = useState(3);
   const [maxPRReviewRounds, setMaxPRReviewRounds] = useState(5);
   const [title, setTitle] = useState('');
+  const [autoMerge, setAutoMerge] = useState(true);  // Auto merge for batch workflows
   const [errorMessage, setErrorMessage] = useState('');
 
   // Data
@@ -78,7 +79,8 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     const data: CreateWorkflowRequest = {
       title: title || undefined,
       requirements_text: requirementsMode === 'text' ? requirementsText : undefined,
-      requirements_issue_url: requirementsMode === 'url' ? requirementsUrl : undefined,
+      requirements_issue_input: requirementsMode === 'url' ? requirementsUrl : undefined,
+      requirements_issue_url: undefined,
       cli_tool: cliTool,
       model: model || undefined,
       workspace_type: workspaceType,
@@ -91,6 +93,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       branch_name: branchName || undefined,
       max_plan_rounds: maxPlanRounds,
       max_pr_review_rounds: maxPRReviewRounds,
+      auto_merge: autoMerge,
     };
 
     try {
@@ -122,6 +125,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     branchName,
     maxPlanRounds,
     maxPRReviewRounds,
+    autoMerge,
     createWorkflow,
     onCreated,
   ]);
@@ -203,13 +207,22 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               onChange={(e) => setRequirementsText(e.target.value)}
             />
           ) : (
-            <input
-              type="url"
-              className="form-control"
-              placeholder="https://github.com/owner/repo/issues/123"
-              value={requirementsUrl}
-              onChange={(e) => setRequirementsUrl(e.target.value)}
-            />
+            <>
+              <textarea
+                className="form-control"
+                rows={3}
+                placeholder={
+                  t('autoIssueInputPlaceholder', language) ||
+                  '123 125,128-130 or https://github.com/owner/repo/issues/123'
+                }
+                value={requirementsUrl}
+                onChange={(e) => setRequirementsUrl(e.target.value)}
+              />
+              <div className="form-text">
+                {t('autoIssueInputHint', language) ||
+                  'Supports commas, spaces, new lines, ranges like 12-15, and mixed GitHub issue URLs.'}
+              </div>
+            </>
           )}
         </div>
 
@@ -400,6 +413,27 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
             onChange={(e) => setMaxPRReviewRounds(parseInt(e.target.value))}
           />
         </div>
+
+        {/* Auto Merge - only show for batch workflows (URL mode with multiple issues) */}
+        {requirementsMode === 'url' && requirementsUrl.trim() && (
+          <div className="col-12">
+            <div className="form-check">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="autoMerge"
+                checked={autoMerge}
+                onChange={(e) => setAutoMerge(e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="autoMerge">
+                {t('autoMergeAfterPR', language) || 'Auto merge after PR created'}
+              </label>
+              <div className="form-text">
+                {t('autoMergeHint', language) || 'Automatically merge PR and proceed to next workflow in batch'}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );

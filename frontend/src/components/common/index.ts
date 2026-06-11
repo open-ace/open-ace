@@ -9,6 +9,7 @@ export { Loading, LoadingOverlay, Skeleton, SkeletonCard } from './Loading';
 export { Error, EmptyState } from './Error';
 export { Select, createOptions } from './Select';
 export { SearchableSelect } from './SearchableSelect';
+export { Pagination } from './Pagination';
 
 // New Phase 5 components
 export { Modal, ConfirmModal } from './Modal';

@@ -39,6 +39,10 @@ class AutonomousWorkflowRepository:
         "github_issue_number",
         "github_pr_number",
         "github_pr_url",
+        "batch_id",
+        "batch_order",
+        "batch_total",
+        "auto_merge",
         "current_phase",
         "current_round",
         "dev_round",
@@ -122,12 +126,13 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, current_phase, dev_round,
+                     remote_machine_id, github_issue_number, batch_id,
+                     batch_order, batch_total, auto_merge, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -148,6 +153,11 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("github_issue_number"),
+                    data.get("batch_id"),
+                    data.get("batch_order"),
+                    data.get("batch_total"),
+                    self._coerce_bool(data.get("auto_merge"), True),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -170,12 +180,13 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, current_phase, dev_round,
+                     remote_machine_id, github_issue_number, batch_id,
+                     batch_order, batch_total, auto_merge, current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -195,6 +206,11 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("github_issue_number"),
+                    data.get("batch_id"),
+                    data.get("batch_order"),
+                    data.get("batch_total"),
+                    self._coerce_bool(data.get("auto_merge"), True),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -269,6 +285,51 @@ class AutonomousWorkflowRepository:
             """
         )
 
+    def get_queued_workflows(self) -> list:
+        """Get workflows that are queued behind another workflow in the same batch."""
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE status = 'queued' AND batch_id IS NOT NULL AND batch_id != ''
+            ORDER BY created_at ASC, batch_order ASC
+            """
+        )
+
+    def list_batch_workflows(self, batch_id: str) -> list:
+        """List all workflows in a batch ordered by configured sequence."""
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE batch_id = ?
+            ORDER BY batch_order ASC, created_at ASC
+            """,
+            (batch_id,),
+        )
+
+    def cancel_queued_batch_workflows(self, batch_id: str, exclude_workflow_id: str) -> int:
+        """Cancel queued workflows in the same batch except the current one."""
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET status = 'cancelled', completed_at = ?, updated_at = ?
+                    WHERE batch_id = ?
+                      AND workflow_id != ?
+                      AND status = 'queued'
+                    """
+                ),
+                (now, now, batch_id, exclude_workflow_id),
+            )
+            rowcount = cursor.rowcount
+            conn.commit()
+            return rowcount
+        finally:
+            conn.close()
+
     def update_workflow(self, workflow_id: str, updates: dict) -> Optional[dict]:
         """Update a workflow's fields. Returns updated record."""
         if not updates:
@@ -282,7 +343,7 @@ class AutonomousWorkflowRepository:
             return self.get_workflow(workflow_id)
 
         # Boolean columns — coerce to Python bool for PostgreSQL BOOLEAN type
-        _BOOL_COLS = {"is_new_project", "is_private"}
+        _BOOL_COLS = {"is_new_project", "is_private", "auto_merge"}
 
         set_clauses = []
         params = []

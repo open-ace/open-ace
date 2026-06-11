@@ -81,6 +81,85 @@ class TestAuditLogger:
         count = logger.count(user_id=1)
         assert count == 42
 
+    def test_count_with_resource_type_filter(self):
+        """Test count() method with resource_type parameter."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 5}
+        count = logger.count(resource_type="user")
+        assert count == 5
+        # Verify SQL query includes resource_type condition
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "resource_type = ?" in sql
+
+    def test_count_with_username_filter(self):
+        """Test count() method with username parameter."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 10}
+        count = logger.count(username="admin")
+        assert count == 10
+        # Verify SQL query includes username condition
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "username = ?" in sql
+
+    def test_count_with_severity_filter(self):
+        """Test count() method with severity parameter."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 3}
+        count = logger.count(severity="warning")
+        assert count == 3
+        # Verify SQL query includes severity condition
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "severity = ?" in sql
+
+    def test_count_with_combined_filters(self):
+        """Test count() method with multiple parameters combined."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 2}
+        count = logger.count(
+            user_id=1,
+            username="admin",
+            action="login",
+            resource_type="session",
+            severity="info",
+        )
+        assert count == 2
+        # Verify SQL query includes all conditions
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "user_id = ?" in sql
+        assert "username = ?" in sql
+        assert "action = ?" in sql
+        assert "resource_type = ?" in sql
+        assert "severity = ?" in sql
+
+    def test_count_with_empty_parameters(self):
+        """Test count() method returns all logs when no filters applied."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 100}
+        count = logger.count()
+        assert count == 100
+        # Verify SQL query has no WHERE conditions (uses 1=1)
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "1=1" in sql
+
+    def test_count_with_empty_string_parameters(self):
+        """Test count() method handles empty string parameters correctly."""
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_one.return_value = {"count": 50}
+        # Empty strings should NOT add filter conditions (same behavior as query())
+        count = logger.count(username="", resource_type="", severity="")
+        assert count == 50
+        # Verify SQL query does NOT include empty string filters
+        call_args = mock_db.fetch_one.call_args
+        sql = call_args[0][0]
+        assert "username" not in sql
+        assert "resource_type" not in sql
+        assert "severity" not in sql
+
     def test_get_user_activity(self):
         logger, mock_db = self._make_logger()
         mock_db.fetch_all.return_value = [

@@ -43,6 +43,11 @@ const translations: Record<Language, Translations> = {
     role: 'Role',
     selectRole: 'Select Role',
     searchMessages: 'Search messages...',
+    // Message role labels
+    messageRoleUser: 'User',
+    messageRoleAssistant: 'Assistant',
+    messageRoleSystem: 'System',
+    messageRoleToolResult: 'Tool Result',
 
     // Navigation
     navigation: 'Navigation',
@@ -99,6 +104,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: 'Last 7 Days',
+    dateRangeLast30Days: 'Last 30 Days',
+    dateRangeThisMonth: 'This Month',
+    dateRangeLastMonth: 'Last Month',
+    dateRangeCustom: 'Custom',
+    dateRangeSeparator: 'to',
+    dateRangeStartDate: 'Start Date',
+    dateRangeEndDate: 'End Date',
+    dateRangeErrorInvalid: 'Start date cannot be after end date',
+    dateRangeErrorFuture: 'Cannot select future dates',
+
     // Tokens
     token: 'Token',
     tokens: 'tokens',
@@ -118,6 +135,7 @@ const translations: Record<Language, Translations> = {
     tableHost: 'Host',
     tableUser: 'User',
     tableSession: 'Session',
+    sessionId: 'Session ID',
     tableMessage: 'Message',
     tableMessages: 'Messages',
     tableTokens: 'Tokens',
@@ -424,6 +442,11 @@ const translations: Record<Language, Translations> = {
     created: 'Created',
     previous: 'Previous',
     next: 'Next',
+    goToPage: 'Go to page',
+    pageInfo: 'Page {current} of {total}',
+    invalidPageNumber: 'Please enter a valid page number (1-{total})',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
 
     // Prompts
     addPrompt: 'Add Prompt',
@@ -941,6 +964,9 @@ const translations: Record<Language, Translations> = {
     autoTaskTitlePlaceholder: 'e.g., Add user authentication feature',
     autoRequirements: 'Requirements',
     autoRequirementsPlaceholder: 'Describe the feature or changes you want AI to develop...',
+    autoIssueInputPlaceholder: '123 125,128-130 or https://github.com/owner/repo/issues/123',
+    autoIssueInputHint:
+      'Supports commas, spaces, new lines, ranges like 12-15, and mixed GitHub issue URLs.',
     autoTextDescription: 'Text Description',
     autoAgentTool: 'Agent Tool',
     autoModel: 'Model',
@@ -961,9 +987,12 @@ const translations: Record<Language, Translations> = {
     autoBranchNamePlaceholder: 'feature/auto-dev (leave empty for auto)',
     autoMaxPlanRounds: 'Max Plan Review Rounds',
     autoMaxPRReviewRounds: 'Max PR Review Rounds',
+    autoMergeAfterPR: 'Auto merge after PR created',
+    autoMergeHint: 'Automatically merge PR and proceed to next workflow in batch',
     autoCreateTask: 'Create Task',
     autoCreating: 'Creating...',
     autoCreateFailed: 'Failed to create task',
+    autoStatusQueued: 'Queued',
     autoStatusPending: 'Pending',
     autoStatusPreparing: 'Preparing',
     autoStatusPlanning: 'Planning',
@@ -1071,6 +1100,11 @@ const translations: Record<Language, Translations> = {
     role: '角色',
     selectRole: '选择角色',
     searchMessages: '搜索消息...',
+    // Message role labels
+    messageRoleUser: '用户',
+    messageRoleAssistant: '助手',
+    messageRoleSystem: '系统',
+    messageRoleToolResult: '工具结果',
 
     // Navigation
     navigation: '导航',
@@ -1127,6 +1161,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: '最近 7 天',
+    dateRangeLast30Days: '最近 30 天',
+    dateRangeThisMonth: '本月',
+    dateRangeLastMonth: '上月',
+    dateRangeCustom: '自定义',
+    dateRangeSeparator: '至',
+    dateRangeStartDate: '开始日期',
+    dateRangeEndDate: '结束日期',
+    dateRangeErrorInvalid: '开始日期不能晚于结束日期',
+    dateRangeErrorFuture: '不能选择未来日期',
+
     // Tokens
     token: 'Token',
     tokens: 'tokens',
@@ -1146,6 +1192,7 @@ const translations: Record<Language, Translations> = {
     tableHost: '主机',
     tableUser: '用户',
     tableSession: '会话',
+    sessionId: '会话 ID',
     tableMessage: '消息',
     tableMessages: '消息数',
     tableTokens: 'Tokens',
@@ -1445,6 +1492,11 @@ const translations: Record<Language, Translations> = {
     created: '创建时间',
     previous: '上一页',
     next: '下一页',
+    goToPage: '跳转到页',
+    pageInfo: '第 {current} 页 / 共 {total} 页',
+    invalidPageNumber: '请输入有效的页码 (1-{total})',
+    previousPage: '上一页',
+    nextPage: '下一页',
 
     // Prompts
     addPrompt: '添加提示词',
@@ -1950,6 +2002,8 @@ const translations: Record<Language, Translations> = {
     autoTaskTitlePlaceholder: '例如：添加用户认证功能',
     autoRequirements: '需求描述',
     autoRequirementsPlaceholder: '描述你希望 AI 开发的功能或变更...',
+    autoIssueInputPlaceholder: '123 125,128-130 或 https://github.com/owner/repo/issues/123',
+    autoIssueInputHint: '支持逗号、空格、换行、12-15 这样的范围，以及混合 GitHub issue URL。',
     autoTextDescription: '文字描述',
     autoAgentTool: 'Agent 工具',
     autoModel: '模型',
@@ -1970,9 +2024,12 @@ const translations: Record<Language, Translations> = {
     autoBranchNamePlaceholder: 'feature/auto-dev（留空自动生成）',
     autoMaxPlanRounds: '计划审查最大轮次',
     autoMaxPRReviewRounds: 'PR 审查最大轮次',
+    autoMergeAfterPR: 'PR 创建后自动合并',
+    autoMergeHint: '自动合并 PR 并执行下一个工作流',
     autoCreateTask: '创建任务',
     autoCreating: '创建中...',
     autoCreateFailed: '创建任务失败',
+    autoStatusQueued: '排队中',
     autoStatusPending: '等待中',
     autoStatusPreparing: '准备中',
     autoStatusPlanning: '计划中',
@@ -2078,6 +2135,11 @@ const translations: Record<Language, Translations> = {
     role: '役割',
     selectRole: '役割を選択',
     searchMessages: 'メッセージを検索...',
+    // Message role labels
+    messageRoleUser: 'ユーザー',
+    messageRoleAssistant: 'アシスタント',
+    messageRoleSystem: 'システム',
+    messageRoleToolResult: 'ツール結果',
 
     // Navigation
     navigation: 'ナビゲーション',
@@ -2134,6 +2196,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: '過去7日間',
+    dateRangeLast30Days: '過去30日間',
+    dateRangeThisMonth: '今月',
+    dateRangeLastMonth: '先月',
+    dateRangeCustom: 'カスタム',
+    dateRangeSeparator: 'から',
+    dateRangeStartDate: '開始日',
+    dateRangeEndDate: '終了日',
+    dateRangeErrorInvalid: '開始日は終了日より後にできません',
+    dateRangeErrorFuture: '未来の日付を選択できません',
+
     // Tokens
     token: 'トークン',
     tokens: 'tokens',
@@ -2152,6 +2226,7 @@ const translations: Record<Language, Translations> = {
     tableHost: 'ホスト',
     tableUser: 'ユーザー',
     tableSession: 'セッション',
+    sessionId: 'セッション ID',
     tableMessage: 'メッセージ',
     tableMessages: 'メッセージ数',
     tableTokens: 'トークン',
@@ -2436,6 +2511,11 @@ const translations: Record<Language, Translations> = {
     created: '作成日時',
     previous: '前へ',
     next: '次へ',
+    goToPage: 'ページへ移動',
+    pageInfo: '{current}ページ / {total}ページ',
+    invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
+    previousPage: '前のページ',
+    nextPage: '次のページ',
 
     // Prompts
     addPrompt: 'プロンプト追加',
@@ -2653,6 +2733,9 @@ const translations: Record<Language, Translations> = {
     autoTaskTitlePlaceholder: '例：ユーザー認証機能を追加',
     autoRequirements: '要件',
     autoRequirementsPlaceholder: 'AIに開発させたい機能や変更を説明...',
+    autoIssueInputPlaceholder: '123 125,128-130 または https://github.com/owner/repo/issues/123',
+    autoIssueInputHint:
+      'カンマ、空白、改行、12-15 のような範囲、GitHub issue URL の混在入力に対応します。',
     autoTextDescription: 'テキスト説明',
     autoAgentTool: 'エージェントツール',
     autoModel: 'モデル',
@@ -2673,9 +2756,12 @@ const translations: Record<Language, Translations> = {
     autoBranchNamePlaceholder: 'feature/auto-dev（空で自動生成）',
     autoMaxPlanRounds: '計画レビュー最大回数',
     autoMaxPRReviewRounds: 'PRレビュー最大回数',
+    autoMergeAfterPR: 'PR作成後に自動マージ',
+    autoMergeHint: 'PRを自動的にマージし、次のワークフローに進む',
     autoCreateTask: 'タスク作成',
     autoCreateFailed: 'タスクの作成に失敗しました',
     autoCreating: '作成中...',
+    autoStatusQueued: 'キュー待ち',
     autoStatusPending: '待機中',
     autoStatusPreparing: '準備中',
     autoStatusPlanning: '計画中',
@@ -2783,6 +2869,11 @@ const translations: Record<Language, Translations> = {
     role: '역할',
     selectRole: '역할 선택',
     searchMessages: '메시지 검색...',
+    // Message role labels
+    messageRoleUser: '사용자',
+    messageRoleAssistant: '어시스턴트',
+    messageRoleSystem: '시스템',
+    messageRoleToolResult: '도구 결과',
 
     // Navigation
     navigation: '네비게이션',
@@ -2839,6 +2930,18 @@ const translations: Record<Language, Translations> = {
     dashboardFilterClaude: 'Claude',
     dashboardFilterQwen: 'Qwen',
 
+    // Date Range Presets
+    dateRangeLast7Days: '지난 7일',
+    dateRangeLast30Days: '지난 30일',
+    dateRangeThisMonth: '이번 달',
+    dateRangeLastMonth: '지난 달',
+    dateRangeCustom: '사용자 지정',
+    dateRangeSeparator: '부터',
+    dateRangeStartDate: '시작일',
+    dateRangeEndDate: '종료일',
+    dateRangeErrorInvalid: '시작일은 종료일 이후일 수 없습니다',
+    dateRangeErrorFuture: '미래 날짜를 선택할 수 없습니다',
+
     // Tokens
     token: '토큰',
     tokens: 'tokens',
@@ -2857,6 +2960,7 @@ const translations: Record<Language, Translations> = {
     tableHost: '호스트',
     tableUser: '사용자',
     tableSession: '세션',
+    sessionId: '세션 ID',
     tableMessage: '메시지',
     tableMessages: '메시지 수',
     tableTokens: '토큰',
@@ -3141,6 +3245,15 @@ const translations: Record<Language, Translations> = {
     previous: '이전',
     next: '다음',
 
+    // Pagination
+    goToPage: '페이지 이동',
+    pageInfo: '{current}페이지 / {total}페이지',
+    invalidPageNumber: '올바른 페이지 번호를 입력하세요 (1-{total})',
+    firstPage: '첫 페이지',
+    lastPage: '마지막 페이지',
+    previousPage: '이전 페이지',
+    nextPage: '다음 페이지',
+
     // Prompts
     addPrompt: '프롬프트 추가',
     editPrompt: '프롬프트 편집',
@@ -3355,6 +3468,9 @@ const translations: Record<Language, Translations> = {
     autoTaskTitlePlaceholder: '예: 사용자 인증 기능 추가',
     autoRequirements: '요구사항',
     autoRequirementsPlaceholder: 'AI가 개발하기를 원하는 기능이나 변경 사항을 설명...',
+    autoIssueInputPlaceholder: '123 125,128-130 또는 https://github.com/owner/repo/issues/123',
+    autoIssueInputHint:
+      '쉼표, 공백, 줄바꿈, 12-15 같은 범위, GitHub 이슈 URL 혼합 입력을 지원합니다.',
     autoTextDescription: '텍스트 설명',
     autoAgentTool: '에이전트 도구',
     autoModel: '모델',
@@ -3375,9 +3491,12 @@ const translations: Record<Language, Translations> = {
     autoBranchNamePlaceholder: 'feature/auto-dev (비워두면 자동 생성)',
     autoMaxPlanRounds: '최대 계획 리뷰 횟수',
     autoMaxPRReviewRounds: '최대 PR 리뷰 횟수',
+    autoMergeAfterPR: 'PR 생성 후 자동 머지',
+    autoMergeHint: 'PR을 자동으로 머지하고 다음 워크플로우 실행',
     autoCreateTask: '작업 생성',
     autoCreateFailed: '작업 생성 실패',
     autoCreating: '생성 중...',
+    autoStatusQueued: '대기열',
     autoStatusPending: '대기 중',
     autoStatusPreparing: '준비 중',
     autoStatusPlanning: '계획 중',

@@ -997,7 +997,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           : 'secondary'
                     }
                   >
-                    {msg.role}
+                    {(() => {
+                      switch (msg.role) {
+                        case 'user':
+                          return t('messageRoleUser', language);
+                        case 'assistant':
+                          return t('messageRoleAssistant', language);
+                        case 'system':
+                          return t('messageRoleSystem', language);
+                        case 'toolResult':
+                          return t('messageRoleToolResult', language);
+                        default:
+                          return msg.role;
+                      }
+                    })()}
                   </Badge>
                   {typeof msg.content === 'string' ? (
                     <pre
