@@ -754,6 +754,21 @@ const translations: Record<Language, Translations> = {
     recordCount: 'Record Count',
     estimatedSize: 'Estimated Size',
 
+    // Data Retention - Data Type Labels
+    dataTypeMessages: 'Messages',
+    dataTypeSessions: 'Sessions',
+    dataTypeAuditLogs: 'Audit Logs',
+    dataTypeQuotaAlerts: 'Quota Alerts',
+    dataTypeSsoSessions: 'SSO Sessions',
+    dataTypeUsageData: 'Usage Data',
+    dataTypeUserActivity: 'User Activity',
+    dataTypeUnknown: 'Unknown Type',
+
+    // Data Retention - Action Labels
+    actionDelete: 'Delete',
+    actionArchive: 'Archive',
+    actionAnonymize: 'Anonymize',
+
     // Audit Analysis
     securityScore: 'Security Score',
     overallScore: 'Overall Score',
@@ -1915,6 +1930,21 @@ const translations: Record<Language, Translations> = {
     recordCount: '记录数',
     estimatedSize: '预估大小',
 
+    // Data Retention - Data Type Labels
+    dataTypeMessages: '消息',
+    dataTypeSessions: '会话',
+    dataTypeAuditLogs: '审计日志',
+    dataTypeQuotaAlerts: '配额告警',
+    dataTypeSsoSessions: 'SSO会话',
+    dataTypeUsageData: '使用数据',
+    dataTypeUserActivity: '用户活动',
+    dataTypeUnknown: '未知类型',
+
+    // Data Retention - Action Labels
+    actionDelete: '删除',
+    actionArchive: '归档',
+    actionAnonymize: '匿名化',
+
     // Audit Analysis
     securityScore: '安全分数',
     overallScore: '总体分数',
@@ -2542,6 +2572,44 @@ const translations: Record<Language, Translations> = {
     reportName: 'レポート名',
     generatedAt: '生成日時',
     period: '期間',
+
+    // Data Retention
+    complianceScore: 'コンプライアンススコア',
+    totalRecords: '総レコード数',
+    estimatedStorage: '推定ストレージ',
+    retentionRules: '保持ルール',
+    dataType: 'データタイプ',
+    retentionDays: '保持日数',
+    notSet: '未設定',
+    runCleanup: 'クリーンアップ実行',
+    cleanupHistory: 'クリーンアップ履歴',
+    noCleanupHistory: 'クリーンアップ履歴なし',
+    executedAt: '実行日時',
+    cleanupType: 'クリーンアップタイプ',
+    recordsDeleted: '削除レコード数',
+    editRetentionRule: '保持ルール編集',
+    cleanupPreview: 'クリーンアッププレビュー',
+    cleanupPreviewDescription: 'このプレビューはクリーンアップ操作で影響を受けるデータを表示します。',
+    executeCleanup: 'クリーンアップ実行',
+    confirmCleanup: 'クリーンアップを実行しますか？この操作は取り消せません。',
+    storageEstimates: 'ストレージ推定',
+    recordCount: 'レコード数',
+    estimatedSize: '推定サイズ',
+
+    // Data Retention - Data Type Labels
+    dataTypeMessages: 'メッセージ',
+    dataTypeSessions: 'セッション',
+    dataTypeAuditLogs: '監査ログ',
+    dataTypeQuotaAlerts: 'クォータアラート',
+    dataTypeSsoSessions: 'SSOセッション',
+    dataTypeUsageData: '使用データ',
+    dataTypeUserActivity: 'ユーザー活動',
+    dataTypeUnknown: '未知タイプ',
+
+    // Data Retention - Action Labels
+    actionDelete: '削除',
+    actionArchive: 'アーカイブ',
+    actionAnonymize: '匿名化',
 
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
@@ -3349,6 +3417,44 @@ const translations: Record<Language, Translations> = {
     reportName: '보고서 이름',
     generatedAt: '생성 시간',
     period: '기간',
+
+    // Data Retention
+    complianceScore: '규정 준수 점수',
+    totalRecords: '총 레코드 수',
+    estimatedStorage: '추정 저장소',
+    retentionRules: '보존 규칙',
+    dataType: '데이터 유형',
+    retentionDays: '보존 일수',
+    notSet: '미설정',
+    runCleanup: '정리 실행',
+    cleanupHistory: '정리 기록',
+    noCleanupHistory: '정리 기록 없음',
+    executedAt: '실행 시간',
+    cleanupType: '정리 유형',
+    recordsDeleted: '삭제된 레코드',
+    editRetentionRule: '보존 규칙 편집',
+    cleanupPreview: '정리 미리보기',
+    cleanupPreviewDescription: '이 미리보기는 정리 작업으로 영향받는 데이터를 표시합니다.',
+    executeCleanup: '정리 실행',
+    confirmCleanup: '정리를 실행하시겠습니까? 이 작업은 되돌릴 수 없습니다.',
+    storageEstimates: '저장소 추정',
+    recordCount: '레코드 수',
+    estimatedSize: '추정 크기',
+
+    // Data Retention - Data Type Labels
+    dataTypeMessages: '메시지',
+    dataTypeSessions: '세션',
+    dataTypeAuditLogs: '감사 로그',
+    dataTypeQuotaAlerts: '할당 알림',
+    dataTypeSsoSessions: 'SSO 세션',
+    dataTypeUsageData: '사용 데이터',
+    dataTypeUserActivity: '사용자 활동',
+    dataTypeUnknown: '알 수 없는 유형',
+
+    // Data Retention - Action Labels
+    actionDelete: '삭제',
+    actionArchive: '보관',
+    actionAnonymize: '익명화',
 
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',

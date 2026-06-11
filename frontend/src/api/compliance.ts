@@ -93,7 +93,7 @@ export interface AuditThresholds {
 export interface RetentionRule {
   data_type: string;
   retention_days: number;
-  action: 'delete' | 'archive';
+  action: 'delete' | 'archive' | 'anonymize';
 }
 
 export interface RetentionHistory {
