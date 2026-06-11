@@ -202,6 +202,8 @@ const translations: Record<Language, Translations> = {
     monthlyRequestQuota: 'Monthly Request Quota',
     quotaUpdated: 'Quota Updated',
     quotaUpdatedDesc: 'User quota settings have been saved successfully.',
+    validationError: 'Validation Error',
+    quotaValidationFailed: 'Please check quota values and fix errors before saving.',
 
     // Audit Thresholds
     auditThresholds: 'Audit Thresholds',
@@ -1285,6 +1287,8 @@ const translations: Record<Language, Translations> = {
     monthlyRequestQuota: '每月请求配额',
     quotaUpdated: '配额已更新',
     quotaUpdatedDesc: '用户配额设置已成功保存。',
+    validationError: '验证错误',
+    quotaValidationFailed: '请检查配额值并修正错误后再保存。',
 
     // Audit Thresholds
     auditThresholds: '审计阈值',
@@ -2354,6 +2358,10 @@ const translations: Record<Language, Translations> = {
     unlimited: '無制限',
     dailyRequestQuota: '毎日のリクエストクォータ',
     monthlyRequestQuota: '月間リクエストクォータ',
+    quotaUpdated: 'クォータ更新済み',
+    quotaUpdatedDesc: 'ユーザークォータ設定が正常に保存されました。',
+    validationError: '検証エラー',
+    quotaValidationFailed: 'クォータ値を確認し、エラーを修正してから保存してください。',
 
     // Audit Thresholds
     auditThresholds: '監査しきい値',
@@ -3113,6 +3121,10 @@ const translations: Record<Language, Translations> = {
     unlimited: '무제한',
     dailyRequestQuota: '일일 요청 할당량',
     monthlyRequestQuota: '월간 요청 할당량',
+    quotaUpdated: '할당량 업데이트 완료',
+    quotaUpdatedDesc: '사용자 할당량 설정이 성공적으로 저장되었습니다.',
+    validationError: '검증 오류',
+    quotaValidationFailed: '할당량 값을 확인하고 오류를 수정한 후 저장하세요.',
 
     // Audit Thresholds
     auditThresholds: '감사 임계값',
