@@ -50,10 +50,12 @@ export const AnomalyDetection: React.FC = () => {
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('');
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for anomaly detection
+  const pageRefresh = usePageRefresh({
     page: '/manage/analysis/anomaly',
     refreshKey: createMatcherConfig([['analysis', 'anomaly']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   // Get hosts for filter
@@ -162,10 +164,11 @@ export const AnomalyDetection: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('anomalyDetection', language)}</h2>
         <PageRefreshControl
-          refreshKey={refreshKey}
+          refresh={pageRefresh}
           compact={true}
           showAutoRefreshToggle={false}
           showIntervalSelector={false}
+          showLastRefreshTime={true}
         />
       </div>
 

@@ -53,6 +53,14 @@ export const ComplianceMgmt: React.FC = () => {
   const language = useLanguage();
   const [activeTab, setActiveTab] = useState<TabType>('reports');
 
+  // --- Page Refresh Control ---
+  const pageRefresh = usePageRefresh({
+    page: '/manage/compliance',
+    refreshKey: createMatcherConfig([['compliance']], 'prefix'),
+    interval: 0, // No auto refresh - manual only for compliance data
+    enabled: false,
+  });
+
   // --- Reports State ---
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
   const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
@@ -628,18 +636,14 @@ export const ComplianceMgmt: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('complianceManagement', language)}</h2>
         <div className="d-flex gap-2 align-items-center">
-          {/* Manual refresh button */}
-          <Button
-            variant="outline-secondary"
-            size="sm"
-            onClick={() => {
-              if (activeTab === 'reports') fetchReportsData();
-              else fetchRetentionData();
-            }}
-          >
-            <i className="bi bi-arrow-clockwise me-1" />
-            {t('refresh', language)}
-          </Button>
+          {/* Page Refresh Control */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
           {activeTab === 'retention' && (
             <>
               <Button

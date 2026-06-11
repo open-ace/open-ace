@@ -72,10 +72,12 @@ export const TenantManagement: React.FC = () => {
   });
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for tenant management
+  const pageRefresh = usePageRefresh({
     page: '/manage/tenants',
     refreshKey: createMatcherConfig([['tenants']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   // Form validation
@@ -279,10 +281,11 @@ export const TenantManagement: React.FC = () => {
         <h2>{t('tenantManagement', language)}</h2>
         <div className="d-flex gap-2">
           <PageRefreshControl
-            refreshKey={refreshKey}
+            refresh={pageRefresh}
             compact={true}
             showAutoRefreshToggle={false}
             showIntervalSelector={false}
+            showLastRefreshTime={true}
           />
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>
             <i className="bi bi-plus-lg me-1" />

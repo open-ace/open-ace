@@ -72,10 +72,12 @@ export const ProjectManagement: React.FC = () => {
   const [sortKey, setSortKey] = useState<ProjectSortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for project management
+  const pageRefresh = usePageRefresh({
     page: '/manage/projects',
     refreshKey: createMatcherConfig([['projects']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   const fetchStats = async () => {
@@ -181,10 +183,11 @@ export const ProjectManagement: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
         <PageRefreshControl
-          refreshKey={refreshKey}
+          refresh={pageRefresh}
           compact={true}
           showAutoRefreshToggle={false}
           showIntervalSelector={false}
+          showLastRefreshTime={true}
         />
       </div>
 

@@ -118,10 +118,12 @@ export const APIKeyManagement: React.FC = () => {
 
   const keys = useMemo(() => keysData?.keys ?? [], [keysData?.keys]);
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for API keys
+  const pageRefresh = usePageRefresh({
     page: '/manage/settings/api-keys',
     refreshKey: createMatcherConfig([['api-keys']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   // Memoize parsed CLI tools to avoid repeated JSON.parse in render
@@ -548,10 +550,11 @@ export const APIKeyManagement: React.FC = () => {
         <h2>{t('apiKeys', language)}</h2>
         <div className="d-flex gap-2">
           <PageRefreshControl
-            refreshKey={refreshKey}
+            refresh={pageRefresh}
             compact={true}
             showAutoRefreshToggle={false}
             showIntervalSelector={false}
+            showLastRefreshTime={true}
           />
           <Button variant="primary" size="sm" onClick={handleOpenAdd}>
             <i className="bi bi-plus-lg me-1" />

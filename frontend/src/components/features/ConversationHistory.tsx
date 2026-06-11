@@ -108,10 +108,12 @@ export const ConversationHistory: React.FC = () => {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for conversation history
+  const pageRefresh = usePageRefresh({
     page: '/manage/analysis/conversation-history',
     refreshKey: createMatcherConfig([['conversation-history']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   // ESC key to exit fullscreen (Issue #103)
@@ -529,10 +531,11 @@ export const ConversationHistory: React.FC = () => {
       <div className="page-header mb-4 d-flex justify-content-between align-items-center">
         <h2>{t('conversationHistory', language)}</h2>
         <PageRefreshControl
-          refreshKey={refreshKey}
+          refresh={pageRefresh}
           compact={true}
           showAutoRefreshToggle={false}
           showIntervalSelector={false}
+          showLastRefreshTime={true}
         />
       </div>
       {tableContent}

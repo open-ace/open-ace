@@ -36,10 +36,12 @@ export const UserManagement: React.FC = () => {
   const deleteUser = useDeleteUser();
   const updateUserPassword = useUpdateUserPassword();
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for user management
+  const pageRefresh = usePageRefresh({
     page: '/manage/users',
     refreshKey: createMatcherConfig([['users']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   const [showModal, setShowModal] = useState(false);
@@ -204,10 +206,11 @@ export const UserManagement: React.FC = () => {
         <h2>{t('userList', language)}</h2>
         <div className="d-flex gap-2">
           <PageRefreshControl
-            refreshKey={refreshKey}
+            refresh={pageRefresh}
             compact={true}
             showAutoRefreshToggle={false}
             showIntervalSelector={false}
+            showLastRefreshTime={true}
           />
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>
             <i className="bi bi-plus-lg me-1" />

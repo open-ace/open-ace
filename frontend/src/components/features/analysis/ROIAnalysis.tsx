@@ -110,10 +110,12 @@ export const ROIAnalysis: React.FC = () => {
   // Track if this is the initial load
   const isInitialLoad = useRef(true);
 
-  // Page refresh control
-  const { refreshKey } = usePageRefresh({
+  // Page refresh control - manual refresh for ROI analysis
+  const pageRefresh = usePageRefresh({
     page: '/manage/analysis/roi',
     refreshKey: createMatcherConfig([['analysis', 'roi']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
   });
 
   // Initialize dates
@@ -303,10 +305,11 @@ export const ROIAnalysis: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('roiAnalysis', language)}</h2>
         <PageRefreshControl
-          refreshKey={refreshKey}
+          refresh={pageRefresh}
           compact={true}
           showAutoRefreshToggle={false}
           showIntervalSelector={false}
+          showLastRefreshTime={true}
         />
       </div>
 
