@@ -295,16 +295,17 @@ def cmd_shell(args: argparse.Namespace) -> int:
     _write_active_terminal(terminal)
     env = _session_env(terminal)
 
-    # Windows: use COMSPEC (cmd.exe)
-    if os.name == "nt":
-        shell = os.environ.get("COMSPEC") or "cmd.exe"
-        subprocess.run([shell], env=env, cwd=work_dir, check=False)
-    else:
-        # Unix/Linux: login shell
-        shell = os.environ.get("SHELL") or "/bin/sh"
-        subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
-
-    _clear_active_terminal()
+    try:
+        # Windows: use COMSPEC (cmd.exe)
+        if os.name == "nt":
+            shell = os.environ.get("COMSPEC") or "cmd.exe"
+            subprocess.run([shell], env=env, cwd=work_dir, check=False)
+        else:
+            # Unix/Linux: login shell
+            shell = os.environ.get("SHELL") or "/bin/sh"
+            subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
+    finally:
+        _clear_active_terminal()
     return 0
 
 
