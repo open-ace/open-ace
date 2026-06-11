@@ -10,19 +10,19 @@
  * - Responsive design
  */
 
-import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { Pagination } from './Pagination';
 import { getVisiblePages } from './Pagination';
 
 // Mock language hook
-jest.mock('@/store', () => ({
+vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
 
 // Mock i18n
-jest.mock('@/i18n', () => ({
+vi.mock('@/i18n', () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
       navigation: 'Navigation',
@@ -96,7 +96,7 @@ describe('getVisiblePages', () => {
 });
 
 describe('Pagination Component', () => {
-  const mockOnPageChange = jest.fn();
+  const mockOnPageChange = vi.fn();
 
   beforeEach(() => {
     mockOnPageChange.mockClear();
@@ -194,7 +194,7 @@ describe('Pagination Component', () => {
       expect(mockOnPageChange).toHaveBeenCalledWith(5);
     });
 
-    it('should show error for invalid input (non-number)', () => {
+    it('should show error for invalid input (non-number)', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
       const input = screen.getByRole('spinbutton', { name: /Go to page/i });
@@ -206,7 +206,7 @@ describe('Pagination Component', () => {
       });
     });
 
-    it('should show error for out-of-range input', () => {
+    it('should show error for out-of-range input', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
       const input = screen.getByRole('spinbutton', { name: /Go to page/i });
@@ -218,7 +218,7 @@ describe('Pagination Component', () => {
       });
     });
 
-    it('should show error for input less than 1', () => {
+    it('should show error for input less than 1', async () => {
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
       const input = screen.getByRole('spinbutton', { name: /Go to page/i });
@@ -250,7 +250,7 @@ describe('Pagination Component', () => {
     });
 
     it('should auto-clear error after 3 seconds', async () => {
-      jest.useFakeTimers();
+      vi.useFakeTimers();
 
       render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
 
@@ -263,13 +263,13 @@ describe('Pagination Component', () => {
       });
 
       // Fast-forward 3 seconds
-      jest.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(3000);
 
       await waitFor(() => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       });
 
-      jest.useRealTimers();
+      vi.useRealTimers();
     });
   });
 
