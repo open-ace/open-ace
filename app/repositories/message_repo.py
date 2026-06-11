@@ -470,8 +470,7 @@ class MessageRepository:
             SELECT COUNT(*) as total FROM (
                 SELECT 1 FROM daily_messages
                 {where_clause}
-                GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id),
-                         agent_session_id, tool_name, host_name, sender_name
+                GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id)
             ) sub
         """
 

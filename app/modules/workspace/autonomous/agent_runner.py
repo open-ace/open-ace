@@ -31,12 +31,26 @@ _extract_stream_usage: Any = None
 
 
 def _ensure_usage_parser():
-    """Import extract_stream_usage once remote-agent is on sys.path."""
+    """Import extract_stream_usage once remote-agent is on sys.path.
+
+    Falls back to a no-op parser if the module is unavailable (e.g. missing
+    dependency or path misconfiguration) so the agent task can still complete.
+    """
     global _extract_stream_usage
     if _extract_stream_usage is None:
-        from cli_adapters.usage_parser import extract_stream_usage
+        try:
+            from cli_adapters.usage_parser import extract_stream_usage
 
-        _extract_stream_usage = extract_stream_usage
+            _extract_stream_usage = extract_stream_usage
+        except ImportError:
+            logger.warning(
+                "cli_adapters.usage_parser not available; token tracking disabled"
+            )
+
+            def _noop_usage_parser(line: str) -> dict | None:
+                return None
+
+            _extract_stream_usage = _noop_usage_parser
 
 
 # Default timeout for agent tasks — configurable via env var (default 1 hour)

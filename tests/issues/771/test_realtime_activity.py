@@ -2,9 +2,9 @@
 
 Covers:
   - activity_callback invocation in agent_runner
-  - _on_agent_activity forwarding to emitter
+  - _on_agent_activity forwarding to emitter (SSE only, no DB token update)
   - _link_session_to_current_milestone immediate session_id write
-  - Token real-time update via usage events
+  - Token accumulation deferred to _accumulate_tokens on task completion
 """
 
 from __future__ import annotations
@@ -155,7 +155,12 @@ class TestOrchestratorActivityForwarding:
         assert args[2]["session_id"] == "sess-456"
         assert args[2]["type"] == "tool_use"
 
-    def test_updates_tokens_on_usage_event(self):
+    def test_usage_event_emits_but_no_token_db_update(self):
+        """Usage events are emitted via SSE but no longer update the DB directly.
+
+        Token accumulation is now handled exclusively by _accumulate_tokens on
+        task completion to avoid double-counting cumulative totals.
+        """
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -173,14 +178,13 @@ class TestOrchestratorActivityForwarding:
             },
         )
 
-        orch.repo.update_workflow_tokens.assert_called_once_with(
-            "wf-123",
-            {
-                "total_tokens": 10000,
-                "total_input_tokens": 8000,
-                "total_output_tokens": 2000,
-            },
-        )
+        # SSE emission still happens
+        orch.emitter.emit.assert_called_once()
+        emitted_data = orch.emitter.emit.call_args[0][2]
+        assert emitted_data["type"] == "usage"
+        assert emitted_data["total_tokens"] == 10000
+        # DB update is NOT called — tokens accumulated only on task completion
+        orch.repo.update_workflow_tokens.assert_not_called()
 
     def test_no_token_update_on_non_usage_event(self):
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator

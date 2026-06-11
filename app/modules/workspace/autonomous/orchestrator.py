@@ -501,7 +501,12 @@ class AutonomousOrchestrator:
         self.repo.recalculate_workflow_requests(self._workflow_id)
 
     def _on_agent_activity(self, session_id: str, activity: dict):
-        """Forward agent activity to the SSE event stream and update tokens."""
+        """Forward agent activity to the SSE event stream.
+
+        Token accumulation is handled exclusively by _accumulate_tokens on task
+        completion to avoid double-counting (usage events carry cumulative totals
+        while the SQL uses += accumulation).
+        """
         self.emitter.emit(
             self._workflow_id,
             "agent_activity",
@@ -510,19 +515,6 @@ class AutonomousOrchestrator:
                 **activity,
             },
         )
-        # Real-time token update (only on usage events to avoid DB thrashing)
-        if activity.get("type") == "usage":
-            try:
-                self.repo.update_workflow_tokens(
-                    self._workflow_id,
-                    {
-                        "total_tokens": activity.get("total_tokens", 0),
-                        "total_input_tokens": activity.get("total_input_tokens", 0),
-                        "total_output_tokens": activity.get("total_output_tokens", 0),
-                    },
-                )
-            except Exception:
-                logger.warning("Failed to update workflow tokens in real-time", exc_info=True)
 
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
