@@ -101,8 +101,8 @@ class TestBatchAnalysisDataRange:
         assert "data_range" in result
         assert result["data_range"] is None
 
-    def test_batch_analysis_calls_data_range_with_none_host(self):
-        """Test that get_data_range is called with None host (global range)."""
+    def test_batch_analysis_calls_data_range_no_args(self):
+        """Test that get_data_range is called without arguments (global range)."""
         # Mock minimal results
         self.daily_stats_repo.get_batch_aggregates.return_value = {
             "total_messages": 10,
@@ -126,8 +126,97 @@ class TestBatchAnalysisDataRange:
         # Call with host filter
         result = self.service.get_batch_analysis(host_name="host1")
 
-        # Verify get_data_range was called with None (ignoring host filter)
-        self.daily_stats_repo.get_data_range.assert_called_once_with(None)
+        # Verify get_data_range was called without arguments (global range)
+        self.daily_stats_repo.get_data_range.assert_called_once_with()
 
         # Verify data_range is in response
         assert result["data_range"] is not None
+
+    def test_batch_analysis_user_ranking_no_feishu_ids(self):
+        """Test that user_ranking excludes ou_ prefix users (Feishu Open IDs)."""
+        # Mock user totals including ou_ users
+        self.daily_stats_repo.get_batch_aggregates.return_value = {
+            "total_messages": 1000,
+            "total_tokens": 50000,
+            "total_input_tokens": 30000,
+            "total_output_tokens": 20000,
+            "unique_tools": 3,
+            "unique_hosts": 2,
+            "unique_users": 2,
+            "unique_days": 30,
+        }
+        self.daily_stats_repo.get_user_totals.return_value = [
+            {
+                "unified_username": "alice",
+                "total_tokens": 30000,
+                "message_count": 50,
+            },
+            {
+                "unified_username": "ou_3e479c7f81f8674741d778e8f838f8ed",
+                "total_tokens": 15000,
+                "message_count": 30,
+            },
+            {
+                "unified_username": "bob",
+                "total_tokens": 5000,
+                "message_count": 20,
+            },
+        ]
+        self.daily_stats_repo.get_tool_totals.return_value = []
+        self.daily_stats_repo.get_daily_totals.return_value = []
+        self.daily_stats_repo.get_hourly_totals.return_value = []
+        self.daily_stats_repo.get_conversation_stats.return_value = {}
+        self.daily_stats_repo.get_data_range.return_value = None
+        self.usage_repo.get_request_count_total.return_value = 100
+
+        result = self.service.get_batch_analysis()
+
+        # Verify no ou_ prefix users in user_ranking
+        user_names = [u["username"] for u in result["user_ranking"]["users"]]
+        assert "ou_3e479c7f81f8674741d778e8f838f8ed" not in user_names
+        assert "alice" in user_names
+        assert "bob" in user_names
+
+    def test_batch_analysis_user_ranking_top_10_limit(self):
+        """Test that user_ranking is limited to top 10 after filtering."""
+        # Create 12 valid users + 2 ou_ users
+        user_data = []
+        for i in range(12):
+            user_data.append({
+                "unified_username": f"user_{i}",
+                "total_tokens": 1000 - i * 50,
+                "message_count": 10,
+            })
+        # Add ou_ users that should be filtered
+        user_data.append({
+            "unified_username": "ou_1234567890abcdef",
+            "total_tokens": 99999,
+            "message_count": 100,
+        })
+
+        self.daily_stats_repo.get_batch_aggregates.return_value = {
+            "total_messages": 1000,
+            "total_tokens": 50000,
+            "total_input_tokens": 30000,
+            "total_output_tokens": 20000,
+            "unique_tools": 1,
+            "unique_hosts": 1,
+            "unique_users": 12,
+            "unique_days": 1,
+        }
+        self.daily_stats_repo.get_user_totals.return_value = user_data
+        self.daily_stats_repo.get_tool_totals.return_value = []
+        self.daily_stats_repo.get_daily_totals.return_value = []
+        self.daily_stats_repo.get_hourly_totals.return_value = []
+        self.daily_stats_repo.get_conversation_stats.return_value = {}
+        self.daily_stats_repo.get_data_range.return_value = None
+        self.usage_repo.get_request_count_total.return_value = 100
+
+        result = self.service.get_batch_analysis()
+
+        users = result["user_ranking"]["users"]
+        # Should have at most 10 users
+        assert len(users) <= 10
+        # Should not contain the ou_ user
+        user_names = [u["username"] for u in users]
+        assert "ou_1234567890abcdef" not in user_names

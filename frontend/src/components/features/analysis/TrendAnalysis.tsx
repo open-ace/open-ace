@@ -95,8 +95,19 @@ export const TrendAnalysis: React.FC = () => {
     error,
   } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
 
-  // Extract dataRange from batchData - must be defined BEFORE useMemo that uses it
-  const dataRange = batchData?.data_range;
+  // Extract dataRange from batchData - use useRef for stable reference
+  // to avoid unnecessary useMemo recalculation when API returns new object
+  // with the same min_date/max_date values
+  const dataRangeRef = useRef<{ min_date: string; max_date: string } | null>(null);
+  const rawDataRange = batchData?.data_range;
+  if (
+    rawDataRange &&
+    (dataRangeRef.current?.min_date !== rawDataRange.min_date ||
+      dataRangeRef.current?.max_date !== rawDataRange.max_date)
+  ) {
+    dataRangeRef.current = rawDataRange;
+  }
+  const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
   // Uses dataRange for 'all' case, fallback to 365 days if dataRange unavailable
