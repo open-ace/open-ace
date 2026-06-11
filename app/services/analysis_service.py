@@ -14,6 +14,7 @@ from app.repositories.message_repo import MessageRepository
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
 from app.utils.helpers import get_days_ago, get_today
+from app.utils.senders import is_valid_sender
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class AnalysisService:
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
             ): "total_requests",
             _executor.submit(
-                self.daily_stats_repo.get_data_range, None
+                self.daily_stats_repo.get_data_range
             ): "data_range",
         }
 
@@ -214,9 +215,12 @@ class AnalysisService:
 
         # User ranking
         users = []
-        for i, user_data in enumerate(user_tokens[:10]):
+        for i, user_data in enumerate(user_tokens):
             # Use unified_username which is resolved via LEFT JOIN users table
             username = user_data.get("unified_username", "Unknown")
+            # Filter out invalid sender names (Feishu Open IDs, etc.)
+            if not is_valid_sender(username):
+                continue
             users.append(
                 {
                     "user_id": i + 1,
@@ -225,6 +229,8 @@ class AnalysisService:
                     "requests": user_data.get("message_count", 0),
                 }
             )
+            if len(users) >= 10:
+                break
 
         user_ranking = {"users": users}
 

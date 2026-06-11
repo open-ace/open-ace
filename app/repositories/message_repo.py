@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.repositories.database import Database, escape_like
+from app.utils.senders import is_valid_sender
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -557,14 +558,7 @@ class MessageRepository:
 
         rows = self.db.fetch_all(query, tuple(params))
 
-        # Filter out abnormal sender names:
-        # Feishu user IDs (e.g., "ou_3e479c7f81f8674741d778e8f838f8ed")
-        def is_valid_sender(name: str) -> bool:
-            if not name:
-                return False
-            # Filter out Feishu user IDs (starts with "ou_" followed by hex characters)
-            return not (name.startswith("ou_") and len(name) > 10)
-
+        # Filter out abnormal sender names (Feishu Open IDs, etc.)
         return [row["sender_name"] for row in rows if is_valid_sender(row["sender_name"])]
 
     def count_messages(
