@@ -273,6 +273,13 @@ def cmd_status(_: argparse.Namespace) -> int:
 
 
 def cmd_menu(args: argparse.Namespace) -> int:
+    # Windows does not support termios module used by terminal_menu.py
+    # Fall back to shell mode on Windows
+    if sys.platform == "win32":
+        print("Note: Interactive menu is not supported on Windows.")
+        print("Starting shell instead. You can run AI tools directly from the shell.\n")
+        return cmd_shell(args)
+
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
     _apply_local_cli_settings(terminal)
