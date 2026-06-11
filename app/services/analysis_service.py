@@ -171,12 +171,15 @@ class AnalysisService:
             "date_range": {"start": start_date, "end": end_date},
         }
 
-        # Override conversation_stats total_conversations with real count from daily_messages
-        # Note: We do NOT recalculate average_* fields in conversation_stats because
-        # get_conversation_stats() does not accept date filters (constraint C2),
-        # so its total_messages/total_tokens are full-range while count_conversations
-        # is date-filtered. Use key_metrics avg_* for accurate per-session averages.
+        # Override conversation_stats total_conversations with real count from daily_messages.
+        # Also override avg_conversation_length since the frontend uses it
+        # (Analysis.tsx, TrendAnalysis.tsx) and the original was based on the
+        # approximate count from get_conversation_stats().
+        # Use date-filtered total_messages and real_conversation_count for accuracy.
         conversation_stats["total_conversations"] = real_conversation_count
+        conversation_stats["avg_conversation_length"] = (
+            total_messages / real_conversation_count if real_conversation_count > 0 else 0
+        )
 
         # Daily/Hourly usage - use pre-aggregated data
         daily_totals = {}

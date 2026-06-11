@@ -1356,7 +1356,7 @@ class AutonomousOrchestrator:
                     result.success,
                 )
                 try:
-                    gh.git_add_all()
+                    gh.git_add_tracked()
                     gh.git_commit(
                         f"auto: development changes (round {dev_round})",
                         no_verify=True,
@@ -2025,7 +2025,7 @@ class AutonomousOrchestrator:
                         "PR fixes left uncommitted changes, auto-committing (round %d)",
                         round_num,
                     )
-                    gh.git_add_all()
+                    gh.git_add_tracked()
                     gh.git_commit(
                         f"auto: PR fixes round {round_num}",
                         no_verify=True,

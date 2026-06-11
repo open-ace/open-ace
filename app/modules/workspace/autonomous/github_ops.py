@@ -433,6 +433,10 @@ class GitHubOps:
         """Stage all changes."""
         self._run_git(["add", "-A"])
 
+    def git_add_tracked(self) -> None:
+        """Stage modifications to already-tracked files only (no new untracked files)."""
+        self._run_git(["add", "-u"])
+
     def git_commit(self, message: str, no_verify: bool = False) -> dict:
         """Create a git commit.
 

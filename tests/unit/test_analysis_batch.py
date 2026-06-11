@@ -317,6 +317,28 @@ class TestRealConversationCount:
         # conversation_stats total_conversations should be overridden to 500
         assert result["conversation_stats"]["total_conversations"] == 500
 
+    def test_conversation_stats_avg_length_overridden(self):
+        """Test that avg_conversation_length is recalculated with real count."""
+        self._setup_minimal_mocks()
+        # get_batch_aggregates returns total_messages=5000
+        # count_conversations returns real count=500
+        self.message_repo.count_conversations.return_value = 500
+
+        result = self.service.get_batch_analysis()
+
+        # avg_conversation_length should be 5000 / 500 = 10.0 (not approximate)
+        assert result["conversation_stats"]["avg_conversation_length"] == 10.0
+
+    def test_conversation_stats_avg_length_zero_count(self):
+        """Test that avg_conversation_length is 0 when real count is 0."""
+        self._setup_minimal_mocks()
+        self.message_repo.count_conversations.return_value = 0
+
+        result = self.service.get_batch_analysis()
+
+        # avg_conversation_length should be 0 when no conversations
+        assert result["conversation_stats"]["avg_conversation_length"] == 0
+
     def test_count_conversations_date_params(self):
         """Test that count_conversations is called with correct date parameters."""
         self._setup_minimal_mocks()
