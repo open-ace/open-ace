@@ -97,6 +97,8 @@ class NotificationPreference:
     webhook_url: Optional[str] = None
     alert_types: list[str] = field(default_factory=lambda: ["quota", "system", "security"])
     min_severity: str = "warning"  # info, warning, critical
+    notification_email: Optional[str] = None  # User's notification email address
+    email_verified: bool = False  # Whether email has been verified
 
 
 class AlertNotifier:
@@ -172,14 +174,16 @@ class AlertNotifier:
 
         # Create notification_preferences table
         cursor.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled {bool_true},
                 push_enabled {bool_true},
                 webhook_url TEXT,
                 alert_types TEXT,
-                min_severity TEXT DEFAULT 'warning'
+                min_severity TEXT DEFAULT 'warning',
+                notification_email TEXT,
+                email_verified {bool_false}
             )
         """
         )
@@ -622,6 +626,8 @@ class AlertNotifier:
                     else ["quota", "system", "security"]
                 ),
                 min_severity=row["min_severity"] or "warning",
+                notification_email=row.get("notification_email"),
+                email_verified=bool(row.get("email_verified", False)),
             )
 
         # Return default preferences
@@ -644,14 +650,17 @@ class AlertNotifier:
             cursor.execute(
                 """
                 INSERT INTO notification_preferences
-                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types,
+                 min_severity, notification_email, email_verified)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (user_id) DO UPDATE SET
                     email_enabled = EXCLUDED.email_enabled,
                     push_enabled = EXCLUDED.push_enabled,
                     webhook_url = EXCLUDED.webhook_url,
                     alert_types = EXCLUDED.alert_types,
-                    min_severity = EXCLUDED.min_severity
+                    min_severity = EXCLUDED.min_severity,
+                    notification_email = EXCLUDED.notification_email,
+                    email_verified = EXCLUDED.email_verified
             """,
                 (
                     preferences.user_id,
@@ -660,14 +669,17 @@ class AlertNotifier:
                     preferences.webhook_url,
                     json.dumps(preferences.alert_types),
                     preferences.min_severity,
+                    preferences.notification_email,
+                    preferences.email_verified,
                 ),
             )
         else:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO notification_preferences
-                (user_id, email_enabled, push_enabled, webhook_url, alert_types, min_severity)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, email_enabled, push_enabled, webhook_url, alert_types,
+                 min_severity, notification_email, email_verified)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     preferences.user_id,
@@ -676,6 +688,8 @@ class AlertNotifier:
                     preferences.webhook_url,
                     json.dumps(preferences.alert_types),
                     preferences.min_severity,
+                    preferences.notification_email,
+                    1 if preferences.email_verified else 0,
                 ),
             )
 

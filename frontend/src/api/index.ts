@@ -135,3 +135,10 @@ export type {
   RemoteSessionOutput,
   CreateRemoteSessionRequest,
 } from './remote';
+export { smtpConfigApi } from './smtpConfig';
+export type {
+  SMTPConfig,
+  SMTPTestResult,
+  EmailStatistics,
+  SendTestEmailResult,
+} from './smtpConfig';

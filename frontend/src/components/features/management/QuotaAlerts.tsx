@@ -105,6 +105,8 @@ export const QuotaAlerts: React.FC = () => {
     push_enabled: true,
     alert_types: ['quota', 'system', 'security'],
     min_severity: 'warning',
+    notification_email: '',
+    email_verified: false,
   });
 
   // Fetch alerts
@@ -860,6 +862,23 @@ export const QuotaAlerts: React.FC = () => {
                   </label>
                 </div>
               </div>
+              {preferences.email_enabled && (
+                <div className="col-12">
+                  <label className="form-label">{t('notificationEmail', language)}</label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    value={preferences.notification_email ?? ''}
+                    onChange={(e) =>
+                      setPreferences({ ...preferences, notification_email: e.target.value })
+                    }
+                    placeholder="your@email.com"
+                  />
+                  <small className="text-muted">
+                    {t('smtpSetupGuide4', language)}
+                  </small>
+                </div>
+              )}
               <div className="col-12">
                 <div className="form-check form-switch">
                   <input

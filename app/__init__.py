@@ -207,6 +207,7 @@ def register_blueprints(app):
     from app.routes.remote import remote_bp
     from app.routes.report import report_bp
     from app.routes.roi import roi_bp
+    from app.routes.smtp_config import smtp_config_bp
     from app.routes.sso import sso_bp
     from app.routes.tenant import tenant_bp
     from app.routes.tool_accounts import tool_accounts_bp
@@ -239,6 +240,7 @@ def register_blueprints(app):
     app.register_blueprint(api_keys_bp, url_prefix="/api")
     app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
+    app.register_blueprint(smtp_config_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")
