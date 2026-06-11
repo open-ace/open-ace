@@ -168,15 +168,80 @@ def generate_report():
 
     # Return format
     output_format = data.get("format", "json")
+    language = data.get("language", "en")
+
+    # Generate filename with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"compliance_report_{report_type}_{timestamp}"
 
     if output_format == "csv":
         return Response(
             report.to_csv(),
             mimetype="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=compliance_report_{report.metadata.report_id}.csv"
+                "Content-Disposition": f"attachment; filename={filename}.csv"
             },
         )
+
+    if output_format == "html":
+        # Log report generation action
+        try:
+            audit_logger = AuditLogger()
+            audit_logger.log(
+                action="generate_report",
+                user_id=g.user_id,
+                resource_type="compliance_report",
+                resource_id=report.metadata.report_id,
+                details={
+                    "report_type": report_type,
+                    "format": output_format,
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                },
+            )
+        except Exception:
+            pass  # Don't fail report generation if audit logging fails
+
+        html_content = report.to_html(language=language)
+        response = Response(
+            html_content,
+            mimetype="text/html",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}.html",
+                # Security: Content-Security-Policy header
+                "Content-Security-Policy": "default-src 'self'; script-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+            },
+        )
+        return response
+
+    if output_format == "excel":
+        # Log report generation action
+        try:
+            audit_logger = AuditLogger()
+            audit_logger.log(
+                action="generate_report",
+                user_id=g.user_id,
+                resource_type="compliance_report",
+                resource_id=report.metadata.report_id,
+                details={
+                    "report_type": report_type,
+                    "format": output_format,
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                },
+            )
+        except Exception:
+            pass
+
+        excel_content = report.to_excel(language=language)
+        response = Response(
+            excel_content,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}.xlsx",
+            },
+        )
+        return response
 
     return jsonify(report.to_dict())
 
@@ -216,15 +281,43 @@ def get_saved_report(report_id: str):
 
     # Check format
     output_format = request.args.get("format", "json")
+    language = request.args.get("language", "en")
+
+    # Generate filename with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"compliance_report_{report_id}_{timestamp}"
 
     if output_format == "csv":
         return Response(
             report.to_csv(),
             mimetype="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=compliance_report_{report_id}.csv"
+                "Content-Disposition": f"attachment; filename={filename}.csv"
             },
         )
+
+    if output_format == "html":
+        html_content = report.to_html(language=language)
+        response = Response(
+            html_content,
+            mimetype="text/html",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}.html",
+                "Content-Security-Policy": "default-src 'self'; script-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+            },
+        )
+        return response
+
+    if output_format == "excel":
+        excel_content = report.to_excel(language=language)
+        response = Response(
+            excel_content,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}.xlsx",
+            },
+        )
+        return response
 
     return jsonify(report.to_dict())
 

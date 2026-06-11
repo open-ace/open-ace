@@ -1,0 +1,41 @@
+<div class="compliance-checks">
+    <h2>Compliance Checks</h2>
+    {% if checks | length > 0 %}
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Check ID</th>
+                <th scope="col">Name</th>
+                <th scope="col">Status</th>
+                <th scope="col">Message</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for check in checks %}
+            <tr>
+                <td>{{ check.check_id | e }}</td>
+                <td>{{ check.name | e }}</td>
+                <td>
+                    {% if check.status == 'pass' %}
+                    <span class="status-icon check-pass" aria-label="Passed">&#10003;</span>
+                    <span class="badge badge-success">Pass</span>
+                    {% elif check.status == 'warning' %}
+                    <span class="status-icon check-warning" aria-label="Warning">&#9888;</span>
+                    <span class="badge badge-warning">Warning</span>
+                    {% else %}
+                    <span class="status-icon check-fail" aria-label="Failed">&#10007;</span>
+                    <span class="badge badge-danger">Fail</span>
+                    {% endif %}
+                </td>
+                <td>{{ check.message | e }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon" aria-hidden="true">&#128196;</div>
+        <p>No compliance checks available</p>
+    </div>
+    {% endif %}
+</div>

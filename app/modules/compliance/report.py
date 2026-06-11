@@ -8,10 +8,13 @@ import csv
 import io
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, Union
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import Database
@@ -39,6 +42,7 @@ class ReportFormat(Enum):
     JSON = "json"
     CSV = "csv"
     HTML = "html"
+    EXCEL = "excel"
     PDF = "pdf"
 
 
@@ -104,6 +108,353 @@ class ComplianceReport:
         writer.writerows(self.details)
 
         return output.getvalue()
+
+    def to_html(self, language: str = "en") -> str:
+        """
+        Convert report to HTML string using Jinja2 templates.
+
+        Args:
+            language: Language for key titles (default: 'en').
+                     Supports: 'en', 'zh', 'ja', 'ko'
+
+        Returns:
+            HTML string with formatted report content.
+        """
+        # Template directory
+        template_dir = os.path.join(os.path.dirname(__file__), "templates")
+
+        # Create Jinja2 environment with autoescape for XSS protection
+        env = Environment(
+            loader=FileSystemLoader(template_dir),
+            autoescape=select_autoescape(["html", "xml"]),
+        )
+
+        # Select template based on report type
+        report_type = self.metadata.report_type
+        template_map = {
+            ReportType.USAGE_SUMMARY.value: "reports/usage_summary.html",
+            ReportType.USER_ACTIVITY.value: "reports/user_activity.html",
+            ReportType.AUDIT_TRAIL.value: "reports/audit_trail.html",
+            ReportType.DATA_ACCESS.value: "reports/data_access.html",
+            ReportType.SECURITY.value: "reports/security.html",
+            ReportType.QUOTA_USAGE.value: "reports/quota_usage.html",
+            ReportType.COMPREHENSIVE.value: "reports/comprehensive.html",
+        }
+
+        template_name = template_map.get(report_type, "reports/comprehensive.html")
+
+        try:
+            template = env.get_template(template_name)
+        except Exception:
+            # Fallback to base template if specific template not found
+            template = env.get_template("base.html")
+
+        # Prepare template context
+        # Translation keys for key titles
+        translations = {
+            "en": {
+                "reportTitle": "Compliance Report",
+                "usageSummary": "Usage Summary Report",
+                "userActivity": "User Activity Report",
+                "auditTrail": "Audit Trail Report",
+                "dataAccess": "Data Access Report",
+                "securityReport": "Security Report",
+                "quotaUsage": "Quota Usage Report",
+                "comprehensive": "Comprehensive Report",
+            },
+            "zh": {
+                "reportTitle": "合规报告",
+                "usageSummary": "使用汇总报告",
+                "userActivity": "用户活动报告",
+                "auditTrail": "审计追踪报告",
+                "dataAccess": "数据访问报告",
+                "securityReport": "安全报告",
+                "quotaUsage": "配额使用报告",
+                "comprehensive": "综合报告",
+            },
+            "ja": {
+                "reportTitle": "コンプライアンスレポート",
+                "usageSummary": "使用量サマリー",
+                "userActivity": "ユーザー活動レポート",
+                "auditTrail": "監査追跡レポート",
+                "dataAccess": "データアクセスレポート",
+                "securityReport": "セキュリティレポート",
+                "quotaUsage": "クォータ使用レポート",
+                "comprehensive": "総合レポート",
+            },
+            "ko": {
+                "reportTitle": "준수 보고서",
+                "usageSummary": "사용량 요약 보고서",
+                "userActivity": "사용자 활동 보고서",
+                "auditTrail": "감사 추적 보고서",
+                "dataAccess": "데이터 액세스 보고서",
+                "securityReport": "보안 보고서",
+                "quotaUsage": "할당량 사용 보고서",
+                "comprehensive": "종합 보고서",
+            },
+        }
+
+        lang_trans = translations.get(language, translations["en"])
+
+        # Get report title
+        report_titles = {
+            ReportType.USAGE_SUMMARY.value: lang_trans.get("usageSummary", "Usage Summary"),
+            ReportType.USER_ACTIVITY.value: lang_trans.get("userActivity", "User Activity"),
+            ReportType.AUDIT_TRAIL.value: lang_trans.get("auditTrail", "Audit Trail"),
+            ReportType.DATA_ACCESS.value: lang_trans.get("dataAccess", "Data Access"),
+            ReportType.SECURITY.value: lang_trans.get("securityReport", "Security Report"),
+            ReportType.QUOTA_USAGE.value: lang_trans.get("quotaUsage", "Quota Usage"),
+            ReportType.COMPREHENSIVE.value: lang_trans.get("comprehensive", "Comprehensive"),
+        }
+
+        # Prepare context
+        context = {
+            "report_title": report_titles.get(report_type, lang_trans["reportTitle"]),
+            "report_type_display": report_titles.get(report_type, report_type),
+            "report_id": self.metadata.report_id,
+            "period_start": self.metadata.period_start.strftime("%Y-%m-%d"),
+            "period_end": self.metadata.period_end.strftime("%Y-%m-%d"),
+            "generated_at": self.metadata.generated_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "generated_by": self.metadata.generated_by,
+            "generated_by_name": "",
+            "summary": self.summary,
+            "details": self.details,
+            "checks": self.compliance_checks,
+            "recommendations": self.recommendations,
+        }
+
+        # Get generator name if available
+        if self.metadata.generated_by:
+            try:
+                user_repo = UserRepository()
+                user = user_repo.get_by_id(self.metadata.generated_by)
+                if user:
+                    context["generated_by_name"] = user.username
+            except Exception:
+                context["generated_by_name"] = f"User {self.metadata.generated_by}"
+
+        return template.render(**context)
+
+    def to_excel(self, language: str = "en") -> bytes:
+        """
+        Convert report to Excel file using openpyxl.
+
+        Args:
+            language: Language for key titles (default: 'en').
+                     Supports: 'en', 'zh', 'ja', 'ko'
+
+        Returns:
+            Bytes containing the Excel file content.
+        """
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = Workbook()
+
+        # Translation keys for column headers
+        translations = {
+            "en": {
+                "summary": "Summary",
+                "details": "Details",
+                "complianceChecks": "Compliance Checks",
+                "recommendations": "Recommendations",
+                "checkId": "Check ID",
+                "name": "Name",
+                "status": "Status",
+                "message": "Message",
+                "noData": "No data available",
+            },
+            "zh": {
+                "summary": "汇总",
+                "details": "详情",
+                "complianceChecks": "合规检查",
+                "recommendations": "建议",
+                "checkId": "检查ID",
+                "name": "名称",
+                "status": "状态",
+                "message": "消息",
+                "noData": "无数据",
+            },
+            "ja": {
+                "summary": "サマリー",
+                "details": "詳細",
+                "complianceChecks": "コンプライアンスチェック",
+                "recommendations": "推奨事項",
+                "checkId": "チェックID",
+                "name": "名前",
+                "status": "状態",
+                "message": "メッセージ",
+                "noData": "データなし",
+            },
+            "ko": {
+                "summary": "요약",
+                "details": "상세",
+                "complianceChecks": "준수 검사",
+                "recommendations": "제안",
+                "checkId": "검사 ID",
+                "name": "이름",
+                "status": "상태",
+                "message": "메시지",
+                "noData": "데이터 없음",
+            },
+        }
+
+        lang_trans = translations.get(language, translations["en"])
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin"),
+        )
+
+        # Status colors
+        status_fills = {
+            "pass": PatternFill(start_color="22C55E", end_color="22C55E", fill_type="solid"),
+            "warning": PatternFill(start_color="F59E0B", end_color="F59E0B", fill_type="solid"),
+            "fail": PatternFill(start_color="EF4444", end_color="EF4444", fill_type="solid"),
+        }
+
+        # === Summary Sheet ===
+        ws_summary = wb.active
+        ws_summary.title = lang_trans["summary"]
+
+        # Add metadata
+        ws_summary["A1"] = "Report ID"
+        ws_summary["B1"] = self.metadata.report_id
+        ws_summary["A2"] = "Report Type"
+        ws_summary["B2"] = self.metadata.report_type
+        ws_summary["A3"] = "Period Start"
+        ws_summary["B3"] = self.metadata.period_start.strftime("%Y-%m-%d")
+        ws_summary["A4"] = "Period End"
+        ws_summary["B4"] = self.metadata.period_end.strftime("%Y-%m-%d")
+        ws_summary["A5"] = "Generated At"
+        ws_summary["B5"] = self.metadata.generated_at.strftime("%Y-%m-%d %H:%M:%S")
+
+        for row in range(1, 6):
+            ws_summary[f"A{row}"].font = Font(bold=True)
+
+        # Add summary data
+        row_num = 7
+        ws_summary[f"A{row_num}"] = lang_trans["summary"]
+        ws_summary[f"A{row_num}"].font = header_font
+        ws_summary[f"A{row_num}"].fill = header_fill
+
+        row_num += 1
+        for key, value in self.summary.items():
+            if key == "period":
+                continue
+            ws_summary[f"A{row_num}"] = str(key)
+            ws_summary[f"B{row_num}"] = str(value) if not isinstance(value, dict) else json.dumps(value)
+            ws_summary[f"A{row_num}"].font = Font(bold=True)
+            ws_summary[f"A{row_num}"].border = border
+            ws_summary[f"B{row_num}"].border = border
+            row_num += 1
+
+        # === Details Sheet ===
+        ws_details = wb.create_sheet(lang_trans["details"])
+
+        if self.details:
+            # Write headers
+            headers = list(self.details[0].keys())
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws_details.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = border
+
+            # Write data
+            for row_idx, detail in enumerate(self.details, 2):
+                for col_idx, header in enumerate(headers, 1):
+                    value = detail.get(header)
+                    cell = ws_details.cell(row=row_idx, column=col_idx, value=value)
+                    cell.border = border
+
+            # Auto-adjust column widths
+            for col_idx in range(1, len(headers) + 1):
+                col_letter = get_column_letter(col_idx)
+                max_length = max(
+                    len(str(ws_details.cell(row=1, column=col_idx).value or "")),
+                    max(
+                        len(str(ws_details.cell(row=r, column=col_idx).value or ""))
+                        for r in range(2, len(self.details) + 2)
+                    ),
+                )
+                ws_details.column_dimensions[col_letter].width = min(max_length + 2, 50)
+        else:
+            ws_details["A1"] = lang_trans["noData"]
+
+        # === Compliance Checks Sheet ===
+        ws_checks = wb.create_sheet(lang_trans["complianceChecks"])
+
+        if self.compliance_checks:
+            check_headers = [
+                lang_trans["checkId"],
+                lang_trans["name"],
+                lang_trans["status"],
+                lang_trans["message"],
+            ]
+            for col_idx, header in enumerate(check_headers, 1):
+                cell = ws_checks.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = border
+
+            for row_idx, check in enumerate(self.compliance_checks, 2):
+                ws_checks.cell(row=row_idx, column=1, value=check.get("check_id")).border = border
+                ws_checks.cell(row=row_idx, column=2, value=check.get("name")).border = border
+
+                status_cell = ws_checks.cell(row=row_idx, column=3, value=check.get("status"))
+                status_cell.border = border
+                if check.get("status") in status_fills:
+                    status_cell.fill = status_fills[check.get("status")]
+
+                ws_checks.cell(row=row_idx, column=4, value=check.get("message")).border = border
+
+            for col_idx in range(1, 5):
+                col_letter = get_column_letter(col_idx)
+                ws_checks.column_dimensions[col_letter].width = 20
+        else:
+            ws_checks["A1"] = lang_trans["noData"]
+
+        # === Recommendations Sheet ===
+        ws_recommendations = wb.create_sheet(lang_trans["recommendations"])
+
+        if self.recommendations:
+            ws_recommendations["A1"] = "#"
+            ws_recommendations["B1"] = lang_trans["recommendations"]
+            ws_recommendations["A1"].font = header_font
+            ws_recommendations["A1"].fill = header_fill
+            ws_recommendations["B1"].font = header_font
+            ws_recommendations["B1"].fill = header_fill
+
+            for idx, rec in enumerate(self.recommendations, 1):
+                ws_recommendations.cell(row=idx + 1, column=1, value=idx).border = border
+                ws_recommendations.cell(row=idx + 1, column=2, value=rec).border = border
+
+                # Highlight urgent recommendations
+                if rec.startswith("URGENT:"):
+                    ws_recommendations.cell(row=idx + 1, column=2).font = Font(bold=True, color="EF4444")
+                elif rec.startswith("Review:"):
+                    ws_recommendations.cell(row=idx + 1, column=2).font = Font(color="F59E0B")
+
+            ws_recommendations.column_dimensions["A"].width = 5
+            ws_recommendations.column_dimensions["B"].width = 80
+        else:
+            ws_recommendations["A1"] = lang_trans["noData"]
+
+        # Write to bytes
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.read()
 
 
 class ReportGenerator:
