@@ -236,7 +236,7 @@ export const RequestDashboard: React.FC = () => {
             {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
               <div
                 className="table-responsive"
-                style={{ maxHeight: '200px', overflowY: 'auto' }}
+                style={{ maxHeight: '200px', minHeight: '80px', overflowY: 'auto' }}
               >
                 <table className="table table-sm">
                   <thead>
@@ -268,7 +268,7 @@ export const RequestDashboard: React.FC = () => {
                 </table>
               </div>
             ) : (
-              <div style={{ minHeight: '150px' }}>
+              <div style={{ minHeight: '80px' }}>
                 <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
               </div>
             )}

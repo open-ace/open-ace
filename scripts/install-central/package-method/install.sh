@@ -1833,9 +1833,9 @@ install_systemd_service() {
     # Get user's HOME directory dynamically (handles non-standard paths like /var/lib/username)
     local home_dir=$(getent passwd "$user" | cut -d: -f6)
     if [ -z "$home_dir" ]; then
-        # Fallback to standard path if getent fails
-        home_dir="/home/$user"
-        print_warning "Could not determine HOME directory for $user, using fallback: $home_dir"
+        print_error "Could not determine HOME directory for $user"
+        print_info "Please ensure the user '$user' exists and has a valid HOME directory"
+        return 1
     fi
     print_info "User HOME directory: $home_dir"
 
