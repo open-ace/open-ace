@@ -179,9 +179,12 @@ def generate_report():
     filename = f"compliance_report_{report_type}_{timestamp}"
 
     if output_format == "csv":
+        # Add UTF-8 BOM for Excel compatibility
+        csv_content = report.to_csv()
+        response_content = b'\xef\xbb\xbf' + csv_content.encode('utf-8')
         return Response(
-            report.to_csv(),
-            mimetype="text/csv",
+            response_content,
+            mimetype="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}.csv"
             },
@@ -296,9 +299,12 @@ def get_saved_report(report_id: str):
     filename = f"compliance_report_{report_id}_{timestamp}"
 
     if output_format == "csv":
+        # Add UTF-8 BOM for Excel compatibility
+        csv_content = report.to_csv()
+        response_content = b'\xef\xbb\xbf' + csv_content.encode('utf-8')
         return Response(
-            report.to_csv(),
-            mimetype="text/csv",
+            response_content,
+            mimetype="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}.csv"
             },
