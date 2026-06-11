@@ -95,6 +95,7 @@ describe('getVisiblePages', () => {
   });
 });
 
+
 describe('Pagination Component', () => {
   const mockOnPageChange = jest.fn();
 

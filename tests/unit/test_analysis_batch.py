@@ -4,7 +4,7 @@ Tests that batch analysis API response includes data_range field.
 """
 
 from concurrent.futures import Future
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -182,17 +182,21 @@ class TestBatchAnalysisDataRange:
         # Create 12 valid users + 2 ou_ users
         user_data = []
         for i in range(12):
-            user_data.append({
-                "unified_username": f"user_{i}",
-                "total_tokens": 1000 - i * 50,
-                "message_count": 10,
-            })
+            user_data.append(
+                {
+                    "unified_username": f"user_{i}",
+                    "total_tokens": 1000 - i * 50,
+                    "message_count": 10,
+                }
+            )
         # Add ou_ users that should be filtered
-        user_data.append({
-            "unified_username": "ou_1234567890abcdef",
-            "total_tokens": 99999,
-            "message_count": 100,
-        })
+        user_data.append(
+            {
+                "unified_username": "ou_1234567890abcdef",
+                "total_tokens": 99999,
+                "message_count": 100,
+            }
+        )
 
         self.daily_stats_repo.get_batch_aggregates.return_value = {
             "total_messages": 1000,

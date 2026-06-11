@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
-from playwright.sync_api import sync_playwright, expect
+from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -119,14 +119,20 @@ def test_preset_selection(page):
     # Select "Last 7 Days"
     page.click(".dropdown-menu .dropdown-item:text('Last 7 Days')")
     pause(0.5)
-    check(date_select.locator(".dropdown-toggle").text_content() == "Last 7 Days", "Selected 'Last 7 Days'")
+    check(
+        date_select.locator(".dropdown-toggle").text_content() == "Last 7 Days",
+        "Selected 'Last 7 Days'",
+    )
 
     # Select "Last 30 Days"
     date_select.click()
     pause(0.5)
     page.click(".dropdown-menu .dropdown-item:text('Last 30 Days')")
     pause(0.5)
-    check(date_select.locator(".dropdown-toggle").text_content() == "Last 30 Days", "Selected 'Last 30 Days'")
+    check(
+        date_select.locator(".dropdown-toggle").text_content() == "Last 30 Days",
+        "Selected 'Last 30 Days'",
+    )
 
     shot(page, "04-preset-selection")
 
@@ -182,7 +188,10 @@ def test_date_validation_invalid_range(page):
     # Check error message is visible
     error_msg = page.locator("#date-range-error")
     check(error_msg.is_visible(), "Error message is visible for invalid range")
-    check(error_msg.text_content() == "Start date cannot be after end date", "Error message text is correct")
+    check(
+        error_msg.text_content() == "Start date cannot be after end date",
+        "Error message text is correct",
+    )
 
     # Check aria-live attribute
     check(error_msg.get_attribute("aria-live") == "polite", "Error message has aria-live='polite'")
@@ -215,7 +224,10 @@ def test_date_validation_future_date(page):
 
     error_msg = page.locator("#date-range-error")
     check(error_msg.is_visible(), "Error message is visible for future dates")
-    check(error_msg.text_content() == "Cannot select future dates", "Future date error message is correct")
+    check(
+        error_msg.text_content() == "Cannot select future dates",
+        "Future date error message is correct",
+    )
 
     shot(page, "07-future-date-error")
 
@@ -239,11 +251,18 @@ def test_accessibility_labels(page):
     check(end_label.count() == 1, "End Date label exists")
 
     # Check labels are visually hidden (class 'visually-hidden')
-    check(start_label.get_attribute("class") == "visually-hidden", "Start Date label is visually hidden")
-    check(end_label.get_attribute("class") == "visually-hidden", "End Date label is visually hidden")
+    check(
+        start_label.get_attribute("class") == "visually-hidden",
+        "Start Date label is visually hidden",
+    )
+    check(
+        end_label.get_attribute("class") == "visually-hidden", "End Date label is visually hidden"
+    )
 
     # Check label for attribute matches input id
-    check(start_label.get_attribute("for") == "date-start-input", "Start label for matches input id")
+    check(
+        start_label.get_attribute("for") == "date-start-input", "Start label for matches input id"
+    )
     check(end_label.get_attribute("for") == "date-end-input", "End label for matches input id")
 
     shot(page, "08-accessibility-labels")
@@ -298,7 +317,9 @@ def test_css_styling(page):
 
     # Check width is within expected range
     width = date_input_narrow.evaluate("el => el.getBoundingClientRect().width")
-    check(width >= 120 and width <= 150, f"Date input width is in range 120-150px (actual: {width}px)")
+    check(
+        width >= 120 and width <= 150, f"Date input width is in range 120-150px (actual: {width}px)"
+    )
 
     shot(page, "10-css-styling")
 
