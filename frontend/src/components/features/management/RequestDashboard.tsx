@@ -158,6 +158,14 @@ export const RequestDashboard: React.FC = () => {
     };
   }, [aggregatedUserStats, language]);
 
+  // Calculate peak tool for today
+  const peakTool = useMemo(() => {
+    if (!todayStats?.by_tool) return '-';
+    return (
+      Object.entries(todayStats.by_tool).sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
+    );
+  }, [todayStats?.by_tool]);
+
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
   }
@@ -221,17 +229,9 @@ export const RequestDashboard: React.FC = () => {
           <Card>
             <div className="d-flex align-items-center mb-3">
               <h5 className="mb-0">{t('todayByTool', language)}</h5>
-              {(() => {
-                const peakTool = todayStats?.by_tool
-                  ? Object.entries(todayStats.by_tool)
-                      .sort((a, b) => b[1] - a[1])[0]?.[0]?.toUpperCase() || '-'
-                  : '-';
-                return (
-                  <Badge variant="warning" className="ms-2">
-                    {peakTool}
-                  </Badge>
-                );
-              })()}
+              <Badge variant="warning" className="ms-2">
+                {peakTool}
+              </Badge>
             </div>
             {todayStats?.by_tool && Object.keys(todayStats.by_tool).length > 0 ? (
               <div
