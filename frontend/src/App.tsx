@@ -124,6 +124,11 @@ const APIKeyManagement = lazy(() =>
     default: m.APIKeyManagement,
   }))
 );
+const SmtpConfig = lazy(() =>
+  import('@/components/features/management/SmtpConfig').then((m) => ({
+    default: m.SmtpConfig,
+  }))
+);
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -321,6 +326,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="/settings/sso" element={<SSOSettings />} />
           <Route path="/settings/api-keys" element={<APIKeyManagement />} />
           <Route path="/settings/ai-agent" element={<AiAgentSettings />} />
+          <Route path="/settings/smtp" element={<SmtpConfig />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
