@@ -9,6 +9,7 @@ import {
   useUpdateUser,
   useDeleteUser,
   useUpdateUserPassword,
+  usePageRefresh,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -21,8 +22,10 @@ import {
   Error,
   EmptyState,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
+import { createMatcherConfig } from '@/utils';
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 
 export const UserManagement: React.FC = () => {
@@ -32,6 +35,12 @@ export const UserManagement: React.FC = () => {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const updateUserPassword = useUpdateUserPassword();
+
+  // Page refresh control
+  const { refreshKey } = usePageRefresh({
+    page: '/manage/users',
+    refreshKey: createMatcherConfig([['users']], 'prefix'),
+  });
 
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
@@ -193,10 +202,18 @@ export const UserManagement: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('userList', language)}</h2>
-        <Button variant="primary" size="sm" onClick={handleOpenCreate}>
-          <i className="bi bi-plus-lg me-1" />
-          {t('addUser', language)}
-        </Button>
+        <div className="d-flex gap-2">
+          <PageRefreshControl
+            refreshKey={refreshKey}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+          />
+          <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('addUser', language)}
+          </Button>
+        </div>
       </div>
 
       {/* User Table */}

@@ -9,7 +9,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { useApiKeys, useStoreApiKey, useUpdateApiKey, useDeleteApiKey } from '@/hooks';
+import { useApiKeys, useStoreApiKey, useUpdateApiKey, useDeleteApiKey, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import type { Language } from '@/types';
@@ -22,8 +22,10 @@ import {
   Error,
   EmptyState,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
+import { createMatcherConfig } from '@/utils';
 import type { ApiKey } from '@/api';
 
 /**
@@ -115,6 +117,12 @@ export const APIKeyManagement: React.FC = () => {
   const deleteApiKey = useDeleteApiKey();
 
   const keys = useMemo(() => keysData?.keys ?? [], [keysData?.keys]);
+
+  // Page refresh control
+  const { refreshKey } = usePageRefresh({
+    page: '/manage/settings/api-keys',
+    refreshKey: createMatcherConfig([['api-keys']], 'prefix'),
+  });
 
   // Memoize parsed CLI tools to avoid repeated JSON.parse in render
   const parsedCliTools = useMemo(() => {
@@ -538,10 +546,18 @@ export const APIKeyManagement: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('apiKeys', language)}</h2>
-        <Button variant="primary" size="sm" onClick={handleOpenAdd}>
-          <i className="bi bi-plus-lg me-1" />
-          {t('addApiKey', language)}
-        </Button>
+        <div className="d-flex gap-2">
+          <PageRefreshControl
+            refreshKey={refreshKey}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+          />
+          <Button variant="primary" size="sm" onClick={handleOpenAdd}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('addApiKey', language)}
+          </Button>
+        </div>
       </div>
 
       {/* Key Table */}

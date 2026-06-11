@@ -9,7 +9,7 @@
  */
 
 import React, { useState } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import {
   useFilterRules,
   useCreateFilterRule,
@@ -19,6 +19,7 @@ import {
   useUpdateSecuritySettings,
   useAuditThresholds,
   useUpdateAuditThresholds,
+  usePageRefresh,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -32,6 +33,7 @@ import {
   Error,
   EmptyState,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
 import { useToast } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
@@ -78,6 +80,14 @@ export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('filter');
+
+  // --- Page Refresh Control ---
+  const pageRefresh = usePageRefresh({
+    page: '/manage/security',
+    refreshKey: createMatcherConfig([['security']], 'prefix'),
+    interval: 0, // Manual refresh only
+    enabled: false,
+  });
 
   // --- Filter Rules State ---
   const {
@@ -851,12 +861,22 @@ export const SecurityCenter: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('securityCenter', language)}</h2>
-        {activeTab === 'filter' && (
-          <Button variant="primary" size="sm" onClick={handleOpenCreateRule}>
-            <i className="bi bi-plus-lg me-1" />
-            {t('addRule', language)}
-          </Button>
-        )}
+        <div className="d-flex gap-2 align-items-center">
+          {/* Page Refresh Control - compact mode */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
+          {activeTab === 'filter' && (
+            <Button variant="primary" size="sm" onClick={handleOpenCreateRule}>
+              <i className="bi bi-plus-lg me-1" />
+              {t('addRule', language)}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Tab Navigation */}

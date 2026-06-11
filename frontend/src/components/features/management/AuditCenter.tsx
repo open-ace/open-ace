@@ -23,9 +23,10 @@ import {
   Badge,
   PieChart,
   BarChart,
+  PageRefreshControl,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { formatDateTime } from '@/utils';
+import { formatDateTime, createMatcherConfig } from '@/utils';
 import {
   complianceApi,
   type AuditPattern,
@@ -34,6 +35,7 @@ import {
   type UserProfile,
 } from '@/api';
 import type { AuditLogFilters } from '@/api';
+import { usePageRefresh } from '@/hooks';
 
 type AuditLog = {
   id: number;

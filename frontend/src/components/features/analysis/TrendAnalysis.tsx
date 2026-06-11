@@ -30,9 +30,10 @@ import {
   LineChart,
   DoughnutChart,
   Skeleton,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatToolName } from '@/utils';
-import { useBatchAnalysis, useHosts, useTools } from '@/hooks';
+import { formatTokens, formatToolName, createMatcherConfig } from '@/utils';
+import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 
 // Skeleton components
 const MetricsSkeleton: React.FC = () => (
@@ -71,6 +72,14 @@ export const TrendAnalysis: React.FC = () => {
 
   // Track if this is the initial load
   const isInitialLoad = useRef(true);
+
+  // Page refresh control - manual refresh for trend analysis
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/trend',
+    refreshKey: createMatcherConfig([['analysis', 'trend']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   // Initial date range for first render (before batchData is available)
   // This is needed to bootstrap the batch analysis request
@@ -253,6 +262,14 @@ export const TrendAnalysis: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tokenTrend', language)}</h2>
+        {/* Page Refresh Control - compact mode */}
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
 
       {/* Filters */}

@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -30,6 +30,7 @@ import {
   BarChart,
   Skeleton,
   SkeletonCard,
+  PageRefreshControl,
 } from '@/components/common';
 import {
   roiApi,
@@ -41,7 +42,7 @@ import {
   type EfficiencyReport,
 } from '@/api';
 import { formatTokens, formatToolName } from '@/utils';
-import { useTools } from '@/hooks';
+import { useTools, usePageRefresh } from '@/hooks';
 
 // Cache key generator
 const getCacheKey = (startDate: string, endDate: string, tool: string) =>
@@ -108,6 +109,12 @@ export const ROIAnalysis: React.FC = () => {
 
   // Track if this is the initial load
   const isInitialLoad = useRef(true);
+
+  // Page refresh control
+  const { refreshKey } = usePageRefresh({
+    page: '/manage/analysis/roi',
+    refreshKey: createMatcherConfig([['analysis', 'roi']], 'prefix'),
+  });
 
   // Initialize dates
   useEffect(() => {
@@ -295,19 +302,12 @@ export const ROIAnalysis: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('roiAnalysis', language)}</h2>
-        <Button variant="primary" size="sm" onClick={() => fetchData(true)} disabled={isRefreshing}>
-          {isRefreshing ? (
-            <>
-              <Loading size="sm" className="me-1" />
-              {t('loading', language)}
-            </>
-          ) : (
-            <>
-              <i className="bi bi-arrow-clockwise me-1" />
-              {t('refresh', language)}
-            </>
-          )}
-        </Button>
+        <PageRefreshControl
+          refreshKey={refreshKey}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
       </div>
 
       {/* Filters */}
