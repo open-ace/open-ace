@@ -641,3 +641,34 @@ body.sidebar-mobile-open {
     display: block !important;
   }
 }
+
+/* ===== Chart Responsive Styles ===== */
+
+/* Small screen chart legend optimization (< 768px) */
+@media (max-width: 767.98px) {
+  /* Doughnut/Pie chart legend - smaller font */
+  .chart-container {
+    min-height: 200px;
+  }
+
+  /* Reduce legend font size on small screens */
+  .chart-container canvas {
+    max-height: 250px;
+  }
+
+  /* User segmentation chart - adjust height */
+  .trend-analysis .col-md-6 .card-body {
+    min-height: 180px;
+  }
+}
+
+/* Medium screens (768px+) - restore normal chart sizes */
+@media (min-width: 768px) {
+  .chart-container {
+    min-height: 250px;
+  }
+
+  .trend-analysis .col-md-6 .card-body {
+    min-height: 200px;
+  }
+}
