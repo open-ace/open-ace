@@ -4,8 +4,9 @@ This test verifies that get_request_stats_by_user properly filters out
 unidentifiable users with username 'unknown'.
 """
 
-import pytest
 from datetime import datetime
+
+import pytest
 
 
 class TestUnknownUserFilter:
