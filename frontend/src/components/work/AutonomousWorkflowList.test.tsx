@@ -170,7 +170,12 @@ describe('AutonomousWorkflowList', () => {
               offset: 50,
             },
             isLoading: false,
-          } as ReturnType<typeof useWorkflows>;
+            isError: false,
+            error: null,
+            isPending: false,
+            isFetching: false,
+            refetch: vi.fn(),
+          } as unknown as ReturnType<typeof useWorkflows>;
         }
 
         return {
