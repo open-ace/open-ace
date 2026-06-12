@@ -141,7 +141,7 @@ class TestReportGenerationAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/csv"
+        assert response.mimetype == "text/csv"
         # CSV should have headers and data
         csv_content = response.get_data(as_text=True)
         assert len(csv_content) > 0
@@ -163,7 +163,7 @@ class TestReportGenerationAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/html"
+        assert response.mimetype == "text/html"
         html_content = response.get_data(as_text=True)
         # HTML should contain basic elements
         assert "<html" in html_content
@@ -409,7 +409,7 @@ class TestSavedReportAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/csv"
+        assert response.mimetype == "text/csv"
 
     def test_get_saved_report_html(self, client, admin_headers):
         """Test getting saved report in HTML format."""
@@ -431,7 +431,7 @@ class TestSavedReportAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/html"
+        assert response.mimetype == "text/html"
         html_content = response.get_data(as_text=True)
         assert "<html" in html_content
 
@@ -568,7 +568,7 @@ class TestReportFormatValidation:
                 headers=admin_headers,
             )
             assert response.status_code == 200
-            assert response.content_type == "text/html"
+            assert response.mimetype == "text/html"
 
 
 class TestReportErrorHandling:
