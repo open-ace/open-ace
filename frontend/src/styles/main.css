@@ -1048,9 +1048,12 @@ link[rel='dns-prefetch'] {
 
 /* Page Refresh Control - ensure buttons are clickable (not blocked by sticky header) */
 /* Header z-index is 310 (z-fixed + 10), need higher z-index to be above header's backdrop-filter layer */
+/* Override position-absolute and top/end offsets from positionStyles to prevent covering header */
 .page-header-controls .page-refresh-control,
 .page-header-controls .page-refresh-control-compact {
   position: relative;
+  top: auto;
+  right: auto;
   z-index: 320;
 }
 
