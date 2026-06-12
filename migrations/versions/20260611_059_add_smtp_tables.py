@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "059_add_smtp_tables"
-down_revision: Union[str, None] = "058_add_workflow_definition_snapshot"
+down_revision: Union[str, None] = "058_workflow_definition_snapshot"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
