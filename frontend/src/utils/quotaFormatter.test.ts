@@ -14,12 +14,7 @@ import {
   getQuotaLabel,
   shouldShowUnlimited,
 } from './quotaFormatter';
-import {
-  QuotaType,
-  MAX_TOKEN_QUOTA,
-  MAX_REQUEST_QUOTA,
-  TOKEN_QUOTA_MULTIPLIER,
-} from '@/constants/quota';
+import { QuotaType, MAX_TOKEN_QUOTA } from '@/constants/quota';
 
 describe('formatQuotaForDisplay', () => {
   it('should return ∞ for null/undefined values', () => {

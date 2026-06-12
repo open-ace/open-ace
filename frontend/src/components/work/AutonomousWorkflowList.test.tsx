@@ -94,11 +94,7 @@ describe('AutonomousWorkflowList', () => {
     mockWorkflowList([workflow()]);
 
     render(
-      <AutonomousWorkflowList
-        selectedId={null}
-        onSelect={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
     expect(screen.getByRole('button', { name: 'Queued' })).toBeInTheDocument();
@@ -114,11 +110,7 @@ describe('AutonomousWorkflowList', () => {
     mockWorkflowList([workflow()]);
 
     render(
-      <AutonomousWorkflowList
-        selectedId={null}
-        onSelect={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
     fireEvent.change(screen.getByPlaceholderText('Search workflows...'), {
@@ -138,11 +130,7 @@ describe('AutonomousWorkflowList', () => {
     mockWorkflowList([workflow()], 75);
 
     render(
-      <AutonomousWorkflowList
-        selectedId="wf-1"
-        onSelect={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
+      <AutonomousWorkflowList selectedId="wf-1" onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: /next page/i })[0]);

@@ -141,7 +141,7 @@ export const usePageRefreshStore = create<PageRefreshState>()(
             lastRefreshTime: now,
             lastVisited: now,
             errorCount: success ? 0 : currentConfig.errorCount + 1,
-            lastError: success ? null : error ?? 'Refresh failed',
+            lastError: success ? null : (error ?? 'Refresh failed'),
           };
 
           // Update nextRefreshTime if auto refresh is enabled

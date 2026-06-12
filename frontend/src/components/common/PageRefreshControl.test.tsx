@@ -117,7 +117,9 @@ describe('PageRefreshControl', () => {
     it('should render dropdown for settings in compact mode', () => {
       const mockRefresh = createMockRefresh();
 
-      render(<PageRefreshControl refresh={mockRefresh} compact={true} showAutoRefreshToggle={true} />);
+      render(
+        <PageRefreshControl refresh={mockRefresh} compact={true} showAutoRefreshToggle={true} />
+      );
 
       // Should have dropdown toggle button with clock icon
       const dropdownToggle = screen.getByTestId('dropdown-toggle');

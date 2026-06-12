@@ -10,7 +10,7 @@ import {
   filterQueryKeys,
   createMatcherConfig,
 } from './queryKeyMatcher';
-import type { QueryKeyMatchMode, QueryKeyMatcherConfig } from './queryKeyMatcher';
+import type { QueryKeyMatcherConfig } from './queryKeyMatcher';
 
 describe('queryKeyMatcher', () => {
   describe('exactMatch', () => {
@@ -170,10 +170,7 @@ describe('queryKeyMatcher', () => {
     });
 
     it('should return empty array when no matches', () => {
-      const keys = [
-        ['remote', 'sessions'],
-        ['users'],
-      ];
+      const keys = [['remote', 'sessions'], ['users']];
       const matcher: QueryKeyMatcherConfig = {
         keys: [['dashboard']],
         mode: 'prefix',

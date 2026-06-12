@@ -160,7 +160,7 @@ describe('usePageRefresh', () => {
         usePageRefreshStore.getState().pauseAll();
       });
 
-      const { result } = renderHook(
+      renderHook(
         () =>
           usePageRefresh({
             page: '/manage/dashboard',
