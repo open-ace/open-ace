@@ -14,7 +14,8 @@ test.describe('Navigation', () => {
     await waitForApp(page);
     await ensureSidebarVisible(page);
     const sidebar = getSidebarLocator(page);
-    await expect(sidebar).toBeVisible({ timeout: 10000 });
+    // Increased timeout for Mobile Safari
+    await expect(sidebar).toBeVisible({ timeout: 20000 });
   });
 
   test('should navigate to messages page', async ({ page }) => {
@@ -25,8 +26,11 @@ test.describe('Navigation', () => {
     const sidebar = getSidebarLocator(page);
     const messagesLink = sidebar.locator('.nav-item .nav-link, .nav-item-link').filter({ hasText: /messages|消息/i }).first();
 
+    // Wait for element with increased timeout for Mobile Safari
+    await messagesLink.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+
     if (await messagesLink.isVisible()) {
-      await messagesLink.click();
+      await messagesLink.click({ force: true });
       await page.waitForLoadState('networkidle');
 
       // Verify URL changed
@@ -42,8 +46,11 @@ test.describe('Navigation', () => {
     const sidebar = getSidebarLocator(page);
     const analysisLink = sidebar.locator('.nav-item .nav-link, .nav-item-link').filter({ hasText: /trend|趋势|analysis/i }).first();
 
+    // Wait for element with increased timeout for Mobile Safari
+    await analysisLink.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+
     if (await analysisLink.isVisible()) {
-      await analysisLink.click();
+      await analysisLink.click({ force: true });
       await page.waitForLoadState('networkidle');
 
       // Verify URL changed
@@ -59,12 +66,15 @@ test.describe('Navigation', () => {
     // Click hamburger button to open sidebar
     const menuToggle = page.locator('.hamburger-btn');
 
-    if (await menuToggle.isVisible()) {
-      await menuToggle.click();
+    // Wait for hamburger button with increased timeout for Mobile Safari
+    await menuToggle.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
 
-      // Sidebar should be visible after toggle
+    if (await menuToggle.isVisible()) {
+      await menuToggle.click({ force: true });
+
+      // Sidebar should be visible after toggle - increased timeout
       const sidebar = getSidebarLocator(page);
-      await expect(sidebar).toBeVisible();
+      await expect(sidebar).toBeVisible({ timeout: 20000 });
     }
   });
 

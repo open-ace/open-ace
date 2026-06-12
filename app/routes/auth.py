@@ -239,6 +239,7 @@ def api_auth_check():
             "username": session.get("username"),
             "email": session.get("email"),
             "role": session.get("role"),
+            "tenant_id": session.get("tenant_id"),
             "avatar_url": avatar_url,
         },
     }
