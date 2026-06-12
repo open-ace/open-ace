@@ -10,7 +10,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLanguage } from '@/store';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import { usePageRefresh } from '@/hooks';
 import {
   Card,
@@ -33,13 +33,13 @@ import {
 } from '@/api/request';
 import { formatNumber, createMatcherConfig } from '@/utils';
 
-// Date range presets
-const DATE_RANGE_PRESETS = [
-  { value: '7', label: '7 Days' },
-  { value: '14', label: '14 Days' },
-  { value: '30', label: '30 Days' },
-  { value: '60', label: '60 Days' },
-  { value: '90', label: '90 Days' },
+// Date range presets - internationalized
+const getDateRangePresets = (language: Language) => [
+  { value: '7', label: t('dateRange7Days', language) },
+  { value: '14', label: t('dateRange14Days', language) },
+  { value: '30', label: t('dateRange30Days', language) },
+  { value: '60', label: t('dateRange60Days', language) },
+  { value: '90', label: t('dateRange90Days', language) },
 ];
 
 // Helper to get date string N days ago
@@ -286,7 +286,7 @@ export const RequestDashboard: React.FC = () => {
       <Card className="mb-4">
         <div className="d-flex flex-wrap gap-2 align-items-center">
           <span className="me-2">{t('dateRange', language)}:</span>
-          {DATE_RANGE_PRESETS.map((preset) => (
+          {getDateRangePresets(language).map((preset) => (
             <Button
               key={preset.value}
               variant={
