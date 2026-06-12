@@ -11,6 +11,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import type { Language } from '@/types';
 import {
   Card,
   StatCard,
@@ -111,7 +112,7 @@ function formatDataTypeKey(key: string): string {
  * Get display label for a data type key
  * Uses i18n translation if available, otherwise uses fallback label or formatted key
  */
-function getDataTypeLabel(key: string, language: string): string {
+function getDataTypeLabel(key: string, language: Language): string {
   const meta = DATA_TYPE_META[key];
   if (meta) {
     // Try i18n translation, fallback to fallbackLabel
@@ -135,7 +136,7 @@ function getDataTypeIcon(key: string): string {
  * Get storage estimate display label for a storage estimate data type key
  * Maps storage estimate API keys back to retention rule display labels
  */
-function getStorageEstimateLabel(storageKey: string, language: string): string {
+function getStorageEstimateLabel(storageKey: string, language: Language): string {
   // First, try to find a retention rule key that maps to this storage key
   for (const [ruleKey, meta] of Object.entries(DATA_TYPE_META)) {
     if (meta.storageEstimateKey === storageKey) {
@@ -152,7 +153,7 @@ function getStorageEstimateLabel(storageKey: string, language: string): string {
  */
 function adaptRulesToTableData(
   rules: Record<string, RetentionRule>,
-  language: string
+  language: Language
 ): Array<{ key: string; label: string; icon: string; rule: RetentionRule }> {
   return Object.entries(rules)
     .filter(([, rule]) => rule !== null && rule !== undefined) // Filter null/undefined
@@ -212,7 +213,7 @@ export const ComplianceMgmt: React.FC = () => {
   const [previewReportType, setPreviewReportType] = useState<string>('');
   const [previewReportId, setPreviewReportId] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [previewLanguage, setPreviewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
+  const [previewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
 
   // Initialize dates for reports
   useEffect(() => {
@@ -351,7 +352,7 @@ export const ComplianceMgmt: React.FC = () => {
   // Download saved report in different formats
   const handleDownloadSavedReport = async (
     reportId: string,
-    reportType: string,
+    _reportType: string,
     downloadFormat: 'json' | 'csv' | 'html' | 'excel'
   ) => {
     try {

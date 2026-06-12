@@ -9,7 +9,6 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -68,7 +67,7 @@ export const SmtpConfig: React.FC = () => {
         });
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch SMTP config';
+      const errorMessage = (err as Error).message || 'Failed to fetch SMTP config';
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -79,7 +78,7 @@ export const SmtpConfig: React.FC = () => {
     try {
       const stats = await smtpConfigApi.getStatistics(7);
       setStatistics(stats);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to fetch statistics:', err);
     }
   };
@@ -120,8 +119,8 @@ export const SmtpConfig: React.FC = () => {
 
       // Clear password field after save
       setFormData({ ...formData, smtp_password: '' });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to save SMTP config';
+    } catch (err: unknown) {
+      const errorMessage = (err as Error).message || 'Failed to save SMTP config';
       toast.error(t('error', language), errorMessage);
     } finally {
       setSaving(false);
@@ -158,8 +157,8 @@ export const SmtpConfig: React.FC = () => {
       } else {
         toast.error(t('smtpTestFailed', language), result.message);
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to test SMTP connection';
+    } catch (err: unknown) {
+      const errorMessage = (err as Error).message || 'Failed to test SMTP connection';
       toast.error(t('error', language), errorMessage);
     } finally {
       setTesting(false);
@@ -181,8 +180,8 @@ export const SmtpConfig: React.FC = () => {
         use_tls: true,
       });
       toast.success(t('smtpConfigDeleted', language), t('smtpConfigDeletedDesc', language));
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to delete SMTP config';
+    } catch (err: unknown) {
+      const errorMessage = (err as Error).message || 'Failed to delete SMTP config';
       toast.error(t('error', language), errorMessage);
     }
   };
@@ -205,8 +204,8 @@ export const SmtpConfig: React.FC = () => {
       } else {
         toast.error(t('error', language), result.message);
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send test email';
+    } catch (err: unknown) {
+      const errorMessage = (err as Error).message || 'Failed to send test email';
       toast.error(t('error', language), errorMessage);
     }
   };

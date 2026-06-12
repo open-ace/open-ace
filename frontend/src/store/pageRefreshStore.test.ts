@@ -3,7 +3,7 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
-import { usePageRefreshStore } from '../pageRefreshStore';
+import { usePageRefreshStore } from './pageRefreshStore';
 
 describe('pageRefreshStore', () => {
   beforeEach(() => {

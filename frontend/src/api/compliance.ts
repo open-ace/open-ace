@@ -141,7 +141,7 @@ export const complianceApi = {
     language?: 'en' | 'zh' | 'ja' | 'ko';
     tenant_id?: number;
     filters?: Record<string, unknown>;
-  }): Promise<ComplianceReport | string> {
+  }): Promise<ComplianceReport | string | Blob> {
     const isCsv = data.format === 'csv';
     const isHtml = data.format === 'html';
     const isExcel = data.format === 'excel';

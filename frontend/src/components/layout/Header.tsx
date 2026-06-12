@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useAuth, useTheme, useLanguage, useAppMode } from '@/hooks';
+import { useAuth, useTheme, useLanguage } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
 import { UserSettingsModal, Avatar } from '@/components/common';
@@ -18,7 +18,6 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const { user, isAuthenticated, logout } = useAuth();
   const theme = useTheme();
   const language = useLanguage();
-  const appMode = useAppMode();
   const [showSettings, setShowSettings] = useState(false);
 
   const handleThemeToggle = () => {

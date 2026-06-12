@@ -12,13 +12,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  usePageRefreshStore,
-  type PageRefreshConfig,
-} from '@/store';
+import { usePageRefreshStore } from '@/store';
 import {
   matchQueryKey,
-  createMatcherConfig,
   hashQueryKey,
   type QueryKeyMatcherConfig,
 } from '@/utils';
@@ -94,8 +90,8 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
 
   // Refs for deduplication and timing
   const lastRefreshTimestampsRef = useRef<Map<string, number>>(new Map());
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<number | null>(null);
+  const debounceTimeoutRef = useRef<number | null>(null);
   const refreshQueueRef = useRef<Array<() => Promise<void>>>([]);
 
   // Get config from store
@@ -201,7 +197,7 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
         const nextRefresh = refreshQueueRef.current.shift();
         if (nextRefresh) {
           // Delay to prevent immediate execution
-          setTimeout(nextRefresh, 100);
+          window.setTimeout(nextRefresh, 100);
         }
       }
     }
@@ -227,12 +223,12 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
   const refresh = useCallback(async () => {
     // Clear any pending debounce
     if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
+      window.clearTimeout(debounceTimeoutRef.current);
     }
 
     // Debounce for 1-2 seconds
     await new Promise<void>((resolve) => {
-      debounceTimeoutRef.current = setTimeout(() => {
+      debounceTimeoutRef.current = window.setTimeout(() => {
         resolve();
       }, 1000);
     });
@@ -266,7 +262,7 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
   useEffect(() => {
     // Clear existing timeout
     if (refreshTimeoutRef.current) {
-      clearTimeout(refreshTimeoutRef.current);
+      window.clearTimeout(refreshTimeoutRef.current);
       refreshTimeoutRef.current = null;
     }
 
@@ -280,14 +276,14 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
       errorCount >= maxRetries ? fallbackInterval : refreshInterval;
 
     // Schedule next refresh
-    refreshTimeoutRef.current = setTimeout(() => {
+    refreshTimeoutRef.current = window.setTimeout(() => {
       executeRefresh();
     }, effectiveInterval);
 
     // Cleanup on unmount or when conditions change
     return () => {
       if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
+        window.clearTimeout(refreshTimeoutRef.current);
         refreshTimeoutRef.current = null;
       }
     };
@@ -308,10 +304,10 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
     return () => {
       // Clear all timeouts
       if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
+        window.clearTimeout(refreshTimeoutRef.current);
       }
       if (debounceTimeoutRef.current) {
-        clearTimeout(debounceTimeoutRef.current);
+        window.clearTimeout(debounceTimeoutRef.current);
       }
       // Clear queue
       refreshQueueRef.current = [];

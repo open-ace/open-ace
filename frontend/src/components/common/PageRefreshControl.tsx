@@ -13,7 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/hooks';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import type { UsePageRefreshReturn } from '@/hooks/usePageRefresh';
 
 /**
@@ -39,7 +39,6 @@ export const STANDARD_INTERVALS: IntervalOption[] = [
 export interface PageRefreshControlProps {
   refresh: UsePageRefreshReturn;
   intervalOptions?: IntervalOption[];
-  defaultInterval?: number;
   showAutoRefreshToggle?: boolean;
   showIntervalSelector?: boolean;
   compact?: boolean;
@@ -53,7 +52,7 @@ export interface PageRefreshControlProps {
 /**
  * Format timestamp to readable string
  */
-function formatRefreshTime(timestamp: number | null, language: string): string {
+function formatRefreshTime(timestamp: number | null, language: Language): string {
   if (!timestamp) return '';
 
   const now = Date.now();
@@ -62,11 +61,11 @@ function formatRefreshTime(timestamp: number | null, language: string): string {
   if (diff < 60000) {
     // Less than 1 minute
     const seconds = Math.floor(diff / 1000);
-    return t('secondsAgo', language, { count: seconds });
+    return `${seconds} ${t('secondsAgo', language)}`;
   } else if (diff < 3600000) {
     // Less than 1 hour
     const minutes = Math.floor(diff / 60000);
-    return t('minutesAgo', language, { count: minutes });
+    return `${minutes} ${t('minutesAgo', language)}`;
   } else {
     // More than 1 hour
     const date = new Date(timestamp);
@@ -103,7 +102,6 @@ function getNextRefreshCountdown(nextRefreshTime: number | null): string {
 export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   refresh,
   intervalOptions = STANDARD_INTERVALS,
-  defaultInterval = 60000,
   showAutoRefreshToggle = true,
   showIntervalSelector = true,
   compact = false,
@@ -134,13 +132,13 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   useEffect(() => {
     if (isRefreshing) {
       setIsButtonDisabled(true);
-    } else {
-      // Re-enable after debounce time
-      const timeout = setTimeout(() => {
-        setIsButtonDisabled(false);
-      }, 1000);
-      return () => clearTimeout(timeout);
+      return;
     }
+    // Re-enable after debounce time
+    const timeout = setTimeout(() => {
+      setIsButtonDisabled(false);
+    }, 1000);
+    return () => clearTimeout(timeout);
   }, [isRefreshing]);
 
   // Update countdown for next refresh
@@ -155,9 +153,9 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
     };
 
     updateCountdown();
-    const intervalId = setInterval(updateCountdown, 1000);
+    const intervalId = window.setInterval(updateCountdown, 1000);
 
-    return () => clearInterval(intervalId);
+    return () => window.clearInterval(intervalId);
   }, [showNextRefreshTime, autoRefresh, nextRefreshTime]);
 
   // Build tooltip content

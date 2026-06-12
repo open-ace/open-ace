@@ -89,7 +89,7 @@ export const smtpConfigApi = {
   },
 
   async getStatistics(days?: number): Promise<EmailStatistics> {
-    const params = days ? { days: String(days) } : {};
+    const params: Record<string, string> | undefined = days ? { days: String(days) } : undefined;
     const response = await apiClient.get<{
       success: boolean;
       data: EmailStatistics;

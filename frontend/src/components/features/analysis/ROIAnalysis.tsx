@@ -20,9 +20,7 @@ import { t } from '@/i18n';
 import {
   Card,
   StatCard,
-  Button,
   Select,
-  Loading,
   Error,
   EmptyState,
   LineChart,
@@ -100,7 +98,7 @@ export const ROIAnalysis: React.FC = () => {
   const [suggestions, setSuggestions] = useState<OptimizationSuggestion[]>([]);
   const [efficiency, setEfficiency] = useState<EfficiencyReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [_isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState('');
