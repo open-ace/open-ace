@@ -1016,6 +1016,13 @@ link[rel='dns-prefetch'] {
   align-items: center;
   justify-content: space-between;
   padding: var(--spacing-sm) var(--spacing-md);
+  /* Ensure header content doesn't block pointer events on elements below */
+  pointer-events: none;
+}
+
+/* Re-enable pointer events for interactive header elements */
+.header > * {
+  pointer-events: auto;
 }
 
 [data-theme='dark'] .header {
@@ -1044,6 +1051,13 @@ link[rel='dns-prefetch'] {
   gap: var(--spacing-sm);
   align-items: center;
   flex-wrap: nowrap;
+}
+
+/* Page Refresh Control - ensure buttons are clickable (not blocked by sticky header) */
+.page-header-controls .page-refresh-control,
+.page-header-controls .page-refresh-control-compact {
+  position: relative;
+  z-index: 1;
 }
 
 .page-header-controls .flex-spacer {
