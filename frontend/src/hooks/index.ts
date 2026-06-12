@@ -108,5 +108,9 @@ export {
 } from '@/store';
 
 // Page refresh hooks
-export { usePageRefresh, type UsePageRefreshOptions, type UsePageRefreshReturn } from './usePageRefresh';
+export {
+  usePageRefresh,
+  type UsePageRefreshOptions,
+  type UsePageRefreshReturn,
+} from './usePageRefresh';
 export { useGlobalRefreshPause } from './useGlobalRefreshPause';

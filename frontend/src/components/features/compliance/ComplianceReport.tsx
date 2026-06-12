@@ -222,7 +222,9 @@ export const ComplianceReport: React.FC = () => {
                 {savedReports.map((report) => (
                   <tr key={report.report_id}>
                     <td>
-                      <strong>{getReportTypeName(report.report_type, language, report.report_type)}</strong>
+                      <strong>
+                        {getReportTypeName(report.report_type, language, report.report_type)}
+                      </strong>
                     </td>
                     <td>
                       <Badge variant="secondary">

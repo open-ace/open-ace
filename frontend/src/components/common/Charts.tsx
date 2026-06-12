@@ -484,7 +484,7 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
             }
 
             // Line 3: Description (if provided)
-            if (descriptions && descriptions[dataIndex]) {
+            if (descriptions?.[dataIndex]) {
               lines.push(descriptions[dataIndex]);
             }
 

@@ -591,7 +591,8 @@ const translations: Record<Language, Translations> = {
     saveFailed: 'Failed to save settings',
     tenantIdRequired: 'Tenant ID is required',
     noTenantConfigured: 'No Tenant Configured',
-    ssoRequiresTenant: 'SSO requires a tenant. Please contact administrator to set up a tenant for your account.',
+    ssoRequiresTenant:
+      'SSO requires a tenant. Please contact administrator to set up a tenant for your account.',
     dataRetention: 'Data Retention',
     complianceReport: 'Compliance Report',
     settings: 'Settings',
@@ -715,7 +716,8 @@ const translations: Record<Language, Translations> = {
     smtpSetupGuide1: 'Enter your SMTP server hostname and port (common ports: 25, 465, 587)',
     smtpSetupGuide2: 'Enter SMTP credentials if authentication is required',
     smtpSetupGuide3: 'Enter the sender email address',
-    smtpSetupGuide4: 'Click "Test Connection" to verify the configuration before enabling email notifications',
+    smtpSetupGuide4:
+      'Click "Test Connection" to verify the configuration before enabling email notifications',
     help: 'Help',
 
     // Data Retention
@@ -2583,7 +2585,8 @@ const translations: Record<Language, Translations> = {
     recordsDeleted: '削除レコード数',
     editRetentionRule: '保持ルール編集',
     cleanupPreview: 'クリーンアッププレビュー',
-    cleanupPreviewDescription: 'このプレビューはクリーンアップ操作で影響を受けるデータを表示します。',
+    cleanupPreviewDescription:
+      'このプレビューはクリーンアップ操作で影響を受けるデータを表示します。',
     executeCleanup: 'クリーンアップ実行',
     confirmCleanup: 'クリーンアップを実行しますか？この操作は取り消せません。',
     storageEstimates: 'ストレージ推定',

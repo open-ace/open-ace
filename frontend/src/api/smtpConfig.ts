@@ -79,7 +79,7 @@ export const smtpConfigApi = {
   }): Promise<SMTPTestResult> {
     const response = await apiClient.post<SMTPTestResult>(
       '/api/management/smtp-config/test',
-      config || {}
+      config ?? {}
     );
     return response;
   },
@@ -97,10 +97,7 @@ export const smtpConfigApi = {
     return response.data;
   },
 
-  async sendTestEmail(
-    recipient_email: string,
-    language?: string
-  ): Promise<SendTestEmailResult> {
+  async sendTestEmail(recipient_email: string, language?: string): Promise<SendTestEmailResult> {
     const response = await apiClient.post<SendTestEmailResult>(
       '/api/management/smtp-config/send-test',
       { recipient_email, language }

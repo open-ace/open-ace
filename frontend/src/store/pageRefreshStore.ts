@@ -89,16 +89,9 @@ export const usePageRefreshStore = create<PageRefreshState>()(
           };
 
           // Update nextRefreshTime if interval or autoRefresh changed
-          if (
-            config.autoRefresh !== undefined ||
-            config.interval !== undefined
-          ) {
-            const autoRefresh =
-              config.autoRefresh !== undefined
-                ? config.autoRefresh
-                : currentConfig.autoRefresh;
-            const interval =
-              config.interval !== undefined ? config.interval : currentConfig.interval;
+          if (config.autoRefresh !== undefined || config.interval !== undefined) {
+            const autoRefresh = config.autoRefresh ?? currentConfig.autoRefresh;
+            const interval = config.interval ?? currentConfig.interval;
 
             if (autoRefresh && interval > 0) {
               newConfig.nextRefreshTime = Date.now() + interval;
@@ -126,9 +119,7 @@ export const usePageRefreshStore = create<PageRefreshState>()(
         if (Date.now() - config.lastVisited > CLEANUP_THRESHOLD) {
           // Auto-cleanup stale config
           set((s) => ({
-            configs: Object.fromEntries(
-              Object.entries(s.configs).filter(([key]) => key !== page)
-            ),
+            configs: Object.fromEntries(Object.entries(s.configs).filter(([key]) => key !== page)),
           }));
           return undefined;
         }
@@ -150,7 +141,7 @@ export const usePageRefreshStore = create<PageRefreshState>()(
             lastRefreshTime: now,
             lastVisited: now,
             errorCount: success ? 0 : currentConfig.errorCount + 1,
-            lastError: success ? null : error || 'Refresh failed',
+            lastError: success ? null : error ?? 'Refresh failed',
           };
 
           // Update nextRefreshTime if auto refresh is enabled
@@ -194,14 +185,10 @@ export const usePageRefreshStore = create<PageRefreshState>()(
 /**
  * Selectors for stable references
  */
-export const usePageConfig = (page: string) =>
-  usePageRefreshStore((state) => state.configs[page]);
+export const usePageConfig = (page: string) => usePageRefreshStore((state) => state.configs[page]);
 
-export const useGlobalPaused = () =>
-  usePageRefreshStore((state) => state.globalPaused);
+export const useGlobalPaused = () => usePageRefreshStore((state) => state.globalPaused);
 
-export const useSetPageConfig = () =>
-  usePageRefreshStore((state) => state.setConfig);
+export const useSetPageConfig = () => usePageRefreshStore((state) => state.setConfig);
 
-export const useRecordRefresh = () =>
-  usePageRefreshStore((state) => state.recordRefresh);
+export const useRecordRefresh = () => usePageRefreshStore((state) => state.recordRefresh);

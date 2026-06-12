@@ -211,6 +211,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
             data-bs-toggle="dropdown"
             aria-expanded="false"
             title={buildTooltip()}
+            data-testid="dropdown-toggle"
           >
             <i className={cn('bi', autoRefresh ? 'bi-clock' : 'bi-clock-history')} />
           </button>
@@ -226,10 +227,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
                       checked={autoRefresh}
                       onChange={(e) => setAutoRefresh(e.target.checked)}
                     />
-                    <label
-                      className="form-check-label"
-                      htmlFor={`${position}-auto-refresh`}
-                    >
+                    <label className="form-check-label" htmlFor={`${position}-auto-refresh`}>
                       {t('autoRefresh', language)}
                     </label>
                   </div>
@@ -249,10 +247,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
                 {intervalOptions.map((option) => (
                   <li key={option.value}>
                     <button
-                      className={cn(
-                        'dropdown-item',
-                        interval === option.value && 'active'
-                      )}
+                      className={cn('dropdown-item', interval === option.value && 'active')}
                       onClick={() => setInterval(option.value)}
                     >
                       {t(option.label, language)}

@@ -132,8 +132,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       return;
     }
 
-    const shouldReconcileSelection =
-      !preserveInitialSelection || hasUserChangedView || !selectedId;
+    const shouldReconcileSelection = !preserveInitialSelection || hasUserChangedView || !selectedId;
 
     if (workflows.length === 0) {
       if (selectedId && shouldReconcileSelection) {

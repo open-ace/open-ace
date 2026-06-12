@@ -145,7 +145,7 @@ describe('AutonomousWorkflowList', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /next page/i })[0]);
 
     const lastFilters = lastWorkflowFilters();
     expect(lastFilters?.limit).toBe('50');
@@ -211,7 +211,7 @@ describe('AutonomousWorkflowList', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /next page/i })[0]);
     shrinkResults = true;
 
     rerender(

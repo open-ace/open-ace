@@ -11,15 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Card,
-  Button,
-  TextInput,
-  Loading,
-  Error,
-  Badge,
-  useToast,
-} from '@/components/common';
+import { Card, Button, TextInput, Loading, Error, Badge, useToast } from '@/components/common';
 import { smtpConfigApi, type SMTPConfig, type EmailStatistics } from '@/api/smtpConfig';
 
 export const SmtpConfig: React.FC = () => {
@@ -60,7 +52,7 @@ export const SmtpConfig: React.FC = () => {
         setFormData({
           smtp_host: result.smtp_host,
           smtp_port: String(result.smtp_port),
-          smtp_user: result.smtp_user || '',
+          smtp_user: result.smtp_user ?? '',
           smtp_password: '', // Don't populate password
           from_address: result.from_address,
           use_tls: result.use_tls,
@@ -237,9 +229,7 @@ export const SmtpConfig: React.FC = () => {
         >
           <div className="row g-3">
             <div className="col-md-6">
-              <label className="form-label">
-                {t('smtpHost', language)} *
-              </label>
+              <label className="form-label">{t('smtpHost', language)} *</label>
               <TextInput
                 value={formData.smtp_host}
                 onChange={(value) => setFormData({ ...formData, smtp_host: value })}
@@ -248,9 +238,7 @@ export const SmtpConfig: React.FC = () => {
             </div>
 
             <div className="col-md-6">
-              <label className="form-label">
-                {t('smtpPort', language)} *
-              </label>
+              <label className="form-label">{t('smtpPort', language)} *</label>
               <TextInput
                 type="number"
                 value={formData.smtp_port}
@@ -275,7 +263,7 @@ export const SmtpConfig: React.FC = () => {
                 className="form-control"
                 value={formData.smtp_password}
                 onChange={(e) => setFormData({ ...formData, smtp_password: e.target.value })}
-                placeholder={config?.smtp_password_masked || t('enterPassword', language)}
+                placeholder={config?.smtp_password_masked ?? t('enterPassword', language)}
               />
               {config?.smtp_password_masked && !formData.smtp_password && (
                 <small className="text-muted">
@@ -285,9 +273,7 @@ export const SmtpConfig: React.FC = () => {
             </div>
 
             <div className="col-md-6">
-              <label className="form-label">
-                {t('senderEmail', language)} *
-              </label>
+              <label className="form-label">{t('senderEmail', language)} *</label>
               <TextInput
                 type="email"
                 value={formData.from_address}
@@ -317,7 +303,11 @@ export const SmtpConfig: React.FC = () => {
                   <i className="bi bi-save me-1" />
                   {t('save', language)}
                 </Button>
-                <Button variant="outline-secondary" onClick={handleTestConnection} loading={testing}>
+                <Button
+                  variant="outline-secondary"
+                  onClick={handleTestConnection}
+                  loading={testing}
+                >
                   <i className="bi bi-plug me-1" />
                   {t('testConnection', language)}
                 </Button>

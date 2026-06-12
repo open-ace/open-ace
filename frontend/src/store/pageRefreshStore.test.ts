@@ -112,8 +112,8 @@ describe('pageRefreshStore', () => {
       const config = result.current.getConfig('/stale-page');
       expect(config).toBeUndefined();
 
-      // Config should be removed from store
-      expect(result.current.configs['/stale-page']).toBeUndefined();
+      // Config should be removed from store - use getState() to get latest state
+      expect(usePageRefreshStore.getState().configs['/stale-page']).toBeUndefined();
     });
   });
 
