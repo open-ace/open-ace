@@ -401,7 +401,7 @@ def create_workflow():
                     {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
                 )
 
-            response_data = {
+            response_data: dict[str, Any] = {
                 "success": True,
                 "workflow": _workflow_response(created_workflows[0]),
             }

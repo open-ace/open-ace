@@ -9,7 +9,7 @@ import base64
 import hashlib
 import logging
 import os
-from typing import Optional
+from typing import Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class SMTPPasswordManager:
         """
         from cryptography.fernet import Fernet
 
-        return Fernet.generate_key().decode()
+        return cast("str", Fernet.generate_key().decode())
 
     def encrypt(self, password: str) -> str:
         """
@@ -73,7 +73,7 @@ class SMTPPasswordManager:
             from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
-            return f.encrypt(password.encode()).decode()
+            return cast("str", f.encrypt(password.encode()).decode())
         except ImportError:
             raise ImportError(
                 "cryptography package is required for SMTP password encryption. "
@@ -102,7 +102,7 @@ class SMTPPasswordManager:
             from cryptography.fernet import Fernet
 
             f = Fernet(base64.urlsafe_b64encode(self._encryption_key))
-            return f.decrypt(encrypted_password.encode()).decode()
+            return cast("str", f.decrypt(encrypted_password.encode()).decode())
         except ImportError:
             raise ImportError(
                 "cryptography package is required for SMTP password decryption. "

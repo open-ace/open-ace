@@ -98,15 +98,20 @@ class SMTPConfigService:
                     "success": False,
                     "message": "No SMTP configuration found",
                 }
-            smtp_host = saved_config["smtp_host"]
-            smtp_port = saved_config["smtp_port"]
+            smtp_host = saved_config["smtp_host"] or ""
+            smtp_port = saved_config["smtp_port"] or 25
             smtp_user = saved_config["smtp_user"]
             smtp_password = saved_config["smtp_password"]
-            from_address = saved_config["from_address"]
-            use_tls = saved_config["use_tls"]
+            from_address = saved_config["from_address"] or ""
+            use_tls = saved_config["use_tls"] or False
             config_id = saved_config["id"]
         else:
             config_id = None
+            # Ensure non-None values when using provided parameters
+            smtp_host = smtp_host or ""
+            smtp_port = smtp_port or 25
+            from_address = from_address or ""
+            use_tls = use_tls or False
 
         try:
             # Create SMTP connection
@@ -143,7 +148,12 @@ class SMTPConfigService:
             }
 
         except smtplib.SMTPAuthenticationError as e:
-            error_msg = f"SMTP authentication failed: {e.smtp_code} - {e.smtp_error.decode()}"
+            smtp_error_str = (
+                e.smtp_error.decode()
+                if isinstance(e.smtp_error, bytes)
+                else str(e.smtp_error)
+            )
+            error_msg = f"SMTP authentication failed: {e.smtp_code} - {smtp_error_str}"
             logger.error(error_msg)
             return {
                 "success": False,
@@ -151,7 +161,12 @@ class SMTPConfigService:
             }
 
         except smtplib.SMTPConnectError as e:
-            error_msg = f"SMTP connection failed: {e.smtp_code} - {e.smtp_error.decode()}"
+            smtp_error_str = (
+                e.smtp_error.decode()
+                if isinstance(e.smtp_error, bytes)
+                else str(e.smtp_error)
+            )
+            error_msg = f"SMTP connection failed: {e.smtp_code} - {smtp_error_str}"
             logger.error(error_msg)
             return {
                 "success": False,

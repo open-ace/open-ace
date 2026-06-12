@@ -108,7 +108,7 @@ class EmailNotificationLogRepository:
         conn.commit()
         conn.close()
 
-        return log_id
+        return int(log_id or 0)
 
     def update_status(
         self,
@@ -153,7 +153,7 @@ class EmailNotificationLogRepository:
             [status, error_message] + ([next_retry_at] if next_retry_at else []) + [log_id],
         )
 
-        success = cursor.rowcount > 0
+        success = bool(cursor.rowcount > 0)
         conn.commit()
         conn.close()
 
@@ -320,7 +320,7 @@ class EmailNotificationLogRepository:
         conn.close()
 
         logger.info(f"Cleaned up {count} old email notification logs")
-        return count
+        return int(count or 0)
 
 
 # Global repository instance

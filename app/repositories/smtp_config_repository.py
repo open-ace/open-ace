@@ -263,7 +263,7 @@ class SMTPConfigRepository:
             ),
         )
 
-        success = cursor.rowcount > 0
+        success = bool(cursor.rowcount > 0)
         conn.commit()
         conn.close()
 
@@ -285,7 +285,7 @@ class SMTPConfigRepository:
         conn.commit()
         conn.close()
 
-        return count > 0
+        return bool(count > 0)
 
 
 # Global repository instance

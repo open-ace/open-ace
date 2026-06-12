@@ -366,13 +366,13 @@ class ComplianceReport:
         if self.metadata.generated_by:
             try:
                 user_repo = UserRepository()
-                user = user_repo.get_by_id(self.metadata.generated_by)
+                user = user_repo.get_user_by_id(self.metadata.generated_by)
                 if user:
-                    context["generated_by_name"] = user.username
+                    context["generated_by_name"] = user.get("username", f"User {self.metadata.generated_by}")
             except Exception:
                 context["generated_by_name"] = f"User {self.metadata.generated_by}"
 
-        return template.render(**context)
+        return str(template.render(**context))
 
     def to_excel(self, language: str = "en") -> bytes:
         """
@@ -636,8 +636,9 @@ class ComplianceReport:
 
                 status_cell = ws_checks.cell(row=row_idx, column=3, value=check.get("status"))
                 status_cell.border = border
-                if check.get("status") in status_fills:
-                    status_cell.fill = status_fills[check.get("status")]
+                status_val = check.get("status")
+                if status_val and status_val in status_fills:
+                    status_cell.fill = status_fills[status_val]
 
                 ws_checks.cell(row=row_idx, column=4, value=check.get("message")).border = border
 
