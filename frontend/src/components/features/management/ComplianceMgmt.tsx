@@ -705,7 +705,9 @@ export const ComplianceMgmt: React.FC = () => {
                               ? 'danger'
                               : rule.action === 'anonymize'
                               ? 'warning'
-                              : 'info'
+                              : rule.action === 'archive'
+                              ? 'info'
+                              : 'secondary'
                           }
                         >
                           {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}

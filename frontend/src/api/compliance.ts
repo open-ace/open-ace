@@ -280,7 +280,7 @@ export const complianceApi = {
   async setRetentionRule(data: {
     data_type: string;
     retention_days: number;
-    action?: 'delete' | 'archive';
+    action?: 'delete' | 'archive' | 'anonymize';
   }): Promise<RetentionRule> {
     const response = await apiClient.put<{ rule: RetentionRule }>(
       '/api/compliance/retention/rules',
