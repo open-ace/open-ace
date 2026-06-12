@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
-import type { CreateWorkflowRequest } from '@/api/autonomous';
+import type { CreateWorkflowRequest, WorkflowListParams } from '@/api/autonomous';
 
 /** Session message shape returned by milestone session API */
 export interface SessionMessage {
@@ -21,10 +21,10 @@ export interface MilestoneSession {
 
 // ── Workflow Queries ───────────────────────────────────────────────
 
-export function useWorkflows(filters?: { status?: string }) {
+export function useWorkflows(filters?: WorkflowListParams) {
   return useQuery({
     queryKey: ['autonomous', 'workflows', filters],
-    queryFn: () => autonomousApi.listWorkflows(filters as Record<string, string> | undefined),
+    queryFn: () => autonomousApi.listWorkflows(filters),
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
   });

@@ -93,7 +93,7 @@ export interface AuditThresholds {
 export interface RetentionRule {
   data_type: string;
   retention_days: number;
-  action: 'delete' | 'archive';
+  action: 'delete' | 'archive' | 'anonymize';
 }
 
 export interface RetentionHistory {
@@ -121,15 +121,42 @@ export const complianceApi = {
     report_type: string;
     period_start?: string;
     period_end?: string;
-    format?: 'json' | 'csv';
+    format?: 'json' | 'csv' | 'html' | 'excel';
+    language?: 'en' | 'zh' | 'ja' | 'ko';
     tenant_id?: number;
     filters?: Record<string, unknown>;
   }): Promise<ComplianceReport | string> {
     const isCsv = data.format === 'csv';
+    const isHtml = data.format === 'html';
+    const isExcel = data.format === 'excel';
+
     if (isCsv) {
       // CSV format returns raw text
       return apiClient.post<string>('/api/compliance/reports', data, undefined, undefined, true);
     }
+
+    if (isHtml) {
+      // HTML format returns raw text
+      return apiClient.post<string>('/api/compliance/reports', data, undefined, undefined, true);
+    }
+
+    if (isExcel) {
+      // Excel format returns binary data - need special handling
+      const response = await fetch('/api/compliance/reports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to generate report');
+      }
+      const blob = await response.blob();
+      return blob;
+    }
+
     return apiClient.post<ComplianceReport>('/api/compliance/reports', data);
   },
 
@@ -152,10 +179,17 @@ export const complianceApi = {
 
   async getSavedReport(
     reportId: string,
-    format?: 'json' | 'csv'
-  ): Promise<ComplianceReport | string> {
-    const queryParams: Record<string, string> = format ? { format } : {};
+    format?: 'json' | 'csv' | 'html' | 'excel',
+    language?: 'en' | 'zh' | 'ja' | 'ko'
+  ): Promise<ComplianceReport | string | Blob> {
+    const queryParams: Record<string, string> = {};
+    if (format) queryParams.format = format;
+    if (language) queryParams.language = language;
+
     const isCsv = format === 'csv';
+    const isHtml = format === 'html';
+    const isExcel = format === 'excel';
+
     if (isCsv) {
       // CSV format returns raw text
       return apiClient.get<string>(
@@ -165,6 +199,29 @@ export const complianceApi = {
         true
       );
     }
+
+    if (isHtml) {
+      // HTML format returns raw text
+      return apiClient.get<string>(
+        `/api/compliance/reports/${reportId}`,
+        queryParams,
+        undefined,
+        true
+      );
+    }
+
+    if (isExcel) {
+      // Excel format returns binary data
+      const url = `/api/compliance/reports/${reportId}?${new URLSearchParams(queryParams).toString()}`;
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to get report');
+      }
+      return response.blob();
+    }
+
     return apiClient.get<ComplianceReport>(`/api/compliance/reports/${reportId}`, queryParams);
   },
 

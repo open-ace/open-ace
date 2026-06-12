@@ -101,6 +101,7 @@ def _make_repo():
     }
     repo.get_workflow.return_value = None
     repo.list_workflows.return_value = []
+    repo.count_workflows.return_value = 0
     repo.list_milestones.return_value = []
     repo.create_milestone.return_value = {"milestone_id": "ms-mock", "workflow_id": "wf-mock"}
     repo.create_event.return_value = {"id": 1}
@@ -157,6 +158,11 @@ class TestCreateWorkflow:
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["success"] is True
+        payload = repo.create_workflow.call_args[0][0]
+        snapshot = json.loads(payload["definition_snapshot"])
+        assert snapshot["requirements_mode"] == "text"
+        assert snapshot["requirements_text"] == "Build a feature"
+        assert snapshot["cli_tool"] == "claude-code"
 
     def test_create_missing_requirements(self, client):
         with _mock_auth():
@@ -247,6 +253,13 @@ class TestCreateWorkflow:
         call_payloads = [call.args[0] for call in repo.create_workflow.call_args_list]
         assert [payload["github_issue_number"] for payload in call_payloads] == [12, 14, 15]
         assert [payload["status"] for payload in call_payloads] == ["pending", "queued", "queued"]
+        snapshots = [json.loads(payload["definition_snapshot"]) for payload in call_payloads]
+        assert all(
+            snapshot["requirements_issue_input_raw"] == "12 14-15 bad-token"
+            for snapshot in snapshots
+        )
+        assert [snapshot["resolved_issue_number"] for snapshot in snapshots] == [12, 14, 15]
+        assert [snapshot["batch_order"] for snapshot in snapshots] == [1, 2, 3]
 
     def test_create_with_only_invalid_issue_selectors(self, client):
         repo = _make_repo()
@@ -286,6 +299,7 @@ class TestListWorkflows:
             {"workflow_id": "wf-1", "title": "Task 1"},
             {"workflow_id": "wf-2", "title": "Task 2"},
         ]
+        repo.count_workflows.return_value = 2
         with _mock_auth(role="admin"):
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.get("/api/autonomous/workflows")
@@ -293,6 +307,9 @@ class TestListWorkflows:
         data = resp.get_json()
         assert data["success"] is True
         assert len(data["workflows"]) == 2
+        assert data["total"] == 2
+        assert data["limit"] == 50
+        assert data["offset"] == 0
 
     def test_list_regular_user_filters_own(self, client):
         """Non-admin users should only see their own workflows."""
@@ -314,6 +331,25 @@ class TestListWorkflows:
                 call_kwargs = repo.list_workflows.call_args
                 assert call_kwargs[1]["user_id"] is None
 
+    def test_list_passes_search_limit_offset_and_status(self, client):
+        repo = _make_repo()
+        repo.count_workflows.return_value = 7
+        with _mock_auth(role="admin"):
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get(
+                    "/api/autonomous/workflows?status=queued&search=issue%2012&limit=25&offset=50"
+                )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total"] == 7
+        assert data["limit"] == 25
+        assert data["offset"] == 50
+        call_kwargs = repo.list_workflows.call_args[1]
+        assert call_kwargs["status"] == "queued"
+        assert call_kwargs["search"] == "issue 12"
+        assert call_kwargs["limit"] == 25
+        assert call_kwargs["offset"] == 50
+
 
 class TestGetWorkflow:
     """Tests for GET /api/autonomous/workflows/<id>."""
@@ -330,6 +366,21 @@ class TestGetWorkflow:
                 resp = client.get("/api/autonomous/workflows/wf-1")
         assert resp.status_code == 200
         assert resp.get_json()["workflow"]["workflow_id"] == "wf-1"
+
+    def test_get_parses_definition_snapshot(self, client):
+        repo = _make_repo()
+        repo.get_workflow.return_value = {
+            "workflow_id": "wf-1",
+            "user_id": 1,
+            "title": "Test",
+            "definition_snapshot": json.dumps({"requirements_mode": "text"}),
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1")
+        assert resp.status_code == 200
+        snapshot = resp.get_json()["workflow"]["definition_snapshot"]
+        assert snapshot["requirements_mode"] == "text"
 
     def test_get_not_found(self, client):
         repo = _make_repo()

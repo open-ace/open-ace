@@ -29,6 +29,8 @@ export interface NotificationPreferences {
   webhook_url?: string;
   alert_types: string[];
   min_severity: 'info' | 'warning' | 'critical';
+  notification_email?: string;
+  email_verified?: boolean;
 }
 
 // API

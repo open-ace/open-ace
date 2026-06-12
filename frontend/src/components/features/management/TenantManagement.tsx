@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -23,9 +23,11 @@ import {
   Modal,
   TextInput,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
 import { tenantApi, type Tenant, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
 import { formatDateTime } from '@/utils';
+import { usePageRefresh } from '@/hooks';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
@@ -69,6 +71,14 @@ export const TenantManagement: React.FC = () => {
     max_sessions_per_user: 5,
   });
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Page refresh control - manual refresh for tenant management
+  const pageRefresh = usePageRefresh({
+    page: '/manage/tenants',
+    refreshKey: createMatcherConfig([['tenants']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   // Form validation
   const isFormValid = formData.name.trim().length > 0;
@@ -269,10 +279,19 @@ export const TenantManagement: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tenantManagement', language)}</h2>
-        <Button variant="primary" size="sm" onClick={handleOpenCreate}>
-          <i className="bi bi-plus-lg me-1" />
-          {t('addTenant', language)}
-        </Button>
+        <div className="d-flex gap-2">
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
+          <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+            <i className="bi bi-plus-lg me-1" />
+            {t('addTenant', language)}
+          </Button>
+        </div>
       </div>
 
       {/* Statistics */}
@@ -321,12 +340,6 @@ export const TenantManagement: React.FC = () => {
           <div className="col-md-3">
             <label className="form-label">{t('plan', language)}</label>
             <Select options={PLAN_OPTIONS} value={planFilter} onChange={setPlanFilter} />
-          </div>
-          <div className="col-md-3 d-flex align-items-end">
-            <Button variant="secondary" size="sm" onClick={fetchTenants}>
-              <i className="bi bi-arrow-clockwise me-1" />
-              {t('refresh', language)}
-            </Button>
           </div>
         </div>
       </Card>

@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'components/summary_table.html' %}
+
+{% if details | length > 0 %}
+<div class="details-section">
+    <h2>Quota Alert Details</h2>
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Alert ID</th>
+                <th scope="col">User ID</th>
+                <th scope="col">Alert Type</th>
+                <th scope="col">Created At</th>
+                <th scope="col">Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detail in details %}
+            <tr>
+                <td>{{ detail.id | e }}</td>
+                <td>{{ detail.user_id | e }}</td>
+                <td>
+                    {% if detail.alert_type == 'exceeded' %}
+                    <span class="badge badge-danger">{{ detail.alert_type | e }}</span>
+                    {% elif detail.alert_type == 'critical' %}
+                    <span class="badge badge-warning">{{ detail.alert_type | e }}</span>
+                    {% else %}
+                    <span class="badge badge-secondary">{{ detail.alert_type | e }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ detail.created_at | e }}</td>
+                <td>{{ detail.details | e }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon" aria-hidden="true">&#128200;</div>
+    <p>No quota alerts recorded for this period</p>
+</div>
+{% endif %}
+
+{% include 'components/compliance_checks.html' %}
+{% include 'components/recommendations.html' %}
+{% endblock %}

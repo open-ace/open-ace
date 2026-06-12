@@ -9,7 +9,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
-import { useQuotaUsage, useUpdateQuota } from '@/hooks';
+import { useQuotaUsage, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -25,18 +25,20 @@ import {
   Progress,
   Badge,
   useToast,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatDateTime, formatNumber } from '@/utils';
-
-// Token quotas are stored in M (millions) units
-const TOKEN_QUOTA_MULTIPLIER = 1_000_000;
-
-// Format quota value (stored in M units) to display string
-// Keep M unit format for consistency with edit modal
-const formatQuotaTokens = (quota: number | undefined | null): string => {
-  if (!quota) return '∞';
-  return `${quota.toFixed(2)}M`;
-};
+import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
+import {
+  QuotaType,
+  TOKEN_QUOTA_MULTIPLIER,
+  MAX_TOKEN_QUOTA,
+  MAX_REQUEST_QUOTA,
+} from '@/constants/quota';
+import {
+  parseAndValidateQuota,
+  formatQuotaForDisplay,
+  getMaxQuotaDisplay,
+} from '@/utils/quotaFormatter';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
@@ -78,9 +80,23 @@ export const QuotaAlerts: React.FC = () => {
   } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
 
+  // Page refresh control - manages manual refresh for quota and alerts data
+  const pageRefresh = usePageRefresh({
+    page: '/manage/quota',
+    refreshKey: createMatcherConfig([['quota'], ['alerts']], 'prefix'),
+    interval: 0, // Manual refresh only for configuration data
+    enabled: false,
+  });
+
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [editingUser, setEditingUser] = useState<QuotaUsage | null>(null);
   const [formData, setFormData] = useState<UpdateQuotaRequest>({});
+  const [quotaErrors, setQuotaErrors] = useState<{
+    daily_token_quota?: string;
+    monthly_token_quota?: string;
+    daily_request_quota?: string;
+    monthly_request_quota?: string;
+  }>({});
 
   // --- Alerts State ---
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -98,6 +114,8 @@ export const QuotaAlerts: React.FC = () => {
     push_enabled: true,
     alert_types: ['quota', 'system', 'security'],
     min_severity: 'warning',
+    notification_email: '',
+    email_verified: false,
   });
 
   // Fetch alerts
@@ -154,10 +172,109 @@ export const QuotaAlerts: React.FC = () => {
   const handleCloseQuotaModal = () => {
     setShowQuotaModal(false);
     setEditingUser(null);
+    setQuotaErrors({});
+  };
+
+  // Handle quota input change with validation
+  const handleQuotaInputChange = (
+    value: string,
+    quotaType: QuotaType,
+    field: keyof UpdateQuotaRequest
+  ) => {
+    const result = parseAndValidateQuota(value, quotaType);
+
+    if (value.trim() === '') {
+      // Empty input means unlimited
+      setFormData({ ...formData, [field]: undefined });
+      setQuotaErrors({ ...quotaErrors, [field]: undefined });
+    } else if (result.value !== null) {
+      // Update form data with parsed value
+      setFormData({ ...formData, [field]: result.value });
+
+      // Update error state
+      if (!result.validation.isValid) {
+        setQuotaErrors({
+          ...quotaErrors,
+          [field]: result.validation.error,
+        });
+      } else if (result.validation.warning) {
+        // Show warning but allow the value
+        setQuotaErrors({
+          ...quotaErrors,
+          [field]: result.validation.warning,
+        });
+      } else {
+        // Clear error
+        setQuotaErrors({ ...quotaErrors, [field]: undefined });
+      }
+    } else {
+      // Invalid input
+      setQuotaErrors({
+        ...quotaErrors,
+        [field]: 'Invalid number format',
+      });
+    }
   };
 
   const handleSubmitQuota = async () => {
     if (!editingUser) return;
+
+    // Validate all quota values before submission
+    const errors: typeof quotaErrors = {};
+
+    // Validate daily token quota
+    if (formData.daily_token_quota !== undefined) {
+      const validation = parseAndValidateQuota(
+        formData.daily_token_quota.toString(),
+        QuotaType.DAILY_TOKEN
+      );
+      if (!validation.validation.isValid) {
+        errors.daily_token_quota = validation.validation.error || 'Invalid value';
+      }
+    }
+
+    // Validate monthly token quota
+    if (formData.monthly_token_quota !== undefined) {
+      const validation = parseAndValidateQuota(
+        formData.monthly_token_quota.toString(),
+        QuotaType.MONTHLY_TOKEN
+      );
+      if (!validation.validation.isValid) {
+        errors.monthly_token_quota = validation.validation.error || 'Invalid value';
+      }
+    }
+
+    // Validate daily request quota
+    if (formData.daily_request_quota !== undefined) {
+      const validation = parseAndValidateQuota(
+        formData.daily_request_quota.toString(),
+        QuotaType.DAILY_REQUEST
+      );
+      if (!validation.validation.isValid) {
+        errors.daily_request_quota = validation.validation.error || 'Invalid value';
+      }
+    }
+
+    // Validate monthly request quota
+    if (formData.monthly_request_quota !== undefined) {
+      const validation = parseAndValidateQuota(
+        formData.monthly_request_quota.toString(),
+        QuotaType.MONTHLY_REQUEST
+      );
+      if (!validation.validation.isValid) {
+        errors.monthly_request_quota = validation.validation.error || 'Invalid value';
+      }
+    }
+
+    // If there are errors, don't submit and show errors
+    if (Object.keys(errors).length > 0) {
+      setQuotaErrors(errors);
+      toast.error(t('validationError', language), t('quotaValidationFailed', language));
+      return;
+    }
+
+    // Clear errors
+    setQuotaErrors({});
 
     try {
       // Token quotas are stored in M (millions) units directly
@@ -365,7 +482,7 @@ export const QuotaAlerts: React.FC = () => {
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
                           {formatTokens(user.tokens_used_today ?? 0)} /{' '}
-                          {formatQuotaTokens(user.daily_token_quota)}
+                          {formatQuotaForDisplay(user.daily_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -381,7 +498,7 @@ export const QuotaAlerts: React.FC = () => {
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
                           {formatTokens(user.tokens_used_month ?? 0)} /{' '}
-                          {formatQuotaTokens(user.monthly_token_quota)}
+                          {formatQuotaForDisplay(user.monthly_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -462,15 +579,15 @@ export const QuotaAlerts: React.FC = () => {
                   </p>
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('dailyTokenQuota', language)} (M)</label>
+                  <label className="form-label">
+                    {t('dailyTokenQuota', language)} (M)
+                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.DAILY_TOKEN)})</small>
+                  </label>
                   <TextInput
-                    type="number"
+                    type="text"
                     value={formData.daily_token_quota?.toString() ?? ''}
                     onChange={(value: string) =>
-                      setFormData({
-                        ...formData,
-                        daily_token_quota: value ? parseInt(value) : undefined,
-                      })
+                      handleQuotaInputChange(value, QuotaType.DAILY_TOKEN, 'daily_token_quota')
                     }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -479,18 +596,22 @@ export const QuotaAlerts: React.FC = () => {
                       }
                     }}
                     placeholder={t('unlimited', language)}
+                    error={quotaErrors.daily_token_quota}
                   />
+                  {quotaErrors.daily_token_quota && (
+                    <small className="text-danger">{quotaErrors.daily_token_quota}</small>
+                  )}
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('monthlyTokenQuota', language)} (M)</label>
+                  <label className="form-label">
+                    {t('monthlyTokenQuota', language)} (M)
+                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.MONTHLY_TOKEN)})</small>
+                  </label>
                   <TextInput
-                    type="number"
+                    type="text"
                     value={formData.monthly_token_quota?.toString() ?? ''}
                     onChange={(value: string) =>
-                      setFormData({
-                        ...formData,
-                        monthly_token_quota: value ? parseInt(value) : undefined,
-                      })
+                      handleQuotaInputChange(value, QuotaType.MONTHLY_TOKEN, 'monthly_token_quota')
                     }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -499,18 +620,22 @@ export const QuotaAlerts: React.FC = () => {
                       }
                     }}
                     placeholder={t('unlimited', language)}
+                    error={quotaErrors.monthly_token_quota}
                   />
+                  {quotaErrors.monthly_token_quota && (
+                    <small className="text-danger">{quotaErrors.monthly_token_quota}</small>
+                  )}
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('dailyRequestQuota', language)}</label>
+                  <label className="form-label">
+                    {t('dailyRequestQuota', language)}
+                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.DAILY_REQUEST)})</small>
+                  </label>
                   <TextInput
-                    type="number"
+                    type="text"
                     value={formData.daily_request_quota?.toString() ?? ''}
                     onChange={(value: string) =>
-                      setFormData({
-                        ...formData,
-                        daily_request_quota: value ? parseInt(value) : undefined,
-                      })
+                      handleQuotaInputChange(value, QuotaType.DAILY_REQUEST, 'daily_request_quota')
                     }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -519,18 +644,22 @@ export const QuotaAlerts: React.FC = () => {
                       }
                     }}
                     placeholder={t('unlimited', language)}
+                    error={quotaErrors.daily_request_quota}
                   />
+                  {quotaErrors.daily_request_quota && (
+                    <small className="text-danger">{quotaErrors.daily_request_quota}</small>
+                  )}
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('monthlyRequestQuota', language)}</label>
+                  <label className="form-label">
+                    {t('monthlyRequestQuota', language)}
+                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.MONTHLY_REQUEST)})</small>
+                  </label>
                   <TextInput
-                    type="number"
+                    type="text"
                     value={formData.monthly_request_quota?.toString() ?? ''}
                     onChange={(value: string) =>
-                      setFormData({
-                        ...formData,
-                        monthly_request_quota: value ? parseInt(value) : undefined,
-                      })
+                      handleQuotaInputChange(value, QuotaType.MONTHLY_REQUEST, 'monthly_request_quota')
                     }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -539,7 +668,11 @@ export const QuotaAlerts: React.FC = () => {
                       }
                     }}
                     placeholder={t('unlimited', language)}
+                    error={quotaErrors.monthly_request_quota}
                   />
+                  {quotaErrors.monthly_request_quota && (
+                    <small className="text-danger">{quotaErrors.monthly_request_quota}</small>
+                  )}
                 </div>
               </div>
             </form>
@@ -738,6 +871,23 @@ export const QuotaAlerts: React.FC = () => {
                   </label>
                 </div>
               </div>
+              {preferences.email_enabled && (
+                <div className="col-12">
+                  <label className="form-label">{t('notificationEmail', language)}</label>
+                  <input
+                    type="email"
+                    className="form-control"
+                    value={preferences.notification_email ?? ''}
+                    onChange={(e) =>
+                      setPreferences({ ...preferences, notification_email: e.target.value })
+                    }
+                    placeholder="your@email.com"
+                  />
+                  <small className="text-muted">
+                    {t('smtpSetupGuide4', language)}
+                  </small>
+                </div>
+              )}
               <div className="col-12">
                 <div className="form-check form-switch">
                   <input
@@ -794,6 +944,13 @@ export const QuotaAlerts: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('quotaAndAlerts', language)}</h2>
         <div className="d-flex gap-2">
+          <PageRefreshControl
+            refresh={pageRefresh}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            compact={true}
+            showLastRefreshTime={true}
+          />
           {activeTab === 'alerts' && (
             <>
               <Button variant="outline-secondary" size="sm" onClick={() => setShowPrefsModal(true)}>
@@ -805,12 +962,6 @@ export const QuotaAlerts: React.FC = () => {
                 {t('markAllRead', language)}
               </Button>
             </>
-          )}
-          {activeTab === 'quota' && (
-            <Button variant="primary" size="sm" onClick={() => refetch()} loading={isFetching}>
-              {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
-              {t('refresh', language)}
-            </Button>
           )}
         </div>
       </div>

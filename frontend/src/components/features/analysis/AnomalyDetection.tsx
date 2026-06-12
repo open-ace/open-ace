@@ -12,7 +12,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -24,9 +24,10 @@ import {
   EmptyState,
   LineChart,
   PieChart,
+  PageRefreshControl,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
-import { useAnomalyDetection, useAnomalyTrend, useRecommendations, useHosts } from '@/hooks';
+import { useAnomalyDetection, useAnomalyTrend, useRecommendations, useHosts, usePageRefresh } from '@/hooks';
 
 // Anomaly type options
 const anomalyTypeOptions = [
@@ -48,6 +49,14 @@ export const AnomalyDetection: React.FC = () => {
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('');
+
+  // Page refresh control - manual refresh for anomaly detection
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/anomaly',
+    refreshKey: createMatcherConfig([['analysis', 'anomaly']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   // Get hosts for filter
   const { data: hostsData } = useHosts();
@@ -154,6 +163,13 @@ export const AnomalyDetection: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('anomalyDetection', language)}</h2>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
 
       {/* Filters */}
