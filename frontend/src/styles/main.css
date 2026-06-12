@@ -1016,13 +1016,6 @@ link[rel='dns-prefetch'] {
   align-items: center;
   justify-content: space-between;
   padding: var(--spacing-sm) var(--spacing-md);
-  /* Ensure header content doesn't block pointer events on elements below */
-  pointer-events: none;
-}
-
-/* Re-enable pointer events for interactive header elements */
-.header > * {
-  pointer-events: auto;
 }
 
 [data-theme='dark'] .header {
@@ -1054,10 +1047,11 @@ link[rel='dns-prefetch'] {
 }
 
 /* Page Refresh Control - ensure buttons are clickable (not blocked by sticky header) */
+/* Header z-index is 310 (z-fixed + 10), need higher z-index to be above header's backdrop-filter layer */
 .page-header-controls .page-refresh-control,
 .page-header-controls .page-refresh-control-compact {
   position: relative;
-  z-index: 1;
+  z-index: 320;
 }
 
 .page-header-controls .flex-spacer {
