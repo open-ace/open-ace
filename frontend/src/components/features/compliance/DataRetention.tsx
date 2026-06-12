@@ -28,14 +28,128 @@ import {
   type StorageEstimate,
 } from '@/api';
 import { formatDateTime } from '@/utils';
+import { cn } from '@/utils';
 
-const DATA_TYPES = [
-  { value: 'messages', label: 'Messages', defaultDays: 90 },
-  { value: 'sessions', label: 'Sessions', defaultDays: 180 },
-  { value: 'audit_logs', label: 'Audit Logs', defaultDays: 365 },
-  { value: 'usage_stats', label: 'Usage Stats', defaultDays: 365 },
-  { value: 'alerts', label: 'Alerts', defaultDays: 30 },
-];
+/**
+ * Data type metadata mapping table
+ * Maps backend retention rule keys to display labels, icons, and storage estimate keys
+ * Synchronized with backend DEFAULT_RULES in app/modules/compliance/retention.py
+ */
+const DATA_TYPE_META: Record<
+  string,
+  {
+    i18nKey: string;
+    icon: string;
+    fallbackLabel: string;
+    storageEstimateKey?: string; // Maps retention rule key to storage estimate API key
+  }
+> = {
+  audit_logs: {
+    i18nKey: 'dataTypeAuditLogs',
+    icon: 'bi-journal-text',
+    fallbackLabel: 'Audit Logs',
+  },
+  quota_alerts: {
+    i18nKey: 'dataTypeQuotaAlerts',
+    icon: 'bi-bell',
+    fallbackLabel: 'Quota Alerts',
+  },
+  sessions: {
+    i18nKey: 'dataTypeSessions',
+    icon: 'bi-chat-square',
+    fallbackLabel: 'Sessions',
+  },
+  sso_sessions: {
+    i18nKey: 'dataTypeSsoSessions',
+    icon: 'bi-key',
+    fallbackLabel: 'SSO Sessions',
+  },
+  usage_data: {
+    i18nKey: 'dataTypeUsageData',
+    icon: 'bi-bar-chart',
+    fallbackLabel: 'Usage Data',
+    storageEstimateKey: 'daily_usage',
+  },
+  messages: {
+    i18nKey: 'dataTypeMessages',
+    icon: 'bi-envelope',
+    fallbackLabel: 'Messages',
+    storageEstimateKey: 'daily_messages',
+  },
+  user_activity: {
+    i18nKey: 'dataTypeUserActivity',
+    icon: 'bi-person-activity',
+    fallbackLabel: 'User Activity',
+  },
+};
+
+/**
+ * Format snake_case key to Title Case for fallback display
+ * Example: 'audit_logs' -> 'Audit Logs'
+ */
+function formatDataTypeKey(key: string): string {
+  return key
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * Get display label for a data type key
+ * Uses i18n translation if available, otherwise uses fallback label or formatted key
+ */
+function getDataTypeLabel(key: string, language: string): string {
+  const meta = DATA_TYPE_META[key];
+  if (meta) {
+    // Try i18n translation, fallback to fallbackLabel
+    const translated = t(meta.i18nKey, language);
+    // If translation returns the key itself (not found), use fallback
+    return translated === meta.i18nKey ? meta.fallbackLabel : translated;
+  }
+  // Unknown type: format snake_case to Title Case
+  return formatDataTypeKey(key);
+}
+
+/**
+ * Get icon for a data type key
+ */
+function getDataTypeIcon(key: string): string {
+  const meta = DATA_TYPE_META[key];
+  return meta?.icon ?? 'bi-database';
+}
+
+/**
+ * Get storage estimate display label for a storage estimate data type key
+ * Maps storage estimate API keys back to retention rule display labels
+ */
+function getStorageEstimateLabel(storageKey: string, language: string): string {
+  // First, try to find a retention rule key that maps to this storage key
+  for (const [ruleKey, meta] of Object.entries(DATA_TYPE_META)) {
+    if (meta.storageEstimateKey === storageKey) {
+      return getDataTypeLabel(ruleKey, language);
+    }
+  }
+  // If no mapping found, format the storage key itself
+  return formatDataTypeKey(storageKey);
+}
+
+/**
+ * Adapt backend rules object to table data array
+ * Filters null/undefined rules, preserves all valid rules including disabled ones
+ */
+function adaptRulesToTableData(
+  rules: Record<string, RetentionRule>,
+  language: string
+): Array<{ key: string; label: string; icon: string; rule: RetentionRule }> {
+  return Object.entries(rules)
+    .filter(([, rule]) => rule !== null && rule !== undefined) // Filter null/undefined
+    .map(([key, rule]) => ({
+      key,
+      label: getDataTypeLabel(key, language),
+      icon: getDataTypeIcon(key),
+      rule,
+    }));
+}
 
 export const DataRetention: React.FC = () => {
   const language = useLanguage();
@@ -50,7 +164,7 @@ export const DataRetention: React.FC = () => {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
-  const [editAction, setEditAction] = useState<'delete' | 'archive'>('delete');
+  const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
   const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
@@ -143,6 +257,9 @@ export const DataRetention: React.FC = () => {
     return <Error message={error} onRetry={fetchData} />;
   }
 
+  // Adapt backend rules to table data
+  const adaptedRules = adaptRulesToTableData(rules, language);
+
   // Calculate stats
   const totalRecords = storage.reduce((sum, s) => sum + s.record_count, 0);
   const totalSize = storage.reduce((sum, s) => sum + s.estimated_size_mb, 0);
@@ -197,7 +314,7 @@ export const DataRetention: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('retentionRules', language)}
-            value={Object.keys(rules).length.toString()}
+            value={adaptedRules.length.toString()}
             icon={<i className="bi bi-gear fs-4" />}
             variant="default"
           />
@@ -217,15 +334,17 @@ export const DataRetention: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {DATA_TYPES.map((dt) => {
-                const rule = rules[dt.value];
+              {adaptedRules.map(({ key, label, icon, rule }) => {
                 return (
-                  <tr key={dt.value}>
+                  <tr key={key}>
                     <td>
-                      <strong>{dt.label}</strong>
+                      <div className="d-flex align-items-center">
+                        <i className={cn('bi me-2', icon)} />
+                        <strong>{label}</strong>
+                      </div>
                     </td>
                     <td>
-                      {rule ? (
+                      {rule.retention_days > 0 ? (
                         <span>
                           {rule.retention_days} {t('days', language)}
                         </span>
@@ -234,19 +353,23 @@ export const DataRetention: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      {rule ? (
-                        <Badge variant={rule.action === 'delete' ? 'danger' : 'info'}>
-                          {rule.action}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted">-</span>
-                      )}
+                      <Badge
+                        variant={
+                          rule.action === 'delete'
+                            ? 'danger'
+                            : rule.action === 'anonymize'
+                            ? 'warning'
+                            : 'info'
+                        }
+                      >
+                        {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}
+                      </Badge>
                     </td>
                     <td>
                       <Button
                         variant="outline-primary"
                         size="sm"
-                        onClick={() => handleOpenEdit(dt.value)}
+                        onClick={() => handleOpenEdit(key)}
                       >
                         <i className="bi bi-pencil" />
                       </Button>
@@ -273,7 +396,12 @@ export const DataRetention: React.FC = () => {
             <tbody>
               {storage.map((s) => (
                 <tr key={s.data_type}>
-                  <td>{s.data_type}</td>
+                  <td>
+                    <div className="d-flex align-items-center">
+                      <i className={cn('bi me-2', getDataTypeIcon(s.data_type))} />
+                      {getStorageEstimateLabel(s.data_type, language)}
+                    </div>
+                  </td>
                   <td>{s.record_count.toLocaleString()}</td>
                   <td>{s.estimated_size_mb.toFixed(2)} MB</td>
                 </tr>
@@ -357,10 +485,11 @@ export const DataRetention: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive')}
+                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')}
               >
-                <option value="delete">{t('delete', language)}</option>
-                <option value="archive">{t('archive', language)}</option>
+                <option value="delete">{t('actionDelete', language)}</option>
+                <option value="archive">{t('actionArchive', language)}</option>
+                <option value="anonymize">{t('actionAnonymize', language)}</option>
               </select>
             </div>
           </div>
