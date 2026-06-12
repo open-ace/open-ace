@@ -11,12 +11,12 @@
 import React from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import type { Language } from '@/types';
 import { Card, Badge, EmptyState } from '@/components/common';
 import { type RetentionReport, type AppliedRule } from '@/api';
 import { formatDateTime } from '@/utils';
 import { cn } from '@/utils';
 import {
-  DATA_TYPE_META,
   getDataTypeLabel,
   getDataTypeIcon,
 } from './DataRetention';
@@ -38,7 +38,7 @@ function getActionBadgeVariant(action: 'delete' | 'archive' | 'anonymize'): 'dan
 /**
  * Get action label
  */
-function getActionLabel(action: 'delete' | 'archive' | 'anonymize', language: string): string {
+function getActionLabel(action: 'delete' | 'archive' | 'anonymize', language: Language): string {
   switch (action) {
     case 'delete':
       return t('actionDelete', language);
