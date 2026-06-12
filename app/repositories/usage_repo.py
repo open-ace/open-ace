@@ -1094,7 +1094,8 @@ class UsageRepository:
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
         # to avoid double counting
         local_row = self.db.fetch_one(
-            """
+            # Uses escape_like() for safe LIKE pattern (see params below)
+        """
             SELECT
                 COALESCE(SUM(tokens_used), 0) as tokens,
                 COUNT(*) as requests
@@ -1156,6 +1157,7 @@ class UsageRepository:
         """
         # Local CLI usage from daily_messages
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
+        # Uses escape_like() for safe LIKE pattern (see params below)
         local_rows = self.db.fetch_all(
             """
             SELECT date, tool_name, SUM(tokens_used) as tokens_used,
