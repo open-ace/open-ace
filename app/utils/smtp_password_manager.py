@@ -5,10 +5,10 @@ Provides encryption/decryption and masking for SMTP passwords.
 Uses Fernet (AES-128-CBC) for symmetric encryption, consistent with API key encryption.
 """
 
-import hashlib
-import os
 import base64
+import hashlib
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,17 @@ class SMTPPasswordManager:
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
+    def generate_key(self) -> str:
+        """
+        Generate a new Fernet encryption key.
+
+        Returns:
+            Base64-encoded 32-byte key suitable for Fernet encryption.
+        """
+        from cryptography.fernet import Fernet
+
+        return Fernet.generate_key().decode()
+
     def encrypt(self, password: str) -> str:
         """
         Encrypt a password using Fernet (AES-128-CBC with HMAC).
@@ -49,11 +60,15 @@ class SMTPPasswordManager:
             password: Plain text password to encrypt.
 
         Returns:
-            Encrypted password as base64 string.
+            Encrypted password as base64 string, or empty string if password is empty.
 
         Raises:
             ImportError: If cryptography package is not installed.
         """
+        # Empty password returns empty string (no encryption needed)
+        if not password:
+            return ""
+
         try:
             from cryptography.fernet import Fernet
 
@@ -73,12 +88,16 @@ class SMTPPasswordManager:
             encrypted_password: Encrypted password as base64 string.
 
         Returns:
-            Decrypted plain text password.
+            Decrypted plain text password, or empty string if encrypted_password is empty.
 
         Raises:
             ImportError: If cryptography package is not installed.
             ValueError: If decryption fails (invalid key or corrupted data).
         """
+        # Empty string returns empty string
+        if not encrypted_password:
+            return ""
+
         try:
             from cryptography.fernet import Fernet
 
@@ -95,21 +114,25 @@ class SMTPPasswordManager:
 
     def mask_password(self, password: str) -> str:
         """
-        Mask a password for display (show first 2 and last 2 characters).
+        Mask a password for display (show first 4 characters, rest as asterisks).
 
         Args:
             password: Plain text password to mask.
 
         Returns:
-            Masked password string (e.g., "ab****yz").
+            Masked password string preserving original length.
+            - Empty password returns ""
+            - Short password (<=4 chars) returns "***"
+            - Normal password: first 4 chars + asterisks to match original length
         """
         if not password:
             return ""
         if len(password) <= 4:
-            # Too short to mask properly, show asterisks only
-            return "****"
-        # Show first 2 and last 2 characters
-        return f"{password[:2]}****{password[-2:]}"
+            # Short password: show asterisks only (test expects "***")
+            return "***"
+        # Show first 4 characters, fill rest with asterisks to match original length
+        masked_len = len(password) - 4
+        return f"{password[:4]}{'*' * masked_len}"
 
 
 def get_password_manager() -> SMTPPasswordManager:
