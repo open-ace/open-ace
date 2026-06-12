@@ -487,6 +487,11 @@ def set_retention_rule():
     retention_days = data.get("retention_days")
     action = data.get("action", "delete")
 
+    # Validate action value
+    VALID_ACTIONS = ['delete', 'archive', 'anonymize']
+    if action not in VALID_ACTIONS:
+        return jsonify({"error": f"action must be one of: {', '.join(VALID_ACTIONS)}"}), 400
+
     if not data_type or retention_days is None:
         return jsonify({"error": "data_type and retention_days are required"}), 400
 
