@@ -83,6 +83,8 @@ export type {
   RetentionRule,
   RetentionHistory,
   StorageEstimate,
+  AppliedRule,
+  RetentionReport,
 } from './compliance';
 export { roiApi } from './roi';
 export type {

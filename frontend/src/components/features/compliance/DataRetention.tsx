@@ -26,16 +26,18 @@ import {
   type RetentionRule,
   type RetentionHistory,
   type StorageEstimate,
+  type RetentionReport,
 } from '@/api';
 import { formatDateTime } from '@/utils';
 import { cn } from '@/utils';
+import { CleanupPreviewContent } from './CleanupPreviewContent';
 
 /**
  * Data type metadata mapping table
  * Maps backend retention rule keys to display labels, icons, and storage estimate keys
  * Synchronized with backend DEFAULT_RULES in app/modules/compliance/retention.py
  */
-const DATA_TYPE_META: Record<
+export const DATA_TYPE_META: Record<
   string,
   {
     i18nKey: string;
@@ -87,7 +89,7 @@ const DATA_TYPE_META: Record<
  * Format snake_case key to Title Case for fallback display
  * Example: 'audit_logs' -> 'Audit Logs'
  */
-function formatDataTypeKey(key: string): string {
+export function formatDataTypeKey(key: string): string {
   return key
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -98,7 +100,7 @@ function formatDataTypeKey(key: string): string {
  * Get display label for a data type key
  * Uses i18n translation if available, otherwise uses fallback label or formatted key
  */
-function getDataTypeLabel(key: string, language: string): string {
+export function getDataTypeLabel(key: string, language: string): string {
   const meta = DATA_TYPE_META[key];
   if (meta) {
     // Try i18n translation, fallback to fallbackLabel
@@ -113,7 +115,7 @@ function getDataTypeLabel(key: string, language: string): string {
 /**
  * Get icon for a data type key
  */
-function getDataTypeIcon(key: string): string {
+export function getDataTypeIcon(key: string): string {
   const meta = DATA_TYPE_META[key];
   return meta?.icon ?? 'bi-database';
 }
@@ -165,7 +167,7 @@ export const DataRetention: React.FC = () => {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
   const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
-  const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [previewResult, setPreviewResult] = useState<RetentionReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   // Fetch data
@@ -513,11 +515,10 @@ export const DataRetention: React.FC = () => {
           </>
         }
       >
-        {previewResult && (
-          <div>
-            <p className="text-muted mb-3">{t('cleanupPreviewDescription', language)}</p>
-            <pre className="bg-light p-3 rounded">{JSON.stringify(previewResult, null, 2)}</pre>
-          </div>
+        {previewResult ? (
+          <CleanupPreviewContent report={previewResult} />
+        ) : (
+          <EmptyState icon="bi-hourglass" title={t('loading', language)} />
         )}
       </Modal>
     </div>

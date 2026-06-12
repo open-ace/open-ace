@@ -769,6 +769,16 @@ const translations: Record<Language, Translations> = {
     actionArchive: 'Archive',
     actionAnonymize: 'Anonymize',
 
+    // Data Retention - Preview Results
+    recordsArchived: 'Archived Records',
+    recordsAnonymized: 'Anonymized Records',
+    rulesApplied: 'Rules Applied',
+    totalAffectedRecords: 'Total Affected Records',
+    executionDetails: 'Execution Details',
+    noRulesApplied: 'No Rules Applied',
+    cutoffDate: 'Cutoff Date',
+    affectedRecords: 'Affected Records',
+
     // Audit Analysis
     securityScore: 'Security Score',
     overallScore: 'Overall Score',
@@ -1945,6 +1955,16 @@ const translations: Record<Language, Translations> = {
     actionArchive: '归档',
     actionAnonymize: '匿名化',
 
+    // Data Retention - Preview Results
+    recordsArchived: '归档记录',
+    recordsAnonymized: '匿名化记录',
+    rulesApplied: '应用规则数',
+    totalAffectedRecords: '总影响记录数',
+    executionDetails: '执行详情',
+    noRulesApplied: '无规则应用',
+    cutoffDate: '截止日期',
+    affectedRecords: '影响记录数',
+
     // Audit Analysis
     securityScore: '安全分数',
     overallScore: '总体分数',
@@ -2610,6 +2630,16 @@ const translations: Record<Language, Translations> = {
     actionDelete: '削除',
     actionArchive: 'アーカイブ',
     actionAnonymize: '匿名化',
+
+    // Data Retention - Preview Results
+    recordsArchived: 'アーカイブされたレコード',
+    recordsAnonymized: '匿名化されたレコード',
+    rulesApplied: '適用されたルール',
+    totalAffectedRecords: '影響を受けたレコード総数',
+    executionDetails: '実行詳細',
+    noRulesApplied: '適用されたルールなし',
+    cutoffDate: 'カットオフ日',
+    affectedRecords: '影響を受けたレコード',
 
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
@@ -3455,6 +3485,16 @@ const translations: Record<Language, Translations> = {
     actionDelete: '삭제',
     actionArchive: '보관',
     actionAnonymize: '익명화',
+
+    // Data Retention - Preview Results
+    recordsArchived: '보관된 레코드',
+    recordsAnonymized: '익명화된 레코드',
+    rulesApplied: '적용된 규칙',
+    totalAffectedRecords: '총 영향받은 레코드',
+    executionDetails: '실행 세부정보',
+    noRulesApplied: '적용된 규칙 없음',
+    cutoffDate: '컷오프 날짜',
+    affectedRecords: '영향받은 레코드',
 
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',
