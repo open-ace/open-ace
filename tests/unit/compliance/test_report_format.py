@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 # Check if openpyxl is available for Excel tests
 try:
     import openpyxl
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -409,8 +410,7 @@ class TestReportTemplates:
         from app.modules.compliance.report import ComplianceReport
 
         template_dir = os.path.join(
-            os.path.dirname(ComplianceReport.__module__.replace(".", "/")),
-            "templates"
+            os.path.dirname(ComplianceReport.__module__.replace(".", "/")), "templates"
         )
         # Template directory should exist
         assert os.path.exists(template_dir)
@@ -420,8 +420,15 @@ class TestReportTemplates:
         import os
 
         template_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "base.html"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "base.html",
         )
         assert os.path.exists(template_path)
 
@@ -430,11 +437,23 @@ class TestReportTemplates:
         import os
 
         template_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "components"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "components",
         )
 
-        components = ["header.html", "summary_table.html", "compliance_checks.html", "recommendations.html"]
+        components = [
+            "header.html",
+            "summary_table.html",
+            "compliance_checks.html",
+            "recommendations.html",
+        ]
         for component in components:
             assert os.path.exists(os.path.join(template_dir, component))
 
@@ -443,10 +462,23 @@ class TestReportTemplates:
         import os
 
         template_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "reports"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "reports",
         )
 
-        reports = ["usage_summary.html", "user_activity.html", "audit_trail.html", "security.html", "comprehensive.html"]
+        reports = [
+            "usage_summary.html",
+            "user_activity.html",
+            "audit_trail.html",
+            "security.html",
+            "comprehensive.html",
+        ]
         for report in reports:
             assert os.path.exists(os.path.join(template_dir, report))

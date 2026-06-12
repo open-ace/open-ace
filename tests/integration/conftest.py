@@ -339,6 +339,23 @@ def _create_sqlite_tables(db):
             )
         """
         )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_permissions (
@@ -613,6 +630,23 @@ def _create_pg_tables(db):
                 created_at TEXT,
                 updated_at TEXT,
                 UNIQUE(user_id, tool_account)
+            )
+        """
+        )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
             )
         """
         )

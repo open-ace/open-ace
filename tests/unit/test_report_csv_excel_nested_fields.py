@@ -23,6 +23,7 @@ try:
     import openpyxl
     from openpyxl import load_workbook
     from io import BytesIO
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -202,7 +203,7 @@ class TestReportToCsv:
         )
         csv = report.to_csv()
         # None should be converted to empty string
-        lines = csv.strip().split('\n')
+        lines = csv.strip().split("\n")
         # Check that the user_id column is empty (not "None" string)
         assert len(lines) >= 2  # Header + data
 
@@ -237,7 +238,7 @@ class TestReportToCsv:
                 {
                     "id": 1,
                     "action": "login",
-                    "message": "User said, \"Hello\"",
+                    "message": 'User said, "Hello"',
                     "description": "Line1\nLine2",
                 },
             ],
@@ -260,7 +261,7 @@ class TestReportToCsv:
                 {
                     "id": 1,
                     "action": "test",
-                    "quote_field": "This has \"quotes\" inside",
+                    "quote_field": 'This has "quotes" inside',
                 },
             ],
             compliance_checks=[],
@@ -291,10 +292,10 @@ class TestReportToCsv:
         # Long JSON should be truncated
         assert "[TRUNCATED]" in csv
         # Should not exceed Excel cell limit (32,767)
-        lines = csv.strip().split('\n')
+        lines = csv.strip().split("\n")
         for line in lines[1:]:  # Skip header
             # Each cell should not be too long
-            cells = line.split(',')
+            cells = line.split(",")
             for cell in cells:
                 # Remove quotes for length check
                 unquoted = cell.strip('"')

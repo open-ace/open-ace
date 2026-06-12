@@ -18,6 +18,7 @@ from functools import wraps
 # Check if openpyxl is available for Excel tests
 try:
     from openpyxl import load_workbook
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -55,26 +56,34 @@ def client(app):
 
         def get(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.get(*args, **kwargs)
 
         def post(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.post(*args, **kwargs)
 
         def put(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.put(*args, **kwargs)
 
         def delete(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.delete(*args, **kwargs)
 
     return AuthenticatedClient(test_client)
@@ -95,7 +104,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "json",
             },
@@ -116,7 +127,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "csv",
             },
@@ -135,7 +148,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
                 "language": "en",
@@ -158,7 +173,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "excel",
                 "language": "en",
@@ -182,7 +199,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
             },

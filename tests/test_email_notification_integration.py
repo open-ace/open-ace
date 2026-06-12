@@ -32,9 +32,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
     @patch("app.modules.governance.alert_notifier.get_email_notification_service")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
-    def test_complete_flow_warning_alert(
-        self, mock_get_prefs, mock_save, mock_email_service
-    ):
+    def test_complete_flow_warning_alert(self, mock_get_prefs, mock_save, mock_email_service):
         """Test complete flow: warning alert created -> email queued."""
         # Setup email service mock
         mock_service = MagicMock()
@@ -80,9 +78,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
     @patch("app.modules.governance.alert_notifier.get_email_notification_service")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
-    def test_complete_flow_critical_alert(
-        self, mock_get_prefs, mock_save, mock_email_service
-    ):
+    def test_complete_flow_critical_alert(self, mock_get_prefs, mock_save, mock_email_service):
         """Test complete flow: critical alert created -> email queued."""
         # Setup email service mock
         mock_service = MagicMock()
@@ -242,7 +238,8 @@ class TestSMPTPasswordEncryptionFlow(unittest.TestCase):
 
         try:
             conn = sqlite3.connect(db_path)
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE smtp_settings (
                     id INTEGER PRIMARY KEY,
                     smtp_host TEXT,
@@ -256,7 +253,8 @@ class TestSMPTPasswordEncryptionFlow(unittest.TestCase):
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP
                 )
-            """)
+            """
+            )
             conn.commit()
             conn.close()
 

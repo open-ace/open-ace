@@ -210,7 +210,9 @@ class TestRateLimiter(unittest.TestCase):
 
         # Add an old timestamp
         limiter._user_send_times[user_id].append(
-            datetime.now(timezone.utc).replace(tzinfo=None) - RATE_LIMIT_WINDOW - timedelta(minutes=1)
+            datetime.now(timezone.utc).replace(tzinfo=None)
+            - RATE_LIMIT_WINDOW
+            - timedelta(minutes=1)
         )
 
         # Should be allowed again (old entry filtered out)
@@ -224,9 +226,7 @@ class TestEmailNotificationService(unittest.TestCase):
 
     @patch("app.services.email_notification_service.get_smtp_config_repository")
     @patch("app.services.email_notification_service.get_email_log_repository")
-    def test_send_alert_notification_no_smtp_config(
-        self, mock_log_repo, mock_smtp_repo
-    ):
+    def test_send_alert_notification_no_smtp_config(self, mock_log_repo, mock_smtp_repo):
         """Test notification fails when SMTP not configured."""
         # Mock SMTP repo to return no config
         mock_smtp_repo.return_value.get_config.return_value = None
@@ -252,9 +252,7 @@ class TestEmailNotificationService(unittest.TestCase):
 
     @patch("app.services.email_notification_service.get_smtp_config_repository")
     @patch("app.services.email_notification_service.get_email_log_repository")
-    def test_send_alert_notification_smtp_not_verified(
-        self, mock_log_repo, mock_smtp_repo
-    ):
+    def test_send_alert_notification_smtp_not_verified(self, mock_log_repo, mock_smtp_repo):
         """Test notification fails when SMTP not verified."""
         # Mock SMTP repo to return unverified config
         mock_config = {
@@ -286,9 +284,7 @@ class TestEmailNotificationService(unittest.TestCase):
 
     @patch("app.services.email_notification_service.get_smtp_config_repository")
     @patch("app.services.email_notification_service.get_email_log_repository")
-    def test_send_alert_notification_rate_limited(
-        self, mock_log_repo, mock_smtp_repo
-    ):
+    def test_send_alert_notification_rate_limited(self, mock_log_repo, mock_smtp_repo):
         """Test notification fails when rate limited."""
         # Mock SMTP repo to return verified config
         mock_config = {
@@ -325,9 +321,7 @@ class TestEmailNotificationService(unittest.TestCase):
 
     @patch("app.services.email_notification_service.get_smtp_config_repository")
     @patch("app.services.email_notification_service.get_email_log_repository")
-    def test_send_alert_notification_success(
-        self, mock_log_repo, mock_smtp_repo
-    ):
+    def test_send_alert_notification_success(self, mock_log_repo, mock_smtp_repo):
         """Test successful notification queuing."""
         # Mock SMTP repo to return verified config
         mock_config = {
@@ -366,9 +360,7 @@ class TestEmailNotificationService(unittest.TestCase):
         """Test sending test email."""
         from app.services.email_notification_service import EmailNotificationService
 
-        with patch.object(
-            EmailNotificationService, "send_alert_notification"
-        ) as mock_send:
+        with patch.object(EmailNotificationService, "send_alert_notification") as mock_send:
             mock_send.return_value = {"success": True, "message": "Queued"}
 
             service = EmailNotificationService()
@@ -482,9 +474,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.get_email_notification_service")
-    def test_create_alert_email_disabled(
-        self, mock_email_service, mock_get_prefs, mock_save
-    ):
+    def test_create_alert_email_disabled(self, mock_email_service, mock_get_prefs, mock_save):
         """Test alert creation doesn't send email when disabled."""
         mock_service = MagicMock()
         mock_email_service.return_value = mock_service
@@ -521,9 +511,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.get_email_notification_service")
-    def test_create_alert_severity_filter(
-        self, mock_email_service, mock_get_prefs, mock_save
-    ):
+    def test_create_alert_severity_filter(self, mock_email_service, mock_get_prefs, mock_save):
         """Test email notification respects severity filter."""
         mock_service = MagicMock()
         mock_email_service.return_value = mock_service
@@ -572,9 +560,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.get_email_notification_service")
-    def test_create_alert_type_filter(
-        self, mock_email_service, mock_get_prefs, mock_save
-    ):
+    def test_create_alert_type_filter(self, mock_email_service, mock_get_prefs, mock_save):
         """Test email notification respects alert type filter."""
         mock_service = MagicMock()
         mock_email_service.return_value = mock_service
