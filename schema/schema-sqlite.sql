@@ -160,6 +160,7 @@ CREATE TABLE daily_stats (
  tool_name TEXT NOT NULL,
  host_name TEXT DEFAULT 'localhost' NOT NULL,
  sender_name TEXT,
+ user_id INTEGER,
  total_tokens INTEGER NOT NULL,
  total_input_tokens INTEGER NOT NULL,
  total_output_tokens INTEGER NOT NULL,
@@ -715,6 +716,7 @@ CREATE INDEX idx_daily_stats_host ON daily_stats (host_name);
 CREATE INDEX idx_daily_stats_project ON daily_stats (project_id);
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats (sender_name);
+CREATE INDEX idx_daily_stats_user_id ON daily_stats (user_id);
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats (tool_name);
 
