@@ -85,7 +85,7 @@ export const AuditCenter: React.FC = () => {
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useAuditLogs({
+  const { data, isLoading, isError, error, refetch } = useAuditLogs({
     ...filters,
     page,
     limit: ITEMS_PER_PAGE,

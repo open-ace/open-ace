@@ -31,8 +31,6 @@ import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from 
 import {
   QuotaType,
   TOKEN_QUOTA_MULTIPLIER,
-  MAX_TOKEN_QUOTA,
-  MAX_REQUEST_QUOTA,
 } from '@/constants/quota';
 import {
   parseAndValidateQuota,
@@ -73,7 +71,6 @@ export const QuotaAlerts: React.FC = () => {
   const {
     data: quotaData,
     isLoading: quotaLoading,
-    isFetching,
     isError,
     error,
     refetch,

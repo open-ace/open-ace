@@ -9,8 +9,8 @@ import {
   matchQueryKey,
   filterQueryKeys,
   createMatcherConfig,
-} from '../queryKeyMatcher';
-import type { QueryKeyMatchMode, QueryKeyMatcherConfig } from '../queryKeyMatcher';
+} from './queryKeyMatcher';
+import type { QueryKeyMatchMode, QueryKeyMatcherConfig } from './queryKeyMatcher';
 
 describe('queryKeyMatcher', () => {
   describe('exactMatch', () => {

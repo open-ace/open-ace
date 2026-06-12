@@ -29,8 +29,8 @@ export function formatQuotaForDisplay(
   value: number | null | undefined,
   isTokenQuota: boolean = true
 ): string {
-  // Unlimited quota
-  if (isUnlimited(value)) {
+  // Unlimited quota (null or undefined)
+  if (value === null || value === undefined) {
     return '∞';
   }
 

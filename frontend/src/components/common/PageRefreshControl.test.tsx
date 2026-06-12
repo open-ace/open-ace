@@ -2,24 +2,24 @@
  * PageRefreshControl Component Tests
  */
 
-import React from 'react';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { PageRefreshControl, STANDARD_INTERVALS } from '../PageRefreshControl';
+import { PageRefreshControl, STANDARD_INTERVALS } from './PageRefreshControl';
 import type { UsePageRefreshReturn } from '@/hooks/usePageRefresh';
 
 // Mock useLanguage hook
-jest.mock('@/store', () => ({
+vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
 
 // Create mock refresh return
 const createMockRefresh = (): UsePageRefreshReturn => ({
   isRefreshing: false,
-  refresh: jest.fn().mockResolvedValue(undefined),
+  refresh: vi.fn().mockResolvedValue(undefined),
   autoRefresh: false,
-  setAutoRefresh: jest.fn(),
+  setAutoRefresh: vi.fn(),
   interval: 60000,
-  setInterval: jest.fn(),
+  setInterval: vi.fn(),
   lastRefreshTime: Date.now() - 60000,
   nextRefreshTime: null,
   error: null,
