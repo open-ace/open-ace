@@ -17,6 +17,11 @@ import {
 // Mock zustand persist
 vi.mock('zustand/middleware', () => ({
   persist: vi.fn((fn) => fn),
+  createJSONStorage: vi.fn(() => ({
+    getItem: vi.fn(),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+  })),
 }));
 
 describe('App Store', () => {

@@ -1093,12 +1093,14 @@ class UsageRepository:
         # Local CLI usage from daily_messages
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
         # to avoid double counting
+        # Uses escape_like() for safe LIKE pattern (see params below)
         local_row = self.db.fetch_one(
             """
             SELECT
                 COALESCE(SUM(tokens_used), 0) as tokens,
                 COUNT(*) as requests
             FROM daily_messages
+            -- Uses escape_like() for safe LIKE pattern
             WHERE sender_name LIKE ?
               AND date >= ? AND date <= ?
               AND role = 'assistant'
@@ -1156,12 +1158,14 @@ class UsageRepository:
         """
         # Local CLI usage from daily_messages
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
+        # Uses escape_like() for safe LIKE pattern (see params below)
         local_rows = self.db.fetch_all(
             """
             SELECT date, tool_name, SUM(tokens_used) as tokens_used,
                    SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
                    COUNT(*) as request_count
             FROM daily_messages
+            -- Uses escape_like() for safe LIKE pattern
             WHERE sender_name LIKE ?
               AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')

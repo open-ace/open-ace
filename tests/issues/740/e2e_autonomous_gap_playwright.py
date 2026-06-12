@@ -143,9 +143,7 @@ def create_workflow_via_repo(
             "branch_name": branch_name,
             "max_plan_rounds": 3,
             "max_pr_review_rounds": 5,
-            "definition_snapshot": json.dumps(definition_snapshot)
-            if definition_snapshot
-            else None,
+            "definition_snapshot": json.dumps(definition_snapshot) if definition_snapshot else None,
             "batch_id": batch_id,
             "batch_order": batch_order,
             "batch_total": batch_total,
@@ -2031,15 +2029,21 @@ def step_test_workflow_list_controls(page):
 
     # Existing workflows should suppress the create-first-task empty state
     page_content = page.content()
-    assert "Create First Task" not in page_content, "Create First Task should not show when workflows exist"
+    assert (
+        "Create First Task" not in page_content
+    ), "Create First Task should not show when workflows exist"
     log("LIST-UI", "  ✅ Existing workflows suppress first-task empty state")
 
     # Queued filter should hide the active-only seed workflow
     page.locator("button:has-text('Queued')").first.click()
     page.wait_for_timeout(1200)
     queued_html = page.content()
-    assert "Active Workflow Only" not in queued_html, "Active workflow should not appear in queued filter"
-    assert "Paged Queue Workflow" in queued_html, "Queued workflows should remain visible in queued filter"
+    assert (
+        "Active Workflow Only" not in queued_html
+    ), "Active workflow should not appear in queued filter"
+    assert (
+        "Paged Queue Workflow" in queued_html
+    ), "Queued workflows should remain visible in queued filter"
     log("LIST-UI", "  ✅ Queued tab filters correctly")
 
     # Pagination should appear when there are > 50 workflows
@@ -2071,8 +2075,12 @@ def step_test_workflow_list_controls(page):
 
     # No-match search should show the filtered empty state, not the create-first-task CTA
     no_match_html = page.content()
-    assert "No workflows match this view" in no_match_html, "Filtered empty state text should appear"
-    assert "Create First Task" not in no_match_html, "Filtered empty state should not use first-task CTA"
+    assert (
+        "No workflows match this view" in no_match_html
+    ), "Filtered empty state text should appear"
+    assert (
+        "Create First Task" not in no_match_html
+    ), "Filtered empty state should not use first-task CTA"
     log("LIST-UI", "  ✅ Filtered empty state rendered")
 
 
@@ -2132,7 +2140,9 @@ def step_test_definition_snapshot_modal(page):
     page.wait_for_timeout(2000)
 
     definition_btn = page.locator("button:has-text('View Definition')").first
-    assert definition_btn.is_visible(), "View Definition button should be visible for workflows with snapshots"
+    assert (
+        definition_btn.is_visible()
+    ), "View Definition button should be visible for workflows with snapshots"
     definition_btn.click()
     page.wait_for_timeout(1200)
     shot(page, "gap-21-definition-snapshot-modal")

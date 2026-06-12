@@ -381,7 +381,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <div className="border rounded p-2">
             <div className="text-muted small mb-1">{t('autoBatchInfo', language)}</div>
             <div className="d-flex flex-wrap gap-2">
-              <Badge variant="light">{snapshot.batch_order}/{snapshot.batch_total}</Badge>
+              <Badge variant="light">
+                {snapshot.batch_order}/{snapshot.batch_total}
+              </Badge>
               <code>{snapshot.batch_id}</code>
             </div>
           </div>
@@ -1135,15 +1137,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           {(() => {
             const snapshot = definitionSnapshot;
             const rawIssueInput =
-              snapshot.requirements_issue_input_raw || snapshot.requirements_issue_url_raw;
+              snapshot.requirements_issue_input_raw ?? snapshot.requirements_issue_url_raw;
             const requirementText =
-              snapshot.requirements_mode === 'text'
-                ? snapshot.requirements_text
-                : rawIssueInput;
+              snapshot.requirements_mode === 'text' ? snapshot.requirements_text : rawIssueInput;
             const creationRows: Array<[string, unknown]> = [
               [t('autoTaskTitle', language), snapshot.title],
               [t('autoAgentTool', language), snapshot.cli_tool],
-              [t('autoModel', language), snapshot.model || t('autoDefaultModel', language)],
+              [t('autoModel', language), snapshot.model ?? t('autoDefaultModel', language)],
               [t('autoWorkspaceType', language), snapshot.workspace_type],
               [t('autoRemoteMachine', language), snapshot.remote_machine_id],
               [t('autoProjectPath', language), snapshot.project_path],
@@ -1182,7 +1182,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       whiteSpace: 'pre-wrap',
                     }}
                   >
-                    {requirementText || '-'}
+                    {requirementText ?? '-'}
                   </pre>
                 </div>
 

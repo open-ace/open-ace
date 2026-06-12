@@ -16,15 +16,14 @@ import { Card, Badge, EmptyState } from '@/components/common';
 import { type RetentionReport, type AppliedRule } from '@/api';
 import { formatDateTime } from '@/utils';
 import { cn } from '@/utils';
-import {
-  getDataTypeLabel,
-  getDataTypeIcon,
-} from './DataRetention';
+import { getDataTypeLabel, getDataTypeIcon } from './DataRetention';
 
 /**
  * Get action badge variant
  */
-function getActionBadgeVariant(action: 'delete' | 'archive' | 'anonymize'): 'danger' | 'info' | 'warning' {
+function getActionBadgeVariant(
+  action: 'delete' | 'archive' | 'anonymize'
+): 'danger' | 'info' | 'warning' {
   switch (action) {
     case 'delete':
       return 'danger';

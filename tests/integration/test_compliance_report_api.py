@@ -10,14 +10,16 @@ Tests cover:
 - Error handling for save failures
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from functools import wraps
+from io import BytesIO
+
+import pytest
 
 # Check if openpyxl is available for Excel tests
 try:
     from openpyxl import load_workbook
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -26,9 +28,11 @@ except ImportError:
 @pytest.fixture
 def app(tmp_db):
     """Create Flask app for testing with temporary database."""
-    from flask import Flask
-    from app.routes.compliance import compliance_bp
     from unittest.mock import patch
+
+    from flask import Flask
+
+    from app.routes.compliance import compliance_bp
 
     app = Flask(__name__)
     app.register_blueprint(compliance_bp)
@@ -44,6 +48,7 @@ def app(tmp_db):
 def client(app):
     """Create test client with authentication."""
     from unittest.mock import patch
+
     from flask import g
 
     test_client = app.test_client()
@@ -55,26 +60,34 @@ def client(app):
 
         def get(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.get(*args, **kwargs)
 
         def post(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.post(*args, **kwargs)
 
         def put(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.put(*args, **kwargs)
 
         def delete(self, *args, **kwargs):
             with patch("app.auth.decorators._extract_token", return_value="test-token"):
-                with patch("app.auth.decorators._load_user_from_token",
-                          return_value={"id": 1, "role": "admin", "username": "test_admin"}):
+                with patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={"id": 1, "role": "admin", "username": "test_admin"},
+                ):
                     return self._client.delete(*args, **kwargs)
 
     return AuthenticatedClient(test_client)
@@ -95,7 +108,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "json",
             },
@@ -116,7 +131,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "csv",
             },
@@ -124,7 +141,7 @@ class TestReportGenerationAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/csv"
+        assert response.mimetype == "text/csv"
         # CSV should have headers and data
         csv_content = response.get_data(as_text=True)
         assert len(csv_content) > 0
@@ -135,7 +152,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
                 "language": "en",
@@ -144,7 +163,7 @@ class TestReportGenerationAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/html"
+        assert response.mimetype == "text/html"
         html_content = response.get_data(as_text=True)
         # HTML should contain basic elements
         assert "<html" in html_content
@@ -158,7 +177,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "excel",
                 "language": "en",
@@ -182,7 +203,9 @@ class TestReportGenerationAPI:
             "/api/compliance/reports",
             json={
                 "report_type": "usage_summary",
-                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d"),
+                "period_start": (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+                    "%Y-%m-%d"
+                ),
                 "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "format": "html",
             },
@@ -386,7 +409,7 @@ class TestSavedReportAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/csv"
+        assert response.mimetype == "text/csv"
 
     def test_get_saved_report_html(self, client, admin_headers):
         """Test getting saved report in HTML format."""
@@ -408,7 +431,7 @@ class TestSavedReportAPI:
         )
 
         assert response.status_code == 200
-        assert response.content_type == "text/html"
+        assert response.mimetype == "text/html"
         html_content = response.get_data(as_text=True)
         assert "<html" in html_content
 
@@ -545,7 +568,7 @@ class TestReportFormatValidation:
                 headers=admin_headers,
             )
             assert response.status_code == 200
-            assert response.content_type == "text/html"
+            assert response.mimetype == "text/html"
 
 
 class TestReportErrorHandling:
@@ -588,7 +611,7 @@ class TestReportErrorHandling:
     def test_generate_report_error_on_save_failure(self, client, admin_headers):
         """Test that generate_report returns error when save_report returns False."""
         # This test verifies the fix for checking save_report return value
-        from unittest.mock import patch, Mock
+        from unittest.mock import Mock, patch
 
         # Mock generate_report to return a valid report
         mock_report = Mock()

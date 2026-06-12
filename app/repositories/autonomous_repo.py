@@ -8,7 +8,7 @@ Database operations for the AI autonomous development feature.
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
 
@@ -294,10 +294,10 @@ class AutonomousWorkflowRepository:
         user_id: Optional[int] = None,
         status: Optional[str] = None,
         search: Optional[str] = None,
-    ) -> tuple[str, list]:
+    ) -> tuple[str, list[Any]]:
         """Build WHERE conditions for workflow list/count queries."""
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if user_id is not None:
             conditions.append("user_id = ?")
@@ -322,8 +322,7 @@ class AutonomousWorkflowRepository:
             )
             search_pattern = f"%{escape_like(search.strip().lower())}%"
             search_clauses = [
-                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'"
-                for field in search_fields
+                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'" for field in search_fields
             ]
             conditions.append(f"({' OR '.join(search_clauses)})")
             params.extend([search_pattern] * len(search_fields))

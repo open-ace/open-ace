@@ -153,7 +153,10 @@ def test_tooltip_enhancement(page):
         print("    [INFO] Chart.js tooltip not found in expected location")
         # Check if the chart canvas has rendered correctly by verifying chart data exists
         chart_canvas = user_segmentation_card.locator("canvas")
-        check(chart_canvas.is_visible(), "Chart canvas is visible (tooltip behavior verified in demo mode)")
+        check(
+            chart_canvas.is_visible(),
+            "Chart canvas is visible (tooltip behavior verified in demo mode)",
+        )
         check(True, "Tooltip enhancement test completed (visual check needed in demo mode)")
 
 
@@ -202,7 +205,6 @@ def test_i18n_chinese(page):
 
     # Switch to Chinese language
     # Find language switcher in header (globe icon dropdown)
-    lang_dropdown = page.locator(".header-icon-btn.dropdown-toggle").filter(has_text="").first
     globe_icon = page.locator(".bi-globe").first
 
     if globe_icon.is_visible():
@@ -210,7 +212,11 @@ def test_i18n_chinese(page):
         pause(0.5)
 
         # Click Chinese option (second dropdown item)
-        chinese_option = page.locator(".dropdown-item").filter(has_text="Chinese").or_(page.locator(".dropdown-item").filter(has_text="中文"))
+        chinese_option = (
+            page.locator(".dropdown-item")
+            .filter(has_text="Chinese")
+            .or_(page.locator(".dropdown-item").filter(has_text="中文"))
+        )
         if chinese_option.count() > 0:
             chinese_option.first.click()
             pause(2)
@@ -254,7 +260,11 @@ def test_i18n_english(page):
         pause(0.5)
 
         # Click English option (first dropdown item)
-        english_option = page.locator(".dropdown-item").filter(has_text="English").or_(page.locator(".dropdown-item").filter(has_text="英语"))
+        english_option = (
+            page.locator(".dropdown-item")
+            .filter(has_text="English")
+            .or_(page.locator(".dropdown-item").filter(has_text="英语"))
+        )
         if english_option.count() > 0:
             english_option.first.click()
             pause(2)

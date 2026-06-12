@@ -361,11 +361,14 @@ export const DataRetention: React.FC = () => {
                           rule.action === 'delete'
                             ? 'danger'
                             : rule.action === 'anonymize'
-                            ? 'warning'
-                            : 'info'
+                              ? 'warning'
+                              : 'info'
                         }
                       >
-                        {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}
+                        {t(
+                          `action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`,
+                          language
+                        )}
                       </Badge>
                     </td>
                     <td>
@@ -488,7 +491,9 @@ export const DataRetention: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')}
+                onChange={(e) =>
+                  setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')
+                }
               >
                 <option value="delete">{t('actionDelete', language)}</option>
                 <option value="archive">{t('actionArchive', language)}</option>

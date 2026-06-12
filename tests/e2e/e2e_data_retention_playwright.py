@@ -341,7 +341,9 @@ def test_edit_retention_rule(page):
                     options = action_select.locator("option").all()
                     option_texts = [opt.text_content().strip().lower() for opt in options]
 
-                    has_anonymize = any("anonymize" in text or "匿名化" in text for text in option_texts)
+                    has_anonymize = any(
+                        "anonymize" in text or "匿名化" in text for text in option_texts
+                    )
                     check(has_anonymize, "Action select has anonymize option")
 
                 # Close modal
@@ -367,7 +369,9 @@ def test_language_switching(page):
     print("\n[TEST] Language switching...")
 
     # Click language selector
-    lang_selector = page.locator("[class*='language-selector'], button").filter(has_text="中文").first
+    lang_selector = (
+        page.locator("[class*='language-selector'], button").filter(has_text="中文").first
+    )
     if not lang_selector.is_visible():
         lang_selector = page.locator("[class*='language'], button").filter(has_text="English").first
 
@@ -383,10 +387,16 @@ def test_language_switching(page):
 
             # Verify page switched to English
             retention_tab = page.locator("button, .nav-link").filter(has_text="Data Retention")
-            check(retention_tab.is_visible(), "Page switched to English (Data Retention tab visible)")
+            check(
+                retention_tab.is_visible(), "Page switched to English (Data Retention tab visible)"
+            )
 
             # Switch back to Chinese
-            lang_selector = page.locator("[class*='language-selector'], button").filter(has_text="English").first
+            lang_selector = (
+                page.locator("[class*='language-selector'], button")
+                .filter(has_text="English")
+                .first
+            )
             if lang_selector.is_visible():
                 lang_selector.click()
                 pause(0.5)
@@ -463,6 +473,7 @@ def run_tests():
     except Exception as e:
         print(f"\n[ERROR] Test execution failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

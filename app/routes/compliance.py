@@ -181,13 +181,11 @@ def generate_report():
     if output_format == "csv":
         # Add UTF-8 BOM for Excel compatibility
         csv_content = report.to_csv()
-        response_content = b'\xef\xbb\xbf' + csv_content.encode('utf-8')
+        response_content = b"\xef\xbb\xbf" + csv_content.encode("utf-8")
         return Response(
             response_content,
-            mimetype="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}.csv"
-            },
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
         )
 
     if output_format == "html":
@@ -301,13 +299,11 @@ def get_saved_report(report_id: str):
     if output_format == "csv":
         # Add UTF-8 BOM for Excel compatibility
         csv_content = report.to_csv()
-        response_content = b'\xef\xbb\xbf' + csv_content.encode('utf-8')
+        response_content = b"\xef\xbb\xbf" + csv_content.encode("utf-8")
         return Response(
             response_content,
-            mimetype="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}.csv"
-            },
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
         )
 
     if output_format == "html":
@@ -488,7 +484,7 @@ def set_retention_rule():
     action = data.get("action", "delete")
 
     # Validate action value
-    VALID_ACTIONS = ['delete', 'archive', 'anonymize']
+    VALID_ACTIONS = ["delete", "archive", "anonymize"]
     if action not in VALID_ACTIONS:
         return jsonify({"error": f"action must be one of: {', '.join(VALID_ACTIONS)}"}), 400
 

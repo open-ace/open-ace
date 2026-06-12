@@ -13,11 +13,11 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from app.schemas.quota import (
-    validate_token_quota,
-    validate_request_quota,
-    validate_quota_update,
-    MAX_TOKEN_QUOTA,
     MAX_REQUEST_QUOTA,
+    MAX_TOKEN_QUOTA,
+    validate_quota_update,
+    validate_request_quota,
+    validate_token_quota,
 )
 
 

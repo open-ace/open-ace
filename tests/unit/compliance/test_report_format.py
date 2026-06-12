@@ -9,21 +9,19 @@ Tests cover:
 - Multi-language support
 """
 
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 
 # Check if openpyxl is available for Excel tests
 try:
     import openpyxl
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
 
-from app.modules.compliance.report import (
-    ComplianceReport,
-    ReportMetadata,
-    ReportType,
-)
+from app.modules.compliance.report import ComplianceReport, ReportMetadata, ReportType
 
 
 @pytest.fixture
@@ -245,6 +243,7 @@ class TestReportToExcel:
     def test_to_excel_valid_format(self, sample_report):
         """Test that Excel file is valid xlsx format."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -258,6 +257,7 @@ class TestReportToExcel:
     def test_to_excel_contains_metadata(self, sample_report):
         """Test that Excel contains metadata."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -270,6 +270,7 @@ class TestReportToExcel:
     def test_to_excel_contains_summary(self, sample_report):
         """Test that Excel contains summary data."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -283,6 +284,7 @@ class TestReportToExcel:
     def test_to_excel_contains_details(self, sample_report):
         """Test that Excel contains details."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -297,6 +299,7 @@ class TestReportToExcel:
     def test_to_excel_contains_compliance_checks(self, sample_report):
         """Test that Excel contains compliance checks."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -317,6 +320,7 @@ class TestReportToExcel:
     def test_to_excel_empty_details(self, sample_report_metadata):
         """Test Excel with empty details."""
         import io
+
         from openpyxl import load_workbook
 
         empty_report = ComplianceReport(
@@ -336,6 +340,7 @@ class TestReportToExcel:
     def test_to_excel_language_en(self, sample_report):
         """Test English language Excel."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel(language="en")
@@ -347,6 +352,7 @@ class TestReportToExcel:
     def test_to_excel_language_zh(self, sample_report):
         """Test Chinese language Excel."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel(language="zh")
@@ -358,6 +364,7 @@ class TestReportToExcel:
     def test_to_excel_styling(self, sample_report):
         """Test Excel styling applied."""
         import io
+
         from openpyxl import load_workbook
 
         excel = sample_report.to_excel()
@@ -371,6 +378,7 @@ class TestReportToExcel:
     def test_to_excel_different_report_types(self):
         """Test Excel for different report types."""
         import io
+
         from openpyxl import load_workbook
 
         report_types = [
@@ -406,11 +414,11 @@ class TestReportTemplates:
     def test_templates_directory_exists(self):
         """Test that templates directory exists."""
         import os
+
         from app.modules.compliance.report import ComplianceReport
 
         template_dir = os.path.join(
-            os.path.dirname(ComplianceReport.__module__.replace(".", "/")),
-            "templates"
+            os.path.dirname(ComplianceReport.__module__.replace(".", "/")), "templates"
         )
         # Template directory should exist
         assert os.path.exists(template_dir)
@@ -420,8 +428,15 @@ class TestReportTemplates:
         import os
 
         template_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "base.html"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "base.html",
         )
         assert os.path.exists(template_path)
 
@@ -430,11 +445,23 @@ class TestReportTemplates:
         import os
 
         template_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "components"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "components",
         )
 
-        components = ["header.html", "summary_table.html", "compliance_checks.html", "recommendations.html"]
+        components = [
+            "header.html",
+            "summary_table.html",
+            "compliance_checks.html",
+            "recommendations.html",
+        ]
         for component in components:
             assert os.path.exists(os.path.join(template_dir, component))
 
@@ -443,10 +470,23 @@ class TestReportTemplates:
         import os
 
         template_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "app", "modules", "compliance", "templates", "reports"
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "app",
+            "modules",
+            "compliance",
+            "templates",
+            "reports",
         )
 
-        reports = ["usage_summary.html", "user_activity.html", "audit_trail.html", "security.html", "comprehensive.html"]
+        reports = [
+            "usage_summary.html",
+            "user_activity.html",
+            "audit_trail.html",
+            "security.html",
+            "comprehensive.html",
+        ]
         for report in reports:
             assert os.path.exists(os.path.join(template_dir, report))

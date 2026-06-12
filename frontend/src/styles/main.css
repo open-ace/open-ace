@@ -1046,6 +1046,14 @@ link[rel='dns-prefetch'] {
   flex-wrap: nowrap;
 }
 
+/* Page Refresh Control - ensure buttons are clickable (not blocked by sticky header) */
+/* Header z-index is 310 (z-fixed + 10), need higher z-index to be above header's backdrop-filter layer */
+.page-header-controls .page-refresh-control,
+.page-header-controls .page-refresh-control-compact {
+  position: relative;
+  z-index: 320;
+}
+
 .page-header-controls .flex-spacer {
   flex: 1;
 }

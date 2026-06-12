@@ -13,11 +13,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePageRefreshStore } from '@/store';
-import {
-  matchQueryKey,
-  hashQueryKey,
-  type QueryKeyMatcherConfig,
-} from '@/utils';
+import { matchQueryKey, hashQueryKey, type QueryKeyMatcherConfig } from '@/utils';
 
 /**
  * UsePageRefreshOptions - Hook configuration
@@ -107,11 +103,14 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
   /**
    * Check if a refresh should be deduplicated
    */
-  const shouldDedupe = useCallback((key: string): boolean => {
-    const lastTime = lastRefreshTimestampsRef.current.get(key);
-    if (!lastTime) return false;
-    return Date.now() - lastTime < dedupeTime;
-  }, [dedupeTime]);
+  const shouldDedupe = useCallback(
+    (key: string): boolean => {
+      const lastTime = lastRefreshTimestampsRef.current.get(key);
+      if (!lastTime) return false;
+      return Date.now() - lastTime < dedupeTime;
+    },
+    [dedupeTime]
+  );
 
   /**
    * Record refresh timestamp for deduplication
@@ -239,22 +238,28 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
   /**
    * Set auto refresh state
    */
-  const setAutoRefresh = useCallback((enabled: boolean) => {
-    setConfig(page, {
-      autoRefresh: enabled,
-      interval: refreshInterval,
-    });
-  }, [page, refreshInterval, setConfig]);
+  const setAutoRefresh = useCallback(
+    (enabled: boolean) => {
+      setConfig(page, {
+        autoRefresh: enabled,
+        interval: refreshInterval,
+      });
+    },
+    [page, refreshInterval, setConfig]
+  );
 
   /**
    * Set refresh interval
    */
-  const setInterval = useCallback((ms: number) => {
-    setConfig(page, {
-      autoRefresh: autoRefresh,
-      interval: ms,
-    });
-  }, [page, autoRefresh, setConfig]);
+  const setInterval = useCallback(
+    (ms: number) => {
+      setConfig(page, {
+        autoRefresh: autoRefresh,
+        interval: ms,
+      });
+    },
+    [page, autoRefresh, setConfig]
+  );
 
   /**
    * Auto refresh effect
@@ -272,8 +277,7 @@ export function usePageRefresh(options: UsePageRefreshOptions): UsePageRefreshRe
     }
 
     // Use fallback interval if error count exceeds max
-    const effectiveInterval =
-      errorCount >= maxRetries ? fallbackInterval : refreshInterval;
+    const effectiveInterval = errorCount >= maxRetries ? fallbackInterval : refreshInterval;
 
     // Schedule next refresh
     refreshTimeoutRef.current = window.setTimeout(() => {

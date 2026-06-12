@@ -81,10 +81,7 @@ def is_invalid_hostname(name: str) -> bool:
     # RFC 1123 validation
     if len(name) < 1 or len(name) > 253:
         return True
-    if not _HOSTNAME_VALID_PATTERN.match(name):
-        return True
-
-    return False
+    return bool(not _HOSTNAME_VALID_PATTERN.match(name))
 
 
 def find_invalid_hostnames(db: Database, table: str) -> list[str]:

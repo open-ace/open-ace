@@ -90,10 +90,7 @@ export function shouldExclude(key: QueryKey, excludeList: QueryKey[]): boolean {
 /**
  * Match a query key against a matcher configuration
  */
-export function matchQueryKey(
-  key: QueryKey,
-  matcher: QueryKeyMatcherConfig
-): boolean {
+export function matchQueryKey(key: QueryKey, matcher: QueryKeyMatcherConfig): boolean {
   // First check exclusion rules
   if (matcher.exclude && shouldExclude(key, matcher.exclude)) {
     return false;
@@ -112,10 +109,7 @@ export function matchQueryKey(
 /**
  * Filter a list of query keys based on a matcher configuration
  */
-export function filterQueryKeys(
-  keys: QueryKey[],
-  matcher: QueryKeyMatcherConfig
-): QueryKey[] {
+export function filterQueryKeys(keys: QueryKey[], matcher: QueryKeyMatcherConfig): QueryKey[] {
   return keys.filter((key) => matchQueryKey(key, matcher));
 }
 

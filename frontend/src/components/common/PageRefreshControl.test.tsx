@@ -80,10 +80,8 @@ describe('PageRefreshControl', () => {
       const button = screen.getByTestId('manual-refresh-button');
       fireEvent.click(button);
 
-      // Button should be disabled after click (debounce)
-      await waitFor(() => {
-        expect(button).toBeDisabled();
-      });
+      // Should call refresh function
+      expect(mockRefresh.refresh).toHaveBeenCalled();
     });
 
     it('should show loading state when refreshing', () => {
@@ -119,10 +117,14 @@ describe('PageRefreshControl', () => {
     it('should render dropdown for settings in compact mode', () => {
       const mockRefresh = createMockRefresh();
 
-      render(<PageRefreshControl refresh={mockRefresh} compact={true} showAutoRefreshToggle={true} />);
+      render(
+        <PageRefreshControl refresh={mockRefresh} compact={true} showAutoRefreshToggle={true} />
+      );
 
-      // Should have clock icon for dropdown
-      expect(screen.getByRole('button', { name: '' })).toBeInTheDocument();
+      // Should have dropdown toggle button with clock icon
+      const dropdownToggle = screen.getByTestId('dropdown-toggle');
+      expect(dropdownToggle).toBeInTheDocument();
+      expect(dropdownToggle.querySelector('i.bi-clock, i.bi-clock-history')).toBeTruthy();
     });
 
     it('should show error indicator in compact mode', () => {

@@ -28,10 +28,7 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
-import {
-  QuotaType,
-  TOKEN_QUOTA_MULTIPLIER,
-} from '@/constants/quota';
+import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
   parseAndValidateQuota,
   formatQuotaForDisplay,
@@ -68,13 +65,7 @@ export const QuotaAlerts: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('quota');
 
   // --- Quota State ---
-  const {
-    data: quotaData,
-    isLoading: quotaLoading,
-    isError,
-    error,
-    refetch,
-  } = useQuotaUsage();
+  const { data: quotaData, isLoading: quotaLoading, isError, error, refetch } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
 
   // Page refresh control - manages manual refresh for quota and alerts data
@@ -226,7 +217,7 @@ export const QuotaAlerts: React.FC = () => {
         QuotaType.DAILY_TOKEN
       );
       if (!validation.validation.isValid) {
-        errors.daily_token_quota = validation.validation.error || 'Invalid value';
+        errors.daily_token_quota = validation.validation.error ?? 'Invalid value';
       }
     }
 
@@ -237,7 +228,7 @@ export const QuotaAlerts: React.FC = () => {
         QuotaType.MONTHLY_TOKEN
       );
       if (!validation.validation.isValid) {
-        errors.monthly_token_quota = validation.validation.error || 'Invalid value';
+        errors.monthly_token_quota = validation.validation.error ?? 'Invalid value';
       }
     }
 
@@ -248,7 +239,7 @@ export const QuotaAlerts: React.FC = () => {
         QuotaType.DAILY_REQUEST
       );
       if (!validation.validation.isValid) {
-        errors.daily_request_quota = validation.validation.error || 'Invalid value';
+        errors.daily_request_quota = validation.validation.error ?? 'Invalid value';
       }
     }
 
@@ -259,7 +250,7 @@ export const QuotaAlerts: React.FC = () => {
         QuotaType.MONTHLY_REQUEST
       );
       if (!validation.validation.isValid) {
-        errors.monthly_request_quota = validation.validation.error || 'Invalid value';
+        errors.monthly_request_quota = validation.validation.error ?? 'Invalid value';
       }
     }
 
@@ -578,7 +569,9 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.DAILY_TOKEN)})</small>
+                    <small className="text-muted ms-1">
+                      ({getMaxQuotaDisplay(QuotaType.DAILY_TOKEN)})
+                    </small>
                   </label>
                   <TextInput
                     type="text"
@@ -602,7 +595,9 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('monthlyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.MONTHLY_TOKEN)})</small>
+                    <small className="text-muted ms-1">
+                      ({getMaxQuotaDisplay(QuotaType.MONTHLY_TOKEN)})
+                    </small>
                   </label>
                   <TextInput
                     type="text"
@@ -626,7 +621,9 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyRequestQuota', language)}
-                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.DAILY_REQUEST)})</small>
+                    <small className="text-muted ms-1">
+                      ({getMaxQuotaDisplay(QuotaType.DAILY_REQUEST)})
+                    </small>
                   </label>
                   <TextInput
                     type="text"
@@ -650,13 +647,19 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('monthlyRequestQuota', language)}
-                    <small className="text-muted ms-1">({getMaxQuotaDisplay(QuotaType.MONTHLY_REQUEST)})</small>
+                    <small className="text-muted ms-1">
+                      ({getMaxQuotaDisplay(QuotaType.MONTHLY_REQUEST)})
+                    </small>
                   </label>
                   <TextInput
                     type="text"
                     value={formData.monthly_request_quota?.toString() ?? ''}
                     onChange={(value: string) =>
-                      handleQuotaInputChange(value, QuotaType.MONTHLY_REQUEST, 'monthly_request_quota')
+                      handleQuotaInputChange(
+                        value,
+                        QuotaType.MONTHLY_REQUEST,
+                        'monthly_request_quota'
+                      )
                     }
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -880,9 +883,7 @@ export const QuotaAlerts: React.FC = () => {
                     }
                     placeholder="your@email.com"
                   />
-                  <small className="text-muted">
-                    {t('smtpSetupGuide4', language)}
-                  </small>
+                  <small className="text-muted">{t('smtpSetupGuide4', language)}</small>
                 </div>
               )}
               <div className="col-12">

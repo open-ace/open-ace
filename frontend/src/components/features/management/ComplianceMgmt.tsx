@@ -326,7 +326,8 @@ export const ComplianceMgmt: React.FC = () => {
       const reports = await complianceApi.getSavedReports();
       setSavedReports(reports);
     } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to generate report';
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to generate report';
       setReportsError(errorMessage);
       console.error('Failed to generate report:', err);
     } finally {
@@ -380,10 +381,9 @@ export const ComplianceMgmt: React.FC = () => {
         URL.revokeObjectURL(url);
       } else {
         const isCsv = downloadFormat === 'csv';
-        const blob = new Blob(
-          [isCsv ? (report as string) : JSON.stringify(report, null, 2)],
-          { type: isCsv ? 'text/csv' : 'application/json' }
-        );
+        const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+          type: isCsv ? 'text/csv' : 'application/json',
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -544,7 +544,9 @@ export const ComplianceMgmt: React.FC = () => {
                   {savedReports.map((report) => (
                     <tr key={report.report_id}>
                       <td>
-                        <strong>{getReportTypeName(report.report_type, language, report.report_type)}</strong>
+                        <strong>
+                          {getReportTypeName(report.report_type, language, report.report_type)}
+                        </strong>
                       </td>
                       <td>
                         <Badge variant="secondary">
@@ -564,7 +566,9 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-info"
                             size="sm"
-                            onClick={() => handlePreviewSavedReport(report.report_id, report.report_type)}
+                            onClick={() =>
+                              handlePreviewSavedReport(report.report_id, report.report_type)
+                            }
                             loading={isPreviewLoading}
                             title={t('preview', language)}
                           >
@@ -573,28 +577,48 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-primary"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'json')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'json'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-json" />
                           </Button>
                           <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'csv')}
+                            onClick={() =>
+                              handleDownloadSavedReport(report.report_id, report.report_type, 'csv')
+                            }
                           >
                             <i className="bi bi-filetype-csv" />
                           </Button>
                           <Button
                             variant="outline-warning"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'html')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'html'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-html" />
                           </Button>
                           <Button
                             variant="outline-success"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'excel')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'excel'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-xlsx" />
                           </Button>
@@ -706,13 +730,16 @@ export const ComplianceMgmt: React.FC = () => {
                             rule.action === 'delete'
                               ? 'danger'
                               : rule.action === 'anonymize'
-                              ? 'warning'
-                              : rule.action === 'archive'
-                              ? 'info'
-                              : 'secondary'
+                                ? 'warning'
+                                : rule.action === 'archive'
+                                  ? 'info'
+                                  : 'secondary'
                           }
                         >
-                          {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}
+                          {t(
+                            `action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`,
+                            language
+                          )}
                         </Badge>
                       </td>
                       <td>
@@ -829,7 +856,9 @@ export const ComplianceMgmt: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')}
+                onChange={(e) =>
+                  setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')
+                }
               >
                 <option value="delete">{t('actionDelete', language)}</option>
                 <option value="archive">{t('actionArchive', language)}</option>
