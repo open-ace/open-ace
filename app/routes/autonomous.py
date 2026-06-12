@@ -388,9 +388,7 @@ def create_workflow():
                         "batch_order": index if is_multi_issue else None,
                         "batch_total": len(issue_selectors) if is_multi_issue else None,
                         "status": "pending" if index == 1 else "queued",
-                        "definition_snapshot": _serialize_definition_snapshot(
-                            definition_snapshot
-                        ),
+                        "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)

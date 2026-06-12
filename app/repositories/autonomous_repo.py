@@ -322,8 +322,7 @@ class AutonomousWorkflowRepository:
             )
             search_pattern = f"%{escape_like(search.strip().lower())}%"
             search_clauses = [
-                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'"
-                for field in search_fields
+                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'" for field in search_fields
             ]
             conditions.append(f"({' OR '.join(search_clauses)})")
             params.extend([search_pattern] * len(search_fields))

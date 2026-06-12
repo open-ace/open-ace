@@ -462,7 +462,9 @@ class EmailNotificationService:
         # Record rate limit
         self.rate_limiter.record_send(user_id)
 
-        logger.info(f"Email notification queued: user={user_id}, alert={alert_data.get('alert_id')}")
+        logger.info(
+            f"Email notification queued: user={user_id}, alert={alert_data.get('alert_id')}"
+        )
 
         return {
             "success": True,

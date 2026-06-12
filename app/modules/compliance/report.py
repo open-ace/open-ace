@@ -122,17 +122,17 @@ class ComplianceReport:
                 if key_fields_data:
                     # Preserve key fields and truncate the rest
                     key_json = json.dumps(key_fields_data, ensure_ascii=False)
-                    truncated = json_str[:self.MAX_CELL_LENGTH - len(key_json) - 20]
+                    truncated = json_str[: self.MAX_CELL_LENGTH - len(key_json) - 20]
                     return f"{key_json}...[TRUNCATED]...{truncated[-100:]}"
                 else:
                     # No key fields, simple truncation
-                    return json_str[:self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
+                    return json_str[: self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
             return json_str
 
         if isinstance(value, list):
             json_str = json.dumps(value, ensure_ascii=False)
             if len(json_str) > self.MAX_CELL_LENGTH:
-                return json_str[:self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
+                return json_str[: self.MAX_CELL_LENGTH - 15] + "...[TRUNCATED]"
             return json_str
 
         if isinstance(value, datetime):
@@ -513,7 +513,9 @@ class ComplianceReport:
             if key == "period":
                 continue
             ws_summary[f"A{row_num}"] = str(key)
-            ws_summary[f"B{row_num}"] = str(value) if not isinstance(value, dict) else json.dumps(value)
+            ws_summary[f"B{row_num}"] = (
+                str(value) if not isinstance(value, dict) else json.dumps(value)
+            )
             ws_summary[f"A{row_num}"].font = Font(bold=True)
             ws_summary[f"A{row_num}"].border = border
             ws_summary[f"B{row_num}"].border = border
@@ -545,7 +547,9 @@ class ComplianceReport:
                         continue
 
                     # Add section header row
-                    section_header_cell = ws_details.cell(row=row_idx, column=1, value=f"=== {section_title} ===")
+                    section_header_cell = ws_details.cell(
+                        row=row_idx, column=1, value=f"=== {section_title} ==="
+                    )
                     section_header_cell.font = Font(bold=True, size=14)
                     row_idx += 1
 
@@ -663,7 +667,9 @@ class ComplianceReport:
 
                 # Highlight urgent recommendations
                 if rec.startswith("URGENT:"):
-                    ws_recommendations.cell(row=idx + 1, column=2).font = Font(bold=True, color="EF4444")
+                    ws_recommendations.cell(row=idx + 1, column=2).font = Font(
+                        bold=True, color="EF4444"
+                    )
                 elif rec.startswith("Review:"):
                     ws_recommendations.cell(row=idx + 1, column=2).font = Font(color="F59E0B")
 
@@ -1291,17 +1297,21 @@ class ReportGenerator:
                 """
                 )
                 cursor.execute(
-                    """
+                    (
+                        """
                     INSERT INTO compliance_reports
                     (report_id, report_type, generated_at, period_start, period_end,
                      generated_by, tenant_id, report_data)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """ if self.db.is_postgresql else """
+                """
+                        if self.db.is_postgresql
+                        else """
                     INSERT INTO compliance_reports
                     (report_id, report_type, generated_at, period_start, period_end,
                      generated_by, tenant_id, report_data)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                    ),
                     (
                         report.metadata.report_id,
                         report.metadata.report_type,
@@ -1397,7 +1407,9 @@ class ReportGenerator:
                         "security_events": [],
                         "quota_alerts": [],
                     }
-                    logger.info(f"Converted old format comprehensive report details for {report_id}")
+                    logger.info(
+                        f"Converted old format comprehensive report details for {report_id}"
+                    )
 
                 return ComplianceReport(
                     metadata=metadata,

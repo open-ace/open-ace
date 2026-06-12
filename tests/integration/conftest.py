@@ -146,6 +146,24 @@ def _create_sqlite_tables(db):
             ON daily_stats (date, tool_name, host_name, sender_name)
         """
         )
+        # daily_usage table for compliance report tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                host_name TEXT DEFAULT 'localhost' NOT NULL,
+                tokens_used INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cache_tokens INTEGER DEFAULT 0,
+                request_count INTEGER DEFAULT 0,
+                models_used TEXT,
+                created_at TEXT
+            )
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS hourly_stats (

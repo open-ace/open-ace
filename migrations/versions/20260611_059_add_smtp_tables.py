@@ -80,9 +80,7 @@ def upgrade() -> None:
     op.create_index("idx_email_logs_user_id", "email_notification_logs", ["user_id"])
     op.create_index("idx_email_logs_sent_at", "email_notification_logs", ["sent_at"])
     op.create_index("idx_email_logs_status", "email_notification_logs", ["status"])
-    op.create_index(
-        "idx_email_logs_user_sent", "email_notification_logs", ["user_id", "sent_at"]
-    )
+    op.create_index("idx_email_logs_user_sent", "email_notification_logs", ["user_id", "sent_at"])
 
 
 def downgrade() -> None:

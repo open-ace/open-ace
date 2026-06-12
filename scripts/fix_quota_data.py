@@ -29,10 +29,7 @@ from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
 from app.schemas.quota import MAX_TOKEN_QUOTA, MAX_REQUEST_QUOTA
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -98,7 +95,9 @@ def check_abnormal_quotas(db: Database) -> dict:
                 abnormal_fields.append("monthly_token_quota (negative)")
                 stats["abnormal_monthly_token"] += 1
             elif monthly_token > MAX_TOKEN_QUOTA:
-                abnormal_fields.append(f"monthly_token_quota ({monthly_token}M > {MAX_TOKEN_QUOTA}M)")
+                abnormal_fields.append(
+                    f"monthly_token_quota ({monthly_token}M > {MAX_TOKEN_QUOTA}M)"
+                )
                 stats["abnormal_monthly_token"] += 1
 
         # Check daily request quota
@@ -107,7 +106,9 @@ def check_abnormal_quotas(db: Database) -> dict:
                 abnormal_fields.append("daily_request_quota (negative)")
                 stats["abnormal_daily_request"] += 1
             elif daily_request > MAX_REQUEST_QUOTA:
-                abnormal_fields.append(f"daily_request_quota ({daily_request} > {MAX_REQUEST_QUOTA})")
+                abnormal_fields.append(
+                    f"daily_request_quota ({daily_request} > {MAX_REQUEST_QUOTA})"
+                )
                 stats["abnormal_daily_request"] += 1
 
         # Check monthly request quota
@@ -116,16 +117,20 @@ def check_abnormal_quotas(db: Database) -> dict:
                 abnormal_fields.append("monthly_request_quota (negative)")
                 stats["abnormal_monthly_request"] += 1
             elif monthly_request > MAX_REQUEST_QUOTA:
-                abnormal_fields.append(f"monthly_request_quota ({monthly_request} > {MAX_REQUEST_QUOTA})")
+                abnormal_fields.append(
+                    f"monthly_request_quota ({monthly_request} > {MAX_REQUEST_QUOTA})"
+                )
                 stats["abnormal_monthly_request"] += 1
 
         if abnormal_fields:
-            stats["affected_users"].append({
-                "id": user_id,
-                "username": username,
-                "email": email,
-                "abnormal_fields": abnormal_fields,
-            })
+            stats["affected_users"].append(
+                {
+                    "id": user_id,
+                    "username": username,
+                    "email": email,
+                    "abnormal_fields": abnormal_fields,
+                }
+            )
 
     return stats
 
@@ -228,33 +233,25 @@ def print_report(stats: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Check and fix abnormal quota values in database"
-    )
+    parser = argparse.ArgumentParser(description="Check and fix abnormal quota values in database")
     parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Check for abnormal values without fixing"
+        "--check", action="store_true", help="Check for abnormal values without fixing"
     )
     parser.add_argument(
         "--fix-default",
         action="store_true",
-        help="Fix abnormal values by setting to default quotas"
+        help="Fix abnormal values by setting to default quotas",
     )
     parser.add_argument(
-        "--fix-max",
-        action="store_true",
-        help="Fix abnormal values by setting to max quotas"
+        "--fix-max", action="store_true", help="Fix abnormal values by setting to max quotas"
     )
     parser.add_argument(
         "--fix-unlimited",
         action="store_true",
-        help="Fix abnormal values by setting to unlimited (NULL)"
+        help="Fix abnormal values by setting to unlimited (NULL)",
     )
     parser.add_argument(
-        "--backup",
-        action="store_true",
-        help="Create database backup before fixing (recommended)"
+        "--backup", action="store_true", help="Create database backup before fixing (recommended)"
     )
 
     args = parser.parse_args()

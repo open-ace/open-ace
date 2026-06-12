@@ -57,7 +57,9 @@ def validate_token_quota(value: int | None, quota_name: str = "token_quota") -> 
     return True, ""
 
 
-def validate_request_quota(value: int | None, quota_name: str = "request_quota") -> tuple[bool, str]:
+def validate_request_quota(
+    value: int | None, quota_name: str = "request_quota"
+) -> tuple[bool, str]:
     """
     Validate a request quota value.
 

@@ -112,23 +112,28 @@ def test_dashboard_refresh_control(page):
 
     # Check if button shows loading state
     # Note: The button should show a spinner when refreshing
-    check(page.locator("text=Refreshing").is_visible() or
-          page.locator(".spinner-border").is_visible(),
-          "Refresh button shows loading state")
+    check(
+        page.locator("text=Refreshing").is_visible()
+        or page.locator(".spinner-border").is_visible(),
+        "Refresh button shows loading state",
+    )
 
     shot(page, "03-dashboard-refresh-clicked")
 
     # Wait for refresh to complete
     pause(3)
-    check(not page.locator("text=Refreshing").is_visible(),
-          "Refresh completes and loading state disappears")
+    check(
+        not page.locator("text=Refreshing").is_visible(),
+        "Refresh completes and loading state disappears",
+    )
 
     # Check for last refresh time indicator
     last_refresh_time = page.locator(".text-muted").filter(has_text="ago")
     # Note: Last refresh time should be displayed somewhere
-    check(last_refresh_time.count() > 0 or
-          page.locator("[title*='Last refresh']").count() > 0,
-          "Last refresh time indicator is visible")
+    check(
+        last_refresh_time.count() > 0 or page.locator("[title*='Last refresh']").count() > 0,
+        "Last refresh time indicator is visible",
+    )
 
 
 def test_quota_alerts_refresh_control(page):
@@ -159,8 +164,7 @@ def test_quota_alerts_refresh_control(page):
         shot(page, "06-alerts-tab")
 
         # Check refresh button is still visible in Alerts tab
-        check(refresh_button.is_visible(),
-              "Refresh button visible in Alerts tab")
+        check(refresh_button.is_visible(), "Refresh button visible in Alerts tab")
 
 
 def test_messages_refresh_control(page):
@@ -201,8 +205,10 @@ def test_messages_refresh_control(page):
                 # Test interval selection
                 interval_selector.select_option("30000")  # 30 seconds
                 pause(1)
-                check(interval_selector.input_value() == "30000",
-                      "Interval selector changes to 30 seconds")
+                check(
+                    interval_selector.input_value() == "30000",
+                    "Interval selector changes to 30 seconds",
+                )
                 shot(page, "09-interval-selected")
 
 
@@ -234,8 +240,7 @@ def test_refresh_state_persistence(page):
     # Check if auto refresh state persisted
     if auto_refresh_toggle.is_visible():
         # Note: Persistence depends on localStorage, might persist
-        check(auto_refresh_toggle.is_checked(),
-              "Auto refresh state persisted after navigation")
+        check(auto_refresh_toggle.is_checked(), "Auto refresh state persisted after navigation")
 
 
 def test_error_handling(page):
@@ -274,8 +279,9 @@ def test_error_handling(page):
 
     # Error indicator should disappear
     if error_indicator.is_visible():
-        check(not error_indicator.is_visible(),
-              "Error indicator disappears after successful refresh")
+        check(
+            not error_indicator.is_visible(), "Error indicator disappears after successful refresh"
+        )
 
 
 def test_global_pause_shortcut(page):
