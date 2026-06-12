@@ -28,7 +28,8 @@ test.describe('Theme Switching', () => {
     const themeToggle = page.locator('.header button:has(.bi-moon), .header button:has(.bi-sun)').first();
 
     if (await themeToggle.isVisible()) {
-      await themeToggle.click();
+      // Use force: true to bypass pointer interception (Safari/WebKit may have overlay elements)
+      await themeToggle.click({ force: true });
       await page.waitForTimeout(500);
 
       // Check for dark theme
@@ -45,8 +46,8 @@ test.describe('Theme Switching', () => {
     const themeToggle = page.locator('.header button:has(.bi-moon), .header button:has(.bi-sun)').first();
 
     if (await themeToggle.isVisible()) {
-      // Toggle to dark
-      await themeToggle.click();
+      // Toggle to dark - use force: true for Safari/WebKit compatibility
+      await themeToggle.click({ force: true });
       await page.waitForTimeout(500);
 
       // Reload page
