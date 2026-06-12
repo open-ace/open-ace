@@ -33,7 +33,7 @@ import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 export const QuotaManagement: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
-  const { data: quotaData, isLoading, isFetching, isError, error, refetch } = useQuotaUsage();
+  const { data: quotaData, isLoading, isError, error, refetch } = useQuotaUsage();
   const updateQuota = useUpdateQuota();
 
   // Page refresh control - manages manual refresh for quota data
