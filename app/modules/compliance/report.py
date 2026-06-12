@@ -368,7 +368,9 @@ class ComplianceReport:
                 user_repo = UserRepository()
                 user = user_repo.get_user_by_id(self.metadata.generated_by)
                 if user:
-                    context["generated_by_name"] = user.get("username", f"User {self.metadata.generated_by}")
+                    context["generated_by_name"] = user.get(
+                        "username", f"User {self.metadata.generated_by}"
+                    )
             except Exception:
                 context["generated_by_name"] = f"User {self.metadata.generated_by}"
 

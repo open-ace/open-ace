@@ -149,9 +149,7 @@ class SMTPConfigService:
 
         except smtplib.SMTPAuthenticationError as e:
             smtp_error_str = (
-                e.smtp_error.decode()
-                if isinstance(e.smtp_error, bytes)
-                else str(e.smtp_error)
+                e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else str(e.smtp_error)
             )
             error_msg = f"SMTP authentication failed: {e.smtp_code} - {smtp_error_str}"
             logger.error(error_msg)
@@ -162,9 +160,7 @@ class SMTPConfigService:
 
         except smtplib.SMTPConnectError as e:
             smtp_error_str = (
-                e.smtp_error.decode()
-                if isinstance(e.smtp_error, bytes)
-                else str(e.smtp_error)
+                e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else str(e.smtp_error)
             )
             error_msg = f"SMTP connection failed: {e.smtp_code} - {smtp_error_str}"
             logger.error(error_msg)

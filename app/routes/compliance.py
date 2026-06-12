@@ -184,7 +184,7 @@ def generate_report():
         response_content = b"\xef\xbb\xbf" + csv_content.encode("utf-8")
         return Response(
             response_content,
-            mimetype="text/csv; charset=utf-8",
+            mimetype="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
         )
 
@@ -302,7 +302,7 @@ def get_saved_report(report_id: str):
         response_content = b"\xef\xbb\xbf" + csv_content.encode("utf-8")
         return Response(
             response_content,
-            mimetype="text/csv; charset=utf-8",
+            mimetype="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}.csv"},
         )
 

@@ -12,26 +12,26 @@
 
 ### 1. 前端 API 类型定义 ✅
 **文件**: `frontend/src/api/compliance.ts`
-**修改内容**: 
+**修改内容**:
 - 第 96 行: `RetentionRule` 接口已包含 `'delete' | 'archive' | 'anonymize'`
 - 第 283-284 行: `setRetentionRule` 参数类型已包含 `anonymize`
 
 ### 2. 后端输入验证 ✅
 **文件**: `app/routes/compliance.py`
-**修改内容**: 
+**修改内容**:
 - 第 488-493 行: 已添加 action 值白名单验证
 - 白名单: `['delete', 'archive', 'anonymize']`
 - 错误响应: 返回 400 + 明确错误消息
 
 ### 3. 前端 Badge 容错处理 ✅
 **文件**: `frontend/src/components/features/management/ComplianceMgmt.tsx`
-**修改内容**: 
+**修改内容**:
 - 第 702-713 行: Badge variant 已有 fallback 到 `'secondary'`
 - 未知 action 值显示灰色样式
 
 ### 4. 编辑弹窗下拉选项 ✅
 **文件**: `frontend/src/components/features/management/ComplianceMgmt.tsx`
-**修改内容**: 
+**修改内容**:
 - 第 206 行: `editAction` 类型定义包含三种 action
 - 第 832-835 行: 下拉选项包含 delete, archive, anonymize
 - 第 402 行: 初始化正确读取当前值
