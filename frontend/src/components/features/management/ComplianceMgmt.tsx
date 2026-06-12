@@ -34,6 +34,7 @@ import {
   type RetentionRule,
   type RetentionHistory,
   type StorageEstimate,
+  type RetentionReport,
 } from '@/api';
 import { usePageRefresh } from '@/hooks';
 
@@ -205,7 +206,7 @@ export const ComplianceMgmt: React.FC = () => {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
   const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
-  const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [previewResult, setPreviewResult] = useState<RetentionReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   // Report preview state
