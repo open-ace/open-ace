@@ -10,7 +10,7 @@ sys.path.insert(0, "/Users/rhuang/workspace/open-ace")
 
 from app import create_app
 from app.repositories.user_repo import UserRepository
-from app.schemas.quota import MAX_TOKEN_QUOTA, MAX_REQUEST_QUOTA
+from app.schemas.quota import MAX_REQUEST_QUOTA, MAX_TOKEN_QUOTA
 
 app = create_app()
 with app.app_context():

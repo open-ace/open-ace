@@ -61,7 +61,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
         notifier = get_alert_notifier()
         notifier._subscribers = []
 
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -107,7 +107,7 @@ class TestEmailNotificationFlow(unittest.TestCase):
         notifier = get_alert_notifier()
         notifier._subscribers = []
 
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="critical",
             title="Quota Exceeded",

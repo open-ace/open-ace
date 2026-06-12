@@ -10,10 +10,11 @@ Tests cover:
 - Excel output with section column
 """
 
-import pytest
-from datetime import datetime, timezone
-import json
 import io
+import json
+from datetime import datetime, timezone
+
+import pytest
 
 try:
     import openpyxl
@@ -25,9 +26,9 @@ except ImportError:
 
 from app.modules.compliance.report import (
     ComplianceReport,
+    ReportGenerator,
     ReportMetadata,
     ReportType,
-    ReportGenerator,
 )
 
 
@@ -245,7 +246,7 @@ class TestComprehensiveVsAuditTrailDifferentDetails:
         """Test that comprehensive and audit trail details types are different."""
         assert isinstance(comprehensive_report.details, dict)
         assert isinstance(audit_trail_report.details, list)
-        assert type(comprehensive_report.details) != type(audit_trail_report.details)
+        assert not isinstance(comprehensive_report.details, type(audit_trail_report.details))
 
     def test_details_content_different(self, comprehensive_report, audit_trail_report):
         """Test that comprehensive details has more sections than audit trail."""

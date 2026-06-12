@@ -10,10 +10,11 @@ Tests cover:
 - Error handling for save failures
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from functools import wraps
+from io import BytesIO
+
+import pytest
 
 # Check if openpyxl is available for Excel tests
 try:
@@ -27,9 +28,11 @@ except ImportError:
 @pytest.fixture
 def app(tmp_db):
     """Create Flask app for testing with temporary database."""
-    from flask import Flask
-    from app.routes.compliance import compliance_bp
     from unittest.mock import patch
+
+    from flask import Flask
+
+    from app.routes.compliance import compliance_bp
 
     app = Flask(__name__)
     app.register_blueprint(compliance_bp)
@@ -45,6 +48,7 @@ def app(tmp_db):
 def client(app):
     """Create test client with authentication."""
     from unittest.mock import patch
+
     from flask import g
 
     test_client = app.test_client()
@@ -607,7 +611,7 @@ class TestReportErrorHandling:
     def test_generate_report_error_on_save_failure(self, client, admin_headers):
         """Test that generate_report returns error when save_report returns False."""
         # This test verifies the fix for checking save_report return value
-        from unittest.mock import patch, Mock
+        from unittest.mock import Mock, patch
 
         # Mock generate_report to return a valid report
         mock_report = Mock()

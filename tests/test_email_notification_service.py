@@ -196,7 +196,7 @@ class TestRateLimiter(unittest.TestCase):
 
     def test_rate_limit_expiry(self):
         """Test rate limit expires after time window."""
-        from app.services.email_notification_service import RateLimiter, RATE_LIMIT_WINDOW
+        from app.services.email_notification_service import RATE_LIMIT_WINDOW, RateLimiter
 
         limiter = RateLimiter()
         user_id = 789
@@ -456,7 +456,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create an alert for user 1
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -497,7 +497,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create an alert
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -534,7 +534,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create a warning alert (below threshold)
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -546,7 +546,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         mock_service.send_alert_notification.assert_not_called()
 
         # Now create a critical alert
-        alert2 = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="critical",
             title="Quota Critical",
@@ -583,7 +583,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create a system alert
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="system",
             severity="warning",
             title="System Warning",
@@ -595,7 +595,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         mock_service.send_alert_notification.assert_not_called()
 
         # Now create a quota alert
-        alert2 = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -634,7 +634,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create an alert
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="quota",
             severity="warning",
             title="Quota Warning",
@@ -658,7 +658,7 @@ class TestAlertNotifierEmailIntegration(unittest.TestCase):
         notifier._subscribers = []
 
         # Create a system-wide alert (no user_id)
-        alert = notifier.create_alert(
+        _ = notifier.create_alert(
             alert_type="system",
             severity="warning",
             title="System Warning",

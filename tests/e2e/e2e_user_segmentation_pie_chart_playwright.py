@@ -205,7 +205,6 @@ def test_i18n_chinese(page):
 
     # Switch to Chinese language
     # Find language switcher in header (globe icon dropdown)
-    lang_dropdown = page.locator(".header-icon-btn.dropdown-toggle").filter(has_text="").first
     globe_icon = page.locator(".bi-globe").first
 
     if globe_icon.is_visible():

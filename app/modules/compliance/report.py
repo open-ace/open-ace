@@ -528,9 +528,6 @@ class ComplianceReport:
             # Check if details is dict format (comprehensive report) or list format
             if isinstance(self.details, dict):
                 # Dict format: multiple sections
-                # Add Section column translation
-                section_trans = lang_trans.get("section", "Section")
-
                 # Section order and translations
                 sections_order = [
                     ("usage_summary", lang_trans.get("sectionUsageSummary", "Usage Summary")),

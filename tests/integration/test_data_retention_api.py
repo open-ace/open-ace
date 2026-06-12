@@ -8,14 +8,16 @@ Tests cover:
 - Retention rule CRUD operations
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture
 def app(tmp_db):
     """Create Flask app for testing with temporary database."""
     from flask import Flask
+
     from app.routes.compliance import compliance_bp
 
     app = Flask(__name__)

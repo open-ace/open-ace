@@ -14,15 +14,17 @@ Tests cover:
 
 import csv
 import json
-import pytest
 from datetime import datetime, timezone
 from io import StringIO
 
+import pytest
+
 # Check if openpyxl is available for Excel tests
 try:
+    from io import BytesIO
+
     import openpyxl
     from openpyxl import load_workbook
-    from io import BytesIO
 
     HAS_OPENPYXL = True
 except ImportError:

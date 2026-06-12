@@ -8,14 +8,15 @@ Tests cover:
 - Report generation API error handling for save failures
 """
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, MagicMock, patch
 import json
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from app.modules.compliance.report import (
-    ReportGenerator,
     ComplianceReport,
+    ReportGenerator,
     ReportMetadata,
     ReportType,
 )
@@ -216,7 +217,7 @@ class TestGetSavedReports:
         generator = ReportGenerator()
         generator.db = mock_db
 
-        result = generator.get_saved_reports(report_type="usage_summary")
+        generator.get_saved_reports(report_type="usage_summary")
 
         # Verify query was called with correct parameters
         call_args = mock_db.fetch_all.call_args
@@ -232,7 +233,7 @@ class TestGetSavedReports:
         generator = ReportGenerator()
         generator.db = mock_db
 
-        result = generator.get_saved_reports(tenant_id=123)
+        generator.get_saved_reports(tenant_id=123)
 
         # Verify query was called with correct parameters
         call_args = mock_db.fetch_all.call_args

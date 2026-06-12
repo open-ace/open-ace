@@ -27,7 +27,7 @@ sys.path.insert(0, str(project_root))
 
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
-from app.schemas.quota import MAX_TOKEN_QUOTA, MAX_REQUEST_QUOTA
+from app.schemas.quota import MAX_REQUEST_QUOTA, MAX_TOKEN_QUOTA
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

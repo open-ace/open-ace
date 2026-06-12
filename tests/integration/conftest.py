@@ -47,8 +47,8 @@ def _create_sqlite_tables(db):
     try:
         cursor = conn.cursor()
 
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.compliance.report import get_ddl_statements as report_ddl
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -682,8 +682,8 @@ def _create_pg_tables(db):
         cursor = conn.cursor()
 
         # Reuse DDL functions that already emit PostgreSQL-compatible SQL
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.compliance.report import get_ddl_statements as report_ddl
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -780,6 +780,7 @@ def pg_db():
 def app(tmp_db):
     """Create Flask app for testing with temporary database."""
     from flask import Flask
+
     from app.routes.compliance import compliance_bp
 
     app = Flask(__name__)
@@ -802,8 +803,9 @@ def client(app):
 def auth_headers():
     """Headers for authenticated user (simulates login)."""
     # For admin_required decorator, we need to mock g.user_id
-    from flask import g
     from unittest.mock import patch
+
+    from flask import g
 
     # In tests, we'll patch g.user_id before each request
     return {"Content-Type": "application/json"}
