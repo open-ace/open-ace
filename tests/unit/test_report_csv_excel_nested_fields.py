@@ -30,11 +30,7 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
-from app.modules.compliance.report import (
-    ComplianceReport,
-    ReportMetadata,
-    ReportType,
-)
+from app.modules.compliance.report import ComplianceReport, ReportMetadata, ReportType
 
 
 @pytest.fixture
