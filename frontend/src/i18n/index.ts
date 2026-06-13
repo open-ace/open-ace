@@ -3122,6 +3122,10 @@ const translations: Record<Language, Translations> = {
       '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
     providerCannotChange: 'プロバイダーは変更できません',
 
+    // Fullscreen
+    enterFullscreen: '全画面表示',
+    exitFullscreen: '全画面終了',
+
     // Issue #584: Directory browser
     browse: '参照',
     recentPaths: '最近のパス',
@@ -4005,6 +4009,10 @@ const translations: Record<Language, Translations> = {
     codexSettingsHint:
       '민감하지 않은 Codex 설정만 구성하세요 (model, sandbox 등). API 키는 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
     providerCannotChange: '공급자를 변경할 수 없습니다',
+
+    // Fullscreen
+    enterFullscreen: '전체 화면',
+    exitFullscreen: '전체 화면 종료',
 
     // Issue #584: Directory browser
     browse: '찾아보기',

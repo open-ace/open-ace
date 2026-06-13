@@ -676,6 +676,32 @@ class TestGetTimeline:
             "files": 2,
             "commits": 1,
         }
+        repo.update_milestone.assert_any_call(
+            "ms-dev",
+            {
+                "diff_stats": json.dumps(
+                    {
+                        "additions": 130,
+                        "deletions": 25,
+                        "files": 3,
+                        "commits": 2,
+                    }
+                )
+            },
+        )
+        repo.update_milestone.assert_any_call(
+            "ms-pr-fix",
+            {
+                "diff_stats": json.dumps(
+                    {
+                        "additions": 8,
+                        "deletions": 3,
+                        "files": 2,
+                        "commits": 1,
+                    }
+                )
+            },
+        )
 
 
 class TestCancelMilestone:

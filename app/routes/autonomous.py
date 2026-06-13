@@ -161,11 +161,12 @@ def _parse_commit_shas(commit_shas_raw: str) -> list[str]:
 def _enrich_milestones_with_diff_stats(
     workflow: dict[str, Any], milestones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Backfill missing diff_stats for milestones that have commits."""
+    """Backfill missing diff_stats for milestones that have commits and persist them."""
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
     if not project_path:
         return milestones
 
+    repo = _get_repo()
     targets = [
         milestone
         for milestone in milestones
@@ -179,11 +180,17 @@ def _enrich_milestones_with_diff_stats(
     gh = GitHubOps(project_path)
     by_id: dict[str, dict[str, Any]] = {}
     for milestone in targets:
+        milestone_id = milestone.get("milestone_id", "")
+        shas = _parse_commit_shas(milestone.get("commit_shas", ""))
+        if not shas:
+            continue
+
         additions = 0
         deletions = 0
         files = 0
         commits = 0
-        for sha in _parse_commit_shas(milestone.get("commit_shas", "")):
+        had_error = False
+        for sha in shas:
             try:
                 stats = gh.get_commit_diff_stats(sha)
                 additions += int(stats.get("additions", 0) or 0)
@@ -191,25 +198,35 @@ def _enrich_milestones_with_diff_stats(
                 files += int(stats.get("files", 0) or 0)
                 commits += int(stats.get("commits", 0) or 0)
             except Exception as exc:
+                had_error = True
                 logger.warning(
                     "Failed to backfill diff stats for %s (%s): %s",
-                    milestone.get("milestone_id", "")[:8],
+                    milestone_id[:8],
                     sha[:8],
                     exc,
                 )
 
-        if additions or deletions or files or commits:
-            by_id[milestone.get("milestone_id", "")] = {
-                **milestone,
-                "diff_stats": json.dumps(
-                    {
-                        "additions": additions,
-                        "deletions": deletions,
-                        "files": files,
-                        "commits": commits,
-                    }
-                ),
+        if had_error:
+            continue
+
+        diff_stats_json = json.dumps(
+            {
+                "additions": additions,
+                "deletions": deletions,
+                "files": files,
+                "commits": commits,
             }
+        )
+        try:
+            repo.update_milestone(milestone_id, {"diff_stats": diff_stats_json})
+        except Exception as exc:
+            logger.warning("Failed to persist diff stats for %s: %s", milestone_id[:8], exc)
+            continue
+
+        by_id[milestone_id] = {
+            **milestone,
+            "diff_stats": diff_stats_json,
+        }
 
     if not by_id:
         return milestones
