@@ -29,8 +29,8 @@ export function formatQuotaForDisplay(
   value: number | null | undefined,
   isTokenQuota: boolean = true
 ): string {
-  // Unlimited quota
-  if (isUnlimited(value)) {
+  // Unlimited quota (null or undefined)
+  if (value === null || value === undefined) {
     return '∞';
   }
 
@@ -94,10 +94,7 @@ export function parseQuotaInput(input: string): number | null {
   }
 
   // Clean the input: remove commas, spaces, and non-numeric characters (except e, ., -)
-  const cleaned = input
-    .trim()
-    .replace(/,/g, '')
-    .replace(/\s/g, '');
+  const cleaned = input.trim().replace(/,/g, '').replace(/\s/g, '');
 
   // Try to parse as number (supports scientific notation)
   const parsed = Number(cleaned);
@@ -171,10 +168,7 @@ export function formatTokensForDisplay(tokens: number): string {
  * @returns Placeholder text
  */
 export function getQuotaPlaceholder(quotaType: QuotaType): string {
-  if (
-    quotaType === QuotaType.DAILY_TOKEN ||
-    quotaType === QuotaType.MONTHLY_TOKEN
-  ) {
+  if (quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN) {
     return 'Unlimited (enter value in M)';
   }
   return 'Unlimited';
@@ -219,10 +213,7 @@ export function shouldShowUnlimited(value: number | null | undefined): boolean {
  * @returns Max value display string
  */
 export function getMaxQuotaDisplay(quotaType: QuotaType): string {
-  if (
-    quotaType === QuotaType.DAILY_TOKEN ||
-    quotaType === QuotaType.MONTHLY_TOKEN
-  ) {
+  if (quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN) {
     return `Max: ${MAX_TOKEN_QUOTA}M`;
   }
   return `Max: ${formatNumberAsString(MAX_REQUEST_QUOTA)}`;

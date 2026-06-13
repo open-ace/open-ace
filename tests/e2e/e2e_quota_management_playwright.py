@@ -128,7 +128,13 @@ def test_valid_quota_input(page):
     print("\n[TEST] Valid quota input...")
 
     # Find daily token quota input
-    token_input = page.locator("input").filter(has_text="Daily Token Quota").locator("..").locator("input").first
+    token_input = (
+        page.locator("input")
+        .filter(has_text="Daily Token Quota")
+        .locator("..")
+        .locator("input")
+        .first
+    )
     if not token_input.is_visible():
         # Alternative: find by placeholder
         token_input = page.locator("input[placeholder='Unlimited']").first
@@ -161,8 +167,10 @@ def test_quota_exceeding_max(page):
 
     # Verify error message appears
     error_msg = monthly_token_input.locator("..").locator(".text-danger")
-    check(error_msg.is_visible() or "exceeds" in monthly_token_input.input_value(),
-          "Quota exceeding max shows error")
+    check(
+        error_msg.is_visible() or "exceeds" in monthly_token_input.input_value(),
+        "Quota exceeding max shows error",
+    )
     shot(page, "06-quota-exceeding-max")
 
 
@@ -182,8 +190,10 @@ def test_negative_quota_input(page):
 
     # Verify error message
     error_msg = request_input.locator("..").locator(".text-danger")
-    check(error_msg.is_visible() or "negative" in request_input.input_value(),
-          "Negative quota shows error")
+    check(
+        error_msg.is_visible() or "negative" in request_input.input_value(),
+        "Negative quota shows error",
+    )
     shot(page, "07-negative-quota")
 
 
@@ -203,8 +213,10 @@ def test_scientific_notation_input(page):
     # Verify it's parsed and validated
     # Should show error as 1e9 >> max for token quota
     error_msg = input_field.locator("..").locator(".text-danger")
-    check(error_msg.is_visible() or input_field.input_value() != "",
-          "Scientific notation is parsed and validated")
+    check(
+        error_msg.is_visible() or input_field.input_value() != "",
+        "Scientific notation is parsed and validated",
+    )
     shot(page, "08-scientific-notation")
 
 
@@ -235,8 +247,10 @@ def test_quota_display_formatting(page):
 
     # Check quota displays show "M" suffix for token quotas
     quota_display = page.locator(".card").first.locator("small").filter(has_text="M")
-    check(quota_display.count() > 0 or "∞" in page.content(),
-          "Token quota displays have M suffix or infinity symbol")
+    check(
+        quota_display.count() > 0 or "∞" in page.content(),
+        "Token quota displays have M suffix or infinity symbol",
+    )
     shot(page, "10-quota-display-format")
 
 
@@ -270,6 +284,7 @@ def main():
             print(f"\n[ERROR] Test execution failed: {e}")
             shot(page, "error-state")
             import traceback
+
             traceback.print_exc()
 
         finally:

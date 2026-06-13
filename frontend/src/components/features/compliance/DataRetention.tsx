@@ -11,6 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import type { Language } from '@/types';
 import {
   Card,
   StatCard,
@@ -26,16 +27,18 @@ import {
   type RetentionRule,
   type RetentionHistory,
   type StorageEstimate,
+  type RetentionReport,
 } from '@/api';
 import { formatDateTime } from '@/utils';
 import { cn } from '@/utils';
+import { CleanupPreviewContent } from './CleanupPreviewContent';
 
 /**
  * Data type metadata mapping table
  * Maps backend retention rule keys to display labels, icons, and storage estimate keys
  * Synchronized with backend DEFAULT_RULES in app/modules/compliance/retention.py
  */
-const DATA_TYPE_META: Record<
+export const DATA_TYPE_META: Record<
   string,
   {
     i18nKey: string;
@@ -87,7 +90,7 @@ const DATA_TYPE_META: Record<
  * Format snake_case key to Title Case for fallback display
  * Example: 'audit_logs' -> 'Audit Logs'
  */
-function formatDataTypeKey(key: string): string {
+export function formatDataTypeKey(key: string): string {
   return key
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -98,7 +101,7 @@ function formatDataTypeKey(key: string): string {
  * Get display label for a data type key
  * Uses i18n translation if available, otherwise uses fallback label or formatted key
  */
-function getDataTypeLabel(key: string, language: string): string {
+export function getDataTypeLabel(key: string, language: Language): string {
   const meta = DATA_TYPE_META[key];
   if (meta) {
     // Try i18n translation, fallback to fallbackLabel
@@ -113,7 +116,7 @@ function getDataTypeLabel(key: string, language: string): string {
 /**
  * Get icon for a data type key
  */
-function getDataTypeIcon(key: string): string {
+export function getDataTypeIcon(key: string): string {
   const meta = DATA_TYPE_META[key];
   return meta?.icon ?? 'bi-database';
 }
@@ -122,7 +125,7 @@ function getDataTypeIcon(key: string): string {
  * Get storage estimate display label for a storage estimate data type key
  * Maps storage estimate API keys back to retention rule display labels
  */
-function getStorageEstimateLabel(storageKey: string, language: string): string {
+function getStorageEstimateLabel(storageKey: string, language: Language): string {
   // First, try to find a retention rule key that maps to this storage key
   for (const [ruleKey, meta] of Object.entries(DATA_TYPE_META)) {
     if (meta.storageEstimateKey === storageKey) {
@@ -139,7 +142,7 @@ function getStorageEstimateLabel(storageKey: string, language: string): string {
  */
 function adaptRulesToTableData(
   rules: Record<string, RetentionRule>,
-  language: string
+  language: Language
 ): Array<{ key: string; label: string; icon: string; rule: RetentionRule }> {
   return Object.entries(rules)
     .filter(([, rule]) => rule !== null && rule !== undefined) // Filter null/undefined
@@ -165,7 +168,7 @@ export const DataRetention: React.FC = () => {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
   const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
-  const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [previewResult, setPreviewResult] = useState<RetentionReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   // Fetch data
@@ -358,11 +361,14 @@ export const DataRetention: React.FC = () => {
                           rule.action === 'delete'
                             ? 'danger'
                             : rule.action === 'anonymize'
-                            ? 'warning'
-                            : 'info'
+                              ? 'warning'
+                              : 'info'
                         }
                       >
-                        {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}
+                        {t(
+                          `action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`,
+                          language
+                        )}
                       </Badge>
                     </td>
                     <td>
@@ -485,7 +491,9 @@ export const DataRetention: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')}
+                onChange={(e) =>
+                  setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')
+                }
               >
                 <option value="delete">{t('actionDelete', language)}</option>
                 <option value="archive">{t('actionArchive', language)}</option>
@@ -513,11 +521,10 @@ export const DataRetention: React.FC = () => {
           </>
         }
       >
-        {previewResult && (
-          <div>
-            <p className="text-muted mb-3">{t('cleanupPreviewDescription', language)}</p>
-            <pre className="bg-light p-3 rounded">{JSON.stringify(previewResult, null, 2)}</pre>
-          </div>
+        {previewResult ? (
+          <CleanupPreviewContent report={previewResult} />
+        ) : (
+          <EmptyState icon="bi-hourglass" title={t('loading', language)} />
         )}
       </Modal>
     </div>

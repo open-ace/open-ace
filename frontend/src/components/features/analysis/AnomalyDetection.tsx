@@ -27,7 +27,13 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { formatTokens } from '@/utils';
-import { useAnomalyDetection, useAnomalyTrend, useRecommendations, useHosts, usePageRefresh } from '@/hooks';
+import {
+  useAnomalyDetection,
+  useAnomalyTrend,
+  useRecommendations,
+  useHosts,
+  usePageRefresh,
+} from '@/hooks';
 
 // Anomaly type options
 const anomalyTypeOptions = [

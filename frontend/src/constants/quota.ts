@@ -67,10 +67,7 @@ export function isUnlimited(value: number | null | undefined): boolean {
  * Get the maximum quota for a given quota type
  */
 export function getMaxQuota(quotaType: QuotaType): number {
-  if (
-    quotaType === QuotaType.DAILY_TOKEN ||
-    quotaType === QuotaType.MONTHLY_TOKEN
-  ) {
+  if (quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN) {
     return MAX_TOKEN_QUOTA;
   }
   return MAX_REQUEST_QUOTA;
@@ -135,9 +132,7 @@ export function validateQuota(
     return {
       isValid: false,
       error: `Quota value exceeds maximum limit of ${maxQuota}${
-        quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN
-          ? 'M'
-          : ''
+        quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN ? 'M' : ''
       }`,
     };
   }

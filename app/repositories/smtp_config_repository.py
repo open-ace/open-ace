@@ -11,11 +11,7 @@ from typing import Any, Optional, Union
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from app.repositories.database import (
-    adapt_sql,
-    get_database_url,
-    is_postgresql,
-)
+from app.repositories.database import adapt_sql, get_database_url, is_postgresql
 from app.utils.smtp_password_manager import get_password_manager
 
 logger = logging.getLogger(__name__)
@@ -53,13 +49,15 @@ class SMTPConfigRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT id, smtp_host, smtp_port, smtp_user, encrypted_password,
                        encryption_version, from_address, use_tls, is_verified,
                        last_verified_at, created_at, updated_at, created_by
                 FROM smtp_settings
                 ORDER BY id DESC LIMIT 1
-            """)
+            """
+            )
         )
 
         row = cursor.fetchone()
@@ -97,13 +95,15 @@ class SMTPConfigRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT id, smtp_host, smtp_port, smtp_user, encrypted_password,
                        encryption_version, from_address, use_tls, is_verified,
                        last_verified_at
                 FROM smtp_settings
                 ORDER BY id DESC LIMIT 1
-            """)
+            """
+            )
         )
 
         row = cursor.fetchone()
@@ -244,11 +244,13 @@ class SMTPConfigRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 UPDATE smtp_settings
                 SET is_verified = ?, last_verified_at = ?, updated_at = ?
                 WHERE id = ?
-            """),
+            """
+            ),
             (
                 is_verified if is_postgresql() else (1 if is_verified else 0),
                 datetime.now(timezone.utc).replace(tzinfo=None),
@@ -257,7 +259,7 @@ class SMTPConfigRepository:
             ),
         )
 
-        success = cursor.rowcount > 0
+        success = bool(cursor.rowcount > 0)
         conn.commit()
         conn.close()
 
@@ -279,7 +281,7 @@ class SMTPConfigRepository:
         conn.commit()
         conn.close()
 
-        return count > 0
+        return bool(count > 0)
 
 
 # Global repository instance

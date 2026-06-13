@@ -8,6 +8,7 @@ Provides validation and limits for quota values to ensure:
 """
 
 import logging
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ MAX_REQUEST_QUOTA = 2147483647
 MIN_QUOTA = 0
 
 
-def validate_token_quota(value: int | None, quota_name: str = "token_quota") -> tuple[bool, str]:
+def validate_token_quota(value: Optional[int], quota_name: str = "token_quota") -> Tuple[bool, str]:
     """
     Validate a token quota value.
 
@@ -57,7 +58,9 @@ def validate_token_quota(value: int | None, quota_name: str = "token_quota") -> 
     return True, ""
 
 
-def validate_request_quota(value: int | None, quota_name: str = "request_quota") -> tuple[bool, str]:
+def validate_request_quota(
+    value: Optional[int], quota_name: str = "request_quota"
+) -> Tuple[bool, str]:
     """
     Validate a request quota value.
 
@@ -92,11 +95,11 @@ def validate_request_quota(value: int | None, quota_name: str = "request_quota")
 
 
 def validate_quota_update(
-    daily_token_quota: int | None = None,
-    monthly_token_quota: int | None = None,
-    daily_request_quota: int | None = None,
-    monthly_request_quota: int | None = None,
-) -> tuple[bool, dict[str, str]]:
+    daily_token_quota: Optional[int] = None,
+    monthly_token_quota: Optional[int] = None,
+    daily_request_quota: Optional[int] = None,
+    monthly_request_quota: Optional[int] = None,
+) -> Tuple[bool, dict[str, str]]:
     """
     Validate all quota fields for an update request.
 

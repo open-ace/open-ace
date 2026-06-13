@@ -109,6 +109,22 @@ export interface StorageEstimate {
   estimated_size_mb: number;
 }
 
+export interface AppliedRule {
+  data_type: string;
+  action: 'delete' | 'archive' | 'anonymize';
+  cutoff: string;
+  records_affected: number;
+}
+
+export interface RetentionReport {
+  timestamp: string;
+  rules_applied: AppliedRule[];
+  records_deleted: number;
+  records_archived: number;
+  records_anonymized: number;
+  errors: string[];
+}
+
 // API
 export const complianceApi = {
   // Reports
@@ -125,7 +141,7 @@ export const complianceApi = {
     language?: 'en' | 'zh' | 'ja' | 'ko';
     tenant_id?: number;
     filters?: Record<string, unknown>;
-  }): Promise<ComplianceReport | string> {
+  }): Promise<ComplianceReport | string | Blob> {
     const isCsv = data.format === 'csv';
     const isHtml = data.format === 'html';
     const isExcel = data.format === 'excel';
@@ -280,7 +296,7 @@ export const complianceApi = {
   async setRetentionRule(data: {
     data_type: string;
     retention_days: number;
-    action?: 'delete' | 'archive';
+    action?: 'delete' | 'archive' | 'anonymize';
   }): Promise<RetentionRule> {
     const response = await apiClient.put<{ rule: RetentionRule }>(
       '/api/compliance/retention/rules',
@@ -289,12 +305,12 @@ export const complianceApi = {
     return response.rule;
   },
 
-  async runCleanup(dryRun?: boolean): Promise<Record<string, unknown>> {
+  async runCleanup(dryRun?: boolean): Promise<RetentionReport> {
     let url = '/api/compliance/retention/cleanup';
     if (dryRun) {
       url += '?dry_run=true';
     }
-    return apiClient.post<Record<string, unknown>>(url);
+    return apiClient.post<RetentionReport>(url);
   },
 
   async getRetentionHistory(limit?: number): Promise<RetentionHistory[]> {

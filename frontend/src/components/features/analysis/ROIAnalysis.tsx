@@ -20,9 +20,7 @@ import { t } from '@/i18n';
 import {
   Card,
   StatCard,
-  Button,
   Select,
-  Loading,
   Error,
   EmptyState,
   LineChart,
@@ -100,7 +98,6 @@ export const ROIAnalysis: React.FC = () => {
   const [suggestions, setSuggestions] = useState<OptimizationSuggestion[]>([]);
   const [efficiency, setEfficiency] = useState<EfficiencyReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState('');
@@ -150,8 +147,6 @@ export const ROIAnalysis: React.FC = () => {
 
       if (isInitialLoad.current) {
         setIsLoading(true);
-      } else {
-        setIsRefreshing(true);
       }
       setError(null);
 
@@ -193,7 +188,6 @@ export const ROIAnalysis: React.FC = () => {
         setError(errorMessage);
       } finally {
         setIsLoading(false);
-        setIsRefreshing(false);
       }
     },
     [startDate, endDate, selectedTool]

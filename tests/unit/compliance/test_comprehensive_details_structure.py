@@ -10,23 +10,25 @@ Tests cover:
 - Excel output with section column
 """
 
-import pytest
-from datetime import datetime, timezone
-import json
 import io
+import json
+from datetime import datetime, timezone
+
+import pytest
 
 try:
     import openpyxl
     from openpyxl import load_workbook
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
 
 from app.modules.compliance.report import (
     ComplianceReport,
+    ReportGenerator,
     ReportMetadata,
     ReportType,
-    ReportGenerator,
 )
 
 
@@ -71,12 +73,8 @@ def comprehensive_report(comprehensive_report_metadata):
                     "unique_users": 10,
                 }
             },
-            "users": {
-                "totals": {"total_users": 20, "active_users": 15, "inactive_users": 5}
-            },
-            "audit": {
-                "totals": {"total_events": 100, "unique_users": 10}
-            },
+            "users": {"totals": {"total_users": 20, "active_users": 15, "inactive_users": 5}},
+            "audit": {"totals": {"total_events": 100, "unique_users": 10}},
             "security": {
                 "security_events": {
                     "failed_logins": 5,
@@ -85,9 +83,7 @@ def comprehensive_report(comprehensive_report_metadata):
                     "content_blocked": 0,
                 }
             },
-            "quota": {
-                "alerts": {"total": 3, "warnings": 2, "critical": 1, "exceeded": 0}
-            },
+            "quota": {"alerts": {"total": 3, "warnings": 2, "critical": 1, "exceeded": 0}},
         },
         details={
             "usage_summary": [
@@ -250,7 +246,7 @@ class TestComprehensiveVsAuditTrailDifferentDetails:
         """Test that comprehensive and audit trail details types are different."""
         assert isinstance(comprehensive_report.details, dict)
         assert isinstance(audit_trail_report.details, list)
-        assert type(comprehensive_report.details) != type(audit_trail_report.details)
+        assert not isinstance(comprehensive_report.details, type(audit_trail_report.details))
 
     def test_details_content_different(self, comprehensive_report, audit_trail_report):
         """Test that comprehensive details has more sections than audit trail."""
@@ -391,7 +387,9 @@ class TestComprehensiveExcelOutput:
                     all_values.append(str(cell.value))
 
         # Should have section identifiers
-        assert any("Usage" in v for v in all_values) or any("usage_summary" in v for v in all_values)
+        assert any("Usage" in v for v in all_values) or any(
+            "usage_summary" in v for v in all_values
+        )
 
     def test_excel_language_zh_contains_chinese_sections(self, comprehensive_report):
         """Test that Chinese Excel contains Chinese section titles."""
@@ -589,7 +587,13 @@ class TestEmptySectionsHandling:
                 "usage_summary": [],  # Empty
                 "user_activity": [],  # Empty
                 "audit_trail": [
-                    {"timestamp": "2024-01-01", "action": "login", "user_id": 1, "severity": "low", "resource_type": "session"},
+                    {
+                        "timestamp": "2024-01-01",
+                        "action": "login",
+                        "user_id": 1,
+                        "severity": "low",
+                        "resource_type": "session",
+                    },
                 ],
                 "security_events": [],  # Empty
                 "quota_alerts": [],  # Empty

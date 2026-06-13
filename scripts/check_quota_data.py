@@ -2,14 +2,15 @@
 检查配额数据脚本
 查找异常配额值（超过上限或异常数值）
 """
+
 import sys
 
 # 添加项目根目录到 Python 路径
-sys.path.insert(0, '/Users/rhuang/workspace/open-ace')
+sys.path.insert(0, "/Users/rhuang/workspace/open-ace")
 
 from app import create_app
 from app.repositories.user_repo import UserRepository
-from app.schemas.quota import MAX_TOKEN_QUOTA, MAX_REQUEST_QUOTA
+from app.schemas.quota import MAX_REQUEST_QUOTA, MAX_TOKEN_QUOTA
 
 app = create_app()
 with app.app_context():
@@ -25,21 +26,21 @@ with app.app_context():
     abnormal_users = []
 
     for user in users:
-        user_id = user['id']
-        username = user['username']
+        user_id = user["id"]
+        username = user["username"]
 
         # 检查各个配额字段
         quotas = {
-            'daily_token_quota': user.get('daily_token_quota'),
-            'monthly_token_quota': user.get('monthly_token_quota'),
-            'daily_request_quota': user.get('daily_request_quota'),
-            'monthly_request_quota': user.get('monthly_request_quota'),
+            "daily_token_quota": user.get("daily_token_quota"),
+            "monthly_token_quota": user.get("monthly_token_quota"),
+            "daily_request_quota": user.get("daily_request_quota"),
+            "monthly_request_quota": user.get("monthly_request_quota"),
         }
 
         issues = []
 
         # 检查 token quotas
-        for field in ['daily_token_quota', 'monthly_token_quota']:
+        for field in ["daily_token_quota", "monthly_token_quota"]:
             value = quotas[field]
             if value is not None:
                 if value > MAX_TOKEN_QUOTA:
@@ -48,7 +49,7 @@ with app.app_context():
                     issues.append(f"{field}: {value}M (负值)")
 
         # 检查 request quotas
-        for field in ['daily_request_quota', 'monthly_request_quota']:
+        for field in ["daily_request_quota", "monthly_request_quota"]:
             value = quotas[field]
             if value is not None:
                 if value > MAX_REQUEST_QUOTA:
@@ -57,12 +58,9 @@ with app.app_context():
                     issues.append(f"{field}: {value} (负值)")
 
         if issues:
-            abnormal_users.append({
-                'id': user_id,
-                'username': username,
-                'email': user.get('email'),
-                'issues': issues
-            })
+            abnormal_users.append(
+                {"id": user_id, "username": username, "email": user.get("email"), "issues": issues}
+            )
 
     # 输出报告
     print(f"\n总用户数: {total_users}")
@@ -77,7 +75,7 @@ with app.app_context():
             print(f"用户名: {user['username']}")
             print(f"邮箱: {user['email']}")
             print("问题:")
-            for issue in user['issues']:
+            for issue in user["issues"]:
                 print(f"  - {issue}")
     else:
         print("\n✅ 所有配额数据都在正常范围内")
@@ -88,8 +86,12 @@ with app.app_context():
     print("=" * 80)
 
     # Token quota 分布
-    daily_token_values = [u.get('daily_token_quota') for u in users if u.get('daily_token_quota') is not None]
-    monthly_token_values = [u.get('monthly_token_quota') for u in users if u.get('monthly_token_quota') is not None]
+    daily_token_values = [
+        u.get("daily_token_quota") for u in users if u.get("daily_token_quota") is not None
+    ]
+    monthly_token_values = [
+        u.get("monthly_token_quota") for u in users if u.get("monthly_token_quota") is not None
+    ]
 
     print(f"\n设置 daily_token_quota 的用户数: {len(daily_token_values)}")
     if daily_token_values:
@@ -104,8 +106,12 @@ with app.app_context():
         print(f"  平均值: {sum(monthly_token_values)/len(monthly_token_values):.2f}M")
 
     # Request quota 分布
-    daily_request_values = [u.get('daily_request_quota') for u in users if u.get('daily_request_quota') is not None]
-    monthly_request_values = [u.get('monthly_request_quota') for u in users if u.get('monthly_request_quota') is not None]
+    daily_request_values = [
+        u.get("daily_request_quota") for u in users if u.get("daily_request_quota") is not None
+    ]
+    monthly_request_values = [
+        u.get("monthly_request_quota") for u in users if u.get("monthly_request_quota") is not None
+    ]
 
     print(f"\n设置 daily_request_quota 的用户数: {len(daily_request_values)}")
     if daily_request_values:

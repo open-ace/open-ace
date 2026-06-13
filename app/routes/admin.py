@@ -254,11 +254,16 @@ def api_update_user_quota(user_id):
         for field, msg in errors.items():
             error_messages.append(f"{field}: {msg}")
 
-        return jsonify({
-            "error": "Quota validation failed",
-            "details": errors,
-            "message": "; ".join(error_messages)
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": "Quota validation failed",
+                    "details": errors,
+                    "message": "; ".join(error_messages),
+                }
+            ),
+            400,
+        )
 
     # If validation passes, proceed with update
     success = user_repo.update_user_quota(

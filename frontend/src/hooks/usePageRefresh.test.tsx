@@ -2,10 +2,11 @@
  * usePageRefresh Hook Tests
  */
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
-import { usePageRefresh } from '../usePageRefresh';
+import { usePageRefresh } from './usePageRefresh';
 import { usePageRefreshStore } from '@/store';
 import { createMatcherConfig } from '@/utils';
 
@@ -129,7 +130,7 @@ describe('usePageRefresh', () => {
   describe('refresh', () => {
     it('should call refresh function', async () => {
       const wrapper = createWrapper();
-      const onRefresh = jest.fn();
+      const onRefresh = vi.fn();
 
       const { result } = renderHook(
         () =>
@@ -159,7 +160,7 @@ describe('usePageRefresh', () => {
         usePageRefreshStore.getState().pauseAll();
       });
 
-      const { result } = renderHook(
+      renderHook(
         () =>
           usePageRefresh({
             page: '/manage/dashboard',

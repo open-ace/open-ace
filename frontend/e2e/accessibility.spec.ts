@@ -24,7 +24,8 @@ test.describe('Accessibility', () => {
     await waitForApp(page);
     await ensureSidebarVisible(page);
     const nav = getSidebarLocator(page);
-    await expect(nav).toBeVisible({ timeout: 10000 });
+    // Increased timeout for Mobile Safari
+    await expect(nav).toBeVisible({ timeout: 20000 });
   });
 
   test('should have visible focus indicators', async ({ page }) => {

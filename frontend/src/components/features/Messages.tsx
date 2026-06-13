@@ -4,7 +4,14 @@
 
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
-import { useMessages, useMessageCount, useHosts, useSenders, useTools, usePageRefresh } from '@/hooks';
+import {
+  useMessages,
+  useMessageCount,
+  useHosts,
+  useSenders,
+  useTools,
+  usePageRefresh,
+} from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -17,7 +24,13 @@ import {
   Pagination,
   PageRefreshControl,
 } from '@/components/common';
-import { formatDateTime, formatDate, formatTokens, formatToolName, createMatcherConfig } from '@/utils';
+import {
+  formatDateTime,
+  formatDate,
+  formatTokens,
+  formatToolName,
+  createMatcherConfig,
+} from '@/utils';
 import type { Message, MessageFilters } from '@/types';
 
 const ITEMS_PER_PAGE = 20;

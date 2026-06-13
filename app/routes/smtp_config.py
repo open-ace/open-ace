@@ -40,22 +40,12 @@ def get_smtp_config():
         config = service.get_config()
 
         if not config:
-            return jsonify({
-                "success": True,
-                "data": None,
-                "message": "SMTP configuration not set"
-            })
+            return jsonify({"success": True, "data": None, "message": "SMTP configuration not set"})
 
-        return jsonify({
-            "success": True,
-            "data": config
-        })
+        return jsonify({"success": True, "data": config})
     except Exception as e:
         logger.error(f"Error getting SMTP config: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error"
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @smtp_config_bp.route("/management/smtp-config", methods=["PUT"])
@@ -64,10 +54,7 @@ def update_smtp_config():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({
-                "success": False,
-                "error": "No data provided"
-            }), 400
+            return jsonify({"success": False, "error": "No data provided"}), 400
 
         # Required fields
         smtp_host = data.get("smtp_host")
@@ -75,10 +62,15 @@ def update_smtp_config():
         from_address = data.get("from_address")
 
         if not smtp_host or not smtp_port or not from_address:
-            return jsonify({
-                "success": False,
-                "error": "Missing required fields: smtp_host, smtp_port, from_address"
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Missing required fields: smtp_host, smtp_port, from_address",
+                    }
+                ),
+                400,
+            )
 
         # Optional fields
         smtp_user = data.get("smtp_user")
@@ -101,17 +93,16 @@ def update_smtp_config():
 
         logger.info(f"SMTP configuration updated by user {user_id}")
 
-        return jsonify({
-            "success": True,
-            "data": config,
-            "message": "SMTP configuration saved. Please test connection before enabling email notifications."
-        })
+        return jsonify(
+            {
+                "success": True,
+                "data": config,
+                "message": "SMTP configuration saved. Please test connection before enabling email notifications.",
+            }
+        )
     except Exception as e:
         logger.error(f"Error updating SMTP config: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error"
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @smtp_config_bp.route("/management/smtp-config/test", methods=["POST"])
@@ -140,11 +131,7 @@ def test_smtp_connection():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error testing SMTP connection: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error",
-            "message": str(e)
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error", "message": str(e)}), 500
 
 
 @smtp_config_bp.route("/management/smtp-config", methods=["DELETE"])
@@ -155,23 +142,14 @@ def delete_smtp_config():
         success = service.delete_config()
 
         if not success:
-            return jsonify({
-                "success": False,
-                "error": "No SMTP configuration to delete"
-            }), 404
+            return jsonify({"success": False, "error": "No SMTP configuration to delete"}), 404
 
         logger.info(f"SMTP configuration deleted by user {g.user.get('id')}")
 
-        return jsonify({
-            "success": True,
-            "message": "SMTP configuration deleted"
-        })
+        return jsonify({"success": True, "message": "SMTP configuration deleted"})
     except Exception as e:
         logger.error(f"Error deleting SMTP config: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error"
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @smtp_config_bp.route("/management/smtp-config/statistics", methods=["GET"])
@@ -182,16 +160,10 @@ def get_email_statistics():
         service = get_smtp_config_service()
         stats = service.get_statistics(days)
 
-        return jsonify({
-            "success": True,
-            "data": stats
-        })
+        return jsonify({"success": True, "data": stats})
     except Exception as e:
         logger.error(f"Error getting email statistics: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error"
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @smtp_config_bp.route("/management/smtp-config/send-test", methods=["POST"])
@@ -200,17 +172,11 @@ def send_test_email():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({
-                "success": False,
-                "error": "No data provided"
-            }), 400
+            return jsonify({"success": False, "error": "No data provided"}), 400
 
         recipient_email = data.get("recipient_email")
         if not recipient_email:
-            return jsonify({
-                "success": False,
-                "error": "Missing recipient_email"
-            }), 400
+            return jsonify({"success": False, "error": "Missing recipient_email"}), 400
 
         language = data.get("language", "en")
 
@@ -220,8 +186,4 @@ def send_test_email():
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error sending test email: {e}")
-        return jsonify({
-            "success": False,
-            "error": "Internal server error",
-            "message": str(e)
-        }), 500
+        return jsonify({"success": False, "error": "Internal server error", "message": str(e)}), 500

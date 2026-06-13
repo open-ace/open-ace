@@ -9,14 +9,15 @@ Tests validation of quota values including:
 """
 
 import pytest
+
 from app.schemas.quota import (
-    validate_token_quota,
-    validate_request_quota,
-    validate_quota_update,
-    get_quota_limits,
-    MAX_TOKEN_QUOTA,
     MAX_REQUEST_QUOTA,
+    MAX_TOKEN_QUOTA,
     MIN_QUOTA,
+    get_quota_limits,
+    validate_quota_update,
+    validate_request_quota,
+    validate_token_quota,
 )
 
 

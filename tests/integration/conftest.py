@@ -47,8 +47,8 @@ def _create_sqlite_tables(db):
     try:
         cursor = conn.cursor()
 
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.compliance.report import get_ddl_statements as report_ddl
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -144,6 +144,24 @@ def _create_sqlite_tables(db):
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_stats_date_tool_host_sender
             ON daily_stats (date, tool_name, host_name, sender_name)
+        """
+        )
+        # daily_usage table for compliance report tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                host_name TEXT DEFAULT 'localhost' NOT NULL,
+                tokens_used INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cache_tokens INTEGER DEFAULT 0,
+                request_count INTEGER DEFAULT 0,
+                models_used TEXT,
+                created_at TEXT
+            )
         """
         )
         cursor.execute(
@@ -318,6 +336,23 @@ def _create_sqlite_tables(db):
                 created_at TEXT,
                 updated_at TEXT,
                 UNIQUE(user_id, tool_account)
+            )
+        """
+        )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
             )
         """
         )
@@ -598,6 +633,23 @@ def _create_pg_tables(db):
             )
         """
         )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_permissions (
@@ -630,8 +682,8 @@ def _create_pg_tables(db):
         cursor = conn.cursor()
 
         # Reuse DDL functions that already emit PostgreSQL-compatible SQL
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.compliance.report import get_ddl_statements as report_ddl
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
         from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
@@ -728,6 +780,7 @@ def pg_db():
 def app(tmp_db):
     """Create Flask app for testing with temporary database."""
     from flask import Flask
+
     from app.routes.compliance import compliance_bp
 
     app = Flask(__name__)
@@ -750,8 +803,9 @@ def client(app):
 def auth_headers():
     """Headers for authenticated user (simulates login)."""
     # For admin_required decorator, we need to mock g.user_id
-    from flask import g
     from unittest.mock import patch
+
+    from flask import g
 
     # In tests, we'll patch g.user_id before each request
     return {"Content-Type": "application/json"}

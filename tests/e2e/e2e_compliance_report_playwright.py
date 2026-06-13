@@ -265,6 +265,7 @@ def run_tests():
     except Exception as e:
         print(f"\n[ERROR] Test execution failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

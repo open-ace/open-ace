@@ -591,7 +591,8 @@ const translations: Record<Language, Translations> = {
     saveFailed: 'Failed to save settings',
     tenantIdRequired: 'Tenant ID is required',
     noTenantConfigured: 'No Tenant Configured',
-    ssoRequiresTenant: 'SSO requires a tenant. Please contact administrator to set up a tenant for your account.',
+    ssoRequiresTenant:
+      'SSO requires a tenant. Please contact administrator to set up a tenant for your account.',
     dataRetention: 'Data Retention',
     complianceReport: 'Compliance Report',
     settings: 'Settings',
@@ -699,7 +700,6 @@ const translations: Record<Language, Translations> = {
     smtpNotVerified: 'SMTP server not verified. Please test connection first.',
     enterSenderEmail: 'Please enter sender email address',
     testEmailSent: 'Test Email Sent',
-    enterPassword: 'Enter new password',
     currentPassword: 'Current password',
     confirmDeleteSmtpConfig: 'Are you sure you want to delete SMTP configuration?',
     smtpConfigDeleted: 'SMTP Configuration Deleted',
@@ -716,18 +716,9 @@ const translations: Record<Language, Translations> = {
     smtpSetupGuide1: 'Enter your SMTP server hostname and port (common ports: 25, 465, 587)',
     smtpSetupGuide2: 'Enter SMTP credentials if authentication is required',
     smtpSetupGuide3: 'Enter the sender email address',
-    smtpSetupGuide4: 'Click "Test Connection" to verify the configuration before enabling email notifications',
+    smtpSetupGuide4:
+      'Click "Test Connection" to verify the configuration before enabling email notifications',
     help: 'Help',
-
-    // Compliance Report
-    selectReportType: 'Select Report Type',
-    generateReport: 'Generate Report',
-    format: 'Format',
-    savedReports: 'Saved Reports',
-    noSavedReports: 'No saved reports',
-    reportName: 'Report Name',
-    generatedAt: 'Generated At',
-    period: 'Period',
 
     // Data Retention
     complianceScore: 'Compliance Score',
@@ -737,7 +728,6 @@ const translations: Record<Language, Translations> = {
     dataType: 'Data Type',
     retentionDays: 'Retention Days',
     notSet: 'Not Set',
-    preview: 'Preview',
     runCleanup: 'Run Cleanup',
     cleanupHistory: 'Cleanup History',
     noCleanupHistory: 'No cleanup history',
@@ -768,6 +758,16 @@ const translations: Record<Language, Translations> = {
     actionDelete: 'Delete',
     actionArchive: 'Archive',
     actionAnonymize: 'Anonymize',
+
+    // Data Retention - Preview Results
+    recordsArchived: 'Archived Records',
+    recordsAnonymized: 'Anonymized Records',
+    rulesApplied: 'Rules Applied',
+    totalAffectedRecords: 'Total Affected Records',
+    executionDetails: 'Execution Details',
+    noRulesApplied: 'No Rules Applied',
+    cutoffDate: 'Cutoff Date',
+    affectedRecords: 'Affected Records',
 
     // Audit Analysis
     securityScore: 'Security Score',
@@ -882,7 +882,6 @@ const translations: Record<Language, Translations> = {
     historyReports: 'History Reports',
     exampleLabel: 'Example',
     deleteReport: 'Delete Report',
-    usageSummary: 'Usage Summary',
     excellent: 'Excellent',
     good: 'Good',
     needsImprovement: 'Needs Improvement',
@@ -1874,7 +1873,6 @@ const translations: Record<Language, Translations> = {
     smtpNotVerified: 'SMTP 服务器未验证。请先测试连接。',
     enterSenderEmail: '请输入发件人邮箱地址',
     testEmailSent: '测试邮件已发送',
-    enterPassword: '输入新密码',
     currentPassword: '当前密码',
     confirmDeleteSmtpConfig: '确定要删除 SMTP 配置吗？',
     smtpConfigDeleted: 'SMTP 配置已删除',
@@ -1896,16 +1894,6 @@ const translations: Record<Language, Translations> = {
     message: '消息',
     time: '时间',
 
-    // Compliance Report
-    selectReportType: '选择报告类型',
-    generateReport: '生成报告',
-    format: '格式',
-    savedReports: '已保存报告',
-    noSavedReports: '暂无已保存报告',
-    reportName: '报告名称',
-    generatedAt: '生成时间',
-    period: '周期',
-
     // Data Retention
     complianceScore: '合规分数',
     totalRecords: '总记录数',
@@ -1914,7 +1902,6 @@ const translations: Record<Language, Translations> = {
     dataType: '数据类型',
     retentionDays: '保留天数',
     notSet: '未设置',
-    preview: '预览',
     runCleanup: '执行清理',
     cleanupHistory: '清理历史',
     noCleanupHistory: '暂无清理历史',
@@ -1944,6 +1931,16 @@ const translations: Record<Language, Translations> = {
     actionDelete: '删除',
     actionArchive: '归档',
     actionAnonymize: '匿名化',
+
+    // Data Retention - Preview Results
+    recordsArchived: '归档记录',
+    recordsAnonymized: '匿名化记录',
+    rulesApplied: '应用规则数',
+    totalAffectedRecords: '总影响记录数',
+    executionDetails: '执行详情',
+    noRulesApplied: '无规则应用',
+    cutoffDate: '截止日期',
+    affectedRecords: '影响记录数',
 
     // Audit Analysis
     securityScore: '安全分数',
@@ -2056,7 +2053,6 @@ const translations: Record<Language, Translations> = {
     historyReports: '历史报告',
     exampleLabel: '示例',
     deleteReport: '删除报告',
-    usageSummary: '使用统计',
     excellent: '优秀',
     good: '良好',
     needsImprovement: '待提升',
@@ -2589,7 +2585,8 @@ const translations: Record<Language, Translations> = {
     recordsDeleted: '削除レコード数',
     editRetentionRule: '保持ルール編集',
     cleanupPreview: 'クリーンアッププレビュー',
-    cleanupPreviewDescription: 'このプレビューはクリーンアップ操作で影響を受けるデータを表示します。',
+    cleanupPreviewDescription:
+      'このプレビューはクリーンアップ操作で影響を受けるデータを表示します。',
     executeCleanup: 'クリーンアップ実行',
     confirmCleanup: 'クリーンアップを実行しますか？この操作は取り消せません。',
     storageEstimates: 'ストレージ推定',
@@ -2610,6 +2607,16 @@ const translations: Record<Language, Translations> = {
     actionDelete: '削除',
     actionArchive: 'アーカイブ',
     actionAnonymize: '匿名化',
+
+    // Data Retention - Preview Results
+    recordsArchived: 'アーカイブされたレコード',
+    recordsAnonymized: '匿名化されたレコード',
+    rulesApplied: '適用されたルール',
+    totalAffectedRecords: '影響を受けたレコード総数',
+    executionDetails: '実行詳細',
+    noRulesApplied: '適用されたルールなし',
+    cutoffDate: 'カットオフ日',
+    affectedRecords: '影響を受けたレコード',
 
     // AI Agent Settings
     aiAgentSettings: 'AIエージェント',
@@ -2988,7 +2995,6 @@ const translations: Record<Language, Translations> = {
     historyReports: '履歴レポート',
     exampleLabel: '例',
     deleteReport: 'レポート削除',
-    usageSummary: '使用統計',
     excellent: '優秀',
     good: '良好',
     needsImprovement: '改善必要',
@@ -3456,6 +3462,16 @@ const translations: Record<Language, Translations> = {
     actionArchive: '보관',
     actionAnonymize: '익명화',
 
+    // Data Retention - Preview Results
+    recordsArchived: '보관된 레코드',
+    recordsAnonymized: '익명화된 레코드',
+    rulesApplied: '적용된 규칙',
+    totalAffectedRecords: '총 영향받은 레코드',
+    executionDetails: '실행 세부정보',
+    noRulesApplied: '적용된 규칙 없음',
+    cutoffDate: '컷오프 날짜',
+    affectedRecords: '영향받은 레코드',
+
     // AI Agent Settings
     aiAgentSettings: 'AI 에이전트',
     aiGithubToken: 'GitHub 토큰',
@@ -3835,7 +3851,6 @@ const translations: Record<Language, Translations> = {
     historyReports: '이전 보고서',
     exampleLabel: '예시',
     deleteReport: '보고서 삭제',
-    usageSummary: '사용 통계',
     excellent: '우수',
     good: '양호',
     needsImprovement: '개선 필요',

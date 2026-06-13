@@ -11,6 +11,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import type { Language } from '@/types';
 import {
   Card,
   StatCard,
@@ -33,6 +34,7 @@ import {
   type RetentionRule,
   type RetentionHistory,
   type StorageEstimate,
+  type RetentionReport,
 } from '@/api';
 import { usePageRefresh } from '@/hooks';
 
@@ -111,7 +113,7 @@ function formatDataTypeKey(key: string): string {
  * Get display label for a data type key
  * Uses i18n translation if available, otherwise uses fallback label or formatted key
  */
-function getDataTypeLabel(key: string, language: string): string {
+function getDataTypeLabel(key: string, language: Language): string {
   const meta = DATA_TYPE_META[key];
   if (meta) {
     // Try i18n translation, fallback to fallbackLabel
@@ -135,7 +137,7 @@ function getDataTypeIcon(key: string): string {
  * Get storage estimate display label for a storage estimate data type key
  * Maps storage estimate API keys back to retention rule display labels
  */
-function getStorageEstimateLabel(storageKey: string, language: string): string {
+function getStorageEstimateLabel(storageKey: string, language: Language): string {
   // First, try to find a retention rule key that maps to this storage key
   for (const [ruleKey, meta] of Object.entries(DATA_TYPE_META)) {
     if (meta.storageEstimateKey === storageKey) {
@@ -152,7 +154,7 @@ function getStorageEstimateLabel(storageKey: string, language: string): string {
  */
 function adaptRulesToTableData(
   rules: Record<string, RetentionRule>,
-  language: string
+  language: Language
 ): Array<{ key: string; label: string; icon: string; rule: RetentionRule }> {
   return Object.entries(rules)
     .filter(([, rule]) => rule !== null && rule !== undefined) // Filter null/undefined
@@ -204,7 +206,7 @@ export const ComplianceMgmt: React.FC = () => {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
   const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
-  const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [previewResult, setPreviewResult] = useState<RetentionReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   // Report preview state
@@ -212,7 +214,7 @@ export const ComplianceMgmt: React.FC = () => {
   const [previewReportType, setPreviewReportType] = useState<string>('');
   const [previewReportId, setPreviewReportId] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [previewLanguage, setPreviewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
+  const [previewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
 
   // Initialize dates for reports
   useEffect(() => {
@@ -324,7 +326,8 @@ export const ComplianceMgmt: React.FC = () => {
       const reports = await complianceApi.getSavedReports();
       setSavedReports(reports);
     } catch (err) {
-      const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to generate report';
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to generate report';
       setReportsError(errorMessage);
       console.error('Failed to generate report:', err);
     } finally {
@@ -351,7 +354,7 @@ export const ComplianceMgmt: React.FC = () => {
   // Download saved report in different formats
   const handleDownloadSavedReport = async (
     reportId: string,
-    reportType: string,
+    _reportType: string,
     downloadFormat: 'json' | 'csv' | 'html' | 'excel'
   ) => {
     try {
@@ -378,10 +381,9 @@ export const ComplianceMgmt: React.FC = () => {
         URL.revokeObjectURL(url);
       } else {
         const isCsv = downloadFormat === 'csv';
-        const blob = new Blob(
-          [isCsv ? (report as string) : JSON.stringify(report, null, 2)],
-          { type: isCsv ? 'text/csv' : 'application/json' }
-        );
+        const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+          type: isCsv ? 'text/csv' : 'application/json',
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -542,7 +544,9 @@ export const ComplianceMgmt: React.FC = () => {
                   {savedReports.map((report) => (
                     <tr key={report.report_id}>
                       <td>
-                        <strong>{getReportTypeName(report.report_type, language, report.report_type)}</strong>
+                        <strong>
+                          {getReportTypeName(report.report_type, language, report.report_type)}
+                        </strong>
                       </td>
                       <td>
                         <Badge variant="secondary">
@@ -562,7 +566,9 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-info"
                             size="sm"
-                            onClick={() => handlePreviewSavedReport(report.report_id, report.report_type)}
+                            onClick={() =>
+                              handlePreviewSavedReport(report.report_id, report.report_type)
+                            }
                             loading={isPreviewLoading}
                             title={t('preview', language)}
                           >
@@ -571,28 +577,48 @@ export const ComplianceMgmt: React.FC = () => {
                           <Button
                             variant="outline-primary"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'json')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'json'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-json" />
                           </Button>
                           <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'csv')}
+                            onClick={() =>
+                              handleDownloadSavedReport(report.report_id, report.report_type, 'csv')
+                            }
                           >
                             <i className="bi bi-filetype-csv" />
                           </Button>
                           <Button
                             variant="outline-warning"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'html')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'html'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-html" />
                           </Button>
                           <Button
                             variant="outline-success"
                             size="sm"
-                            onClick={() => handleDownloadSavedReport(report.report_id, report.report_type, 'excel')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'excel'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-xlsx" />
                           </Button>
@@ -704,11 +730,16 @@ export const ComplianceMgmt: React.FC = () => {
                             rule.action === 'delete'
                               ? 'danger'
                               : rule.action === 'anonymize'
-                              ? 'warning'
-                              : 'info'
+                                ? 'warning'
+                                : rule.action === 'archive'
+                                  ? 'info'
+                                  : 'secondary'
                           }
                         >
-                          {t(`action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`, language)}
+                          {t(
+                            `action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`,
+                            language
+                          )}
                         </Badge>
                       </td>
                       <td>
@@ -825,7 +856,9 @@ export const ComplianceMgmt: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')}
+                onChange={(e) =>
+                  setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')
+                }
               >
                 <option value="delete">{t('actionDelete', language)}</option>
                 <option value="archive">{t('actionArchive', language)}</option>
