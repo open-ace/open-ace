@@ -54,14 +54,17 @@ export function parseDiffFiles(diffText: string): ParsedDiffFile[] {
   for (const line of lines) {
     if (line.startsWith('--- Commit: ')) {
       pushCurrent();
-      commitLabel = line.replace(/^--- Commit:\s*/, '').replace(/\s*---$/, '').trim();
+      commitLabel = line
+        .replace(/^--- Commit:\s*/, '')
+        .replace(/\s*---$/, '')
+        .trim();
       continue;
     }
 
     if (line.startsWith('diff --git ')) {
       pushCurrent();
       const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
-      const nextPath = match?.[2] || match?.[1] || line.replace('diff --git ', '').trim();
+      const nextPath = match?.[2] ?? match?.[1] ?? line.replace('diff --git ', '').trim();
       current = {
         path: nextPath,
         status: 'modified',

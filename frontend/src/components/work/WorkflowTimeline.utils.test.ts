@@ -4,9 +4,7 @@ import { parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
   it('parses diff stats json', () => {
-    expect(
-      parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')
-    ).toEqual({
+    expect(parseDiffStats('{"additions":100,"deletions":25,"files":3,"commits":2}')).toEqual({
       additions: 100,
       deletions: 25,
       files: 3,

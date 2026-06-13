@@ -196,7 +196,13 @@
   flex-shrink: 0;
   min-width: 3.9rem;
   color: #7b8ba2;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-live-activity-text {
@@ -302,7 +308,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.78rem;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-diff-file-stats {
@@ -310,7 +322,13 @@
   gap: 0.4rem;
   flex-shrink: 0;
   font-size: 0.75rem;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-diff-viewer {
@@ -343,7 +361,13 @@
   margin-top: 0.2rem;
   color: #64748b;
   font-size: 0.74rem;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-diff-viewer-summary {
@@ -352,7 +376,13 @@
   gap: 0.55rem;
   flex-shrink: 0;
   font-size: 0.8rem;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-diff-fullscreen-btn {
@@ -365,7 +395,13 @@
   padding: 0.8rem 0;
   background: #ffffff;
   font-size: 0.76rem;
-  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    SF Mono,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .workflow-timeline-diff-line {
