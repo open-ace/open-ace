@@ -80,6 +80,7 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   pr_reviewed: { icon: 'bi-chat-left-text', color: 'warning' },
   pr_updated: { icon: 'bi-pencil-square', color: 'primary' },
   pr_review_summary: { icon: 'bi-check2-circle', color: 'success' },
+  conflicts_resolved: { icon: 'bi-cone-striped', color: 'warning' },
   progress_reported: { icon: 'bi-file-earmark-text', color: 'info' },
   requirement_received: { icon: 'bi-inbox', color: 'secondary' },
   round_completed: { icon: 'bi-flag-fill', color: 'success' },
@@ -659,6 +660,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             : t('autoMsPrUpdatedSingle', language);
         case 'pr_review_summary':
           return t('autoMsPrReviewSummary', language);
+        case 'conflicts_resolved':
+          return t('autoMsConflictsResolved', language);
         case 'progress_reported':
           return t('autoMsProgressReported', language).replace('{round}', String(round || 1));
         case 'round_completed':

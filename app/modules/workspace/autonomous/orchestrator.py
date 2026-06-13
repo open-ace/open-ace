@@ -563,6 +563,12 @@ class AutonomousOrchestrator:
                 logger.warning("Failed to resolve workflow session in real-time", exc_info=True)
         elif activity_type == "usage":
             try:
+                # Write the running cumulative usage to the in-progress milestone
+                # so the workflow total climbs during a long task instead of
+                # freezing until the call returns. phase_* is overwritten per
+                # event (session totals are cumulative within the call) and
+                # finalized by _write_phase_usage at _run_agent return.
+                self._write_realtime_phase_usage(activity)
                 self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
             except Exception:
                 logger.warning("Failed to refresh workflow tokens in real-time", exc_info=True)
@@ -740,6 +746,32 @@ class AutonomousOrchestrator:
             )
         except Exception:
             logger.warning("Failed to write phase usage to milestone", exc_info=True)
+
+    def _write_realtime_phase_usage(self, activity: dict) -> None:
+        """Write the current call's running cumulative usage to the in-progress milestone.
+
+        Driven by live usage events so the workflow total climbs during a long
+        task instead of freezing until the call returns. Overwrites phase_* each
+        event (session totals are cumulative within the call); the final value is
+        re-written (with request_count) by _write_phase_usage at _run_agent return.
+        """
+        try:
+            milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
+            if not milestones:
+                return
+            ms_id = milestones[-1].get("milestone_id", "")
+            if not ms_id:
+                return
+            self.repo.update_milestone(
+                ms_id,
+                {
+                    "phase_total_tokens": int(activity.get("total_tokens", 0) or 0),
+                    "phase_input_tokens": int(activity.get("total_input_tokens", 0) or 0),
+                    "phase_output_tokens": int(activity.get("total_output_tokens", 0) or 0),
+                },
+            )
+        except Exception:
+            logger.warning("Failed to write real-time phase usage", exc_info=True)
 
     def pause_current_task(self):
         """Pause the currently running agent task using SIGSTOP.
@@ -2734,6 +2766,15 @@ class AutonomousOrchestrator:
             )
 
             wf = self.workflow
+            # Track this as its own milestone so conflict-resolution usage is
+            # captured in phase_* (and thus workflow totals = SUM(phase_*)).
+            conflict_ms = self._create_milestone(
+                phase="merge",
+                dev_round=wf.get("dev_round", 1),
+                milestone_type="conflicts_resolved",
+                status="in_progress",
+                title=f"Resolving merge conflicts (PR #{pr_number})",
+            )
             result = self._run_agent(
                 wf=wf,
                 workflow_id=self._workflow_id,
@@ -2744,6 +2785,17 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
+                session_line="main",
+                milestone_id=conflict_ms.get("milestone_id", ""),
+            )
+            self._accumulate_tokens(result)
+            self.repo.update_milestone(
+                conflict_ms.get("milestone_id", ""),
+                {
+                    "status": "completed" if result.success else "failed",
+                    "session_id": result.session_id,
+                    "error_message": result.error or "",
+                },
             )
 
             if not result.success:

@@ -209,10 +209,24 @@ class AutonomousAgentRunner:
         # Prefer the real CLI session_id captured from the SDK init
         # control_response; fall back to mtime-based JSONL discovery only when
         # the control_response was never received (older CLI / parse miss).
-        persisted_id = session.cli_session_id or self._find_latest_claude_session_id(
-            session.encoded_project_path,
-            session.started_at_epoch,
-        )
+        if session.cli_session_id:
+            persisted_id = session.cli_session_id
+        else:
+            # mtime fallback — this is the original #848 pollution mechanism.
+            # control_response covers the vast majority of cases; if this fires
+            # and the guessed id is wrong, it can get pinned to a session line
+            # and propagated via --resume. Warn so it's traceable.
+            persisted_id = self._find_latest_claude_session_id(
+                session.encoded_project_path,
+                session.started_at_epoch,
+            )
+            logger.warning(
+                "Using mtime fallback to resolve session (control_response missed) — "
+                "workflow=%s path=%s -> %s",
+                session.workflow_id,
+                session.encoded_project_path,
+                (persisted_id or "<none>")[:8],
+            )
         if not persisted_id:
             return ""
 
