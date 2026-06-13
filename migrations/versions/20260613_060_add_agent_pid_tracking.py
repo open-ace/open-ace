@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260613_060_agent_pid_tracking"
-down_revision: Union[str, None] = "20260612_060"
+down_revision: Union[str, None] = "059_add_smtp_tables"
 branch_labels = None
 depends_on = None
 

@@ -9,9 +9,13 @@ Follows the same singleton pattern as DataFetchScheduler.
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import socket
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -306,11 +310,6 @@ def _cleanup_orphan_processes():
     Scans DB for workflows with a non-null agent_pid and active status,
     kills those processes, and resets the workflow status to paused.
     """
-    import os
-    import signal
-    import time
-    from datetime import datetime, timezone
-
     logger.info("Checking for orphaned agent processes...")
 
     try:
