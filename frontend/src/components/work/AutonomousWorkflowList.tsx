@@ -9,8 +9,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Badge, Loading, Pagination } from '@/components/common';
-import { useWorkflows, useDeleteWorkflow } from '@/hooks/useAutonomous';
+import { useWorkflows, useDeleteBatch, useDeleteWorkflow } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
+import './AutonomousWorkflowList.css';
 
 interface AutonomousWorkflowListProps {
   selectedId: string | null;
@@ -72,6 +73,82 @@ const STATUS_FILTER_TABS = [
 
 const PAGE_SIZE = 50;
 const EMPTY_WORKFLOWS: AutonomousWorkflow[] = [];
+const STATUS_ORDER = Object.keys(STATUS_CONFIG);
+
+function isBatchWorkflow(workflow: AutonomousWorkflow): boolean {
+  return Boolean(workflow.batch_id && (workflow.batch_total ?? 0) > 1);
+}
+
+function compareBatchWorkflows(a: AutonomousWorkflow, b: AutonomousWorkflow): number {
+  const aOrder = typeof a.batch_order === 'number' ? a.batch_order : Number.MAX_SAFE_INTEGER;
+  const bOrder = typeof b.batch_order === 'number' ? b.batch_order : Number.MAX_SAFE_INTEGER;
+  if (aOrder !== bOrder) {
+    return aOrder - bOrder;
+  }
+
+  const aCreated = a.created_at ? Date.parse(a.created_at) : Number.MAX_SAFE_INTEGER;
+  const bCreated = b.created_at ? Date.parse(b.created_at) : Number.MAX_SAFE_INTEGER;
+  if (aCreated !== bCreated) {
+    return aCreated - bCreated;
+  }
+
+  return a.workflow_id.localeCompare(b.workflow_id);
+}
+
+type WorkflowListEntry =
+  | { type: 'workflow'; workflow: AutonomousWorkflow }
+  | {
+      type: 'batch';
+      batchId: string;
+      representative: AutonomousWorkflow;
+      workflows: AutonomousWorkflow[];
+    };
+
+function getIssueLabel(workflow: AutonomousWorkflow): string {
+  if (typeof workflow.github_issue_number === 'number' && workflow.github_issue_number > 0) {
+    return `#${workflow.github_issue_number}`;
+  }
+
+  const title = workflow.title?.trim();
+  if (!title) {
+    return workflow.batch_order ? `#${workflow.batch_order}` : `#${workflow.workflow_id.slice(0, 8)}`;
+  }
+
+  const issueMatch = title.match(/\(#?(\d+)\)\s*$/);
+  if (issueMatch) {
+    return `#${issueMatch[1]}`;
+  }
+
+  return title;
+}
+
+function getCommonTitlePrefix(workflows: AutonomousWorkflow[]): string {
+  const titles = workflows.map((workflow) => workflow.title?.trim()).filter(Boolean) as string[];
+  if (titles.length === 0) {
+    return '';
+  }
+
+  let prefix = titles[0];
+  for (const title of titles.slice(1)) {
+    let index = 0;
+    while (
+      index < prefix.length &&
+      index < title.length &&
+      prefix[index].toLowerCase() === title[index].toLowerCase()
+    ) {
+      index += 1;
+    }
+    prefix = prefix.slice(0, index);
+    if (!prefix) {
+      break;
+    }
+  }
+
+  return prefix
+    .replace(/\s*\(#?\d*$/g, '')
+    .replace(/[\s\-–—(:,#]+$/g, '')
+    .trim();
+}
 
 export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   selectedId,
@@ -86,6 +163,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [hasUserChangedView, setHasUserChangedView] = useState(false);
+  const [expandedBatchIds, setExpandedBatchIds] = useState<Record<string, boolean>>({});
   const filters = useMemo(() => {
     const params: Record<string, string> = {
       limit: String(PAGE_SIZE),
@@ -101,6 +179,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   }, [debouncedSearch, page, statusFilter]);
   const { data, isLoading } = useWorkflows(filters);
   const deleteMutation = useDeleteWorkflow();
+  const deleteBatchMutation = useDeleteBatch();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const workflows = data?.workflows ?? EMPTY_WORKFLOWS;
@@ -181,6 +260,128 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     return { rootWorkflows: roots, childrenMap: children };
   }, [workflows]);
 
+  const displayEntries = useMemo<WorkflowListEntry[]>(() => {
+    const batchRoots = new Map<string, AutonomousWorkflow[]>();
+    rootWorkflows.forEach((workflow) => {
+      if (workflow.batch_id && isBatchWorkflow(workflow)) {
+        const entries = batchRoots.get(workflow.batch_id) ?? [];
+        entries.push(workflow);
+        batchRoots.set(workflow.batch_id, entries);
+      }
+    });
+
+    const seenBatchIds = new Set<string>();
+    const entries: WorkflowListEntry[] = [];
+
+    rootWorkflows.forEach((workflow) => {
+      if (!workflow.batch_id || !isBatchWorkflow(workflow)) {
+        entries.push({ type: 'workflow', workflow });
+        return;
+      }
+
+      if (seenBatchIds.has(workflow.batch_id)) {
+        return;
+      }
+
+      seenBatchIds.add(workflow.batch_id);
+      const batchWorkflows = [...(batchRoots.get(workflow.batch_id) ?? [workflow])].sort(
+        compareBatchWorkflows
+      );
+
+      entries.push({
+        type: 'batch',
+        batchId: workflow.batch_id,
+        representative: batchWorkflows[0] ?? workflow,
+        workflows: batchWorkflows,
+      });
+    });
+
+    return entries;
+  }, [rootWorkflows]);
+
+  const formatWorkflowDate = (value: string | null | undefined): string | null => {
+    if (!value) {
+      return null;
+    }
+    return new Date(value).toLocaleDateString();
+  };
+
+  const buildBatchTitle = (batchWorkflows: AutonomousWorkflow[]): string => {
+    const prefix = getCommonTitlePrefix(batchWorkflows);
+    if (prefix.length >= 8) {
+      return prefix;
+    }
+
+    const issueNumbers = batchWorkflows
+      .map((workflow) => workflow.github_issue_number)
+      .filter((value): value is number => typeof value === 'number' && value > 0)
+      .sort((a, b) => a - b);
+
+    if (issueNumbers.length >= 2) {
+      return `gh issue ${issueNumbers[0]}-${issueNumbers[issueNumbers.length - 1]}`;
+    }
+
+    return (
+      batchWorkflows[0]?.title ||
+      batchWorkflows[0]?.requirements_text?.slice(0, 70) ||
+      `Workflow ${batchWorkflows[0]?.workflow_id.slice(0, 8) ?? ''}`
+    );
+  };
+
+  const buildBatchToolSummary = (batchWorkflows: AutonomousWorkflow[]): string => {
+    const tools = Array.from(new Set(batchWorkflows.map((workflow) => workflow.cli_tool).filter(Boolean)));
+    if (tools.length <= 2) {
+      return tools.join(', ');
+    }
+    return `${tools.slice(0, 2).join(', ')} +${tools.length - 2}`;
+  };
+
+  const buildBatchDateSummary = (batchWorkflows: AutonomousWorkflow[]): string | null => {
+    const dates = Array.from(
+      new Set(
+        batchWorkflows
+          .map((workflow) => formatWorkflowDate(workflow.created_at))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    if (dates.length === 0) {
+      return null;
+    }
+    if (dates.length === 1) {
+      return dates[0];
+    }
+    return `${dates[0]} - ${dates[dates.length - 1]}`;
+  };
+
+  const buildBatchStatusSummary = (batchWorkflows: AutonomousWorkflow[]) => {
+    const counts = new Map<string, number>();
+    batchWorkflows.forEach((workflow) => {
+      counts.set(workflow.status, (counts.get(workflow.status) ?? 0) + 1);
+    });
+
+    return STATUS_ORDER.filter((status) => counts.has(status)).map((status) => ({
+      status,
+      count: counts.get(status) ?? 0,
+    }));
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const selectedWorkflow = workflows.find((workflow) => workflow.workflow_id === selectedId);
+    if (!selectedWorkflow?.batch_id || !isBatchWorkflow(selectedWorkflow)) return;
+
+    setExpandedBatchIds((current) => {
+      if (current[selectedWorkflow.batch_id!]) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [selectedWorkflow.batch_id!]: true,
+      };
+    });
+  }, [selectedId, workflows]);
+
   if (isLoading) {
     return (
       <div className="d-flex justify-content-center p-4">
@@ -196,6 +397,17 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       setConfirmDeleteId(null);
     } else {
       setConfirmDeleteId(workflowId);
+    }
+  };
+
+  const handleBatchDeleteClick = (e: React.MouseEvent, batchId: string) => {
+    e.stopPropagation();
+    const confirmKey = `batch:${batchId}`;
+    if (confirmDeleteId === confirmKey) {
+      deleteBatchMutation.mutate(batchId);
+      setConfirmDeleteId(null);
+    } else {
+      setConfirmDeleteId(confirmKey);
     }
   };
 
@@ -216,72 +428,141 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     setHasUserChangedView(true);
   };
 
+  const toggleBatch = (batchId: string) => {
+    setExpandedBatchIds((current) => ({
+      ...current,
+      [batchId]: !current[batchId],
+    }));
+  };
+
+  const handleBatchKeyDown = (event: React.KeyboardEvent, batchId: string) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    toggleBatch(batchId);
+  };
+
   // Render a single workflow item
-  const renderWorkflowItem = (workflow: AutonomousWorkflow, isForkChild: boolean) => {
+  const renderWorkflowItem = (
+    workflow: AutonomousWorkflow,
+    isForkChild: boolean,
+    compact = false
+  ) => {
     const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
     const isSelected = selectedId === workflow.workflow_id;
     const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
     const isConfirming = confirmDeleteId === workflow.workflow_id;
+    const workflowDate = formatWorkflowDate(workflow.created_at);
+    const itemClasses = [
+      'list-group-item',
+      'list-group-item-action',
+      'border-0',
+      'px-3',
+      'py-2',
+      'd-flex',
+      'align-items-start',
+      'auto-workflow-item',
+      compact ? 'auto-workflow-item-compact' : 'auto-workflow-item-standard',
+      isSelected ? 'auto-workflow-item-selected' : '',
+      isForkChild ? 'auto-workflow-item-indented' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
 
     return (
       <div
         key={workflow.workflow_id}
-        className={`list-group-item border-0 px-3 py-2 d-flex align-items-start ${isSelected ? 'active' : ''} ${isForkChild ? 'bg-light' : ''}`}
-        style={{
-          cursor: 'pointer',
-          ...(isForkChild
-            ? { paddingLeft: '2rem', borderTop: '1px dashed var(--bs-gray-300)' }
-            : {}),
-        }}
+        className={itemClasses}
         onClick={() => onSelect(workflow)}
       >
         <div className="flex-grow-1 min-width-0">
-          <div className="fw-semibold text-truncate" style={{ fontSize: '0.875rem' }}>
-            {isForkChild && (
-              <i className="bi bi-diagram-3 text-info me-1" style={{ fontSize: '0.75rem' }}></i>
-            )}
-            {workflow.title ||
-              workflow.requirements_text?.slice(0, 50) ||
-              `Workflow ${workflow.workflow_id.slice(0, 8)}`}
-          </div>
-          <div className="d-flex align-items-center gap-1 mt-1">
-            <Badge
-              variant={
-                statusCfg.variant as
-                  | 'secondary'
-                  | 'info'
-                  | 'primary'
-                  | 'warning'
-                  | 'success'
-                  | 'danger'
-              }
-            >
-              <i className={`bi ${statusCfg.icon} me-1`}></i>
-              {t(statusCfg.labelKey, language)}
-            </Badge>
-            {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
-            {workflow.batch_order && workflow.batch_total && (
-              <Badge variant="light">
-                {workflow.batch_order}/{workflow.batch_total}
-              </Badge>
-            )}
-            {isForkChild && (
-              <Badge variant="info" style={{ fontSize: '0.6rem' }}>
-                {t('autoForkedFrom', language)}
-              </Badge>
-            )}
-          </div>
-          <div className="text-muted mt-1" style={{ fontSize: '0.75rem' }}>
-            <i
-              className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
-            ></i>
-            {workflow.cli_tool}
-            {workflow.created_at && (
-              <span className="ms-2">{new Date(workflow.created_at).toLocaleDateString()}</span>
-            )}
-          </div>
+          {compact ? (
+            <div className="d-flex align-items-start justify-content-between gap-2">
+              <div className="min-width-0">
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                  <div className="auto-workflow-issue-label">
+                    {isForkChild && <i className="bi bi-diagram-3 text-info me-1"></i>}
+                    {getIssueLabel(workflow)}
+                  </div>
+                  {workflow.batch_order && workflow.batch_total && (
+                    <Badge variant="light">
+                      {workflow.batch_order}/{workflow.batch_total}
+                    </Badge>
+                  )}
+                  {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
+                </div>
+                <div className="d-flex align-items-center gap-1 mt-2 flex-wrap">
+                  <Badge
+                    variant={
+                      statusCfg.variant as
+                        | 'secondary'
+                        | 'info'
+                        | 'primary'
+                        | 'warning'
+                        | 'success'
+                        | 'danger'
+                    }
+                  >
+                    <i className={`bi ${statusCfg.icon} me-1`}></i>
+                    {t(statusCfg.labelKey, language)}
+                  </Badge>
+                  {isForkChild && (
+                    <Badge variant="info" style={{ fontSize: '0.6rem' }}>
+                      {t('autoForkedFrom', language)}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="fw-semibold text-truncate auto-workflow-title">
+                {isForkChild && (
+                  <i className="bi bi-diagram-3 text-info me-1" style={{ fontSize: '0.75rem' }}></i>
+                )}
+                {workflow.title ||
+                  workflow.requirements_text?.slice(0, 50) ||
+                  `Workflow ${workflow.workflow_id.slice(0, 8)}`}
+              </div>
+              <div className="d-flex align-items-center gap-1 mt-1 flex-wrap">
+                <Badge
+                  variant={
+                    statusCfg.variant as
+                      | 'secondary'
+                      | 'info'
+                      | 'primary'
+                      | 'warning'
+                      | 'success'
+                      | 'danger'
+                  }
+                >
+                  <i className={`bi ${statusCfg.icon} me-1`}></i>
+                  {t(statusCfg.labelKey, language)}
+                </Badge>
+                {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
+                {workflow.batch_order && workflow.batch_total && (
+                  <Badge variant="light">
+                    {workflow.batch_order}/{workflow.batch_total}
+                  </Badge>
+                )}
+                {isForkChild && (
+                  <Badge variant="info" style={{ fontSize: '0.6rem' }}>
+                    {t('autoForkedFrom', language)}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-muted mt-1 auto-workflow-meta">
+                <i
+                  className={`bi ${workflow.workspace_type === 'remote' ? 'bi-cloud' : 'bi-laptop'} me-1`}
+                ></i>
+                {workflow.cli_tool}
+                {workflowDate && <span className="ms-2">{workflowDate}</span>}
+              </div>
+            </>
+          )}
         </div>
-        <div className="d-flex align-items-center gap-1 ms-1">
+        <div className="d-flex align-items-center gap-1 ms-2">
           {isActive && (
             <span className="spinner-border spinner-border-sm text-primary" role="status">
               <span className="visually-hidden">...</span>
@@ -289,7 +570,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           )}
           {!isActive && (
             <button
-              className={`btn btn-sm border-0 p-0 ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
+              className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${isConfirming ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
               title={t('autoDeleteWorkflow', language)}
               disabled={deleteMutation.isPending}
               onClick={(e) => handleDeleteClick(e, workflow.workflow_id)}
@@ -300,6 +581,133 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
           )}
         </div>
       </div>
+    );
+  };
+
+  const renderWorkflowBranch = (workflow: AutonomousWorkflow, compact = false) => (
+    <React.Fragment key={workflow.workflow_id}>
+      {renderWorkflowItem(workflow, false, compact)}
+      {(childrenMap[workflow.workflow_id] || []).map((child) => renderWorkflowItem(child, true, compact))}
+    </React.Fragment>
+  );
+
+  const renderBatchGroup = (entry: Extract<WorkflowListEntry, { type: 'batch' }>) => {
+    const isExpanded = !!expandedBatchIds[entry.batchId];
+    const batchTitle = buildBatchTitle(entry.workflows);
+    const batchTools = buildBatchToolSummary(entry.workflows);
+    const batchDate = buildBatchDateSummary(entry.workflows);
+    const batchStatuses = buildBatchStatusSummary(entry.workflows);
+    const visibleCount = entry.workflows.length;
+    const batchTotalCount = entry.representative.batch_total ?? visibleCount;
+    const batchCountSplit = visibleCount < batchTotalCount;
+    const hasSelectedWorkflow = entry.workflows.some((workflow) => {
+      if (workflow.workflow_id === selectedId) {
+        return true;
+      }
+      return (childrenMap[workflow.workflow_id] || []).some((child) => child.workflow_id === selectedId);
+    });
+    const hasActiveWorkflow = entry.workflows.some((workflow) => {
+      if (ACTIVE_WORKFLOW_STATUSES.includes(workflow.status)) {
+        return true;
+      }
+      return (childrenMap[workflow.workflow_id] || []).some((child) =>
+        ACTIVE_WORKFLOW_STATUSES.includes(child.status)
+      );
+    });
+    const batchDeleteConfirmKey = `batch:${entry.batchId}`;
+
+    return (
+      <React.Fragment key={`batch-${entry.batchId}`}>
+        <div
+          className={`list-group-item list-group-item-action border-0 px-3 py-3 text-start auto-workflow-batch ${hasSelectedWorkflow ? 'auto-workflow-batch-selected' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
+          aria-label={`${isExpanded ? t('collapse', language) : t('expand', language)} ${t('autoBatchInfo', language)}`}
+          onClick={() => toggleBatch(entry.batchId)}
+          onKeyDown={(event) => handleBatchKeyDown(event, entry.batchId)}
+        >
+          <div className="d-flex align-items-start justify-content-between gap-3">
+            <div className="min-width-0">
+              <div className="auto-workflow-batch-kicker">
+                <i
+                  className={`bi ${isExpanded ? 'bi-chevron-down' : 'bi-chevron-right'} me-2`}
+                  aria-hidden="true"
+                ></i>
+                {t('autoBatchInfo', language)}
+              </div>
+              <div className="auto-workflow-batch-title">{batchTitle}</div>
+              <div className="auto-workflow-batch-meta-stack">
+                {batchDate && (
+                  <span className="auto-workflow-batch-meta-pill auto-workflow-batch-meta-line">
+                    <i className="bi bi-calendar3 me-1"></i>
+                    {batchDate}
+                  </span>
+                )}
+                {batchTools && (
+                  <span className="auto-workflow-batch-meta-pill auto-workflow-batch-meta-line">
+                    <i className="bi bi-terminal me-1"></i>
+                    {batchTools}
+                  </span>
+                )}
+                <span className="auto-workflow-batch-meta-pill auto-workflow-batch-count auto-workflow-batch-meta-line">
+                  {batchCountSplit ? `${visibleCount} / ${batchTotalCount}` : visibleCount}{' '}
+                  {t('autoBatchWorkflowUnit', language)}
+                </span>
+              </div>
+              <div className="auto-workflow-batch-status-row">
+                {batchStatuses.map(({ status, count }) => {
+                  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+                  return (
+                    <Badge
+                      key={status}
+                      variant={
+                        cfg.variant as
+                          | 'secondary'
+                          | 'info'
+                          | 'primary'
+                          | 'warning'
+                          | 'success'
+                          | 'danger'
+                      }
+                    >
+                      {t(cfg.labelKey, language)} {count}
+                    </Badge>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="d-flex align-items-center gap-2 auto-workflow-batch-side">
+              {hasActiveWorkflow && (
+                <span className="spinner-border spinner-border-sm text-primary" role="status">
+                  <span className="visually-hidden">...</span>
+                </span>
+              )}
+              {!hasActiveWorkflow && (
+                <button
+                  className={`btn btn-sm border-0 p-0 auto-workflow-delete-btn ${confirmDeleteId === batchDeleteConfirmKey ? 'btn-outline-danger' : 'btn-outline-secondary'}`}
+                  title={t('autoDeleteWorkflow', language)}
+                  disabled={deleteBatchMutation.isPending}
+                  onClick={(event) => handleBatchDeleteClick(event, entry.batchId)}
+                >
+                  <i className="bi bi-trash" style={{ fontSize: '0.85rem' }}></i>
+                  {confirmDeleteId === batchDeleteConfirmKey && (
+                    <small className="ms-1">{t('autoDeleteConfirm', language)}</small>
+                  )}
+                </button>
+              )}
+              <span className="auto-workflow-batch-chevron">
+                <i className={`bi ${isExpanded ? 'bi-dash-lg' : 'bi-plus-lg'}`}></i>
+              </span>
+            </div>
+          </div>
+        </div>
+        {isExpanded && (
+          <div className="list-group list-group-flush auto-workflow-batch-children">
+            {entry.workflows.map((workflow) => renderWorkflowBranch(workflow, true))}
+          </div>
+        )}
+      </React.Fragment>
     );
   };
 
@@ -354,19 +762,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       ) : (
         <>
           <div className="list-group list-group-flush">
-            {rootWorkflows.map((workflow) => {
-              const forkChildren = childrenMap[workflow.workflow_id] || [];
-
-              return (
-                <React.Fragment key={workflow.workflow_id}>
-                  {/* Parent/root workflow item */}
-                  {renderWorkflowItem(workflow, false)}
-
-                  {/* Fork children indented under parent */}
-                  {forkChildren.map((child) => renderWorkflowItem(child, true))}
-                </React.Fragment>
-              );
-            })}
+            {displayEntries.map((entry) =>
+              entry.type === 'batch' ? renderBatchGroup(entry) : renderWorkflowBranch(entry.workflow)
+            )}
           </div>
           {totalPages > 1 && (
             <div className="border-top p-2">

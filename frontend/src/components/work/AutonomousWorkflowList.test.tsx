@@ -4,10 +4,19 @@ import { AutonomousWorkflowList } from './AutonomousWorkflowList';
 import { useWorkflows } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 
+const { mockDeleteWorkflowMutate, mockDeleteBatchMutate } = vi.hoisted(() => ({
+  mockDeleteWorkflowMutate: vi.fn(),
+  mockDeleteBatchMutate: vi.fn(),
+}));
+
 vi.mock('@/hooks/useAutonomous', () => ({
   useWorkflows: vi.fn(),
   useDeleteWorkflow: () => ({
-    mutate: vi.fn(),
+    mutate: mockDeleteWorkflowMutate,
+    isPending: false,
+  }),
+  useDeleteBatch: () => ({
+    mutate: mockDeleteBatchMutate,
     isPending: false,
   }),
 }));
@@ -39,9 +48,9 @@ function workflow(overrides: Partial<AutonomousWorkflow> = {}): AutonomousWorkfl
     github_issue_number: null,
     github_pr_number: null,
     github_pr_url: '',
-    batch_id: 'batch-1',
-    batch_order: 2,
-    batch_total: 3,
+    batch_id: null,
+    batch_order: null,
+    batch_total: null,
     auto_merge: true,
     definition_snapshot: null,
     current_phase: 'preparation',
@@ -83,6 +92,8 @@ describe('AutonomousWorkflowList', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockUseWorkflows.mockReset();
+    mockDeleteWorkflowMutate.mockReset();
+    mockDeleteBatchMutate.mockReset();
   });
 
   afterEach(() => {
@@ -213,5 +224,143 @@ describe('AutonomousWorkflowList', () => {
 
     expect(onClearSelection).not.toHaveBeenCalled();
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: 'wf-1' }));
+  });
+
+  it('collapses batch workflows and expands them in ascending batch order', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-3',
+        title: 'Task 3',
+        batch_id: 'batch-33',
+        batch_order: 3,
+        batch_total: 3,
+      }),
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-33',
+        batch_order: 1,
+        batch_total: 3,
+      }),
+      workflow({
+        workflow_id: 'wf-2',
+        title: 'Task 2',
+        batch_id: 'batch-33',
+        batch_order: 2,
+        batch_total: 3,
+      }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList
+        selectedId={null}
+        onSelect={vi.fn()}
+        onClearSelection={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('1/3')).not.toBeInTheDocument();
+    expect(screen.queryByText('2/3')).not.toBeInTheDocument();
+    expect(screen.queryByText('3/3')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Batch' }));
+
+    const first = screen.getByText('1/3');
+    const second = screen.getByText('2/3');
+    const third = screen.getByText('3/3');
+
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(second.compareDocumentPosition(third) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('deletes an entire batch from the batch header action', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-33',
+        batch_order: 1,
+        batch_total: 2,
+      }),
+      workflow({
+        workflow_id: 'wf-2',
+        title: 'Task 2',
+        batch_id: 'batch-33',
+        batch_order: 2,
+        batch_total: 2,
+      }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList
+        selectedId={null}
+        onSelect={vi.fn()}
+        onClearSelection={vi.fn()}
+      />
+    );
+
+    const deleteButton = screen.getByTitle('Delete');
+    fireEvent.click(deleteButton);
+    fireEvent.click(screen.getByText('Delete this workflow?'));
+
+    expect(mockDeleteBatchMutate).toHaveBeenCalledWith('batch-33');
+    expect(mockDeleteWorkflowMutate).not.toHaveBeenCalled();
+  });
+
+  it('shows a partial count pill when a batch is split across pages', () => {
+    // Only one member of a 3-item batch lands on the current page (e.g. after a
+    // status filter or pagination). The pill must reflect the visible subset and
+    // flag it as partial, instead of showing the true total of 3.
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-split',
+        batch_order: 1,
+        batch_total: 3,
+        status: 'completed',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    const pill = container.querySelector('.auto-workflow-batch-count');
+    expect(pill?.textContent).toContain('1 / 3');
+    // status badge sums to the visible subset (1), matching the leading count
+    expect(screen.getByText(/Completed\s+1/i)).toBeInTheDocument();
+  });
+
+  it('shows the plain count pill when the whole batch fits on the page', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-full',
+        batch_order: 1,
+        batch_total: 2,
+        status: 'completed',
+      }),
+      workflow({
+        workflow_id: 'wf-2',
+        title: 'Task 2',
+        batch_id: 'batch-full',
+        batch_order: 2,
+        batch_total: 2,
+        status: 'failed',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    const pill = container.querySelector('.auto-workflow-batch-count');
+    expect(pill?.textContent).toContain('2');
+    expect(pill?.textContent).not.toContain('/');
+    // badges (Completed 1 + Failed 1) sum to the visible count
+    expect(screen.getByText(/Completed\s+1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Failed\s+1/i)).toBeInTheDocument();
   });
 });

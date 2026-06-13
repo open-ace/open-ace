@@ -274,6 +274,18 @@ class TestGitHubOpsDiff:
         diff = self.gh.get_commit_diff("abc123")
         assert "+change" in diff
 
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_get_commit_diff_stats(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="10\t5\tfile1.py\n3\t1\tfile2.py\n",
+        )
+        stats = self.gh.get_commit_diff_stats("abc123")
+        assert stats["additions"] == 13
+        assert stats["deletions"] == 6
+        assert stats["files"] == 2
+        assert stats["commits"] == 1
+
 
 class TestGitHubOpsGit:
     """Tests for raw git operations."""

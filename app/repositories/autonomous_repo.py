@@ -556,6 +556,57 @@ class AutonomousWorkflowRepository:
             ),
         )
 
+    def get_milestone_usage_summary(
+        self, workflow_id: str, milestones: Optional[list[dict]] = None
+    ) -> dict[str, dict[str, Any]]:
+        """Return per-milestone session/token/request usage.
+
+        Current implementation attaches the linked session totals to each milestone.
+        This restores timeline-level token/request stats even when a session is
+        reused across multiple milestones.
+        """
+        milestones = milestones or self.list_milestones(workflow_id)
+        session_ids = sorted(
+            {
+                (milestone.get("review_session_id") or milestone.get("session_id") or "").strip()
+                for milestone in milestones
+                if (milestone.get("review_session_id") or milestone.get("session_id") or "").strip()
+            }
+        )
+        if not session_ids:
+            return {}
+
+        placeholders = ",".join(["?"] * len(session_ids))
+        session_rows = self.db.fetch_all(
+            f"""
+            SELECT session_id, total_tokens, request_count
+            FROM agent_sessions
+            WHERE session_id IN ({placeholders})
+            """,
+            tuple(session_ids),
+        )
+        session_usage = {
+            row.get("session_id", ""): {
+                "total_tokens": int(row.get("total_tokens", 0) or 0),
+                "request_count": int(row.get("request_count", 0) or 0),
+            }
+            for row in session_rows
+        }
+
+        result: dict[str, dict[str, Any]] = {}
+        for milestone in milestones:
+            milestone_id = milestone.get("milestone_id", "")
+            session_id = (
+                milestone.get("review_session_id") or milestone.get("session_id") or ""
+            ).strip()
+            usage = session_usage.get(session_id, {})
+            result[milestone_id] = {
+                "llm_session_id": session_id,
+                "llm_total_tokens": usage.get("total_tokens", 0),
+                "llm_request_count": usage.get("request_count", 0),
+            }
+        return result
+
     def list_forks(self, workflow_id: str) -> list:
         """List all child workflows forked from the given parent."""
         return self.db.fetch_all(
@@ -675,6 +726,40 @@ class AutonomousWorkflowRepository:
                 (workflow_id,),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def delete_batch(self, batch_id: str) -> int:
+        """Delete all workflows and related records for a batch."""
+        workflows = self.list_batch_workflows(batch_id)
+        if not workflows:
+            return 0
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            workflow_ids = [
+                workflow.get("workflow_id", "")
+                for workflow in workflows
+                if workflow.get("workflow_id")
+            ]
+            if not workflow_ids:
+                return 0
+            placeholders = ",".join(["?"] * len(workflow_ids))
+            cursor.execute(
+                adapt_sql(f"DELETE FROM workflow_events WHERE workflow_id IN ({placeholders})"),
+                tuple(workflow_ids),
+            )
+            cursor.execute(
+                adapt_sql(f"DELETE FROM workflow_milestones WHERE workflow_id IN ({placeholders})"),
+                tuple(workflow_ids),
+            )
+            cursor.execute(
+                adapt_sql("DELETE FROM autonomous_workflows WHERE batch_id = ?"),
+                (batch_id,),
+            )
+            conn.commit()
+            return len(workflow_ids)
         finally:
             conn.close()
 

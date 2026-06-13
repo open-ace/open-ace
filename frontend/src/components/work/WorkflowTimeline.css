@@ -1,0 +1,419 @@
+.workflow-timeline-leading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  min-width: 1.8rem;
+  height: 1.8rem;
+  line-height: 1;
+}
+
+.workflow-timeline-card {
+  cursor: default;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: #ffffff;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.workflow-timeline-card:hover {
+  transform: translateY(-1px);
+  background: #f8fbff;
+  border-color: rgba(59, 130, 246, 0.22);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.workflow-timeline-card-expanded {
+  background: #dcecff;
+  border-color: rgba(59, 130, 246, 0.34);
+  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.1);
+}
+
+.workflow-timeline-card-expanded:hover {
+  background: #d4e7ff;
+}
+
+.workflow-timeline-meta {
+  font-size: 0.75rem;
+}
+
+.workflow-timeline-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #f8fbff;
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  color: #365172;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workflow-timeline-session-pill {
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.workflow-timeline-session-pill-reused {
+  font-weight: 600;
+}
+
+.workflow-timeline-session-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.workflow-timeline-action-row {
+  min-height: 2rem;
+  font-size: 0.75rem;
+  row-gap: 0.45rem;
+}
+
+.workflow-timeline-inline-btn {
+  border-radius: 999px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.workflow-timeline-action-row .workflow-timeline-meta-pill {
+  font-size: 0.75rem;
+}
+
+.workflow-timeline-detail {
+  background: #ffffff;
+  border-radius: 0 0.85rem 0.85rem 0;
+}
+
+.workflow-timeline-header-meta {
+  min-height: 2rem;
+  margin-bottom: 0.55rem;
+}
+
+.workflow-timeline-header-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.85rem;
+  padding: 0.22rem 0.76rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.workflow-timeline-header-pill-subtle {
+  color: #52637a;
+  background: #f6f8fb;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+}
+
+.workflow-timeline-header-pill-status {
+  color: #ffffff;
+  background: #6b7280;
+}
+
+.workflow-timeline-header-pill-light {
+  color: #42556f;
+  background: #f8fbff;
+  border: 1px solid rgba(191, 219, 254, 0.95);
+}
+
+.workflow-timeline-header-pill-link {
+  color: #42556f;
+  background: #f8fbff;
+  border: 1px solid rgba(191, 219, 254, 0.95);
+}
+
+.workflow-timeline-header-pill-link:hover {
+  background: #eef5ff;
+  border-color: rgba(147, 197, 253, 0.98);
+}
+
+.workflow-timeline-header-link {
+  display: inline-flex;
+  align-items: center;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.workflow-timeline-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.workflow-timeline-definition-btn {
+  flex-shrink: 1;
+  max-width: 100%;
+  padding-inline: 0.8rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.workflow-timeline-summary {
+  font-size: 0.82rem;
+}
+
+.workflow-timeline-summary small {
+  font-size: inherit;
+}
+
+.workflow-timeline-live-activity {
+  padding: 0.85rem 0.95rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  background: #f8fbff;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.workflow-timeline-live-activity-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #50637c;
+}
+
+.workflow-timeline-live-activity-line + .workflow-timeline-live-activity-line {
+  margin-top: 0.38rem;
+}
+
+.workflow-timeline-live-activity-time {
+  flex-shrink: 0;
+  min-width: 3.9rem;
+  color: #7b8ba2;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-live-activity-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.workflow-timeline-diff-modal {
+  max-width: min(1200px, calc(100vw - 2rem));
+}
+
+.workflow-timeline-diff-modal .modal-content {
+  overflow: hidden;
+}
+
+.workflow-timeline-diff-modal-fullscreen {
+  max-width: calc(100vw - 1rem);
+  margin: 0.5rem auto;
+  height: calc(100vh - 1rem);
+}
+
+.workflow-timeline-diff-modal-fullscreen .modal-content {
+  height: 100%;
+}
+
+.workflow-timeline-diff-shell {
+  display: flex;
+  min-height: 70vh;
+  max-height: 75vh;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 1rem;
+  background: #f8fafc;
+}
+
+.workflow-timeline-diff-sidebar {
+  width: 280px;
+  min-width: 280px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(226, 232, 240, 0.95);
+  background: #ffffff;
+}
+
+.workflow-timeline-diff-resizer {
+  position: relative;
+  width: 8px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.workflow-timeline-diff-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workflow-timeline-diff-resizer:hover::before,
+.workflow-timeline-diff-resizer:active::before {
+  background: rgba(59, 130, 246, 0.75);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.workflow-timeline-diff-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border: 0;
+  border-bottom: 1px solid rgba(241, 245, 249, 0.95);
+  background: transparent;
+  text-align: left;
+  transition: background-color 160ms ease;
+}
+
+.workflow-timeline-diff-file:hover {
+  background: #f8fbff;
+}
+
+.workflow-timeline-diff-file-active {
+  background: #e8f2ff;
+}
+
+.workflow-timeline-diff-file-badge {
+  min-width: 1.4rem;
+  padding-inline: 0.4rem;
+}
+
+.workflow-timeline-diff-file-path {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-diff-file-stats {
+  display: inline-flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-diff-viewer {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.workflow-timeline-diff-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+  background: #ffffff;
+}
+
+.workflow-timeline-diff-viewer-path {
+  overflow: hidden;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.workflow-timeline-diff-viewer-commit {
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-diff-viewer-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-diff-fullscreen-btn {
+  white-space: nowrap;
+}
+
+.workflow-timeline-diff-code {
+  flex: 1;
+  overflow: auto;
+  padding: 0.8rem 0;
+  background: #ffffff;
+  font-size: 0.76rem;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+}
+
+.workflow-timeline-diff-line {
+  padding: 0.12rem 1rem;
+  white-space: pre;
+  color: #334155;
+}
+
+.workflow-timeline-diff-line-add {
+  background: #ecfdf3;
+  color: #166534;
+}
+
+.workflow-timeline-diff-line-del {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.workflow-timeline-diff-line-hunk {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.workflow-timeline-diff-line-meta {
+  color: #64748b;
+}
+
+@media (max-width: 991px) {
+  .workflow-timeline-diff-shell {
+    flex-direction: column;
+  }
+
+  .workflow-timeline-diff-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+  }
+
+  .workflow-timeline-diff-resizer {
+    display: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  .workflow-timeline-controls {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+}
