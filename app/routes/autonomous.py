@@ -12,6 +12,7 @@ import logging
 import os
 import queue
 import re
+import signal
 import threading
 import time
 import uuid
@@ -529,8 +530,8 @@ def pause_workflow(workflow_id):
     if workflow.get("status") == "paused":
         return jsonify({"error": "Workflow already paused"}), 400
 
-    # Signal running orchestrator to cancel its active agent task
-    _cancel_running_task(workflow_id)
+    # Suspend the running agent subprocess (SIGSTOP)
+    _pause_running_task(workflow_id)
 
     from datetime import datetime, timezone
 
@@ -559,6 +560,9 @@ def resume_workflow(workflow_id):
     if workflow.get("status") != "paused":
         return jsonify({"error": "Workflow is not paused"}), 400
 
+    # Resume the paused agent subprocess (SIGCONT)
+    _resume_running_task(workflow_id)
+
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
@@ -584,8 +588,8 @@ def stop_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    # Signal running orchestrator to cancel its active agent task
-    _cancel_running_task(workflow_id)
+    # Kill the running agent subprocess (SIGTERM → SIGKILL)
+    _stop_running_task(workflow_id)
 
     from datetime import datetime, timezone
 
@@ -1150,7 +1154,188 @@ def _emit_event_safe(workflow_id: str, event_type: str, data: dict):
 
 
 def _cancel_running_task(workflow_id: str):
-    """Signal a running orchestrator to cancel its current agent task."""
+    """Legacy: cancel a running task. Delegates to _stop_running_task."""
+    _stop_running_task(workflow_id)
+
+
+def _pid_matches_expected(pid: int) -> bool:
+    """Best-effort check that PID likely belongs to a CLI agent process.
+
+    Helps guard against PID recycling on long-running servers by verifying
+    the process command line contains known agent binary names.
+    """
+    try:
+        import subprocess as _sp
+
+        result = _sp.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return False  # process doesn't exist
+        comm = result.stdout.strip().lower()
+        return any(name in comm for name in ("claude", "qwen", "codex", "openclaw", "node"))
+    except Exception:
+        # If we can't check, assume it matches (conservative: try to stop it)
+        return True
+
+
+def _kill_pid(pid: int) -> bool:
+    """Kill a process by PID with SIGTERM -> SIGKILL escalation.
+
+    Works with process groups created via ``start_new_session=True``.
+    Returns True if the process was killed or was already gone.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True  # already gone
+
+    # Stage 1: SIGTERM
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return True
+
+    # Stage 2: poll for exit, up to 5 seconds
+    for _ in range(10):
+        time.sleep(0.5)
+        try:
+            os.killpg(pgid, 0)  # existence check
+        except (ProcessLookupError, OSError):
+            return True  # died after SIGTERM
+
+    # Stage 3: SIGKILL
+    logger.warning("PID %d still alive after SIGTERM, sending SIGKILL", pid)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        return True
+
+    # Final check
+    time.sleep(1)
+    try:
+        os.killpg(pgid, 0)
+        return False  # still alive even after SIGKILL
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _suspend_pid(pid: int) -> bool:
+    """Suspend a process by PID using SIGSTOP."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True
+
+    try:
+        os.killpg(pgid, signal.SIGSTOP)
+        return True
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _resume_pid(pid: int) -> bool:
+    """Resume a suspended process by PID using SIGCONT."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True
+
+    try:
+        os.killpg(pgid, signal.SIGCONT)
+        return True
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _pause_running_task(workflow_id: str):
+    """Pause the running agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.pause_current_task()
+    Strategy 2: PID from database → direct SIGSTOP
+    Strategy 3: Scan runner's in-memory sessions → SIGSTOP matching sessions
+    """
+    affected_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator (fast path)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.pause_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        affected_pids.add(session.process.pid)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Pause strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database (covers scheduler poll gap)
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in affected_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Pause strategy 2: suspending DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _suspend_pid(pid)
+                affected_pids.add(pid)
+            # Keep agent_pid in DB (needed for resume)
+    except Exception as e:
+        logger.warning("Pause strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 3: scan runner sessions (last resort)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            runner = orchestrator._runner
+            for _sid, session in list(runner._local_sessions.items()):
+                if session.workflow_id == workflow_id:
+                    if session.process and session.process.returncode is None:
+                        pid = session.process.pid
+                        if pid not in affected_pids:
+                            try:
+                                os.killpg(os.getpgid(pid), signal.SIGSTOP)
+                                affected_pids.add(pid)
+                            except (ProcessLookupError, OSError):
+                                pass
+    except Exception as e:
+        logger.warning("Pause strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+
+def _stop_running_task(workflow_id: str):
+    """Stop (kill) the running agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.cancel_current_task()
+    Strategy 2: PID from database → direct SIGTERM/SIGKILL
+    Strategy 3: Scan runner's in-memory sessions → kill matching sessions
+    """
+    killed_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator (fast path)
     try:
         from app.services.autonomous_scheduler import AutonomousScheduler
 
@@ -1158,5 +1343,113 @@ def _cancel_running_task(workflow_id: str):
         orchestrator = scheduler.get_running_orchestrator(workflow_id)
         if orchestrator:
             orchestrator.cancel_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        killed_pids.add(session.process.pid)
+            except Exception:
+                pass
     except Exception as e:
-        logger.warning("Failed to cancel running task for %s: %s", workflow_id[:8], e)
+        logger.warning("Stop strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database (covers scheduler poll gap / server restart)
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in killed_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Stop strategy 2: killing DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _kill_pid(pid)
+                killed_pids.add(pid)
+            # Clear PID from DB
+            repo.update_workflow(workflow_id, {"agent_pid": None, "agent_session_id": ""})
+    except Exception as e:
+        logger.warning("Stop strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 3: scan runner sessions (last resort)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            runner = orchestrator._runner
+            for _sid, session in list(runner._local_sessions.items()):
+                if session.workflow_id == workflow_id:
+                    if session.process and session.process.returncode is None:
+                        pid = session.process.pid
+                        if pid not in killed_pids:
+                            try:
+                                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                                killed_pids.add(pid)
+                            except (ProcessLookupError, OSError):
+                                pass
+                    runner.stop_session(_sid)
+    except Exception as e:
+        logger.warning("Stop strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+
+def _resume_running_task(workflow_id: str):
+    """Resume a paused agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.resume_current_task()
+    Strategy 2: PID from database → direct SIGCONT
+    """
+    resumed_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.resume_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        resumed_pids.add(session.process.pid)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Resume strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in resumed_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Resume strategy 2: resuming DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _resume_pid(pid)
+                resumed_pids.add(pid)
+    except Exception as e:
+        logger.warning("Resume strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)

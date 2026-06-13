@@ -103,6 +103,7 @@ class _LocalSession:
     remote_machine_id: str | None = None
     started_at_epoch: float = 0.0
     persisted_session_id: str = ""
+    _paused: bool = False  # True when process is suspended via SIGSTOP
 
 
 class AutonomousAgentRunner:
@@ -114,6 +115,8 @@ class AutonomousAgentRunner:
         remote_session_manager=None,
         server_url: str = "",
         activity_callback=None,
+        on_pid_registered=None,
+        on_pid_cleared=None,
     ):
         """
         Args:
@@ -123,6 +126,10 @@ class AutonomousAgentRunner:
             activity_callback: Optional callback ``(session_id, activity_dict)``
                 invoked for each assistant/tool_use/usage event, enabling
                 real-time streaming of agent activity to the frontend.
+            on_pid_registered: Optional callback ``(session_id, pid)`` called
+                when a local subprocess is created, for PID persistence.
+            on_pid_cleared: Optional callback ``(session_id)`` called when a
+                local subprocess exits, for PID cleanup.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
@@ -130,6 +137,8 @@ class AutonomousAgentRunner:
             "OPENACE_SERVER_URL", "http://localhost:5000"
         )
         self._activity_callback = activity_callback
+        self._on_pid_registered = on_pid_registered
+        self._on_pid_cleared = on_pid_cleared
         self._local_sessions: dict[str, _LocalSession] = {}
 
     @staticmethod
@@ -501,6 +510,13 @@ class AutonomousAgentRunner:
         )
         self._local_sessions[session_id] = session
 
+        # Persist PID to database for reliable cancel/pause
+        if self._on_pid_registered:
+            try:
+                self._on_pid_registered(session_id, process.pid)
+            except Exception as e:
+                logger.warning("on_pid_registered callback failed: %s", e)
+
         # Start output reader threads
         session._stdout_thread = threading.Thread(
             target=self._read_stdout,
@@ -536,6 +552,13 @@ class AutonomousAgentRunner:
                     pass
 
         self._local_sessions.pop(session_id, None)
+
+        # Clear PID from database
+        if self._on_pid_cleared:
+            try:
+                self._on_pid_cleared(session_id)
+            except Exception as e:
+                logger.warning("on_pid_cleared callback failed: %s", e)
 
         if (
             completed
@@ -1000,12 +1023,90 @@ class AutonomousAgentRunner:
             pass
 
     def stop_session(self, session_id: str) -> None:
-        """Stop a running local session."""
+        """Stop a running local session with SIGTERM + SIGKILL escalation.
+
+        If the process is currently paused (SIGSTOP), it will be resumed
+        first with SIGCONT so it can handle SIGTERM.
+        """
         session = self._local_sessions.get(session_id)
-        if session and session.process and session.process.returncode is None:
-            try:
-                os.killpg(os.getpgid(session.process.pid), signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
+        if not session or not session.process or session.process.returncode is not None:
+            return
+
+        try:
+            pgid = os.getpgid(session.process.pid)
+        except (ProcessLookupError, OSError):
             session._stopped.set()
             session.completed.set()
+            return
+
+        # If paused, resume first so it can handle SIGTERM
+        if session._paused:
+            try:
+                os.killpg(pgid, signal.SIGCONT)
+                session._paused = False
+            except (ProcessLookupError, OSError):
+                pass
+
+        # Stage 1: SIGTERM
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            session._stopped.set()
+            session.completed.set()
+            return
+
+        # Stage 2: wait up to 5 seconds for graceful exit
+        try:
+            session.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Stage 3: SIGKILL
+            logger.warning(
+                "Process %d did not exit after SIGTERM, sending SIGKILL",
+                session.process.pid,
+            )
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+                session.process.wait(timeout=3)
+            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+                pass
+
+        session._stopped.set()
+        session.completed.set()
+
+    def pause_session(self, session_id: str) -> bool:
+        """Suspend a running local session using SIGSTOP.
+
+        The process is frozen in place and can be resumed with
+        :meth:`resume_session` using SIGCONT.
+        """
+        session = self._local_sessions.get(session_id)
+        if not session or not session.process or session.process.returncode is not None:
+            return False
+        if session._paused:
+            return True
+        try:
+            pgid = os.getpgid(session.process.pid)
+            os.killpg(pgid, signal.SIGSTOP)
+            session._paused = True
+            logger.info("Paused session %s (pid %d)", session_id[:8], session.process.pid)
+            return True
+        except (ProcessLookupError, OSError) as e:
+            logger.error("Failed to pause session %s: %s", session_id[:8], e)
+            return False
+
+    def resume_session(self, session_id: str) -> bool:
+        """Resume a paused local session using SIGCONT."""
+        session = self._local_sessions.get(session_id)
+        if not session or not session.process or session.process.returncode is not None:
+            return False
+        if not session._paused:
+            return True
+        try:
+            pgid = os.getpgid(session.process.pid)
+            os.killpg(pgid, signal.SIGCONT)
+            session._paused = False
+            logger.info("Resumed session %s (pid %d)", session_id[:8], session.process.pid)
+            return True
+        except (ProcessLookupError, OSError) as e:
+            logger.error("Failed to resume session %s: %s", session_id[:8], e)
+            return False
