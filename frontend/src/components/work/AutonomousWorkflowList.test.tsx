@@ -252,11 +252,7 @@ describe('AutonomousWorkflowList', () => {
     ]);
 
     render(
-      <AutonomousWorkflowList
-        selectedId={null}
-        onSelect={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
     expect(screen.queryByText('1/3')).not.toBeInTheDocument();
@@ -292,11 +288,7 @@ describe('AutonomousWorkflowList', () => {
     ]);
 
     render(
-      <AutonomousWorkflowList
-        selectedId={null}
-        onSelect={vi.fn()}
-        onClearSelection={vi.fn()}
-      />
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
     const deleteButton = screen.getByTitle('Delete');

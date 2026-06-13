@@ -39,7 +39,7 @@ export const AutonomousDev: React.FC = () => {
     if (typeof window === 'undefined') {
       return DEFAULT_LEFT_PANEL_WIDTH;
     }
-    const saved = Number(window.localStorage.getItem(LEFT_PANEL_WIDTH_KEY) || '');
+    const saved = Number(window.localStorage.getItem(LEFT_PANEL_WIDTH_KEY) ?? '');
     return Number.isFinite(saved) && saved >= MIN_LEFT_PANEL_WIDTH && saved <= MAX_LEFT_PANEL_WIDTH
       ? saved
       : DEFAULT_LEFT_PANEL_WIDTH;
@@ -51,7 +51,10 @@ export const AutonomousDev: React.FC = () => {
 
   const clampLeftPanelWidth = useCallback((nextWidth: number) => {
     const viewportLimit = Math.max(MIN_LEFT_PANEL_WIDTH, Math.floor(window.innerWidth * 0.55));
-    return Math.min(Math.max(nextWidth, MIN_LEFT_PANEL_WIDTH), Math.min(MAX_LEFT_PANEL_WIDTH, viewportLimit));
+    return Math.min(
+      Math.max(nextWidth, MIN_LEFT_PANEL_WIDTH),
+      Math.min(MAX_LEFT_PANEL_WIDTH, viewportLimit)
+    );
   }, []);
 
   const handleResizeStart = useCallback(
@@ -178,10 +181,7 @@ export const AutonomousDev: React.FC = () => {
               }
             >
               <i
-                className={cn(
-                  'bi',
-                  workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'
-                )}
+                className={cn('bi', workspaceFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen')}
               />
             </button>
             <Button size="sm" onClick={() => setShowNewModal(true)}>

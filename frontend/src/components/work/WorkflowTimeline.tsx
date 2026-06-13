@@ -163,10 +163,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   }, []);
   const resolvedIssueUrl = useMemo(() => {
     const directUrl =
-      workflow.requirements_issue_url ||
-      definitionSnapshot?.resolved_issue_url ||
-      definitionSnapshot?.parsed_issue_selectors?.find((selector) => selector.requirements_issue_url)
-        ?.requirements_issue_url ||
+      workflow.requirements_issue_url ??
+      definitionSnapshot?.resolved_issue_url ??
+      definitionSnapshot?.parsed_issue_selectors?.find(
+        (selector) => selector.requirements_issue_url
+      )?.requirements_issue_url ??
       '';
 
     if (directUrl) {
@@ -175,8 +176,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
     const issueNumber = workflow.github_issue_number;
     const repoUrl = normalizeGithubRepoUrl(
-      workflow.project_repo_url ||
-        definitionSnapshot?.project_repo_url ||
+      workflow.project_repo_url ??
+        definitionSnapshot?.project_repo_url ??
         (workflow.github_pr_url
           ? workflow.github_pr_url.replace(/\/pull\/\d+(?:[/?#].*)?$/i, '')
           : '')
@@ -199,7 +200,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const isPaused = workflow.status === 'paused';
   const isWaiting = workflow.current_phase === 'wait';
-  const allowMilestoneActions = isActive || isPaused || isWaiting || workflow.status === 'planning_timeout';
+  const allowMilestoneActions =
+    isActive || isPaused || isWaiting || workflow.status === 'planning_timeout';
 
   // Modal state for cancel/fork
   const [showCancelModal, setShowCancelModal] = useState<string | null>(null);
@@ -493,7 +495,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         timestamp,
         content: (
           <>
-            <strong>{activity.tool_name || 'tool'}</strong>
+            <strong>{activity.tool_name ?? 'tool'}</strong>
             {snippet && (
               <span className="ms-1 opacity-75">
                 {snippet.length > 96 ? `${snippet.slice(0, 96)}...` : snippet}
@@ -512,7 +514,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       };
     }
 
-    const text = activity.text?.trim() || '';
+    const text = activity.text?.trim() ?? '';
     return {
       icon: 'bi-chat-text text-info',
       timestamp,
@@ -527,7 +529,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const extractFromBlock = (block: unknown): string[] => {
       if (!block || typeof block !== 'object') return [];
       const item = block as Record<string, unknown>;
-      const type = String(item.type || '');
+      const type = String(item.type ?? '');
       if (type === 'thinking') {
         const thinking = item.thinking;
         return typeof thinking === 'string' && thinking.trim() ? [thinking.trim()] : [];
@@ -566,8 +568,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     (milestone: WorkflowMilestone) => {
       const title = milestone.title?.trim() || '';
       const round = milestone.round_number || milestone.dev_round || 0;
-      const issueNumber = milestone.github_issue_number || workflow.github_issue_number || null;
-      const prNumber = milestone.github_pr_number || workflow.github_pr_number || null;
+      const issueNumber = milestone.github_issue_number ?? workflow.github_issue_number ?? null;
+      const prNumber = milestone.github_pr_number ?? workflow.github_pr_number ?? null;
 
       switch (milestone.milestone_type) {
         case 'issue_linked':
@@ -580,7 +582,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             : t('autoMsIssueCreated', language);
         case 'branch_created': {
           const branchMatch = title.match(/Branch ['"]?(.+?)['"]? created/i);
-          const branchName = branchMatch?.[1] || workflow.branch_name || '';
+          const branchName = branchMatch?.[1] ?? workflow.branch_name ?? '';
           return branchName
             ? t('autoMsBranchCreated', language).replace('{branch}', branchName)
             : t('autoMsBranchCreatedGeneric', language);
@@ -669,7 +671,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   };
 
   const getMilestoneAnchorTime = (milestone: WorkflowMilestone) =>
-    milestone.completed_at || milestone.started_at || milestone.created_at;
+    milestone.completed_at ?? milestone.started_at ?? milestone.created_at;
 
   const workflowStartTime =
     milestones.length > 0 ? getMilestoneAnchorTime(milestones[0]) : workflow.created_at;
@@ -692,7 +694,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   }, [viewingDiff, parsedDiffFiles]);
 
   const selectedDiffFile = useMemo(
-    () => parsedDiffFiles.find((file) => file.id === selectedDiffFileId) ?? parsedDiffFiles[0] ?? null,
+    () =>
+      parsedDiffFiles.find((file) => file.id === selectedDiffFileId) ?? parsedDiffFiles[0] ?? null,
     [parsedDiffFiles, selectedDiffFileId]
   );
 
@@ -733,7 +736,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const counts = new Map<string, number>();
     for (const milestone of allKnownMilestones) {
       const sessionId =
-        milestone.llm_session_id || milestone.review_session_id || milestone.session_id || '';
+        milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id ?? '';
       if (!sessionId) continue;
       counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
     }
@@ -782,7 +785,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const diffStats = parseDiffStats(milestone.diff_stats);
     const milestoneTime = formatMilestoneTime(getMilestoneAnchorTime(milestone));
     const llmSessionId =
-      milestone.llm_session_id || milestone.review_session_id || milestone.session_id;
+      milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id;
     const llmTotalTokens = milestone.llm_total_tokens ?? 0;
     const llmRequestCount = milestone.llm_request_count ?? 0;
     const showUsageMetrics = !!llmSessionId || llmTotalTokens > 0 || llmRequestCount > 0;
@@ -805,16 +808,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       showForkCancel &&
       (milestone.status === 'completed' || milestone.status === 'in_progress');
     const canCancel =
-      !compact &&
-      allowMilestoneActions &&
-      showForkCancel &&
-      milestone.status !== 'cancelled';
+      !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
     const canInlineAction = !!llmSessionId || canViewChanges;
     const showActionRow =
-      !compact &&
-      (!!llmSessionId ||
-        canViewChanges ||
-        (canInlineAction && (canFork || canCancel)));
+      !compact && (!!llmSessionId || canViewChanges || (canInlineAction && (canFork || canCancel)));
     const showExpandedDetail = milestone.status === 'in_progress' && hasLiveActivity;
 
     return (
@@ -833,10 +830,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <div className="flex-grow-1 min-width-0">
             <div className="d-flex align-items-center gap-2 flex-wrap">
               <i className={`bi ${display.icon} text-${display.color}`}></i>
-              <span
-                className="fw-semibold"
-                style={{ fontSize: compact ? '0.8rem' : '0.925rem' }}
-              >
+              <span className="fw-semibold" style={{ fontSize: compact ? '0.8rem' : '0.925rem' }}>
                 {formatMilestoneTitle(milestone)}
               </span>
               {milestone.round_number > 0 && (
@@ -963,9 +957,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       key={`${milestone.milestone_id}-live-${index}`}
                       className="workflow-timeline-live-activity-line"
                     >
-                      <span className="workflow-timeline-live-activity-time">
-                        {line.timestamp}
-                      </span>
+                      <span className="workflow-timeline-live-activity-time">{line.timestamp}</span>
                       <i className={`bi ${line.icon}`}></i>
                       <span className="workflow-timeline-live-activity-text">{line.content}</span>
                     </div>
@@ -1178,8 +1170,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <span className="workflow-timeline-header-pill workflow-timeline-header-pill-status">
             {workflow.status}
           </span>
-          {workflow.github_issue_number && (
-            resolvedIssueUrl ? (
+          {workflow.github_issue_number &&
+            (resolvedIssueUrl ? (
               <a
                 href={resolvedIssueUrl}
                 target="_blank"
@@ -1194,10 +1186,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <i className="bi bi-card-text me-1"></i>
                 {t('autoIssueBadge', language)} #{workflow.github_issue_number}
               </span>
-            )
-          )}
-          {workflow.github_pr_number && (
-            workflow.github_pr_url ? (
+            ))}
+          {workflow.github_pr_number &&
+            (workflow.github_pr_url ? (
               <a
                 href={workflow.github_pr_url}
                 target="_blank"
@@ -1214,8 +1205,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 {t('autoPrBadge', language)}
                 {workflow.github_pr_number}
               </span>
-            )
-          )}
+            ))}
           {isForkChild && parentWorkflow && (
             <Badge variant="info">
               <i className="bi bi-diagram-3 me-1"></i>
@@ -1261,7 +1251,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <small className="text-muted">
             <i className="bi bi-hourglass-split me-1"></i>
             {t('autoDuration', language)}:{' '}
-            {formatDuration(workflowStartTime, workflow.completed_at || workflow.updated_at)}
+            {formatDuration(workflowStartTime, workflow.completed_at ?? workflow.updated_at)}
           </small>
           <small className="text-muted">
             <i className="bi bi-bar-chart-line me-1"></i>
@@ -1631,17 +1621,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           variant={getDiffStatusClass(file.status)}
                           className="workflow-timeline-diff-file-badge"
                         >
-                          {file.status === 'added'
-                            ? 'A'
-                            : file.status === 'deleted'
-                              ? 'D'
-                              : 'M'}
+                          {file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : 'M'}
                         </Badge>
                         <span className="workflow-timeline-diff-file-path">{file.path}</span>
                       </div>
                       <span className="workflow-timeline-diff-file-stats">
-                        {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
-                        {file.deletions > 0 && <span className="text-danger">-{file.deletions}</span>}
+                        {file.additions > 0 && (
+                          <span className="text-success">+{file.additions}</span>
+                        )}
+                        {file.deletions > 0 && (
+                          <span className="text-danger">-{file.deletions}</span>
+                        )}
                       </span>
                     </button>
                   ))}
@@ -1656,7 +1646,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <div className="workflow-timeline-diff-viewer">
                   <div className="workflow-timeline-diff-viewer-header">
                     <div className="min-width-0">
-                      <div className="workflow-timeline-diff-viewer-path">{selectedDiffFile.path}</div>
+                      <div className="workflow-timeline-diff-viewer-path">
+                        {selectedDiffFile.path}
+                      </div>
                       {selectedDiffFile.commitLabel && (
                         <div className="workflow-timeline-diff-viewer-commit">
                           {t('autoCommits', language)} {selectedDiffFile.commitLabel}
@@ -1681,27 +1673,30 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           diffFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'
                         } me-1`}
                       />
-                      {diffFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+                      {diffFullscreen
+                        ? t('exitFullscreen', language)
+                        : t('enterFullscreen', language)}
                     </button>
                   </div>
                   <div className="workflow-timeline-diff-code">
                     {selectedDiffFile.patch.split('\n').map((line, index) => {
-                      const lineClass = line.startsWith('+') && !line.startsWith('+++')
-                        ? 'workflow-timeline-diff-line-add'
-                        : line.startsWith('-') && !line.startsWith('---')
-                          ? 'workflow-timeline-diff-line-del'
-                          : line.startsWith('@@')
-                            ? 'workflow-timeline-diff-line-hunk'
-                            : line.startsWith('diff --git') ||
-                                line.startsWith('index ') ||
-                                line.startsWith('--- ') ||
-                                line.startsWith('+++ ') ||
-                                line.startsWith('new file mode ') ||
-                                line.startsWith('deleted file mode ') ||
-                                line.startsWith('rename from ') ||
-                                line.startsWith('rename to ')
-                              ? 'workflow-timeline-diff-line-meta'
-                              : '';
+                      const lineClass =
+                        line.startsWith('+') && !line.startsWith('+++')
+                          ? 'workflow-timeline-diff-line-add'
+                          : line.startsWith('-') && !line.startsWith('---')
+                            ? 'workflow-timeline-diff-line-del'
+                            : line.startsWith('@@')
+                              ? 'workflow-timeline-diff-line-hunk'
+                              : line.startsWith('diff --git') ||
+                                  line.startsWith('index ') ||
+                                  line.startsWith('--- ') ||
+                                  line.startsWith('+++ ') ||
+                                  line.startsWith('new file mode ') ||
+                                  line.startsWith('deleted file mode ') ||
+                                  line.startsWith('rename from ') ||
+                                  line.startsWith('rename to ')
+                                ? 'workflow-timeline-diff-line-meta'
+                                : '';
 
                       return (
                         <div

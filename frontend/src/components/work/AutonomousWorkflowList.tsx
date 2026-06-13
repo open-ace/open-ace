@@ -111,7 +111,9 @@ function getIssueLabel(workflow: AutonomousWorkflow): string {
 
   const title = workflow.title?.trim();
   if (!title) {
-    return workflow.batch_order ? `#${workflow.batch_order}` : `#${workflow.workflow_id.slice(0, 8)}`;
+    return workflow.batch_order
+      ? `#${workflow.batch_order}`
+      : `#${workflow.workflow_id.slice(0, 8)}`;
   }
 
   const issueMatch = title.match(/\(#?(\d+)\)\s*$/);
@@ -329,7 +331,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   };
 
   const buildBatchToolSummary = (batchWorkflows: AutonomousWorkflow[]): string => {
-    const tools = Array.from(new Set(batchWorkflows.map((workflow) => workflow.cli_tool).filter(Boolean)));
+    const tools = Array.from(
+      new Set(batchWorkflows.map((workflow) => workflow.cli_tool).filter(Boolean))
+    );
     if (tools.length <= 2) {
       return tools.join(', ');
     }
@@ -471,11 +475,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       .join(' ');
 
     return (
-      <div
-        key={workflow.workflow_id}
-        className={itemClasses}
-        onClick={() => onSelect(workflow)}
-      >
+      <div key={workflow.workflow_id} className={itemClasses} onClick={() => onSelect(workflow)}>
         <div className="flex-grow-1 min-width-0">
           {compact ? (
             <div className="d-flex align-items-start justify-content-between gap-2">
@@ -587,7 +587,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   const renderWorkflowBranch = (workflow: AutonomousWorkflow, compact = false) => (
     <React.Fragment key={workflow.workflow_id}>
       {renderWorkflowItem(workflow, false, compact)}
-      {(childrenMap[workflow.workflow_id] || []).map((child) => renderWorkflowItem(child, true, compact))}
+      {(childrenMap[workflow.workflow_id] || []).map((child) =>
+        renderWorkflowItem(child, true, compact)
+      )}
     </React.Fragment>
   );
 
@@ -604,7 +606,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
       if (workflow.workflow_id === selectedId) {
         return true;
       }
-      return (childrenMap[workflow.workflow_id] || []).some((child) => child.workflow_id === selectedId);
+      return (childrenMap[workflow.workflow_id] || []).some(
+        (child) => child.workflow_id === selectedId
+      );
     });
     const hasActiveWorkflow = entry.workflows.some((workflow) => {
       if (ACTIVE_WORKFLOW_STATUSES.includes(workflow.status)) {
@@ -763,7 +767,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
         <>
           <div className="list-group list-group-flush">
             {displayEntries.map((entry) =>
-              entry.type === 'batch' ? renderBatchGroup(entry) : renderWorkflowBranch(entry.workflow)
+              entry.type === 'batch'
+                ? renderBatchGroup(entry)
+                : renderWorkflowBranch(entry.workflow)
             )}
           </div>
           {totalPages > 1 && (
