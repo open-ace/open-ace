@@ -72,12 +72,14 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   plan_created: { icon: 'bi-lightbulb', color: 'warning' },
   plan_reviewed: { icon: 'bi-eye', color: 'info' },
   plan_refined: { icon: 'bi-pencil', color: 'warning' },
+  plan_finalized: { icon: 'bi-clipboard-check', color: 'success' },
   dev_started: { icon: 'bi-code-slash', color: 'primary' },
   dev_completed: { icon: 'bi-check2-square', color: 'success' },
   tests_run: { icon: 'bi-activity', color: 'info' },
   pr_created: { icon: 'bi-git-pull-request', color: 'success' },
   pr_reviewed: { icon: 'bi-chat-left-text', color: 'warning' },
   pr_updated: { icon: 'bi-pencil-square', color: 'primary' },
+  pr_review_summary: { icon: 'bi-check2-circle', color: 'success' },
   progress_reported: { icon: 'bi-file-earmark-text', color: 'info' },
   requirement_received: { icon: 'bi-inbox', color: 'secondary' },
   round_completed: { icon: 'bi-flag-fill', color: 'success' },
@@ -564,12 +566,44 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return trim;
   }, []);
 
+  // Round-bearing milestone types grouped by phase. When a phase only ran one
+  // round, its milestones show a numberless label (e.g. "方案评审"); when a
+  // phase ran multiple rounds, they show the round number (e.g. "方案评审 轮次 2").
+  // Singular milestones (plan_finalized / pr_review_summary) never carry a round.
+  const ROUND_PHASE: Record<string, string> = {
+    plan_created: 'planning',
+    plan_refined: 'planning',
+    plan_reviewed: 'planning',
+    pr_reviewed: 'pr_review',
+    pr_updated: 'pr_review',
+    dev_started: 'development',
+    tests_run: 'development',
+  };
+
+  const maxRoundByPhase = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const ms of milestones) {
+      const phase = ROUND_PHASE[ms.milestone_type];
+      if (!phase) continue;
+      const r = ms.round_number || ms.dev_round || 0;
+      if (r > (map[phase] || 0)) map[phase] = r;
+    }
+    return map;
+    // ROUND_PHASE is a stable constant; depend on milestones only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [milestones]);
+
   const formatMilestoneTitle = useCallback(
     (milestone: WorkflowMilestone) => {
       const title = milestone.title?.trim() || '';
       const round = milestone.round_number || milestone.dev_round || 0;
       const issueNumber = milestone.github_issue_number ?? workflow.github_issue_number ?? null;
       const prNumber = milestone.github_pr_number ?? workflow.github_pr_number ?? null;
+      // Multi-round phase → show round number; single-round phase → numberless label.
+      const multiRound = (phase: string) => (maxRoundByPhase[phase] ?? 0) > 1;
+      const planningMulti = multiRound('planning');
+      const prReviewMulti = multiRound('pr_review');
+      const devMulti = multiRound('development');
 
       switch (milestone.milestone_type) {
         case 'issue_linked':
@@ -588,15 +622,27 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             : t('autoMsBranchCreatedGeneric', language);
         }
         case 'plan_created':
-          return t('autoMsPlanCreated', language).replace('{round}', String(round || 1));
+          return planningMulti
+            ? t('autoMsPlanCreated', language).replace('{round}', String(round || 1))
+            : t('autoMsPlanCreatedSingle', language);
         case 'plan_refined':
-          return t('autoMsPlanRefined', language).replace('{round}', String(round || 1));
+          return planningMulti
+            ? t('autoMsPlanRefined', language).replace('{round}', String(round || 1))
+            : t('autoMsPlanRefinedSingle', language);
         case 'plan_reviewed':
-          return t('autoMsPlanReviewed', language).replace('{round}', String(round || 1));
+          return planningMulti
+            ? t('autoMsPlanReviewed', language).replace('{round}', String(round || 1))
+            : t('autoMsPlanReviewedSingle', language);
+        case 'plan_finalized':
+          return t('autoMsPlanFinalized', language);
         case 'dev_started':
-          return t('autoMsDevelopmentStarted', language).replace('{round}', String(round || 1));
+          return devMulti
+            ? t('autoMsDevelopmentStarted', language).replace('{round}', String(round || 1))
+            : t('autoMsDevelopmentStartedSingle', language);
         case 'tests_run':
-          return t('autoMsTestsRun', language).replace('{round}', String(round || 1));
+          return devMulti
+            ? t('autoMsTestsRun', language).replace('{round}', String(round || 1))
+            : t('autoMsTestsRunSingle', language);
         case 'dev_completed':
           return t('autoMsDevelopmentCompleted', language).replace('{round}', String(round || 1));
         case 'pr_created':
@@ -604,9 +650,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             ? t('autoMsPrCreated', language).replace('{pr}', String(prNumber))
             : t('autoMsPrCreatedGeneric', language);
         case 'pr_reviewed':
-          return t('autoMsPrReviewed', language).replace('{round}', String(round || 1));
+          return prReviewMulti
+            ? t('autoMsPrReviewed', language).replace('{round}', String(round || 1))
+            : t('autoMsPrReviewedSingle', language);
         case 'pr_updated':
-          return t('autoMsPrUpdated', language).replace('{round}', String(round || 1));
+          return prReviewMulti
+            ? t('autoMsPrUpdated', language).replace('{round}', String(round || 1))
+            : t('autoMsPrUpdatedSingle', language);
+        case 'pr_review_summary':
+          return t('autoMsPrReviewSummary', language);
         case 'progress_reported':
           return t('autoMsProgressReported', language).replace('{round}', String(round || 1));
         case 'round_completed':
@@ -631,7 +683,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           return title || milestone.milestone_type;
       }
     },
-    [language, workflow.branch_name, workflow.github_issue_number, workflow.github_pr_number]
+    [
+      language,
+      maxRoundByPhase,
+      workflow.branch_name,
+      workflow.github_issue_number,
+      workflow.github_pr_number,
+    ]
   );
 
   const formatWorkflowDateTime = (value: string | null) => {

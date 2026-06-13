@@ -1138,6 +1138,15 @@ def get_milestone_session(workflow_id, milestone_id):
     sm = SessionManager()
     session_data = sm.get_session(session_id, include_messages=True)
 
+    # Multiple milestones may share a session (main/review/test lines via
+    # --resume); surface only this milestone's own messages.
+    if session_data and getattr(session_data, "messages", None):
+        session_data.messages = [
+            m
+            for m in session_data.messages
+            if (getattr(m, "milestone_id", "") or "") == milestone_id
+        ]
+
     return jsonify({"success": True, "session": session_data})
 
 

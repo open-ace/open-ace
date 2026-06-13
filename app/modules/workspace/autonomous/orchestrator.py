@@ -142,6 +142,18 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 PREV_REVIEW_MAX_LENGTH = 3000
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
+# Session lines that span multiple milestones via --resume. Each maps to a
+# workflow column holding the real CLI session id once the line is established.
+#   main:   plan_created → plan_refined → plan_finalized → dev_started →
+#           pr_updated → pr_review_summary
+#   review: plan_reviewed → pr_reviewed
+#   test:   tests_run (reused across dev rounds)
+SESSION_LINE_FIELDS = {
+    "main": "main_session_id",
+    "review": "review_session_id",
+    "test": "test_session_id",
+}
+
 # Agent intro/closing text patterns for _clean_agent_text().
 # These match common Chinese agent narration phrases that should not
 # appear in GitHub comments.
@@ -555,6 +567,21 @@ class AutonomousOrchestrator:
             except Exception:
                 logger.warning("Failed to refresh workflow tokens in real-time", exc_info=True)
 
+    def _resolve_session_line(self, wf: dict, session_line: str):
+        """Resolve (tracking_session_id, resume_session_id, resume) for a line.
+
+        main/review/test: if the workflow already stores that line's real CLI
+        session id, resume it (--resume); otherwise mint a fresh tracking id
+        (first call on that line). fresh/unknown: brand-new session, no resume.
+        """
+        field = SESSION_LINE_FIELDS.get(session_line)
+        if not field:
+            return str(uuid.uuid4()), None, False
+        existing = ((wf or {}).get(field) or "").strip()
+        if existing:
+            return str(uuid.uuid4()), existing, True
+        return str(uuid.uuid4()), None, False
+
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
         try:
@@ -586,19 +613,30 @@ class AutonomousOrchestrator:
             for p in ["429", "quota exceeded", "rate limit", "too many requests"]
         )
 
-    def _run_agent(self, wf: dict = None, **kwargs) -> AgentTaskResult:
-        """Run an agent task with session tracking and 429 retry support.
+    def _run_agent(
+        self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
+    ) -> AgentTaskResult:
+        """Run an agent task with session-line tracking and 429 retry support.
 
         Args:
             wf: Optional pre-fetched workflow dict to avoid extra DB queries.
                 If not provided, falls back to self.workflow (DB query).
+            session_line: Which session line this call belongs to — "main",
+                "review", "test" (resumed across milestones via --resume), or
+                "fresh" (a brand-new one-off session).
+            milestone_id: Milestone to attribute this call's phase usage to.
         """
-        # Pre-generate session_id so cancel_current_task() can access it
-        # before run_agent_task() returns
-        if "session_id" not in kwargs:
-            kwargs["session_id"] = str(uuid.uuid4())
-        tracking_session_id = kwargs["session_id"]
         workflow_data = wf or self.workflow
+        # Resolve the session line: resume an established session or start new.
+        session_id, resume_session_id, resume = self._resolve_session_line(
+            workflow_data, session_line
+        )
+        kwargs["session_id"] = session_id
+        kwargs["resume"] = resume
+        kwargs["resume_session_id"] = resume_session_id
+        if milestone_id:
+            kwargs["milestone_id"] = milestone_id
+        tracking_session_id = session_id
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
 
@@ -621,6 +659,10 @@ class AutonomousOrchestrator:
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
             self._link_session_to_current_milestone(result.session_id)
+            # First successful call on a resume line establishes it for later milestones.
+            field = SESSION_LINE_FIELDS.get(session_line)
+            if field and not resume and not (workflow_data or {}).get(field):
+                self._update_workflow({field: result.session_id})
 
         # 429 rate limit retry — exponential backoff, max 30 minutes total.
         # Use interruptible sleep (check cancel signal every 5s) so the
@@ -659,22 +701,45 @@ class AutonomousOrchestrator:
                 slept += _CANCEL_POLL_INTERVAL
                 if self._cancel_requested.is_set():
                     logger.info("429 retry cancelled (cancel requested)")
+                    self._write_phase_usage(milestone_id, result)
                     with self._session_lock:
                         self._current_session_id = result.session_id
                     return result
 
             delay = min(delay * 2, API_RETRY_MAX_DELAY)
 
-            # Generate new session_id for retry
+            # Rotate tracking id only; resume_session_id stays so the line holds.
             kwargs["session_id"] = str(uuid.uuid4())
             with self._session_lock:
                 self._current_session_id = kwargs["session_id"]
             self._link_session_to_current_milestone(kwargs["session_id"])
             result = self._runner.run_agent_task(**kwargs)
+            if result.session_id:
+                self._link_session_to_current_milestone(result.session_id)
+
+        # Attribute this call's own usage to its milestone (increment, not cumulative).
+        self._write_phase_usage(milestone_id, result)
 
         with self._session_lock:
             self._current_session_id = result.tracking_session_id or result.session_id
         return result
+
+    def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
+        """Write this call's token/request increment to its milestone."""
+        if not milestone_id:
+            return
+        try:
+            self.repo.update_milestone(
+                milestone_id,
+                {
+                    "phase_total_tokens": result.total_tokens or 0,
+                    "phase_input_tokens": result.total_input_tokens or 0,
+                    "phase_output_tokens": result.total_output_tokens or 0,
+                    "phase_request_count": result.request_count or 0,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to write phase usage to milestone", exc_info=True)
 
     def pause_current_task(self):
         """Pause the currently running agent task using SIGSTOP.
@@ -1083,6 +1148,8 @@ class AutonomousOrchestrator:
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
+            session_line="main",
+            milestone_id=ms.get("milestone_id", ""),
         )
 
         # Clear user feedback after it has been injected into the prompt
@@ -1175,6 +1242,8 @@ class AutonomousOrchestrator:
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
+            session_line="review",
+            milestone_id=review_ms.get("milestone_id", ""),
         )
 
         self._accumulate_tokens(review_result)
@@ -1228,8 +1297,8 @@ class AutonomousOrchestrator:
         needs_refinement = review_has_feedback and round_num <= max_rounds
 
         if not needs_refinement:
-            # Planning complete — post final plan to issue.
-            # Use the latest refined plan if available, otherwise the original.
+            # Planning complete — finalize the plan via the main session.
+            # Gather the latest plan and the last review round's feedback.
             final_plan = ""
             last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
@@ -1245,13 +1314,23 @@ class AutonomousOrchestrator:
                 if final_plan and last_review:
                     break
 
-            # If the review approved the plan but contained improvement
-            # suggestions, run a one-time refinement step to incorporate
-            # them into the final plan.
+            # Always record a plan_finalized milestone before development so the
+            # timeline shows the authoritative final plan (regardless of how many
+            # review rounds were preset). The main session resumes to integrate
+            # the last review round's feedback when the review carried suggestions.
+            plan_final_ms = self._create_milestone(
+                phase="planning",
+                dev_round=dev_round,
+                round_number=round_num,
+                milestone_type="plan_finalized",
+                status="in_progress",
+                title="Plan Finalized",
+            )
+
             if self._should_refine_plan(last_review) and final_plan:
-                refine_prompt = (
+                finalize_prompt = (
                     PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
-                    "请根据建议优化方案。直接输出优化后的完整方案，"
+                    "请根据建议整合优化，输出最终方案。直接输出最终的完整方案，"
                     "不要输出思考过程或其他引导文字。\n\n"
                     f"## 已通过的方案\n{final_plan}\n\n"
                     f"## 审查建议\n{last_review}\n\n"
@@ -1259,33 +1338,39 @@ class AutonomousOrchestrator:
                     "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
                 )
                 planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
-                refine_result = self._run_agent(
+                finalize_result = self._run_agent(
                     wf=wf,
                     workflow_id=self._workflow_id,
                     cli_tool=wf.get("cli_tool", "claude-code"),
                     model=wf.get("model", ""),
                     project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                    prompt=refine_prompt,
+                    prompt=finalize_prompt,
                     workspace_type=wf.get("workspace_type", "local"),
                     remote_machine_id=wf.get("remote_machine_id"),
                     permission_mode=wf.get("permission_mode", "auto-edit"),
                     allowed_tools=planning_allowed,
                     timeout=PLANNING_TIMEOUT,
+                    session_line="main",
+                    milestone_id=plan_final_ms.get("milestone_id", ""),
                 )
-                self._accumulate_tokens(refine_result)
-                if refine_result.success and refine_result.response_text:
-                    final_plan = refine_result.response_text
-                    # Record refinement as a milestone for crash recovery.
-                    self._create_milestone(
-                        phase="planning",
-                        milestone_type="plan_refined",
-                        title="Plan Refined (Review Suggestions Incorporated)",
-                        plan_content=final_plan,
-                        round_number=round_num,
-                    )
+                self._accumulate_tokens(finalize_result)
+                if finalize_result.success and finalize_result.response_text:
+                    final_plan = finalize_result.response_text
 
             # Clean up agent intro text (e.g. "我来分析代码库...")
             final_plan = self._clean_agent_text(final_plan)
+
+            # Record the authoritative final plan on the milestone. When the
+            # review carried no suggestions, the existing plan is the final plan
+            # and no agent call was made (phase usage stays zero).
+            self.repo.update_milestone(
+                plan_final_ms.get("milestone_id", ""),
+                {
+                    "status": "completed",
+                    "plan_content": final_plan,
+                    "result_summary": final_plan[:200],
+                },
+            )
 
             issue_number = wf.get("github_issue_number")
             if issue_number and final_plan:
@@ -1354,13 +1439,19 @@ class AutonomousOrchestrator:
         On failure, updates workflow status to 'failed' and returns.
         Caller should check workflow status if needed.
         """
-        # Get the finalized plan
+        # Get the finalized plan — prefer the explicit plan_finalized milestone
+        # (authoritative final plan), then fall back to the latest plan_content.
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
         final_plan = ""
         for ms in reversed(milestones):
-            if ms.get("plan_content"):
+            if ms.get("milestone_type") == "plan_finalized" and ms.get("plan_content"):
                 final_plan = ms["plan_content"]
                 break
+        if not final_plan:
+            for ms in reversed(milestones):
+                if ms.get("plan_content"):
+                    final_plan = ms["plan_content"]
+                    break
 
         if not final_plan:
             final_plan = wf.get("requirements_text", "No plan available")
@@ -1404,6 +1495,8 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            session_line="main",
+            milestone_id=ms.get("milestone_id", ""),
         )
 
         # Clear user feedback after it has been injected into the prompt
@@ -1610,6 +1703,8 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            session_line="test",
+            milestone_id=test_ms.get("milestone_id", ""),
         )
 
         self._accumulate_tokens(test_result)
@@ -2025,6 +2120,8 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            session_line="review",
+            milestone_id=review_ms.get("milestone_id", ""),
         )
 
         self._accumulate_tokens(review_result)
@@ -2053,7 +2150,84 @@ class AutonomousOrchestrator:
         self._update_workflow({"current_round": round_num})
 
         if round_num >= max_rounds:
-            # All PR review rounds completed — move to report
+            # All PR review rounds completed — summarize via the main session,
+            # then move to report. The main session resumes and is given the
+            # last review round's feedback plus the last fix record, then asked
+            # whether all review points were addressed and the PR is ready.
+            last_pr_review = ""
+            last_fix_summary = ""
+            pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
+            for ms in reversed(pr_milestones):
+                if (
+                    ms.get("milestone_type") == "pr_reviewed"
+                    and ms.get("review_content")
+                    and not last_pr_review
+                ):
+                    last_pr_review = ms["review_content"]
+                if (
+                    ms.get("milestone_type") == "pr_updated"
+                    and ms.get("result_summary")
+                    and not last_fix_summary
+                ):
+                    last_fix_summary = ms["result_summary"]
+                if last_pr_review and last_fix_summary:
+                    break
+
+            summary_ms = self._create_milestone(
+                phase="pr_review",
+                dev_round=dev_round,
+                round_number=round_num,
+                milestone_type="pr_review_summary",
+                status="in_progress",
+                title="PR Review Summary",
+            )
+
+            summary_prompt = (
+                AUTONOMOUS_CONTEXT
+                + "代码审查已全部完成。请根据最后一轮审查意见和最后一次修复记录，"
+                "输出一份 PR 评审总结，明确：\n"
+                "1. 最后一轮审查意见是否已全部落实\n"
+                "2. 是否还有遗留问题需要处理\n"
+                "3. 当前 PR 是否可以合并\n\n"
+                f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
+                f"## 最后一次修复记录\n{self._clean_agent_text(last_fix_summary)}\n\n"
+                "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
+                "直接输出总结，不要添加引导文字。"
+            )
+            summary_result = self._run_agent(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=summary_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                session_line="main",
+                milestone_id=summary_ms.get("milestone_id", ""),
+            )
+            self._accumulate_tokens(summary_result)
+            summary_text = self._clean_agent_text(summary_result.response_text or "")
+            self.repo.update_milestone(
+                summary_ms.get("milestone_id", ""),
+                {
+                    "status": "completed" if summary_result.success else "failed",
+                    "review_content": summary_text,
+                    "result_summary": summary_text[:200],
+                },
+            )
+
+            if pr_number and summary_text:
+                try:
+                    gh.add_pr_comment(
+                        pr_number,
+                        f"## ✅ PR Review Summary\n\n{summary_text}",
+                    )
+                except GitHubOpsError:
+                    pass
+
+            # Move to report
             self._update_workflow(
                 {
                     "current_phase": "report",
@@ -2103,6 +2277,8 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
+                session_line="main",
+                milestone_id=fix_ms.get("milestone_id", ""),
             )
 
             self._accumulate_tokens(fix_result)
@@ -2169,12 +2345,21 @@ class AutonomousOrchestrator:
         pr_number = wf.get("github_pr_number")
         all_milestones = self.repo.list_milestones(self._workflow_id, dev_round=dev_round)
 
-        # 1. Plan summary (from finalized plan)
+        # 1. Plan summary (from finalized plan — prefer plan_finalized milestone)
         plan_summary = ""
         for ms in reversed(all_milestones):
-            if ms.get("plan_content") and ms.get("phase") == "planning":
+            if (
+                ms.get("plan_content")
+                and ms.get("phase") == "planning"
+                and ms.get("milestone_type") == "plan_finalized"
+            ):
                 plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
                 break
+        if not plan_summary:
+            for ms in reversed(all_milestones):
+                if ms.get("plan_content") and ms.get("phase") == "planning":
+                    plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
+                    break
 
         # 2. Diff stats
         diff_stats = {}
