@@ -136,6 +136,19 @@ class AutonomousScheduler:
         finally:
             with self._orchestrator_lock:
                 self._running_orchestrators.pop(workflow_id, None)
+            # Safety net: clear stale agent_pid if orchestrator failed to clean up
+            try:
+                wf_check = repo.get_workflow(workflow_id)
+                if wf_check and wf_check.get("agent_pid"):
+                    repo.update_workflow(
+                        workflow_id,
+                        {
+                            "agent_pid": None,
+                            "agent_session_id": "",
+                        },
+                    )
+            except Exception:
+                pass
             # Release DB lock
             try:
                 repo.release_lock(workflow_id, lock_owner)
@@ -287,7 +300,97 @@ class AutonomousScheduler:
                     )
 
 
+def _cleanup_orphan_processes():
+    """Kill orphaned agent processes from previous server runs.
+
+    Scans DB for workflows with a non-null agent_pid and active status,
+    kills those processes, and resets the workflow status to paused.
+    """
+    import os
+    import signal
+    import time
+    from datetime import datetime, timezone
+
+    logger.info("Checking for orphaned agent processes...")
+
+    try:
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.repositories.database import Database
+
+        repo = AutonomousWorkflowRepository(Database())
+        workflows = repo.get_workflows_with_active_pid()
+
+        if not workflows:
+            logger.info("No orphaned processes found")
+            return
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        cleaned = 0
+        for wf in workflows:
+            pid = wf.get("agent_pid")
+            if not pid or not isinstance(pid, int):
+                continue
+
+            # Check if process still exists
+            try:
+                os.kill(pid, 0)  # signal 0 = existence check
+            except (ProcessLookupError, OSError):
+                # Process already dead, just clean up DB
+                repo.update_workflow(
+                    wf["workflow_id"],
+                    {
+                        "agent_pid": None,
+                        "agent_session_id": "",
+                    },
+                )
+                logger.info(
+                    "Cleaned up stale PID %d for workflow %s (process already dead)",
+                    pid,
+                    wf["workflow_id"][:8],
+                )
+                continue
+
+            # Process is still alive — kill it
+            try:
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+                time.sleep(1)
+                try:
+                    os.killpg(pgid, 0)
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+                cleaned += 1
+                logger.warning(
+                    "Killed orphan process PID=%d for workflow %s (status=%s)",
+                    pid,
+                    wf["workflow_id"][:8],
+                    wf.get("status"),
+                )
+            except (ProcessLookupError, OSError) as e:
+                logger.info("Orphan PID %d already gone: %s", pid, e)
+
+            # Reset workflow to paused (safe default, user can resume)
+            repo.update_workflow(
+                wf["workflow_id"],
+                {
+                    "agent_pid": None,
+                    "agent_session_id": "",
+                    "status": "paused",
+                    "paused_at": now,
+                },
+            )
+
+        if cleaned:
+            logger.info("Cleaned up %d orphaned agent processes", cleaned)
+    except Exception as e:
+        logger.error("Orphan process cleanup failed: %s", e, exc_info=True)
+
+
 def init_autonomous_scheduler():
     """Initialize and start the autonomous scheduler."""
+    # Clean up orphaned processes from previous server run
+    _cleanup_orphan_processes()
+
     scheduler = AutonomousScheduler.instance()
     scheduler.start()

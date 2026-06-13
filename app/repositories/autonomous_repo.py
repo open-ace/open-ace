@@ -66,6 +66,8 @@ class AutonomousWorkflowRepository:
         "updated_at",
         "completed_at",
         "paused_at",
+        "agent_pid",
+        "agent_session_id",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -97,6 +99,44 @@ class AutonomousWorkflowRepository:
 
     def __init__(self, db: Optional[Database] = None):
         self.db = db or Database()
+
+    # ── Agent PID helpers ──────────────────────────────────────────
+
+    def get_workflows_with_active_pid(self) -> list[dict]:
+        """Find workflows that have an agent PID set and are in an active status.
+
+        Used by the orphan process cleanup at server startup.
+        """
+        active_statuses = (
+            "pending",
+            "preparing",
+            "planning",
+            "developing",
+            "pr_review",
+            "reporting",
+            "waiting",
+            "merging",
+        )
+        placeholders = ", ".join(["?"] * len(active_statuses))
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    f"""
+                    SELECT workflow_id, agent_pid, status
+                    FROM autonomous_workflows
+                    WHERE agent_pid IS NOT NULL
+                      AND agent_pid > 0
+                      AND status IN ({placeholders})
+                    """
+                ),
+                list(active_statuses),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
     # ── Workflow CRUD ──────────────────────────────────────────────
 

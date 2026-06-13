@@ -204,6 +204,8 @@ class AutonomousOrchestrator:
         self._runner = AutonomousAgentRunner(
             session_manager=session_manager,
             activity_callback=self._on_agent_activity,
+            on_pid_registered=self._on_pid_registered,
+            on_pid_cleared=self._on_pid_cleared,
         )
         self._gh: Optional[GitHubOps] = None
 
@@ -492,6 +494,44 @@ class AutonomousOrchestrator:
         """Refresh workflow totals from the sessions linked to milestones."""
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
+    def _on_pid_registered(self, session_id: str, pid: int):
+        """Persist agent subprocess PID to database for reliable cancel/pause."""
+        try:
+            self.repo.update_workflow(
+                self._workflow_id,
+                {
+                    "agent_pid": pid,
+                    "agent_session_id": session_id,
+                },
+            )
+            logger.info(
+                "Registered agent PID %d for workflow %s (session %s)",
+                pid,
+                self._workflow_id[:8],
+                session_id[:8],
+            )
+        except Exception as e:
+            logger.warning("Failed to persist agent PID: %s", e)
+
+    def _on_pid_cleared(self, session_id: str):
+        """Clear agent subprocess PID from database after process exits."""
+        try:
+            with self._session_lock:
+                if self._current_session_id == session_id:
+                    self.repo.update_workflow(
+                        self._workflow_id,
+                        {
+                            "agent_pid": None,
+                            "agent_session_id": "",
+                        },
+                    )
+                    logger.debug(
+                        "Cleared agent PID for workflow %s",
+                        self._workflow_id[:8],
+                    )
+        except Exception as e:
+            logger.warning("Failed to clear agent PID: %s", e)
+
     def _on_agent_activity(self, session_id: str, activity: dict):
         """Forward agent activity to the SSE event stream and refresh usage."""
         self.emitter.emit(
@@ -636,8 +676,51 @@ class AutonomousOrchestrator:
             self._current_session_id = result.tracking_session_id or result.session_id
         return result
 
+    def pause_current_task(self):
+        """Pause the currently running agent task using SIGSTOP.
+
+        The process is frozen in place and can be resumed later.
+        Unlike cancel, this does NOT clear _current_session_id so
+        resume can find the session again.
+
+        Note: we intentionally do NOT set _cancel_requested here.
+        Since SIGSTOP freezes the process, _run_local's
+        session.completed.wait() will block until SIGCONT resumes
+        the process and it finishes. The scheduler won't re-poll
+        this workflow because its status is set to "paused" in the
+        database, which advance() checks at entry.
+        """
+        with self._session_lock:
+            session_id = self._current_session_id
+        if session_id:
+            logger.info(
+                "Pausing current agent task session=%s",
+                session_id[:8],
+            )
+            try:
+                self._runner.pause_session(session_id)
+            except Exception as e:
+                logger.warning("Failed to pause session %s: %s", session_id[:8], e)
+
+    def resume_current_task(self):
+        """Resume a paused agent task using SIGCONT."""
+        with self._session_lock:
+            session_id = self._current_session_id
+        if session_id:
+            logger.info(
+                "Resuming paused agent task session=%s",
+                session_id[:8],
+            )
+            try:
+                self._runner.resume_session(session_id)
+            except Exception as e:
+                logger.warning("Failed to resume session %s: %s", session_id[:8], e)
+
     def cancel_current_task(self):
-        """Cancel the currently running agent task (e.g. on pause/stop)."""
+        """Cancel the currently running agent task (e.g. on stop).
+
+        Terminates the subprocess with SIGTERM/SIGKILL.
+        """
         self._cancel_requested.set()  # signal 429 retry loop to stop
         with self._session_lock:
             session_id = self._current_session_id
