@@ -125,7 +125,6 @@ def _enrich_milestones_with_usage(
     """Attach per-milestone LLM usage/session metadata for the timeline UI."""
     repo = _get_repo()
     usage_by_milestone = repo.get_milestone_usage_summary(workflow_id, milestones)
-    activity_preview_by_milestone = repo.get_milestone_activity_preview(workflow_id, milestones)
     enriched: list[dict[str, Any]] = []
     for milestone in milestones:
         milestone_id = milestone.get("milestone_id", "")
@@ -137,7 +136,6 @@ def _enrich_milestones_with_usage(
                 or _resolve_milestone_session_id(milestone),
                 "llm_total_tokens": usage.get("llm_total_tokens", 0),
                 "llm_request_count": usage.get("llm_request_count", 0),
-                "activity_preview": activity_preview_by_milestone.get(milestone_id, []),
             }
         )
     return enriched

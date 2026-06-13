@@ -598,9 +598,6 @@ class TestGetTimeline:
                 "llm_request_count": 7,
             }
         }
-        repo.get_milestone_activity_preview.return_value = {
-            "ms-1": ["20:15:43 Planning started", "20:15:44 Reviewing files"]
-        }
         with _mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.get("/api/autonomous/workflows/wf-1/timeline")
@@ -610,10 +607,6 @@ class TestGetTimeline:
         assert data["milestones"][0]["llm_session_id"] == "sess-plan"
         assert data["milestones"][0]["llm_total_tokens"] == 1234
         assert data["milestones"][0]["llm_request_count"] == 7
-        assert data["milestones"][0]["activity_preview"] == [
-            "20:15:43 Planning started",
-            "20:15:44 Reviewing files",
-        ]
         assert data["milestones"][1]["llm_total_tokens"] == 0
 
     def test_get_timeline_backfills_diff_stats_per_milestone(self, client):
@@ -641,7 +634,6 @@ class TestGetTimeline:
             },
         ]
         repo.get_milestone_usage_summary.return_value = {}
-        repo.get_milestone_activity_preview.return_value = {}
 
         gh = MagicMock()
         gh.get_commit_diff_stats.side_effect = [

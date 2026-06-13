@@ -114,7 +114,6 @@ export interface WorkflowMilestone {
   llm_session_id?: string;
   llm_total_tokens?: number;
   llm_request_count?: number;
-  activity_preview?: string[];
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;

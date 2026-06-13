@@ -306,4 +306,61 @@ describe('AutonomousWorkflowList', () => {
     expect(mockDeleteBatchMutate).toHaveBeenCalledWith('batch-33');
     expect(mockDeleteWorkflowMutate).not.toHaveBeenCalled();
   });
+
+  it('shows a partial count pill when a batch is split across pages', () => {
+    // Only one member of a 3-item batch lands on the current page (e.g. after a
+    // status filter or pagination). The pill must reflect the visible subset and
+    // flag it as partial, instead of showing the true total of 3.
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-split',
+        batch_order: 1,
+        batch_total: 3,
+        status: 'completed',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    const pill = container.querySelector('.auto-workflow-batch-count');
+    expect(pill?.textContent).toContain('1 / 3');
+    // status badge sums to the visible subset (1), matching the leading count
+    expect(screen.getByText(/Completed\s+1/i)).toBeInTheDocument();
+  });
+
+  it('shows the plain count pill when the whole batch fits on the page', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-1',
+        title: 'Task 1',
+        batch_id: 'batch-full',
+        batch_order: 1,
+        batch_total: 2,
+        status: 'completed',
+      }),
+      workflow({
+        workflow_id: 'wf-2',
+        title: 'Task 2',
+        batch_id: 'batch-full',
+        batch_order: 2,
+        batch_total: 2,
+        status: 'failed',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    const pill = container.querySelector('.auto-workflow-batch-count');
+    expect(pill?.textContent).toContain('2');
+    expect(pill?.textContent).not.toContain('/');
+    // badges (Completed 1 + Failed 1) sum to the visible count
+    expect(screen.getByText(/Completed\s+1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Failed\s+1/i)).toBeInTheDocument();
+  });
 });

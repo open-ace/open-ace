@@ -253,18 +253,6 @@ class TestWorkflowCRUD:
             """
         )
         auto_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS session_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT,
-                timestamp TEXT,
-                metadata TEXT
-            )
-            """
-        )
-        auto_db.execute(
             "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
             ("sess-plan", 1200, 4),
         )
@@ -272,47 +260,14 @@ class TestWorkflowCRUD:
             "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
             ("sess-review", 300, 2),
         )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
-            ("sess-plan", "Inspecting files", "2026-06-12T20:10:01", None),
-        )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'tool', ?, ?, ?)",
-            ("sess-plan", '{"path":"src"}', "2026-06-12T20:10:02", '{"tool_name":"rg"}'),
-        )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
-            ("sess-plan", "Writing implementation", "2026-06-12T20:10:03", None),
-        )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
-            ("sess-plan", "Running checks", "2026-06-12T20:10:04", None),
-        )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
-            ("sess-review", "Reviewing plan", "2026-06-12T20:00:01", None),
-        )
-        auto_db.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
-            ("sess-review", "Need more detail", "2026-06-12T20:00:02", None),
-        )
 
         summary = repo.get_milestone_usage_summary(workflow["workflow_id"])
-        preview = repo.get_milestone_activity_preview(workflow["workflow_id"])
 
         assert summary["ms-plan"]["llm_session_id"] == "sess-review"
         assert summary["ms-plan"]["llm_total_tokens"] == 300
         assert summary["ms-plan"]["llm_request_count"] == 2
         assert summary["ms-dev"]["llm_total_tokens"] == 1200
         assert summary["ms-dev"]["llm_request_count"] == 4
-        assert preview["ms-plan"] == [
-            "20:00:01 Reviewing plan",
-            "20:00:02 Need more detail",
-        ]
-        assert preview["ms-dev"][:2] == [
-            "20:10:01 Inspecting files",
-            '20:10:02 [rg] {"path":"src"}',
-        ]
 
     def test_list_workflows_search_and_pagination(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)

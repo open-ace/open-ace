@@ -53,16 +53,6 @@
   white-space: nowrap;
 }
 
-.workflow-timeline-activity-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.28rem;
-  font-size: 0.76rem;
-  line-height: 1.45;
-  color: #4b607c;
-  white-space: pre-wrap;
-}
-
 .workflow-timeline-session-pill {
   cursor: pointer;
   appearance: none;

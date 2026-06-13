@@ -597,6 +597,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     const batchTools = buildBatchToolSummary(entry.workflows);
     const batchDate = buildBatchDateSummary(entry.workflows);
     const batchStatuses = buildBatchStatusSummary(entry.workflows);
+    const visibleCount = entry.workflows.length;
+    const batchTotalCount = entry.representative.batch_total ?? visibleCount;
+    const batchCountSplit = visibleCount < batchTotalCount;
     const hasSelectedWorkflow = entry.workflows.some((workflow) => {
       if (workflow.workflow_id === selectedId) {
         return true;
@@ -648,7 +651,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   </span>
                 )}
                 <span className="auto-workflow-batch-meta-pill auto-workflow-batch-count auto-workflow-batch-meta-line">
-                  {entry.representative.batch_total ?? entry.workflows.length}{' '}
+                  {batchCountSplit ? `${visibleCount} / ${batchTotalCount}` : visibleCount}{' '}
                   {t('autoBatchWorkflowUnit', language)}
                 </span>
               </div>

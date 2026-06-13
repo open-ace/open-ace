@@ -5,10 +5,8 @@ Open ACE - Autonomous Workflow Repository
 Database operations for the AI autonomous development feature.
 """
 
-import json
 import logging
 import uuid
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -558,31 +556,6 @@ class AutonomousWorkflowRepository:
             ),
         )
 
-    @staticmethod
-    def _parse_timestamp(value: Any) -> Optional[datetime]:
-        """Parse DB/session timestamps into comparable datetimes."""
-        if not value:
-            return None
-        if isinstance(value, datetime):
-            return value
-        text = str(value).strip()
-        if not text:
-            return None
-        candidates = [text]
-        if text.endswith("Z"):
-            candidates.append(text[:-1] + "+00:00")
-        for candidate in candidates:
-            try:
-                return datetime.fromisoformat(candidate)
-            except ValueError:
-                pass
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-            try:
-                return datetime.strptime(text, fmt)
-            except ValueError:
-                continue
-        return None
-
     def get_milestone_usage_summary(
         self, workflow_id: str, milestones: Optional[list[dict]] = None
     ) -> dict[str, dict[str, Any]]:
@@ -633,102 +606,6 @@ class AutonomousWorkflowRepository:
                 "llm_request_count": usage.get("request_count", 0),
             }
         return result
-
-    def get_milestone_activity_preview(
-        self,
-        workflow_id: str,
-        milestones: Optional[list[dict]] = None,
-        max_lines: int = 10,
-    ) -> dict[str, list[str]]:
-        """Return timestamped activity preview lines for each milestone."""
-        milestones = milestones or self.list_milestones(workflow_id)
-        if not milestones:
-            return {}
-
-        milestone_entries: list[tuple[dict, datetime, Optional[datetime], str]] = []
-        linked_session_ids: set[str] = set()
-        for index, milestone in enumerate(milestones):
-            session_id = (
-                milestone.get("review_session_id") or milestone.get("session_id") or ""
-            ).strip()
-            if not session_id:
-                continue
-            start_at = self._parse_timestamp(
-                milestone.get("completed_at")
-                or milestone.get("started_at")
-                or milestone.get("created_at")
-            )
-            if not start_at:
-                continue
-            next_at: Optional[datetime] = None
-            for next_milestone in milestones[index + 1 :]:
-                next_anchor = self._parse_timestamp(
-                    next_milestone.get("completed_at")
-                    or next_milestone.get("started_at")
-                    or next_milestone.get("created_at")
-                )
-                if next_anchor:
-                    next_at = next_anchor
-                    break
-            milestone_entries.append((milestone, start_at, next_at, session_id))
-            linked_session_ids.add(session_id)
-
-        if not linked_session_ids:
-            return {}
-
-        placeholders = ",".join(["?"] * len(linked_session_ids))
-        message_rows = self.db.fetch_all(
-            f"""
-            SELECT session_id, role, content, timestamp, metadata
-            FROM session_messages
-            WHERE session_id IN ({placeholders})
-            ORDER BY timestamp ASC
-            """,
-            tuple(sorted(linked_session_ids)),
-        )
-
-        by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in message_rows:
-            by_session[row.get("session_id", "")].append(row)
-
-        previews: dict[str, list[str]] = {}
-        for milestone, start_at, end_at, session_id in milestone_entries:
-            lines: list[str] = []
-            for row in by_session.get(session_id, []):
-                row_time = self._parse_timestamp(row.get("timestamp"))
-                if not row_time or row_time < start_at or (end_at and row_time >= end_at):
-                    continue
-
-                role = row.get("role", "")
-                content = str(row.get("content", "") or "").strip()
-                if not content:
-                    continue
-
-                timestamp = row_time.strftime("%H:%M:%S")
-                if role == "assistant":
-                    snippet = content.replace("\r", " ").replace("\n", " ").strip()
-                    if snippet:
-                        lines.append(f"{timestamp} {snippet[:180]}")
-                elif role == "tool":
-                    tool_name = ""
-                    metadata = row.get("metadata")
-                    if metadata:
-                        try:
-                            meta = json.loads(metadata) if isinstance(metadata, str) else metadata
-                            tool_name = str(meta.get("tool_name", "") or "").strip()
-                        except Exception:
-                            tool_name = ""
-                    snippet = content.replace("\r", " ").replace("\n", " ").strip()
-                    prefix = f"[{tool_name}] " if tool_name else ""
-                    lines.append(f"{timestamp} {prefix}{snippet[:180]}")
-
-                if len(lines) >= max_lines:
-                    break
-
-            if lines:
-                previews[milestone.get("milestone_id", "")] = lines
-
-        return previews
 
     def list_forks(self, workflow_id: str) -> list:
         """List all child workflows forked from the given parent."""
