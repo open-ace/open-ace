@@ -200,6 +200,120 @@ class TestWorkflowCRUD:
         result = repo.list_workflows(status="planning,developing")
         assert len(result) == 2
 
+    def test_get_milestone_usage_summary(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        workflow = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Usage Summary",
+                "requirements_text": "Collect milestone usage",
+                "cli_tool": "claude-code",
+                "project_path": "/tmp",
+            }
+        )
+
+        repo.create_milestone(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "milestone_id": "ms-plan",
+                "phase": "planning",
+                "milestone_type": "plan_created",
+                "status": "completed",
+                "session_id": "sess-plan",
+                "review_session_id": "sess-review",
+            }
+        )
+        repo.create_milestone(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "milestone_id": "ms-dev",
+                "phase": "development",
+                "milestone_type": "dev_completed",
+                "status": "completed",
+                "session_id": "sess-plan",
+            }
+        )
+        repo.update_milestone(
+            "ms-plan",
+            {"completed_at": "2026-06-12 20:00:00", "started_at": "2026-06-12 20:00:00"},
+        )
+        repo.update_milestone(
+            "ms-dev",
+            {"completed_at": "2026-06-12 20:10:00", "started_at": "2026-06-12 20:10:00"},
+        )
+
+        auto_db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL UNIQUE,
+                total_tokens INTEGER DEFAULT 0,
+                request_count INTEGER DEFAULT 0
+            )
+            """
+        )
+        auto_db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                timestamp TEXT,
+                metadata TEXT
+            )
+            """
+        )
+        auto_db.execute(
+            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
+            ("sess-plan", 1200, 4),
+        )
+        auto_db.execute(
+            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
+            ("sess-review", 300, 2),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
+            ("sess-plan", "Inspecting files", "2026-06-12T20:10:01", None),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'tool', ?, ?, ?)",
+            ("sess-plan", '{"path":"src"}', "2026-06-12T20:10:02", '{"tool_name":"rg"}'),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
+            ("sess-plan", "Writing implementation", "2026-06-12T20:10:03", None),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
+            ("sess-plan", "Running checks", "2026-06-12T20:10:04", None),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
+            ("sess-review", "Reviewing plan", "2026-06-12T20:00:01", None),
+        )
+        auto_db.execute(
+            "INSERT INTO session_messages (session_id, role, content, timestamp, metadata) VALUES (?, 'assistant', ?, ?, ?)",
+            ("sess-review", "Need more detail", "2026-06-12T20:00:02", None),
+        )
+
+        summary = repo.get_milestone_usage_summary(workflow["workflow_id"])
+        preview = repo.get_milestone_activity_preview(workflow["workflow_id"])
+
+        assert summary["ms-plan"]["llm_session_id"] == "sess-review"
+        assert summary["ms-plan"]["llm_total_tokens"] == 300
+        assert summary["ms-plan"]["llm_request_count"] == 2
+        assert summary["ms-dev"]["llm_total_tokens"] == 1200
+        assert summary["ms-dev"]["llm_request_count"] == 4
+        assert preview["ms-plan"] == [
+            "20:00:01 Reviewing plan",
+            "20:00:02 Need more detail",
+        ]
+        assert preview["ms-dev"][:2] == [
+            "20:10:01 Inspecting files",
+            '20:10:02 [rg] {"path":"src"}',
+        ]
+
     def test_list_workflows_search_and_pagination(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
         first = repo.create_workflow(
@@ -373,6 +487,40 @@ class TestWorkflowCRUD:
         assert repo.get_workflow(wf_id) is None
         assert repo.list_milestones(wf_id) == []
         assert repo.list_events(wf_id) == []
+
+    def test_delete_batch_cascades(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        batch_workflows = []
+        for index in range(2):
+            workflow = repo.create_workflow(
+                {
+                    "user_id": 1,
+                    "title": f"Batch {index + 1}",
+                    "requirements_text": "t",
+                    "cli_tool": "cc",
+                    "project_path": "/tmp",
+                    "batch_id": "batch-1",
+                    "batch_order": index + 1,
+                    "batch_total": 2,
+                }
+            )
+            batch_workflows.append(workflow)
+            repo.create_milestone(
+                {
+                    "workflow_id": workflow["workflow_id"],
+                    "phase": "planning",
+                    "milestone_type": "plan_created",
+                }
+            )
+            repo.create_event({"workflow_id": workflow["workflow_id"], "event_type": "test"})
+
+        deleted_count = repo.delete_batch("batch-1")
+
+        assert deleted_count == 2
+        for workflow in batch_workflows:
+            assert repo.get_workflow(workflow["workflow_id"]) is None
+            assert repo.list_milestones(workflow["workflow_id"]) == []
+            assert repo.list_events(workflow["workflow_id"]) == []
 
 
 class TestMilestoneCRUD:

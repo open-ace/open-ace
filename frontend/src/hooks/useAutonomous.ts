@@ -57,6 +57,7 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 export interface AgentActivity {
   session_id: string;
   type: 'assistant' | 'tool_use' | 'usage';
+  timestamp?: string;
   text?: string;
   tool_name?: string;
   tool_input?: string;
@@ -85,7 +86,16 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
       try {
         const data = JSON.parse(event.data);
         if (data.event_type === 'agent_activity') {
-          setActivities((prev) => [...prev.slice(-49), data.data]);
+          setActivities((prev) => [
+            ...prev.slice(-49),
+            {
+              ...data.data,
+              timestamp:
+                typeof data.data?.timestamp === 'string' && data.data.timestamp
+                  ? data.data.timestamp
+                  : new Date().toISOString(),
+            },
+          ]);
         }
       } catch {
         // Ignore parse errors
@@ -322,6 +332,16 @@ export function useDeleteWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (workflowId: string) => autonomousApi.deleteWorkflow(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
+export function useDeleteBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: string) => autonomousApi.deleteBatch(batchId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
     },

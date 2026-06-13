@@ -111,6 +111,10 @@ export interface WorkflowMilestone {
   fork_branch: string;
   fork_workflow_id: string;
   metadata: string;
+  llm_session_id?: string;
+  llm_total_tokens?: number;
+  llm_request_count?: number;
+  activity_preview?: string[];
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;
@@ -196,6 +200,10 @@ export const autonomousApi = {
 
   async deleteWorkflow(workflowId: string): Promise<{ success: boolean }> {
     return apiClient.delete(`/api/autonomous/workflows/${workflowId}`);
+  },
+
+  async deleteBatch(batchId: string): Promise<{ success: boolean; deleted_count: number }> {
+    return apiClient.delete(`/api/autonomous/batches/${batchId}`);
   },
 
   // Workflow Control

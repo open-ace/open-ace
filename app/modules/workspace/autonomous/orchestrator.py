@@ -1421,7 +1421,11 @@ class AutonomousOrchestrator:
         except Exception:
             pass
         try:
-            diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
+            diff_stats = (
+                gh.get_commit_diff_stats(commit_sha)
+                if commit_sha
+                else gh.get_diff_stats("HEAD~1", "HEAD")
+            )
         except Exception:
             pass
 
@@ -1451,7 +1455,11 @@ class AutonomousOrchestrator:
                     commit_sha = gh.get_current_commit()
                     sha_changed = True
                     try:
-                        diff_stats = gh.get_diff_stats("HEAD~1", "HEAD")
+                        diff_stats = (
+                            gh.get_commit_diff_stats(commit_sha)
+                            if commit_sha
+                            else gh.get_diff_stats("HEAD~1", "HEAD")
+                        )
                     except Exception:
                         pass
                 except Exception as e:
@@ -2104,9 +2112,11 @@ class AutonomousOrchestrator:
                 self._update_workflow({"user_feedback": ""})
 
             commit_sha = ""
+            diff_stats = {}
             try:
                 gh.git_push()
                 commit_sha = gh.get_current_commit()
+                diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
             except Exception:
                 pass
 
@@ -2116,6 +2126,7 @@ class AutonomousOrchestrator:
                     "status": "completed" if fix_result.success else "failed",
                     "session_id": fix_result.session_id,
                     "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+                    "diff_stats": json.dumps(diff_stats),
                 },
             )
 

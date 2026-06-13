@@ -1,0 +1,212 @@
+.auto-workflow-item,
+.auto-workflow-batch {
+  position: relative;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.auto-workflow-item {
+  cursor: pointer;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
+  background: #ffffff;
+}
+
+.auto-workflow-item:hover {
+  z-index: 1;
+  transform: translateY(-1px);
+  background: #f3f7fd;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.auto-workflow-item-selected {
+  background: #d2e6ff;
+  box-shadow:
+    inset 3px 0 0 rgba(37, 99, 235, 0.95),
+    0 10px 20px rgba(37, 99, 235, 0.1);
+}
+
+.auto-workflow-item-selected:hover {
+  background: #c6ddff;
+  box-shadow:
+    inset 3px 0 0 rgba(37, 99, 235, 0.95),
+    0 10px 20px rgba(37, 99, 235, 0.1);
+}
+
+.auto-workflow-item-standard .auto-workflow-title {
+  font-size: 0.875rem;
+}
+
+.auto-workflow-item-standard .auto-workflow-meta {
+  font-size: 0.75rem;
+}
+
+.auto-workflow-item-compact {
+  background: #ffffff;
+}
+
+.auto-workflow-item-compact.auto-workflow-item-selected {
+  background: #d2e6ff;
+}
+
+.auto-workflow-item-compact:hover {
+  background: #f3f7fd;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+}
+
+.auto-workflow-item-compact.auto-workflow-item-selected:hover {
+  background: #c6ddff;
+  box-shadow:
+    inset 3px 0 0 rgba(37, 99, 235, 0.95),
+    0 10px 20px rgba(37, 99, 235, 0.1);
+}
+
+.auto-workflow-item-indented {
+  margin-left: 1.1rem;
+  border-left: 1px dashed rgba(148, 163, 184, 0.55);
+}
+
+.auto-workflow-item-compact.auto-workflow-item-indented {
+  margin-left: 1.75rem;
+}
+
+.auto-workflow-issue-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.auto-workflow-delete-btn {
+  min-width: 1.5rem;
+  color: var(--text-tertiary);
+  transition:
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.auto-workflow-delete-btn:hover:not(:disabled) {
+  color: var(--color-danger);
+  transform: scale(1.08);
+}
+
+.auto-workflow-batch {
+  border-bottom: 1px solid rgba(96, 165, 250, 0.22) !important;
+  background: #eef5ff;
+}
+
+.auto-workflow-batch:hover {
+  z-index: 2;
+  transform: translateY(-1px);
+  background: #e8f1ff;
+  box-shadow: 0 12px 26px rgba(59, 130, 246, 0.12);
+}
+
+.auto-workflow-batch-selected {
+  box-shadow:
+    inset 3px 0 0 rgba(37, 99, 235, 0.95),
+    0 14px 30px rgba(59, 130, 246, 0.14);
+}
+
+.auto-workflow-batch-selected:hover {
+  box-shadow:
+    inset 3px 0 0 rgba(37, 99, 235, 0.95),
+    0 14px 30px rgba(59, 130, 246, 0.14);
+}
+
+.auto-workflow-batch-kicker {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.auto-workflow-batch-title {
+  margin-top: 0.35rem;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.auto-workflow-batch-meta-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.auto-workflow-batch-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.24rem 0.62rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
+}
+
+.auto-workflow-batch-meta-line {
+  max-width: 100%;
+}
+
+.auto-workflow-batch-count {
+  color: var(--color-primary);
+  border-color: rgba(59, 130, 246, 0.18);
+  background: rgba(239, 246, 255, 0.96);
+}
+
+.auto-workflow-batch-status-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.auto-workflow-batch-status-row::-webkit-scrollbar {
+  display: none;
+}
+
+.auto-workflow-batch-side {
+  padding-top: 0.15rem;
+  flex-shrink: 0;
+}
+
+.auto-workflow-batch-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1);
+}
+
+.auto-workflow-batch-children {
+  padding: 0.35rem 0;
+  background: #f8fbff;
+}
+
+@media (max-width: 576px) {
+  .auto-workflow-batch-title {
+    font-size: 0.95rem;
+  }
+
+  .auto-workflow-issue-label {
+    font-size: 0.9rem;
+  }
+}

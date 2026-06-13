@@ -114,6 +114,108 @@ def _get_event_emitter():
     return AutonomousEventEmitter.instance()
 
 
+def _resolve_milestone_session_id(milestone: dict[str, Any]) -> str:
+    """Prefer review session when present because it is the latest LLM round."""
+    return milestone.get("review_session_id") or milestone.get("session_id") or ""
+
+
+def _enrich_milestones_with_usage(
+    workflow_id: str, milestones: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach per-milestone LLM usage/session metadata for the timeline UI."""
+    repo = _get_repo()
+    usage_by_milestone = repo.get_milestone_usage_summary(workflow_id, milestones)
+    activity_preview_by_milestone = repo.get_milestone_activity_preview(workflow_id, milestones)
+    enriched: list[dict[str, Any]] = []
+    for milestone in milestones:
+        milestone_id = milestone.get("milestone_id", "")
+        usage = usage_by_milestone.get(milestone_id, {})
+        enriched.append(
+            {
+                **milestone,
+                "llm_session_id": usage.get("llm_session_id")
+                or _resolve_milestone_session_id(milestone),
+                "llm_total_tokens": usage.get("llm_total_tokens", 0),
+                "llm_request_count": usage.get("llm_request_count", 0),
+                "activity_preview": activity_preview_by_milestone.get(milestone_id, []),
+            }
+        )
+    return enriched
+
+
+def _parse_commit_shas(commit_shas_raw: str) -> list[str]:
+    """Parse milestone commit_shas field into a normalized SHA list."""
+    if not commit_shas_raw:
+        return []
+    try:
+        shas = (
+            json.loads(commit_shas_raw)
+            if commit_shas_raw.startswith("[")
+            else commit_shas_raw.split(",")
+        )
+    except (ValueError, TypeError):
+        shas = [commit_shas_raw]
+    return [str(sha).strip().strip('"').strip("'") for sha in shas if str(sha).strip()]
+
+
+def _enrich_milestones_with_diff_stats(
+    workflow: dict[str, Any], milestones: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Backfill missing diff_stats for milestones that have commits."""
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    if not project_path:
+        return milestones
+
+    targets = [
+        milestone
+        for milestone in milestones
+        if milestone.get("commit_shas") and not milestone.get("diff_stats")
+    ]
+    if not targets:
+        return milestones
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    gh = GitHubOps(project_path)
+    by_id: dict[str, dict[str, Any]] = {}
+    for milestone in targets:
+        additions = 0
+        deletions = 0
+        files = 0
+        commits = 0
+        for sha in _parse_commit_shas(milestone.get("commit_shas", "")):
+            try:
+                stats = gh.get_commit_diff_stats(sha)
+                additions += int(stats.get("additions", 0) or 0)
+                deletions += int(stats.get("deletions", 0) or 0)
+                files += int(stats.get("files", 0) or 0)
+                commits += int(stats.get("commits", 0) or 0)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to backfill diff stats for %s (%s): %s",
+                    milestone.get("milestone_id", "")[:8],
+                    sha[:8],
+                    exc,
+                )
+
+        if additions or deletions or files or commits:
+            by_id[milestone.get("milestone_id", "")] = {
+                **milestone,
+                "diff_stats": json.dumps(
+                    {
+                        "additions": additions,
+                        "deletions": deletions,
+                        "files": files,
+                        "commits": commits,
+                    }
+                ),
+            }
+
+    if not by_id:
+        return milestones
+    return [by_id.get(milestone.get("milestone_id", ""), milestone) for milestone in milestones]
+
+
 def _normalize_issue_url(value: str) -> str:
     """Trim whitespace and trailing slash from an issue URL."""
     return value.strip().rstrip("/")
@@ -514,6 +616,27 @@ def delete_workflow(workflow_id):
         return jsonify({"error": str(e)}), 500
 
 
+@autonomous_bp.route("/batches/<batch_id>", methods=["DELETE"])
+@auth_required
+def delete_batch(batch_id):
+    """Delete an entire batch of workflows."""
+    workflows = _get_repo().list_batch_workflows(batch_id)
+    if not workflows:
+        return jsonify({"error": "Batch not found"}), 404
+
+    if g.user_role != "admin":
+        for workflow in workflows:
+            if workflow.get("user_id") != g.user_id:
+                return jsonify({"error": "Access denied"}), 403
+
+    try:
+        deleted_count = _get_repo().delete_batch(batch_id)
+        return jsonify({"success": True, "deleted_count": deleted_count})
+    except Exception as e:
+        logger.error("Failed to delete batch %s: %s", batch_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Workflow Control ────────────────────────────────────────────────
 
 
@@ -731,7 +854,10 @@ def get_timeline(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestones = _get_repo().list_milestones(workflow_id)
+    milestones = _enrich_milestones_with_usage(
+        workflow_id, _get_repo().list_milestones(workflow_id)
+    )
+    milestones = _enrich_milestones_with_diff_stats(workflow, milestones)
     return jsonify({"success": True, "milestones": milestones})
 
 
@@ -987,7 +1113,7 @@ def get_milestone_session(workflow_id, milestone_id):
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
-    session_id = milestone.get("session_id", "")
+    session_id = _resolve_milestone_session_id(milestone)
     if not session_id:
         return jsonify({"success": True, "session": None})
 

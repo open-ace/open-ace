@@ -1,0 +1,80 @@
+.autonomous-dev-layout {
+  min-width: 0;
+  position: relative;
+}
+
+.autonomous-dev-layout .btn,
+.autonomous-dev-layout .workflow-timeline-session-pill,
+.autonomous-dev-layout .workflow-timeline-header-link {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.autonomous-dev-layout .btn:hover,
+.autonomous-dev-layout .workflow-timeline-header-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.autonomous-dev-left-panel {
+  flex-shrink: 0;
+  background: var(--bg-primary);
+}
+
+.autonomous-dev-list-scroll {
+  scrollbar-gutter: stable;
+}
+
+.autonomous-dev-resizer {
+  position: relative;
+  width: 8px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.autonomous-dev-resizer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.autonomous-dev-resizer:hover::before,
+.autonomous-dev-resizer:active::before {
+  background: rgba(59, 130, 246, 0.75);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.autonomous-dev-right-panel {
+  min-width: 0;
+  position: relative;
+}
+
+.autonomous-dev-fullscreen-btn {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.autonomous-dev-layout-fullscreen {
+  background: var(--bg-primary);
+}
+
+@media (max-width: 768px) {
+  .autonomous-dev-resizer {
+    display: none;
+  }
+}
