@@ -1202,6 +1202,38 @@ def get_milestone_diff(workflow_id, milestone_id):
     return jsonify({"success": True, "diff": "\n\n".join(diff_parts)})
 
 
+@autonomous_bp.route("/workflows/<workflow_id>/pr-diff", methods=["GET"])
+@auth_required
+def get_workflow_pr_diff(workflow_id):
+    """Get the cumulative PR diff (head vs base) for a workflow.
+
+    Returns ``{success, diff, pr_number}``. When the workflow has no PR yet,
+    returns ``pr_number=null, diff=""`` (200) so the caller can render an empty
+    state instead of erroring. gh failures degrade to an empty diff + warning.
+    """
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    pr_number = workflow.get("github_pr_number")
+    if not pr_number:
+        return jsonify({"success": True, "diff": "", "pr_number": None})
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    gh = GitHubOps(project_path)
+    try:
+        diff = gh.get_pr_diff(int(pr_number))
+    except Exception as e:
+        logger.warning("Failed to get PR diff for #%s: %s", pr_number, e)
+        diff = ""
+
+    return jsonify({"success": True, "diff": diff, "pr_number": int(pr_number)})
+
+
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
 
 

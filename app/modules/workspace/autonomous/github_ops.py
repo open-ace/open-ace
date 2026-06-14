@@ -384,6 +384,23 @@ class GitHubOps:
             logger.warning("Failed to parse CI checks for PR #%s: %s", pr_number, raw[:200])
             return []
 
+    def get_pr_diff(self, number: int) -> str:
+        """Get the full diff of a PR (head vs base) via `gh pr diff`.
+
+        Returns the diff as a string. Returns "" when the PR is missing or
+        the command fails, so callers can render an empty state instead of 500.
+        """
+        result = self._run_gh(["pr", "diff", str(number)], check=False)
+        if result.returncode != 0:
+            logger.warning(
+                "gh pr diff #%s failed (exit %s): %s",
+                number,
+                result.returncode,
+                (result.stderr or "").strip()[:200],
+            )
+            return ""
+        return result.stdout or ""
+
     # ── Diff Operations ─────────────────────────────────────────────
 
     def get_diff(self, base: str = "HEAD~1", head: str = "HEAD") -> str:

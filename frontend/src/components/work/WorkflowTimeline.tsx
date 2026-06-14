@@ -27,6 +27,7 @@ import {
   useExtendPlanningTimeout,
   useMilestoneSession,
   useMilestoneDiff,
+  useWorkflowPrDiff,
   useWorkflowForks,
   useWorkflow,
 } from '@/hooks/useAutonomous';
@@ -34,6 +35,7 @@ import type { MilestoneSession } from '@/hooks/useAutonomous';
 import { autonomousApi } from '@/api/autonomous';
 import CancelRoundModal from './CancelRoundModal';
 import ForkFromHereModal from './ForkFromHereModal';
+import { MarkdownContent } from './MarkdownContent';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import type {
@@ -88,6 +90,11 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   cleaned_up: { icon: 'bi-trash', color: 'secondary' },
 };
 
+// Milestone types whose `plan_content` / `review_content` holds full-text output
+// worth viewing after the run finishes (the live activity stream is run-time only).
+const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
+const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
+
 // ── Branch data type for parallel view ──────────────────────────────
 
 interface BranchData {
@@ -118,6 +125,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const [diffSidebarWidth, setDiffSidebarWidth] = useState(320);
   const [diffFullscreen, setDiffFullscreen] = useState(false);
   const [showDefinitionSnapshot, setShowDefinitionSnapshot] = useState(false);
+  const [viewingContent, setViewingContent] = useState<{
+    title: string;
+    content: string;
+  } | null>(null);
+  const [viewingPrDiff, setViewingPrDiff] = useState(false);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
   const pauseMutation = usePauseWorkflow();
@@ -141,11 +153,40 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     !!viewingDiff
   );
 
+  // Cumulative PR diff (head vs base) for the header "Final Code Changes" button
+  const { data: prDiffData, isLoading: prDiffLoading } = useWorkflowPrDiff(
+    workflow.workflow_id,
+    viewingPrDiff
+  );
+
   // Real-time agent activity (only when workflow is active)
   const isWorkflowActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const activities = useWorkflowActivity(workflow.workflow_id, isWorkflowActive);
 
-  const milestones = timelineData?.milestones ?? [];
+  const milestones = useMemo(() => timelineData?.milestones ?? [], [timelineData?.milestones]);
+
+  // Latest (highest dev_round, non-empty content) finalized plan / PR review summary.
+  // Each dev_round produces its own; the header "final" buttons surface the newest,
+  // and a round badge shows which round it came from (fallback to an earlier round
+  // if the newest round hasn't produced one yet).
+  const latestPlanFinalized = useMemo(() => {
+    const candidates = milestones.filter(
+      (m) => m.milestone_type === 'plan_finalized' && m.plan_content?.trim()
+    );
+    if (!candidates.length) return undefined;
+    return candidates.reduce((best, m) => ((m.dev_round || 0) > (best.dev_round || 0) ? m : best));
+  }, [milestones]);
+
+  const latestPrReviewSummary = useMemo(() => {
+    const candidates = milestones.filter(
+      (m) => m.milestone_type === 'pr_review_summary' && m.review_content?.trim()
+    );
+    if (!candidates.length) return undefined;
+    return candidates.reduce((best, m) => ((m.dev_round || 0) > (best.dev_round || 0) ? m : best));
+  }, [milestones]);
+
+  const hasPr = !!workflow.github_pr_number;
+
   const definitionSnapshot = workflow.definition_snapshot;
   const normalizeGithubRepoUrl = useCallback((value: string) => {
     const text = value.trim();
@@ -863,6 +904,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         : [];
     const hasLiveActivity = milestoneActivities.length > 0;
     const canViewChanges = !compact && !!milestone.commit_shas;
+    const canViewPlanContent =
+      !compact &&
+      PLAN_CONTENT_TYPES.includes(milestone.milestone_type) &&
+      !!milestone.plan_content?.trim();
+    const canViewReviewContent =
+      !compact &&
+      REVIEW_CONTENT_TYPES.includes(milestone.milestone_type) &&
+      !!milestone.review_content?.trim();
     const canFork =
       !compact &&
       allowMilestoneActions &&
@@ -872,7 +921,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
     const canInlineAction = !!llmSessionId || canViewChanges;
     const showActionRow =
-      !compact && (!!llmSessionId || canViewChanges || (canInlineAction && (canFork || canCancel)));
+      !compact &&
+      (!!llmSessionId ||
+        canViewChanges ||
+        canViewPlanContent ||
+        canViewReviewContent ||
+        (canInlineAction && (canFork || canCancel)));
     const showExpandedDetail = milestone.status === 'in_progress' && hasLiveActivity;
 
     return (
@@ -958,6 +1012,38 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     <i className="bi bi-chat-square-text me-1"></i>
                     {t('autoSessionIdLabel', language)} {llmSessionId.slice(0, 4)}
                   </button>
+                )}
+                {canViewPlanContent && (
+                  <Button
+                    size="sm"
+                    variant="outline-success"
+                    className="workflow-timeline-inline-btn"
+                    onClick={() =>
+                      setViewingContent({
+                        title: t('autoViewPlanTitle', language),
+                        content: milestone.plan_content,
+                      })
+                    }
+                  >
+                    <i className="bi bi-file-text me-1"></i>
+                    {t('autoViewPlan', language)}
+                  </Button>
+                )}
+                {canViewReviewContent && (
+                  <Button
+                    size="sm"
+                    variant="outline-info"
+                    className="workflow-timeline-inline-btn"
+                    onClick={() =>
+                      setViewingContent({
+                        title: t('autoViewReviewTitle', language),
+                        content: milestone.review_content,
+                      })
+                    }
+                  >
+                    <i className="bi bi-chat-text me-1"></i>
+                    {t('autoViewReview', language)}
+                  </Button>
                 )}
                 {canViewChanges && (
                   <Button
@@ -1136,6 +1222,64 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 {t('autoViewDefinition', language)}
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="workflow-timeline-definition-btn"
+              disabled={!latestPlanFinalized}
+              onClick={() =>
+                latestPlanFinalized &&
+                setViewingContent({
+                  title: t('autoViewPlanTitle', language),
+                  content: latestPlanFinalized.plan_content,
+                })
+              }
+            >
+              <i className="bi bi-clipboard-check me-1"></i>
+              {t('autoFinalPlan', language)}
+              {latestPlanFinalized && (
+                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                  {t('autoRoundBadge', language).replace(
+                    '{n}',
+                    String(latestPlanFinalized.dev_round || 1)
+                  )}
+                </Badge>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="workflow-timeline-definition-btn"
+              disabled={!latestPrReviewSummary}
+              onClick={() =>
+                latestPrReviewSummary &&
+                setViewingContent({
+                  title: t('autoViewReviewTitle', language),
+                  content: latestPrReviewSummary.review_content,
+                })
+              }
+            >
+              <i className="bi bi-check2-circle me-1"></i>
+              {t('autoPrReviewSummary', language)}
+              {latestPrReviewSummary && (
+                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                  {t('autoRoundBadge', language).replace(
+                    '{n}',
+                    String(latestPrReviewSummary.dev_round || 1)
+                  )}
+                </Badge>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="workflow-timeline-definition-btn"
+              disabled={!hasPr}
+              onClick={() => setViewingPrDiff(true)}
+            >
+              <i className="bi bi-file-diff me-1"></i>
+              {t('autoFinalCodeChanges', language)}
+            </Button>
             {workspaceFullscreen && (
               <Button
                 size="sm"
@@ -1514,6 +1658,59 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <p className="text-muted">{t('autoNoSessionData', language)}</p>
         )}
       </Modal>
+
+      {/* Markdown Content Modal (plan / review full text — Feature A & B share this) */}
+      <Modal
+        isOpen={!!viewingContent}
+        onClose={() => setViewingContent(null)}
+        title={viewingContent?.title ?? ''}
+        size="lg"
+      >
+        {viewingContent?.content?.trim() ? (
+          <MarkdownContent content={viewingContent.content} />
+        ) : (
+          <p className="text-muted mb-0">{t('autoNoContent', language)}</p>
+        )}
+      </Modal>
+
+      {/* PR Diff Modal (cumulative final code changes).
+          Conditionally rendered (not isOpen-toggled like the content Modal
+          above) so the inner <pre> remounts on every open and its scroll
+          position resets to the top. */}
+      {viewingPrDiff && (
+        <Modal
+          isOpen={true}
+          onClose={() => setViewingPrDiff(false)}
+          title={
+            prDiffData?.pr_number
+              ? `${t('autoFinalCodeChanges', language)} · PR #${prDiffData.pr_number}`
+              : t('autoFinalCodeChanges', language)
+          }
+          size="xl"
+        >
+          {prDiffLoading ? (
+            <div className="py-4">
+              <Loading />
+            </div>
+          ) : prDiffData?.diff ? (
+            <pre
+              className="bg-dark text-light p-3 rounded mb-0"
+              style={{
+                fontSize: '0.75rem',
+                maxHeight: '70vh',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {prDiffData.diff.length > 50000
+                ? prDiffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
+                : prDiffData.diff}
+            </pre>
+          ) : (
+            <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>
+          )}
+        </Modal>
+      )}
 
       {/* Branch Selector Modal */}
       <Modal
