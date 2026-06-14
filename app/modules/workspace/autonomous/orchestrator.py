@@ -136,6 +136,11 @@ PHASE_STATUS_MAP = {
 CI_POLL_INTERVAL = 30  # seconds between polls
 CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
+# GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
+# review / fix / test) can exceed that, so very long comments are capped with
+# a notice pointing to the timeline full-text view (#988).
+GITHUB_COMMENT_MAX_CHARS = 65000
+
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Session lines that span multiple milestones via --resume. Each maps to a
@@ -405,6 +410,49 @@ class AutonomousOrchestrator:
             or "预先存在" in response
             or re.search(r"pre[\s-]?existing", response, re.IGNORECASE)
         )
+
+    def _post_github_comment(
+        self,
+        gh: GitHubOps,
+        number: int,
+        body: str,
+        *,
+        is_pr: bool = False,
+        context: str = "",
+    ) -> None:
+        """Post a comment to a GitHub issue or PR.
+
+        Guards two failure modes the raw ``gh.add_*_comment`` calls used to
+        swallow silently:
+
+        - **Length**: GitHub rejects comment bodies longer than 65536 chars.
+          Verbose agent output (plan / review / fix / test) can exceed that, so
+          bodies over ``GITHUB_COMMENT_MAX_CHARS`` are capped with a notice
+          pointing readers to the timeline full-text view (#988) for the rest.
+        - **Errors**: a failed post is logged at WARNING (with ``context``) and
+          swallowed, so a missing comment is diagnosable without aborting the
+          workflow phase. The body survives in the DB / timeline regardless.
+        """
+        if len(body) > GITHUB_COMMENT_MAX_CHARS:
+            notice = (
+                "\n\n---\n\n"
+                "> ⚠️ 内容超出 GitHub 评论长度上限，已截断显示。"
+                "完整内容请查看 workflow timeline 的里程碑卡片（方案/评审/报告全文）。\n"
+            )
+            body = body[: GITHUB_COMMENT_MAX_CHARS - len(notice)] + notice
+        try:
+            if is_pr:
+                gh.add_pr_comment(number, body)
+            else:
+                gh.add_issue_comment(number, body)
+        except Exception as e:  # log + continue; never abort the phase over a comment
+            logger.warning(
+                "Failed to post GitHub %s comment #%s%s: %s",
+                "PR" if is_pr else "issue",
+                number,
+                f" ({context})" if context else "",
+                e,
+            )
 
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
@@ -1231,13 +1279,12 @@ class AutonomousOrchestrator:
 
         # Post plan as issue comment
         if issue_number:
-            try:
-                gh.add_issue_comment(
-                    issue_number,
-                    f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_agent_text(plan_text)}",
-                )
-            except GitHubOpsError:
-                pass
+            self._post_github_comment(
+                gh,
+                issue_number,
+                f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_agent_text(plan_text)}",
+                context="plan",
+            )
 
         # Step 2: Review plan
         review_prompt = (
@@ -1306,13 +1353,12 @@ class AutonomousOrchestrator:
 
         # Post review as issue comment
         if issue_number:
-            try:
-                gh.add_issue_comment(
-                    issue_number,
-                    f"## 🔍 Plan Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
-                )
-            except GitHubOpsError:
-                pass
+            self._post_github_comment(
+                gh,
+                issue_number,
+                f"## 🔍 Plan Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                context="plan-review",
+            )
 
         # Step 3: Check if all rounds are done
         # max_plan_rounds means the max number of Plan→Review→Refine cycles.
@@ -1406,21 +1452,18 @@ class AutonomousOrchestrator:
 
             issue_number = wf.get("github_issue_number")
             if issue_number and final_plan:
-                try:
-                    final_comment = (
-                        f"## 📋 Final Implementation Plan\n\n"
-                        f"Plan review completed after {round_num} round(s).\n\n"
-                        f"{final_plan}"
+                final_comment = (
+                    f"## 📋 Final Implementation Plan\n\n"
+                    f"Plan review completed after {round_num} round(s).\n\n"
+                    f"{final_plan}"
+                )
+                if self._should_show_review_warning(round_num, max_rounds, last_review):
+                    final_comment += (
+                        f"\n\n---\n\n"
+                        f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
+                        f"{last_review}"
                     )
-                    if self._should_show_review_warning(round_num, max_rounds, last_review):
-                        final_comment += (
-                            f"\n\n---\n\n"
-                            f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
-                            f"{last_review}"
-                        )
-                    gh.add_issue_comment(issue_number, final_comment)
-                except Exception:
-                    pass
+                self._post_github_comment(gh, issue_number, final_comment, context="final-plan")
 
             # Plan finalized, move to development
             self._update_workflow(
@@ -1690,10 +1733,7 @@ class AutonomousOrchestrator:
             )
         msg += "\nProgressing to test phase..."
 
-        try:
-            gh.add_issue_comment(issue_number, msg)
-        except Exception:
-            pass
+        self._post_github_comment(gh, issue_number, msg, context="dev-progress")
 
     def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run tests, post results to issue, handle retries.
@@ -1791,22 +1831,19 @@ class AutonomousOrchestrator:
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
-            try:
-                test_summary = self._clean_agent_text(test_response_text)
-                if tests_actually_skipped:
-                    status_line = "⚠️ Tests were not actually run — see details below"
-                elif test_result.success:
-                    status_line = "✅ All tests passed"
-                else:
-                    status_line = "❌ Tests failed"
-                test_comment = (
-                    f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
-                    f"{status_line}\n\n"
-                    f"{test_summary}"
-                )
-                gh.add_issue_comment(issue_number, test_comment)
-            except Exception:
-                pass
+            test_summary = self._clean_agent_text(test_response_text)
+            if tests_actually_skipped:
+                status_line = "⚠️ Tests were not actually run — see details below"
+            elif test_result.success:
+                status_line = "✅ All tests passed"
+            else:
+                status_line = "❌ Tests failed"
+            test_comment = (
+                f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
+                f"{status_line}\n\n"
+                f"{test_summary}"
+            )
+            self._post_github_comment(gh, issue_number, test_comment, context="test-results")
 
         # Treat skipped tests as failure — tests must actually run.
         # Allow 1 retry in case of transient environment issues.
@@ -1915,17 +1952,14 @@ class AutonomousOrchestrator:
 
         # Post test-passed status to issue
         if issue_number:
-            try:
-                branch = wf.get("branch_name", "")
-                status_msg = (
-                    f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
-                    f"- **Status**: Development + tests completed successfully\n"
-                    f"- **Branch**: `{branch}`\n"
-                    f"- **Next**: Creating PR and running code review\n"
-                )
-                gh.add_issue_comment(issue_number, status_msg)
-            except Exception:
-                pass
+            branch = wf.get("branch_name", "")
+            status_msg = (
+                f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
+                f"- **Status**: Development + tests completed successfully\n"
+                f"- **Branch**: `{branch}`\n"
+                f"- **Next**: Creating PR and running code review\n"
+            )
+            self._post_github_comment(gh, issue_number, status_msg, context="dev-complete")
 
         # Move to PR review
         self._update_workflow(
@@ -1965,10 +1999,7 @@ class AutonomousOrchestrator:
                 f"Skipping PR creation."
             )
             if issue_number:
-                try:
-                    gh.add_issue_comment(issue_number, no_change_msg)
-                except GitHubOpsError:
-                    pass
+                self._post_github_comment(gh, issue_number, no_change_msg, context="no-changes")
             self._create_milestone(
                 phase="pr_review",
                 dev_round=dev_round,
@@ -2039,19 +2070,22 @@ class AutonomousOrchestrator:
             if pr_number:
                 try:
                     ci_checks_post = self._poll_ci_status(gh, pr_number)
-                    ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
-                    if ci_fails_post:
-                        ci_summary = "\n".join(
-                            f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
-                        )
-                        gh.add_pr_comment(
-                            pr_number,
-                            "## ⚠️ CI 检查状态\n\n"
-                            f"以下 CI 检查未通过：\n{ci_summary}\n\n"
-                            "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
-                        )
                 except Exception:
-                    pass
+                    ci_checks_post = []
+                ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
+                if ci_fails_post:
+                    ci_summary = "\n".join(
+                        f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
+                    )
+                    self._post_github_comment(
+                        gh,
+                        pr_number,
+                        "## ⚠️ CI 检查状态\n\n"
+                        f"以下 CI 检查未通过：\n{ci_summary}\n\n"
+                        "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
+                        is_pr=True,
+                        context="ci-fails",
+                    )
 
         pr_number = wf.get("github_pr_number")
         if not pr_number:
@@ -2151,13 +2185,13 @@ class AutonomousOrchestrator:
 
         # Post review as PR comment
         if pr_number:
-            try:
-                gh.add_pr_comment(
-                    pr_number,
-                    f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
-                )
-            except GitHubOpsError:
-                pass
+            self._post_github_comment(
+                gh,
+                pr_number,
+                f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                is_pr=True,
+                context="code-review",
+            )
 
         # Check if all rounds done
         self._update_workflow({"current_round": round_num})
@@ -2220,13 +2254,13 @@ class AutonomousOrchestrator:
             )
 
             if pr_number and summary_text:
-                try:
-                    gh.add_pr_comment(
-                        pr_number,
-                        f"## ✅ PR Review Summary\n\n{summary_text}",
-                    )
-                except GitHubOpsError:
-                    pass
+                self._post_github_comment(
+                    gh,
+                    pr_number,
+                    f"## ✅ PR Review Summary\n\n{summary_text}",
+                    is_pr=True,
+                    context="review-summary",
+                )
 
             # Move to report
             self._update_workflow(
@@ -2308,24 +2342,21 @@ class AutonomousOrchestrator:
             )
 
             if pr_number:
-                try:
-                    # Extract fix summary from agent response in full; GitHub
-                    # comments render long content fine.
-                    fix_summary = self._clean_agent_text(fix_result.response_text or "")
-                    comment = (
-                        f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
-                        f"### Changes Made\n{fix_summary}\n\n"
+                # Extract fix summary from agent response in full; GitHub comments
+                # render long content fine (capped by _post_github_comment if huge).
+                fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                comment = (
+                    f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
+                    f"### Changes Made\n{fix_summary}\n\n"
+                )
+                if commit_sha:
+                    comment += f"- Commit: `{commit_sha[:8]}`\n"
+                # Note pre-existing CI failures if fix agent identified them.
+                if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
+                    comment += (
+                        "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
                     )
-                    if commit_sha:
-                        comment += f"- Commit: `{commit_sha[:8]}`\n"
-                    # Note pre-existing CI failures if fix agent identified them.
-                    if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
-                        comment += (
-                            "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
-                        )
-                    gh.add_pr_comment(pr_number, comment)
-                except GitHubOpsError:
-                    pass
+                self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
 
     # ── Phase: Report ───────────────────────────────────────────────
 
@@ -2426,10 +2457,7 @@ class AutonomousOrchestrator:
 
         # Post report to issue
         if issue_number:
-            try:
-                gh.add_issue_comment(issue_number, report)
-            except GitHubOpsError:
-                pass
+            self._post_github_comment(gh, issue_number, report, context="progress-report")
 
         # Mark round completed
         self._create_milestone(

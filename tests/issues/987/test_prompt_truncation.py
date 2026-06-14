@@ -13,9 +13,11 @@ Verifies that:
     content (no [:300] / [:200] truncation).
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
+from app.modules.workspace.autonomous.orchestrator import GITHUB_COMMENT_MAX_CHARS
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -218,3 +220,49 @@ class TestReportNotTruncated:
         # test section not truncated at [:200] (nor the writer-side [:300])
         assert "TEST_MARKER" in comment
         assert "passed case line" in comment
+
+
+# ── _post_github_comment (finding 1: GitHub hard-limit + silent failure) ──
+
+
+class TestPostGithubComment:
+    """``_post_github_comment`` caps over-long bodies and logs failures instead
+    of swallowing them — GitHub rejects comment bodies > 65536 chars, and the
+    old ``try/except: pass`` around every post made a rejected comment vanish
+    with no trace."""
+
+    def test_short_body_posted_verbatim(self):
+        orch = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        orch._post_github_comment(gh, 42, "short body", context="t")
+        gh.add_issue_comment.assert_called_once_with(42, "short body")
+        gh.add_pr_comment.assert_not_called()
+
+    def test_is_pr_routes_to_pr_comment(self):
+        orch = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        orch._post_github_comment(gh, 7, "x", is_pr=True)
+        gh.add_pr_comment.assert_called_once_with(7, "x")
+        gh.add_issue_comment.assert_not_called()
+
+    def test_long_body_capped_with_notice(self):
+        orch = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        long_body = "B" * (GITHUB_COMMENT_MAX_CHARS + 5000)
+        orch._post_github_comment(gh, 42, long_body, context="report")
+        posted = gh.add_issue_comment.call_args[0][1]
+        # capped body respects the GitHub limit
+        assert len(posted) <= GITHUB_COMMENT_MAX_CHARS
+        # truncation notice points readers to the timeline full-text view
+        assert "截断" in posted
+        # head of the content is preserved
+        assert posted.startswith("B")
+
+    def test_failure_is_logged_not_raised(self, caplog):
+        orch = _make_orchestrator(_make_workflow())
+        gh = MagicMock()
+        gh.add_issue_comment.side_effect = RuntimeError("boom")
+        with caplog.at_level(logging.WARNING):
+            orch._post_github_comment(gh, 42, "body", context="report")  # must not raise
+        # failure logged with the context + issue number so it's diagnosable
+        assert any("report" in rec.message and "#42" in rec.message for rec in caplog.records)
