@@ -4,9 +4,11 @@ Tests for PR #909 code review feedback fixes (Issue #913).
 Covers:
 1. _poll_ci_status polling mechanism
 2. get_pr_checks warning log on parse failure
-3. Previous review feedback truncation notice
-4. Pre-existing CI detection via structured output
-5. Worktree cleanup logic verification
+3. Pre-existing CI detection via structured output
+4. Worktree cleanup logic verification
+
+Note: previous-round review truncation notice tests were removed — that
+truncation was dropped in #987 (previous review is carried by --resume).
 """
 
 import json
@@ -190,47 +192,3 @@ class TestIsPreExistingCIFailure:
         """Empty string returns False."""
         result = AutonomousOrchestrator._is_pre_existing_ci_failure("")
         assert result is False
-
-
-# ── Test truncation logic with constant ───────────────────────────────────
-
-
-class TestTruncationNotice:
-    """Test the truncation notice for previous review feedback."""
-
-    def test_notice_shown_when_truncated(self):
-        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
-
-        cleaned = "x" * (PREV_REVIEW_MAX_LENGTH + 100)
-        truncated = cleaned[:PREV_REVIEW_MAX_LENGTH]
-        notice = (
-            "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
-            else ""
-        )
-        assert "⚠️" in notice
-        assert len(truncated) == PREV_REVIEW_MAX_LENGTH
-
-    def test_no_notice_when_not_truncated(self):
-        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
-
-        cleaned = "Short review content"
-        truncated = cleaned[:PREV_REVIEW_MAX_LENGTH]
-        notice = (
-            "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
-            else ""
-        )
-        assert notice == ""
-        assert truncated == "Short review content"
-
-    def test_no_notice_at_exact_boundary(self):
-        from app.modules.workspace.autonomous.orchestrator import PREV_REVIEW_MAX_LENGTH
-
-        cleaned = "x" * PREV_REVIEW_MAX_LENGTH
-        notice = (
-            "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-            if len(cleaned) > PREV_REVIEW_MAX_LENGTH
-            else ""
-        )
-        assert notice == ""
