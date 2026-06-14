@@ -753,7 +753,10 @@ class AutonomousOrchestrator:
         Driven by live usage events so the workflow total climbs during a long
         task instead of freezing until the call returns. Overwrites phase_* each
         event (session totals are cumulative within the call); the final value is
-        re-written (with request_count) by _write_phase_usage at _run_agent return.
+        re-written by _write_phase_usage at _run_agent return. request_count is
+        written per event too (it is incremented before the usage event fires),
+        so total_requests climbs in lockstep with total_tokens instead of only
+        jumping once the call returns.
         """
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
@@ -768,6 +771,7 @@ class AutonomousOrchestrator:
                     "phase_total_tokens": int(activity.get("total_tokens", 0) or 0),
                     "phase_input_tokens": int(activity.get("total_input_tokens", 0) or 0),
                     "phase_output_tokens": int(activity.get("total_output_tokens", 0) or 0),
+                    "phase_request_count": int(activity.get("request_count", 0) or 0),
                 },
             )
         except Exception:

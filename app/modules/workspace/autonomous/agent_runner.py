@@ -1001,6 +1001,7 @@ class AutonomousAgentRunner:
                                     "total_tokens": session.total_tokens,
                                     "total_input_tokens": session.total_input_tokens,
                                     "total_output_tokens": session.total_output_tokens,
+                                    "request_count": session.request_count,
                                 },
                             )
 
