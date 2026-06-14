@@ -48,7 +48,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: 0.78rem;
-  color: #64748b;
+  color: var(--text-tertiary);
   line-height: 1.4;
 }
 
