@@ -357,6 +357,15 @@ export function useMilestoneDiff(workflowId: string, milestoneId: string, enable
   });
 }
 
+export function useWorkflowPrDiff(workflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'pr-diff', workflowId],
+    queryFn: () => autonomousApi.getWorkflowPrDiff(workflowId),
+    enabled: enabled && !!workflowId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ── Auxiliary Queries ──────────────────────────────────────────────
 
 export function useAvailableTools() {
