@@ -101,8 +101,10 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
 
 # Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
 # can implement, run tests, and commit. Bash is allowed wholesale (test / git /
-# build commands vary by language and can't be enumerated) — the worktree +
-# feature branch is the security boundary. plan phases stay read-only via
+# build commands vary by language and can't be enumerated). This bounds where
+# commits land (worktree + feature branch); bash itself is NOT sandboxed —
+# cd /, rm -rf, sudo, network egress are all reachable from the worktree cwd,
+# same trust model as any dev agent. plan phases stay read-only via
 # PLANNING_ALLOWED_TOOLS above. See #996.
 AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
     "claude-code": [
@@ -2409,7 +2411,9 @@ class AutonomousOrchestrator:
 
             # Agent may fail to commit (bash blocked / forgot) — salvage
             # uncommitted changes the way dev does, else the fix never reaches
-            # the PR (#960 symptom). Mirrors _run_development_phase.
+            # the PR (#960 symptom). Adapted from _run_development_phase (no
+            # branch-vs-base check — a no-op fix is genuinely empty, not a
+            # failed dev round).
             commit_sha = ""
             diff_stats = {}
             try:
@@ -2429,9 +2433,14 @@ class AutonomousOrchestrator:
                         sha_changed = True
                 except Exception as e:
                     logger.warning("Fix auto-commit failed: %s", e)
-            try:
-                if sha_changed:
+            if sha_changed:
+                try:
                     gh.git_push()
+                except Exception as e:
+                    # push failure leaves the fix local; the next pr_review
+                    # re-reads the old PR state — log so it's diagnosable.
+                    logger.warning("Fix git_push failed (round %d): %s", round_num, e)
+            try:
                 diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
             except Exception:
                 pass
