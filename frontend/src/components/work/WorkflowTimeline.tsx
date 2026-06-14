@@ -1673,7 +1673,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         )}
       </Modal>
 
-      {/* PR Diff Modal (cumulative final code changes) */}
+      {/* PR Diff Modal (cumulative final code changes).
+          Conditionally rendered (not isOpen-toggled like the content Modal
+          above) so the inner <pre> remounts on every open and its scroll
+          position resets to the top. */}
       {viewingPrDiff && (
         <Modal
           isOpen={true}

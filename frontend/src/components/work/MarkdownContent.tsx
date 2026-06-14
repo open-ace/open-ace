@@ -20,7 +20,7 @@ const generateHeadingId = (children: React.ReactNode): string => {
     text
       .toLowerCase()
       .replace(/\s+/g, '-')
-      .replace(/[^\w一-鿿぀-ゟ゠-ヿ가-힯-]/g, '') || text
+      .replace(/[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af-]/g, '') || text
   );
 };
 
@@ -58,7 +58,7 @@ export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content, class
         ),
         p: ({ children }) => <p className="doc-paragraph">{children}</p>,
         ul: ({ children }) => <ul className="doc-list">{children}</ul>,
-        ol: ({ children }) => <ol className="doc-list">{children}</ol>,
+        ol: ({ children }) => <ol className="doc-list-ordered">{children}</ol>,
         li: ({ children }) => <li className="doc-list-item">{children}</li>,
         table: ({ children }) => (
           <div className="doc-table-wrapper">
