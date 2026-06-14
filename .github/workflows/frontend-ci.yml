@@ -87,6 +87,10 @@ jobs:
 
   e2e:
     name: E2E Tests
+    # E2E takes ~27min and is too slow to block every PR. Run only on pushes
+    # to the default branch; PRs skip this job. Regression coverage is still
+    # preserved on merge. Local `npm run test:e2e` is unaffected.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
