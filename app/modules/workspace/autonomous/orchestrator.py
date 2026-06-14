@@ -99,6 +99,41 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     "openclaw": [],
 }
 
+# Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
+# can implement, run tests, and commit. Bash is allowed wholesale (test / git /
+# build commands vary by language and can't be enumerated) — the worktree +
+# feature branch is the security boundary. plan phases stay read-only via
+# PLANNING_ALLOWED_TOOLS above. See #996.
+AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
+    "claude-code": [
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "Agent",
+        "TaskRead",
+        "TaskGet",
+        "TaskList",
+        "Write",
+        "Edit",
+        "Bash",
+    ],
+    "qwen-code-cli": [
+        "read_file",
+        "list_files",
+        "search_files",
+        "code_search",
+        "web_search",
+        "web_fetch",
+        "write_file",
+        "edit_file",
+        "execute_command",
+    ],
+    "codex": [],
+    "openclaw": [],
+}
+
 # Maximum time (seconds) for a single planning agent call.
 # Normal planning should complete in a few minutes; this caps runaway agents.
 PLANNING_TIMEOUT = 600
@@ -1600,6 +1635,7 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="main",
             milestone_id=ms.get("milestone_id", ""),
         )
@@ -1807,6 +1843,7 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="test",
             milestone_id=test_ms.get("milestone_id", ""),
         )
@@ -2200,6 +2237,7 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="review",
             milestone_id=review_ms.get("milestone_id", ""),
         )
@@ -2273,6 +2311,9 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
                 session_line="main",
                 milestone_id=summary_ms.get("milestone_id", ""),
             )
@@ -2337,6 +2378,12 @@ class AutonomousOrchestrator:
                     "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
                 )
 
+            commit_before = ""
+            try:
+                commit_before = gh.get_current_commit()
+            except Exception:
+                pass
+
             fix_result = self._run_agent(
                 wf=wf,
                 workflow_id=self._workflow_id,
@@ -2347,6 +2394,9 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
                 session_line="main",
                 milestone_id=fix_ms.get("milestone_id", ""),
             )
@@ -2357,11 +2407,31 @@ class AutonomousOrchestrator:
             if wf.get("user_feedback", "").strip():
                 self._update_workflow({"user_feedback": ""})
 
+            # Agent may fail to commit (bash blocked / forgot) — salvage
+            # uncommitted changes the way dev does, else the fix never reaches
+            # the PR (#960 symptom). Mirrors _run_development_phase.
             commit_sha = ""
             diff_stats = {}
             try:
-                gh.git_push()
                 commit_sha = gh.get_current_commit()
+            except Exception:
+                pass
+            sha_changed = commit_before and commit_sha and commit_before != commit_sha
+            if not sha_changed:
+                try:
+                    if gh.has_uncommitted_changes():
+                        gh.git_add_all()
+                        gh.git_commit(
+                            f"auto: review fixes (round {round_num})",
+                            no_verify=True,
+                        )
+                        commit_sha = gh.get_current_commit()
+                        sha_changed = True
+                except Exception as e:
+                    logger.warning("Fix auto-commit failed: %s", e)
+            try:
+                if sha_changed:
+                    gh.git_push()
                 diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
             except Exception:
                 pass
@@ -2809,6 +2879,9 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
                 session_line="main",
                 milestone_id=conflict_ms.get("milestone_id", ""),
             )
