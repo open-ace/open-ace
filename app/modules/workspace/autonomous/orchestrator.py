@@ -141,6 +141,17 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # a notice pointing to the timeline full-text view (#988).
 GITHUB_COMMENT_MAX_CHARS = 65000
 
+# Each phase agent appends a one-line `TL;DR: ...` summary to its output for the
+# timeline milestone card (#993). TLDR_INSTRUCTION is appended to every agent
+# prompt; _extract_tldr pulls the line back out for storage in the tldr column.
+TLDR_INSTRUCTION = (
+    "\n\n## 输出格式要求\n"
+    "请在输出的最后单独一行，用以下格式给出本次输出的一句话总结"
+    "（将显示在 timeline 卡片上，务必简洁、纯文本、不要 markdown）：\n"
+    "TL;DR: <不超过 80 字的总结>\n"
+)
+_TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Session lines that span multiple milestones via --resume. Each maps to a
@@ -410,6 +421,17 @@ class AutonomousOrchestrator:
             or "预先存在" in response
             or re.search(r"pre[\s-]?existing", response, re.IGNORECASE)
         )
+
+    @staticmethod
+    def _extract_tldr(response: str) -> str:
+        """Extract the ``TL;DR: ...`` one-liner the agent was asked to append.
+
+        Returns "" when absent so callers can fall back to ``result_summary``.
+        """
+        if not response:
+            return ""
+        match = _TLDR_RE.search(response)
+        return match.group(1).strip()[:200] if match else ""
 
     def _post_github_comment(
         self,
@@ -705,6 +727,11 @@ class AutonomousOrchestrator:
             task_timeout = (workflow_data or {}).get("task_timeout")
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
+
+        # Append the TL;DR instruction so every phase agent outputs a one-line
+        # summary for the timeline milestone card (#993).
+        if kwargs.get("prompt"):
+            kwargs["prompt"] = kwargs["prompt"] + TLDR_INSTRUCTION
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
@@ -1246,6 +1273,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if result.success else "failed",
                 "plan_content": plan_text,
                 "result_summary": plan_text[:200],
+                "tldr": self._extract_tldr(plan_text),
                 "session_id": result.session_id,
                 "error_message": result.error or "",
             },
@@ -1347,6 +1375,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "result_summary": review_text[:200],
+                "tldr": self._extract_tldr(review_text),
                 "review_session_id": review_result.session_id,
             },
         )
@@ -1447,6 +1476,7 @@ class AutonomousOrchestrator:
                     "status": "completed",
                     "plan_content": final_plan,
                     "result_summary": final_plan[:200],
+                    "tldr": self._extract_tldr(final_plan),
                 },
             )
 
@@ -1667,6 +1697,7 @@ class AutonomousOrchestrator:
                         "result_summary": (
                             result.response_text[:300] if result.response_text else ""
                         ),
+                        "tldr": self._extract_tldr(result.response_text),
                         "error_message": "Agent produced no code changes (commit SHA unchanged)",
                     },
                 )
@@ -1684,6 +1715,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if result.success else "failed",
                 "session_id": result.session_id,
                 "result_summary": result.response_text[:300] if result.response_text else "",
+                "tldr": self._extract_tldr(result.response_text),
                 "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                 "diff_stats": json.dumps(diff_stats),
                 "error_message": result.error or "",
@@ -1787,6 +1819,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if test_result.success else "failed",
                 "session_id": test_result.session_id,
                 "result_summary": (test_result.response_text if test_result.response_text else ""),
+                "tldr": self._extract_tldr(test_result.response_text),
             },
         )
 
@@ -2180,6 +2213,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "review_session_id": review_result.session_id,
+                "tldr": self._extract_tldr(review_text),
             },
         )
 
@@ -2250,6 +2284,7 @@ class AutonomousOrchestrator:
                     "status": "completed" if summary_result.success else "failed",
                     "review_content": summary_text,
                     "result_summary": summary_text[:200],
+                    "tldr": self._extract_tldr(summary_text),
                 },
             )
 
@@ -2338,6 +2373,7 @@ class AutonomousOrchestrator:
                     "session_id": fix_result.session_id,
                     "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                     "diff_stats": json.dumps(diff_stats),
+                    "tldr": self._extract_tldr(fix_result.response_text or ""),
                 },
             )
 

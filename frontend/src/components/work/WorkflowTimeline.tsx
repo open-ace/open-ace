@@ -977,6 +977,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </span>
               )}
             </div>
+            {(() => {
+              const summary = (milestone.tldr || milestone.result_summary || '').trim();
+              if (!summary || compact) return null;
+              return (
+                <div className="workflow-timeline-card-summary mt-1" title={summary}>
+                  {summary}
+                </div>
+              );
+            })()}
             {showActionRow && (
               <div
                 className="workflow-timeline-action-row mt-2 d-flex align-items-center gap-2 flex-wrap"

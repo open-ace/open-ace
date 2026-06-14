@@ -104,6 +104,7 @@ export interface WorkflowMilestone {
   commit_shas: string;
   diff_stats: string;
   result_summary: string;
+  tldr: string;
   plan_content: string;
   review_content: string;
   error_message: string;
