@@ -928,6 +928,19 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         canViewReviewContent ||
         (canInlineAction && (canFork || canCancel)));
     const showExpandedDetail = milestone.status === 'in_progress' && hasLiveActivity;
+    // One-line per-round summary (agent TL;DR, falling back to result_summary).
+    // Plain text, clamped to 2 lines via CSS; the title is capped so a verbose
+    // result_summary (e.g. tests_run full output) can't flood the hover tooltip.
+    const rawSummary = (milestone.tldr || milestone.result_summary || '').trim();
+    const cardSummaryEl =
+      !rawSummary || compact ? null : (
+        <div
+          className="workflow-timeline-card-summary mt-1"
+          title={rawSummary.length > 200 ? rawSummary.slice(0, 200) + '…' : rawSummary}
+        >
+          {rawSummary}
+        </div>
+      );
 
     return (
       <div key={milestone.milestone_id} className="mb-2">
@@ -977,6 +990,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </span>
               )}
             </div>
+            {cardSummaryEl}
             {showActionRow && (
               <div
                 className="workflow-timeline-action-row mt-2 d-flex align-items-center gap-2 flex-wrap"
