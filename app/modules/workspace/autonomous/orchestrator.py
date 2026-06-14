@@ -136,10 +136,6 @@ PHASE_STATUS_MAP = {
 CI_POLL_INTERVAL = 30  # seconds between polls
 CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
-# Maximum character length for previous review feedback included in
-# the review prompt.  Reviews longer than this are truncated with a
-# notice so the reviewer knows content was omitted.
-PREV_REVIEW_MAX_LENGTH = 3000
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Session lines that span multiple milestones via --resume. Each maps to a
@@ -1420,7 +1416,7 @@ class AutonomousOrchestrator:
                         final_comment += (
                             f"\n\n---\n\n"
                             f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
-                            f"{last_review[:2000]}"
+                            f"{last_review}"
                         )
                     gh.add_issue_comment(issue_number, final_comment)
                 except Exception:
@@ -1750,9 +1746,7 @@ class AutonomousOrchestrator:
             {
                 "status": "completed" if test_result.success else "failed",
                 "session_id": test_result.session_id,
-                "result_summary": (
-                    test_result.response_text[:300] if test_result.response_text else ""
-                ),
+                "result_summary": (test_result.response_text if test_result.response_text else ""),
             },
         )
 
@@ -1798,7 +1792,7 @@ class AutonomousOrchestrator:
         issue_number = wf.get("github_issue_number")
         if issue_number:
             try:
-                test_summary = self._clean_agent_text(test_response_text)[:800]
+                test_summary = self._clean_agent_text(test_response_text)
                 if tests_actually_skipped:
                     status_line = "⚠️ Tests were not actually run — see details below"
                 elif test_result.success:
@@ -2003,7 +1997,7 @@ class AutonomousOrchestrator:
         if round_num == 1:
             try:
                 # Build PR body with issue linkage
-                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')[:500]}"
+                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
                 issue_number = wf.get("github_issue_number")
                 if issue_number:
                     pr_body += f"\n\nCloses #{issue_number}"
@@ -2092,35 +2086,18 @@ class AutonomousOrchestrator:
 
         review_prompt = (
             AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
-            f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
             f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
         )
 
-        # Include previous review feedback for rounds > 1
+        # For rounds > 1, the previous round's review is already in this review
+        # session's resumed history (--resume). Ask the reviewer to revisit it
+        # and confirm whether each point was addressed.
         if round_num > 1:
-            prev_review_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
-            last_review_text = ""
-            for ms in reversed(prev_review_milestones):
-                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
-                    last_review_text = ms["review_content"]
-                    break
-            if last_review_text:
-                cleaned_review = self._clean_agent_text(last_review_text)
-                truncated = cleaned_review[:PREV_REVIEW_MAX_LENGTH]
-                truncation_notice = (
-                    "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
-                    if len(cleaned_review) > PREV_REVIEW_MAX_LENGTH
-                    else ""
-                )
-                review_prompt += (
-                    f"## 上一轮审查意见（Round {round_num - 1}）\n\n"
-                    f"{truncated}\n"
-                    f"{truncation_notice}\n"
-                    "**请逐条确认上一轮审查意见是否已被落实：**\n"
-                    "- 已落实：说明如何修改\n"
-                    "- 未落实：说明原因\n"
-                    "- 不适用：说明理由\n\n"
-                )
+            review_prompt += (
+                "## 上一轮审查\n"
+                "请回顾你上一轮的审查意见（在本会话历史中），逐条确认是否已落实："
+                "已落实（说明如何修改）/ 未落实（说明原因）/ 不适用（说明理由）。\n\n"
+            )
 
         review_prompt += (
             "请检查：\n"
@@ -2187,26 +2164,15 @@ class AutonomousOrchestrator:
 
         if round_num >= max_rounds:
             # All PR review rounds completed — summarize via the main session,
-            # then move to report. The main session resumes and is given the
-            # last review round's feedback plus the last fix record, then asked
-            # whether all review points were addressed and the PR is ready.
+            # then move to report. The main session resumes with the development
+            # history (incl. fixes) and is given the last review round's feedback
+            # (review runs on the review session, so it must be injected), then
+            # asked whether all review points were addressed and the PR is ready.
             last_pr_review = ""
-            last_fix_summary = ""
             pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
             for ms in reversed(pr_milestones):
-                if (
-                    ms.get("milestone_type") == "pr_reviewed"
-                    and ms.get("review_content")
-                    and not last_pr_review
-                ):
+                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
                     last_pr_review = ms["review_content"]
-                if (
-                    ms.get("milestone_type") == "pr_updated"
-                    and ms.get("result_summary")
-                    and not last_fix_summary
-                ):
-                    last_fix_summary = ms["result_summary"]
-                if last_pr_review and last_fix_summary:
                     break
 
             summary_ms = self._create_milestone(
@@ -2219,14 +2185,13 @@ class AutonomousOrchestrator:
             )
 
             summary_prompt = (
-                AUTONOMOUS_CONTEXT
-                + "代码审查已全部完成。请根据最后一轮审查意见和最后一次修复记录，"
+                AUTONOMOUS_CONTEXT + "代码审查已全部完成。请根据最后一轮审查意见，"
+                "并结合本会话历史中开发环节的修复记录，"
                 "输出一份 PR 评审总结，明确：\n"
                 "1. 最后一轮审查意见是否已全部落实\n"
                 "2. 是否还有遗留问题需要处理\n"
                 "3. 当前 PR 是否可以合并\n\n"
                 f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
-                f"## 最后一次修复记录\n{self._clean_agent_text(last_fix_summary)}\n\n"
                 "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
                 "直接输出总结，不要添加引导文字。"
             )
@@ -2344,18 +2309,9 @@ class AutonomousOrchestrator:
 
             if pr_number:
                 try:
-                    # Extract fix summary from agent response (no hard truncation —
-                    # _clean_agent_text already strips noise; only cap at 5000 chars
-                    # to avoid excessively long comments, breaking at paragraph boundary).
+                    # Extract fix summary from agent response in full; GitHub
+                    # comments render long content fine.
                     fix_summary = self._clean_agent_text(fix_result.response_text or "")
-                    if len(fix_summary) > 5000:
-                        # Truncate at last paragraph break within limit
-                        truncated = fix_summary[:5000]
-                        last_break = max(truncated.rfind("\n\n"), truncated.rfind("\n##"), 0)
-                        if last_break > 1000:
-                            fix_summary = truncated[:last_break].rstrip() + "\n\n..."
-                        else:
-                            fix_summary = truncated.rstrip() + "..."
                     comment = (
                         f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
                         f"### Changes Made\n{fix_summary}\n\n"
@@ -2389,12 +2345,12 @@ class AutonomousOrchestrator:
                 and ms.get("phase") == "planning"
                 and ms.get("milestone_type") == "plan_finalized"
             ):
-                plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
+                plan_summary = self._clean_agent_text(ms["plan_content"])
                 break
         if not plan_summary:
             for ms in reversed(all_milestones):
                 if ms.get("plan_content") and ms.get("phase") == "planning":
-                    plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
+                    plan_summary = self._clean_agent_text(ms["plan_content"])
                     break
 
         # 2. Diff stats
@@ -2409,7 +2365,7 @@ class AutonomousOrchestrator:
         test_summary = ""
         for ms in all_milestones:
             if ms.get("milestone_type") == "tests_run" and ms.get("result_summary"):
-                test_summary = self._clean_agent_text(ms["result_summary"])[:200]
+                test_summary = self._clean_agent_text(ms["result_summary"])
                 break
 
         # 4. Code review rounds
