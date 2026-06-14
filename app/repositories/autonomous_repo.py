@@ -68,6 +68,9 @@ class AutonomousWorkflowRepository:
         "paused_at",
         "agent_pid",
         "agent_session_id",
+        "main_session_id",
+        "review_session_id",
+        "test_session_id",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -87,6 +90,10 @@ class AutonomousWorkflowRepository:
         "result_summary",
         "plan_content",
         "review_content",
+        "phase_total_tokens",
+        "phase_input_tokens",
+        "phase_output_tokens",
+        "phase_request_count",
         "error_message",
         "parent_milestone_id",
         "fork_branch",
@@ -506,104 +513,60 @@ class AutonomousWorkflowRepository:
         )
 
     def refresh_workflow_usage_from_sessions(self, workflow_id: str) -> None:
-        """Refresh workflow token/request totals from linked agent_sessions."""
+        """Refresh workflow token/request totals from per-milestone phase usage.
+
+        Sums each milestone's phase_* increment so shared sessions are counted
+        once per milestone, rather than via cumulative agent_sessions totals
+        (which double-count when a session spans multiple milestones).
+        """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.db.execute(
             adapt_sql(
                 """
-                WITH linked_sessions AS (
-                    SELECT DISTINCT sid FROM (
-                        SELECT NULLIF(session_id, '') AS sid
-                        FROM workflow_milestones
-                        WHERE workflow_id = ?
-                        UNION
-                        SELECT NULLIF(review_session_id, '') AS sid
-                        FROM workflow_milestones
-                        WHERE workflow_id = ?
-                    ) linked
-                    WHERE sid IS NOT NULL
-                )
                 UPDATE autonomous_workflows SET
                     total_tokens = COALESCE((
-                        SELECT SUM(COALESCE(s.total_tokens, 0))
-                        FROM agent_sessions s
-                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
+                        SELECT SUM(COALESCE(phase_total_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
                     ), 0),
                     total_input_tokens = COALESCE((
-                        SELECT SUM(COALESCE(s.total_input_tokens, 0))
-                        FROM agent_sessions s
-                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
+                        SELECT SUM(COALESCE(phase_input_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
                     ), 0),
                     total_output_tokens = COALESCE((
-                        SELECT SUM(COALESCE(s.total_output_tokens, 0))
-                        FROM agent_sessions s
-                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
+                        SELECT SUM(COALESCE(phase_output_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
                     ), 0),
                     total_requests = COALESCE((
-                        SELECT SUM(COALESCE(s.request_count, 0))
-                        FROM agent_sessions s
-                        WHERE s.session_id IN (SELECT sid FROM linked_sessions)
+                        SELECT SUM(COALESCE(phase_request_count, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
                     ), 0),
                     updated_at = ?
                 WHERE workflow_id = ?
                 """
             ),
-            (
-                workflow_id,
-                workflow_id,
-                now,
-                workflow_id,
-            ),
+            (workflow_id, workflow_id, workflow_id, workflow_id, now, workflow_id),
         )
 
     def get_milestone_usage_summary(
         self, workflow_id: str, milestones: Optional[list[dict]] = None
     ) -> dict[str, dict[str, Any]]:
-        """Return per-milestone session/token/request usage.
+        """Return per-milestone usage from each milestone's own phase_* columns.
 
-        Current implementation attaches the linked session totals to each milestone.
-        This restores timeline-level token/request stats even when a session is
-        reused across multiple milestones.
+        Each milestone stores only its own increment (phase_total_tokens etc.),
+        so shared sessions (main/review/test lines) no longer duplicate
+        cumulative session totals across milestones.
         """
         milestones = milestones or self.list_milestones(workflow_id)
-        session_ids = sorted(
-            {
-                (milestone.get("review_session_id") or milestone.get("session_id") or "").strip()
-                for milestone in milestones
-                if (milestone.get("review_session_id") or milestone.get("session_id") or "").strip()
-            }
-        )
-        if not session_ids:
-            return {}
-
-        placeholders = ",".join(["?"] * len(session_ids))
-        session_rows = self.db.fetch_all(
-            f"""
-            SELECT session_id, total_tokens, request_count
-            FROM agent_sessions
-            WHERE session_id IN ({placeholders})
-            """,
-            tuple(session_ids),
-        )
-        session_usage = {
-            row.get("session_id", ""): {
-                "total_tokens": int(row.get("total_tokens", 0) or 0),
-                "request_count": int(row.get("request_count", 0) or 0),
-            }
-            for row in session_rows
-        }
-
         result: dict[str, dict[str, Any]] = {}
         for milestone in milestones:
             milestone_id = milestone.get("milestone_id", "")
             session_id = (
                 milestone.get("review_session_id") or milestone.get("session_id") or ""
             ).strip()
-            usage = session_usage.get(session_id, {})
             result[milestone_id] = {
                 "llm_session_id": session_id,
-                "llm_total_tokens": usage.get("total_tokens", 0),
-                "llm_request_count": usage.get("request_count", 0),
+                "llm_total_tokens": int(milestone.get("phase_total_tokens", 0) or 0),
+                "llm_request_count": int(milestone.get("phase_request_count", 0) or 0),
             }
         return result
 
@@ -782,8 +745,10 @@ class AutonomousWorkflowRepository:
                      plan_content, review_content,
                      parent_milestone_id, fork_branch, metadata,
                      error_message,
+                     phase_total_tokens, phase_input_tokens,
+                     phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -810,6 +775,10 @@ class AutonomousWorkflowRepository:
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
+                    data.get("phase_total_tokens", 0),
+                    data.get("phase_input_tokens", 0),
+                    data.get("phase_output_tokens", 0),
+                    data.get("phase_request_count", 0),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,
@@ -829,8 +798,10 @@ class AutonomousWorkflowRepository:
                      plan_content, review_content,
                      parent_milestone_id, fork_branch, metadata,
                      error_message,
+                     phase_total_tokens, phase_input_tokens,
+                     phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("workflow_id", ""),
@@ -856,6 +827,10 @@ class AutonomousWorkflowRepository:
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
+                    data.get("phase_total_tokens", 0),
+                    data.get("phase_input_tokens", 0),
+                    data.get("phase_output_tokens", 0),
+                    data.get("phase_request_count", 0),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,

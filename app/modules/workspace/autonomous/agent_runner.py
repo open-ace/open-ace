@@ -103,6 +103,13 @@ class _LocalSession:
     remote_machine_id: str | None = None
     started_at_epoch: float = 0.0
     persisted_session_id: str = ""
+    # Real Claude session_id captured from the SDK init control_response.
+    # Preferred over mtime-based JSONL guessing so resume chains stay correct.
+    cli_session_id: str = ""
+    init_request_id: str = ""  # SDK initialize request_id for matching control_response
+    sdk_initialized: threading.Event = field(default_factory=threading.Event)
+    # Milestone this task belongs to — tags session_messages for per-phase detail views.
+    milestone_id: str = ""
     _paused: bool = False  # True when process is suspended via SIGSTOP
 
 
@@ -199,10 +206,27 @@ class AutonomousAgentRunner:
         if session.persisted_session_id:
             return session.persisted_session_id
 
-        persisted_id = self._find_latest_claude_session_id(
-            session.encoded_project_path,
-            session.started_at_epoch,
-        )
+        # Prefer the real CLI session_id captured from the SDK init
+        # control_response; fall back to mtime-based JSONL discovery only when
+        # the control_response was never received (older CLI / parse miss).
+        if session.cli_session_id:
+            persisted_id = session.cli_session_id
+        else:
+            # mtime fallback — this is the original #848 pollution mechanism.
+            # control_response covers the vast majority of cases; if this fires
+            # and the guessed id is wrong, it can get pinned to a session line
+            # and propagated via --resume. Warn so it's traceable.
+            persisted_id = self._find_latest_claude_session_id(
+                session.encoded_project_path,
+                session.started_at_epoch,
+            )
+            logger.warning(
+                "Using mtime fallback to resolve session (control_response missed) — "
+                "workflow=%s path=%s -> %s",
+                session.workflow_id,
+                session.encoded_project_path,
+                (persisted_id or "<none>")[:8],
+            )
         if not persisted_id:
             return ""
 
@@ -297,6 +321,9 @@ class AutonomousAgentRunner:
         session_id: str = None,
         user_id: int | None = None,
         allowed_tools: list[str] | None = None,
+        resume: bool = False,
+        resume_session_id: str = None,
+        milestone_id: str = "",
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -371,6 +398,9 @@ class AutonomousAgentRunner:
                     user_id=user_id,
                     workspace_type=workspace_type,
                     allowed_tools=allowed_tools,
+                    resume=resume,
+                    resume_session_id=resume_session_id,
+                    milestone_id=milestone_id,
                 )
 
             persisted_session_id = (
@@ -380,7 +410,7 @@ class AutonomousAgentRunner:
             # Persist session messages to database (Issue #776 Bug 1)
             if self.session_manager and persisted_session_id and workspace_type == "local":
                 try:
-                    self._persist_local_session_messages(persisted_session_id, result)
+                    self._persist_local_session_messages(persisted_session_id, result, milestone_id)
                 except Exception as e:
                     logger.warning("Failed to persist session messages: %s", e)
 
@@ -425,6 +455,9 @@ class AutonomousAgentRunner:
         user_id: int | None,
         workspace_type: str,
         allowed_tools: list[str] | None = None,
+        resume: bool = False,
+        resume_session_id: str = None,
+        milestone_id: str = "",
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -463,12 +496,17 @@ class AutonomousAgentRunner:
         env = dict(os.environ)
 
         # Build command
+        # When resuming an established session, pass the real CLI session_id
+        # so the adapter emits `--resume <id>`; otherwise let the CLI mint a new
+        # session and capture its id from the control_response.
+        resume_target = resume_session_id if (resume and resume_session_id) else session_id
         adapter_args = adapter.build_start_args(
-            session_id,
+            resume_target,
             project_path,
             model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume=resume,
         )
         cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
@@ -507,7 +545,14 @@ class AutonomousAgentRunner:
             user_id=user_id,
             workspace_type=workspace_type,
             started_at_epoch=time.time(),
+            milestone_id=milestone_id,
         )
+        # For a resumed session the real CLI session_id is known up front; pin
+        # it so sidebar detection reuses the existing record instead of guessing.
+        if resume and resume_session_id:
+            session.cli_session_id = resume_session_id
+            session.persisted_session_id = resume_session_id
+            session.sdk_initialized.set()
         self._local_sessions[session_id] = session
 
         # Persist PID to database for reliable cancel/pause
@@ -745,7 +790,9 @@ class AutonomousAgentRunner:
 
     # ── Local helpers ──────────────────────────────────────────────
 
-    def _persist_local_session_messages(self, session_id: str, result: AgentTaskResult) -> None:
+    def _persist_local_session_messages(
+        self, session_id: str, result: AgentTaskResult, milestone_id: str = ""
+    ) -> None:
         """Write agent conversation to session_messages preserving order.
 
         Uses the ordered event_log from _LocalSession to maintain the actual
@@ -763,6 +810,7 @@ class AutonomousAgentRunner:
                 if event.get("type") == "assistant":
                     self.session_manager.add_message(
                         session_id=session_id,
+                        milestone_id=milestone_id,
                         role="assistant",
                         content=event.get("text", ""),
                         model=event.get("model"),
@@ -776,6 +824,7 @@ class AutonomousAgentRunner:
                     tool_input = event.get("tool_input", {})
                     self.session_manager.add_message(
                         session_id=session_id,
+                        milestone_id=milestone_id,
                         role="tool",
                         content=(
                             json.dumps(tool_input)
@@ -797,6 +846,7 @@ class AutonomousAgentRunner:
             if result.response_text:
                 self.session_manager.add_message(
                     session_id=session_id,
+                    milestone_id=milestone_id,
                     role="assistant",
                     content=result.response_text,
                 )
@@ -806,6 +856,7 @@ class AutonomousAgentRunner:
                 tool_input = tool_info.get("input", {})
                 self.session_manager.add_message(
                     session_id=session_id,
+                    milestone_id=milestone_id,
                     role="tool",
                     content=(
                         json.dumps(tool_input)
@@ -816,10 +867,12 @@ class AutonomousAgentRunner:
                 )
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:
-        """Send SDK initialize message."""
+        """Send SDK initialize message and record request_id for response matching."""
+        request_id = str(uuid.uuid4())
+        session.init_request_id = request_id
         init_msg = {
             "type": "control_request",
-            "request_id": str(uuid.uuid4()),
+            "request_id": request_id,
             "request": {"subtype": "initialize"},
         }
         return self._write_stdin(session, json.dumps(init_msg))
@@ -948,8 +1001,24 @@ class AutonomousAgentRunner:
                                     "total_tokens": session.total_tokens,
                                     "total_input_tokens": session.total_input_tokens,
                                     "total_output_tokens": session.total_output_tokens,
+                                    "request_count": session.request_count,
                                 },
                             )
+
+                    elif msg_type == "control_response":
+                        # Capture the real Claude session_id from the SDK
+                        # initialize response (mirrors remote executor.py).
+                        resp = parsed.get("response", {}) or {}
+                        if (
+                            session.init_request_id
+                            and resp.get("request_id") == session.init_request_id
+                        ):
+                            if resp.get("subtype") == "success":
+                                inner = resp.get("response", {}) or {}
+                                cli_sid = inner.get("session_id", "")
+                                if cli_sid and not session.cli_session_id:
+                                    session.cli_session_id = cli_sid
+                            session.sdk_initialized.set()
 
                     elif msg_type == "control_request":
                         # Auto-approve permissions in autonomous mode,
