@@ -10,7 +10,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLanguage } from '@/store';
-import { t, type Language } from '@/i18n';
+import { t } from '@/i18n';
 import { usePageRefresh } from '@/hooks';
 import {
   Card,
@@ -33,14 +33,14 @@ import {
 } from '@/api/request';
 import { formatNumber, createMatcherConfig } from '@/utils';
 
-// Date range presets - internationalized
-const getDateRangePresets = (language: Language) => [
-  { value: '7', label: t('dateRange7Days', language) },
-  { value: '14', label: t('dateRange14Days', language) },
-  { value: '30', label: t('dateRange30Days', language) },
-  { value: '60', label: t('dateRange60Days', language) },
-  { value: '90', label: t('dateRange90Days', language) },
-];
+// Date range preset values for the selector
+const DATE_RANGE_PRESET_VALUES = [
+  { value: '7', labelKey: 'dateRange7Days' },
+  { value: '14', labelKey: 'dateRange14Days' },
+  { value: '30', labelKey: 'dateRange30Days' },
+  { value: '60', labelKey: 'dateRange60Days' },
+  { value: '90', labelKey: 'dateRange90Days' },
+] as const;
 
 // Helper to get date string N days ago
 const getDaysAgo = (days: number): string => {
@@ -108,6 +108,16 @@ export const RequestDashboard: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Date range presets with translated labels
+  const dateRangePresets = useMemo(
+    () =>
+      DATE_RANGE_PRESET_VALUES.map((preset) => ({
+        value: preset.value,
+        label: t(preset.labelKey, language),
+      })),
+    [language]
+  );
 
   // Aggregate user stats
   const aggregatedUserStats = useMemo(() => {
@@ -286,7 +296,7 @@ export const RequestDashboard: React.FC = () => {
       <Card className="mb-4">
         <div className="d-flex flex-wrap gap-2 align-items-center">
           <span className="me-2">{t('dateRange', language)}:</span>
-          {getDateRangePresets(language).map((preset) => (
+          {dateRangePresets.map((preset) => (
             <Button
               key={preset.value}
               variant={
