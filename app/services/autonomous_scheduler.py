@@ -49,7 +49,13 @@ class AutonomousScheduler:
         self._stop_event = threading.Event()
         self._in_progress_ids: set[str] = set()
         self._in_progress_batch_ids: set[str] = set()  # Track batches being processed
-        self._in_progress_paths: set[str] = set()  # Track project paths being processed
+        # Git-conflict keys being processed. workspace = worktree_path (fork /
+        # worktree strategy — isolated git working tree) else project_path
+        # (new-branch / same-branch — shares the main repo dir). branch tracks
+        # branch_name so batch workflows sharing a branch still serialize.
+        # See #1002: deduping on project_path alone starved forked children.
+        self._in_progress_workspaces: set[str] = set()
+        self._in_progress_branches: set[str] = set()
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -88,6 +94,69 @@ class AutonomousScheduler:
         with self._orchestrator_lock:
             return self._running_orchestrators.get(workflow_id)
 
+    @staticmethod
+    def _conflict_keys(wf: dict) -> tuple[str, str]:
+        """Git-conflict identity for a workflow: ``(workspace, branch)``.
+
+        ``workspace`` is the actual git working tree the workflow mutates:
+        ``worktree_path`` when set (fork / ``worktree`` strategy — an isolated
+        worktree) else ``project_path`` (``new-branch`` / ``same-branch`` — the
+        main repo dir, shared). Two workflows conflict if they share a
+        workspace OR a non-empty branch (git forbids the same branch in two
+        worktrees, and batch workflows can be assigned the same branch). #1002.
+        """
+        workspace = wf.get("worktree_path") or wf.get("project_path") or ""
+        branch = wf.get("branch_name") or ""
+        return workspace, branch
+
+    def _reclaim_paused_slots(self, repo) -> None:
+        """Release git-conflict keys held by workflows that have since been paused.
+
+        Pausing SIGSTOPs the agent but leaves its orchestrator's ``advance()``
+        blocked on the frozen process, so the ``finally`` that clears its
+        workspace/branch/batch keys never runs. A forked child sharing the
+        parent's ``project_path`` is then starved indefinitely (#1002).
+
+        We release the paused workflow's *conflict keys* (so the fork can run)
+        but keep its ``workflow_id`` in ``_in_progress_ids`` — that prevents the
+        scheduler from double-advancing it on resume (the in-flight advance()
+        owns the resumption). The frozen parent does no git work, so concurrent
+        fork execution is safe.
+        """
+        with self._in_progress_lock:
+            if not self._in_progress_ids:
+                return
+            ids_snapshot = list(self._in_progress_ids)
+
+        paused: list[dict] = []
+        for wid in ids_snapshot:
+            try:
+                w = repo.get_workflow(wid)
+            except Exception:
+                w = None
+            if w and w.get("status") == "paused":
+                paused.append(w)
+
+        if not paused:
+            return
+
+        with self._in_progress_lock:
+            for w in paused:
+                # NOTE: deliberately keep workflow_id in _in_progress_ids to
+                # block a double-advance race when the frozen agent is resumed.
+                workspace, branch = self._conflict_keys(w)
+                if workspace:
+                    self._in_progress_workspaces.discard(workspace)
+                if branch:
+                    self._in_progress_branches.discard(branch)
+                batch_id = w.get("batch_id")
+                if batch_id:
+                    self._in_progress_batch_ids.discard(batch_id)
+        logger.info(
+            "Reclaimed git-conflict slots for paused workflows: %s",
+            [w.get("workflow_id", "")[:8] for w in paused],
+        )
+
     def _run_loop(self):
         """Main loop: poll for active workflows and advance them."""
         while not self._stop_event.is_set():
@@ -108,10 +177,10 @@ class AutonomousScheduler:
         lock_owner = f"{socket.gethostname()}/{threading.current_thread().name}"
         repo = _get_repo()
 
-        # Get workflow's batch_id and project_path for cleanup
+        # Get workflow's batch_id and git-conflict keys for cleanup
         workflow = repo.get_workflow(workflow_id)
         batch_id = workflow.get("batch_id") if workflow else None
-        project_path = workflow.get("project_path", "") if workflow else ""
+        workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
 
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
@@ -120,8 +189,10 @@ class AutonomousScheduler:
                 self._in_progress_ids.discard(workflow_id)
                 if batch_id:
                     self._in_progress_batch_ids.discard(batch_id)
-                if project_path:
-                    self._in_progress_paths.discard(project_path)
+                if workspace:
+                    self._in_progress_workspaces.discard(workspace)
+                if branch:
+                    self._in_progress_branches.discard(branch)
             return workflow_id
 
         orchestrator = None
@@ -162,8 +233,10 @@ class AutonomousScheduler:
                 self._in_progress_ids.discard(workflow_id)
                 if batch_id:
                     self._in_progress_batch_ids.discard(batch_id)
-                if project_path:
-                    self._in_progress_paths.discard(project_path)
+                if workspace:
+                    self._in_progress_workspaces.discard(workspace)
+                if branch:
+                    self._in_progress_branches.discard(branch)
         return workflow_id
 
     @staticmethod
@@ -228,6 +301,9 @@ class AutonomousScheduler:
 
         repo = _get_repo()
         self._promote_queued_workflows(repo)
+        # Release git-conflict keys held by workflows paused mid-advance, so a
+        # forked child sharing the parent's project_path isn't starved (#1002).
+        self._reclaim_paused_slots(repo)
 
         try:
             workflows = repo.get_active_workflows()
@@ -236,8 +312,9 @@ class AutonomousScheduler:
             return
 
         # Filter out paused, already-in-progress workflows, batch workflows
-        # whose batch is already being processed, and workflows whose
-        # project_path is already being processed by another workflow
+        # whose batch is already being processed, and workflows whose git
+        # working tree (worktree_path or project_path) OR branch is already
+        # being processed by another workflow.
         with self._in_progress_lock:
             active = []
             for wf in workflows:
@@ -249,9 +326,11 @@ class AutonomousScheduler:
                 batch_id = wf.get("batch_id")
                 if batch_id and batch_id in self._in_progress_batch_ids:
                     continue
-                # Check if the project_path is already being processed
-                project_path = wf.get("project_path", "")
-                if project_path and project_path in self._in_progress_paths:
+                # git-conflict guard: same working tree OR same branch (#1002)
+                workspace, branch = self._conflict_keys(wf)
+                if workspace and workspace in self._in_progress_workspaces:
+                    continue
+                if branch and branch in self._in_progress_branches:
                     continue
                 active.append(wf)
 
@@ -273,16 +352,18 @@ class AutonomousScheduler:
         if not to_process:
             return
 
-        # Mark workflows, their batches, and project_paths as in-progress
+        # Mark workflows, their batches, and git-conflict keys as in-progress
         with self._in_progress_lock:
             for wf in to_process:
                 self._in_progress_ids.add(wf.get("workflow_id", ""))
                 batch_id = wf.get("batch_id")
                 if batch_id:
                     self._in_progress_batch_ids.add(batch_id)
-                project_path = wf.get("project_path", "")
-                if project_path:
-                    self._in_progress_paths.add(project_path)
+                workspace, branch = self._conflict_keys(wf)
+                if workspace:
+                    self._in_progress_workspaces.add(workspace)
+                if branch:
+                    self._in_progress_branches.add(branch)
 
         with ThreadPoolExecutor(
             max_workers=min(MAX_CONCURRENT_WORKFLOWS, len(to_process)),
