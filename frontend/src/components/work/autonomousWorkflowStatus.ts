@@ -97,4 +97,3 @@ export const AUTONOMOUS_WORKFLOW_STATUS_CONFIG: Record<string, AutonomousWorkflo
 export function getAutonomousWorkflowStatusConfig(status: string): AutonomousWorkflowStatusConfig {
   return AUTONOMOUS_WORKFLOW_STATUS_CONFIG[status] ?? AUTONOMOUS_WORKFLOW_STATUS_CONFIG.pending;
 }
-

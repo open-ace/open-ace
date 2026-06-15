@@ -38,12 +38,12 @@ export const ForkConnector: React.FC<ForkConnectorProps> = ({ feedback, branchCo
         </div>
       )}
 
-      <div className="d-flex mt-2 timeline-fork-connector__lines" style={{ height: '14px', gap: '0' }}>
+      <div
+        className="d-flex mt-2 timeline-fork-connector__lines"
+        style={{ height: '14px', gap: '0' }}
+      >
         {Array.from({ length: branchCount }, (_, i) => (
-          <div
-            key={i}
-            className="timeline-fork-connector__line-slot"
-          >
+          <div key={i} className="timeline-fork-connector__line-slot">
             <div
               className="timeline-fork-connector__line"
               style={{
@@ -95,9 +95,7 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
       >
         <div className="fork-branch-column__title fw-semibold">{title}</div>
         <div className="fork-branch-column__badges d-flex justify-content-center gap-1 mt-1">
-          <Badge variant={statusConfig.variant}>
-            {t(statusConfig.labelKey, language)}
-          </Badge>
+          <Badge variant={statusConfig.variant}>{t(statusConfig.labelKey, language)}</Badge>
           {branchName && (
             <Badge variant="light">
               <i className="bi bi-git me-1"></i>
