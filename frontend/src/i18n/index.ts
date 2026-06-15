@@ -114,7 +114,10 @@ const translations: Record<Language, Translations> = {
 
     // Date Range Presets
     dateRangeLast7Days: 'Last 7 Days',
+    dateRangeLast14Days: 'Last 14 Days',
     dateRangeLast30Days: 'Last 30 Days',
+    dateRangeLast60Days: 'Last 60 Days',
+    dateRangeLast90Days: 'Last 90 Days',
     dateRangeThisMonth: 'This Month',
     dateRangeLastMonth: 'Last Month',
     dateRangeCustom: 'Custom',
@@ -1347,7 +1350,10 @@ const translations: Record<Language, Translations> = {
 
     // Date Range Presets
     dateRangeLast7Days: '最近 7 天',
+    dateRangeLast14Days: '最近 14 天',
     dateRangeLast30Days: '最近 30 天',
+    dateRangeLast60Days: '最近 60 天',
+    dateRangeLast90Days: '最近 90 天',
     dateRangeThisMonth: '本月',
     dateRangeLastMonth: '上月',
     dateRangeCustom: '自定义',
@@ -2556,7 +2562,10 @@ const translations: Record<Language, Translations> = {
 
     // Date Range Presets
     dateRangeLast7Days: '過去7日間',
+    dateRangeLast14Days: '過去14日間',
     dateRangeLast30Days: '過去30日間',
+    dateRangeLast60Days: '過去60日間',
+    dateRangeLast90Days: '過去90日間',
     dateRangeThisMonth: '今月',
     dateRangeLastMonth: '先月',
     dateRangeCustom: 'カスタム',
@@ -3463,7 +3472,10 @@ const translations: Record<Language, Translations> = {
 
     // Date Range Presets
     dateRangeLast7Days: '지난 7일',
+    dateRangeLast14Days: '지난 14일',
     dateRangeLast30Days: '지난 30일',
+    dateRangeLast60Days: '지난 60일',
+    dateRangeLast90Days: '지난 90일',
     dateRangeThisMonth: '이번 달',
     dateRangeLastMonth: '지난 달',
     dateRangeCustom: '사용자 지정',

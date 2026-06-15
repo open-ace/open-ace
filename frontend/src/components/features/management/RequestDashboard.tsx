@@ -33,14 +33,14 @@ import {
 } from '@/api/request';
 import { formatNumber, createMatcherConfig } from '@/utils';
 
-// Date range presets
-const DATE_RANGE_PRESETS = [
-  { value: '7', label: '7 Days' },
-  { value: '14', label: '14 Days' },
-  { value: '30', label: '30 Days' },
-  { value: '60', label: '60 Days' },
-  { value: '90', label: '90 Days' },
-];
+// Date range preset values for the selector
+const DATE_RANGE_PRESET_VALUES = [
+  { value: '7', labelKey: 'dateRangeLast7Days' },
+  { value: '14', labelKey: 'dateRangeLast14Days' },
+  { value: '30', labelKey: 'dateRangeLast30Days' },
+  { value: '60', labelKey: 'dateRangeLast60Days' },
+  { value: '90', labelKey: 'dateRangeLast90Days' },
+] as const;
 
 // Helper to get date string N days ago
 const getDaysAgo = (days: number): string => {
@@ -108,6 +108,16 @@ export const RequestDashboard: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Date range presets with translated labels
+  const dateRangePresets = useMemo(
+    () =>
+      DATE_RANGE_PRESET_VALUES.map((preset) => ({
+        value: preset.value,
+        label: t(preset.labelKey, language),
+      })),
+    [language]
+  );
 
   // Aggregate user stats
   const aggregatedUserStats = useMemo(() => {
@@ -286,7 +296,7 @@ export const RequestDashboard: React.FC = () => {
       <Card className="mb-4">
         <div className="d-flex flex-wrap gap-2 align-items-center">
           <span className="me-2">{t('dateRange', language)}:</span>
-          {DATE_RANGE_PRESETS.map((preset) => (
+          {dateRangePresets.map((preset) => (
             <Button
               key={preset.value}
               variant={
