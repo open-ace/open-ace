@@ -37,7 +37,9 @@ services:
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
     volumes:
-      - ./config:/home/open-ace/.open-ace:ro
+      # CONFIG_DIR: Container runs as root (required for multi-user workspace mode)
+      # ~/.open-ace expands to /root/.open-ace when running as root
+      - ./config:/root/.open-ace:ro
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
