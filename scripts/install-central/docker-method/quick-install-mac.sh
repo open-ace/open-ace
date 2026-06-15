@@ -185,7 +185,7 @@ cat > "$DEPLOY_DIR/config/config.json" << EOF
   "host_name": "$(hostname)",
   "database": {
     "type": "sqlite",
-    "path": "/home/open-ace/.open-ace/ace.db"
+    "path": "/root/.open-ace/ace.db"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
@@ -233,7 +233,7 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY}
     volumes:
-      - ./config:/home/open-ace/.open-ace:ro
+      - ./config:/root/.open-ace:ro
       - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]

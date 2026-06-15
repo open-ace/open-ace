@@ -120,7 +120,7 @@ cd ~/open-ace
   "host_name": "my-mac",
   "database": {
     "type": "sqlite",
-    "path": "/home/open-ace/.open-ace/ace.db"
+    "path": "/root/.open-ace/ace.db"
   },
   "server": {
     "upload_auth_key": "your-random-key",
@@ -155,7 +155,7 @@ services:
       - SECRET_KEY=your-secret-key
       - UPLOAD_AUTH_KEY=your-upload-key
     volumes:
-      - ./config:/home/open-ace/.open-ace:ro
+      - ./config:/root/.open-ace:ro
       - ./logs:/app/logs
 ```
 

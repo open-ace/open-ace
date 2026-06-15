@@ -169,7 +169,7 @@ chmod 440 /etc/sudoers.d/open-ace-webui
 
 ### 数据持久化
 
-- **配置文件**: `./config/` → `/home/open-ace/.open-ace/`
+- **配置文件**: `./config/` → `/root/.open-ace/`
 - **日志**: `./logs/` → `/app/logs/`
 - **数据库**: Docker volume `postgres-data`
 - **Workspace**: Docker volume `workspace-data` → `/workspace/`
