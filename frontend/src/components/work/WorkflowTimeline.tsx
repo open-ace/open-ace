@@ -878,7 +878,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {t('autoDevRoundLabel', language)} {workflow.dev_round}
                 </span>
               )}
-              {workflow.github_issue_number && (
+              {(workflow.requirements_issue_url || workflow.github_issue_number) && (
                 <a
                   href={workflow.requirements_issue_url || '#'}
                   target={workflow.requirements_issue_url ? '_blank' : undefined}
@@ -890,7 +890,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 >
                   <i className="bi bi-card-text"></i>
                   <span>
-                    {t('autoIssueBadge', language)} #{workflow.github_issue_number}
+                    {workflow.github_issue_number
+                      ? `${t('autoIssueBadge', language)} #${workflow.github_issue_number}`
+                      : t('autoIssueBadge', language)}
                   </span>
                 </a>
               )}
