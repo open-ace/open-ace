@@ -289,11 +289,11 @@ class AutonomousAgentRunner:
         if not persisted_id or not self.session_manager:
             return
 
+        # NOTE: request_count / total_tokens / in-out are owned by
+        # increment_session_usage at finish time (per-call delta), NOT written
+        # here. Writing them here during streaming (ASSIGN) would double-count
+        # against the finish increment (#1007 review).
         updates = {
-            "request_count": session.request_count,
-            "total_tokens": session.total_tokens,
-            "total_input_tokens": session.total_input_tokens,
-            "total_output_tokens": session.total_output_tokens,
             "project_path": session.encoded_project_path,
         }
         if session.user_id:
@@ -414,20 +414,23 @@ class AutonomousAgentRunner:
                 except Exception as e:
                     logger.warning("Failed to persist session messages: %s", e)
 
-            # Update session record
+            # Update session record. Counters are INCREMENTED (not overwritten)
+            # so the session columns stay cumulative and Σ milestone == Σ session
+            # holds (#1003). The previous overwrite reset the columns to each
+            # call's local count, breaking the invariant.
             if self.session_manager and persisted_session_id:
                 try:
-                    update_fields = {
-                        "request_count": result.request_count,
-                        "total_tokens": result.total_tokens,
-                        "total_input_tokens": result.total_input_tokens,
-                        "total_output_tokens": result.total_output_tokens,
-                    }
-                    if result.success:
-                        update_fields["status"] = "completed"
-                    else:
-                        update_fields["status"] = "error"
-                    self.session_manager.update_session_fields(persisted_session_id, update_fields)
+                    self.session_manager.increment_session_usage(
+                        persisted_session_id,
+                        request_delta=result.request_count or 0,
+                        total_tokens_delta=result.total_tokens or 0,
+                        total_input_delta=result.total_input_tokens or 0,
+                        total_output_delta=result.total_output_tokens or 0,
+                    )
+                    status = "completed" if result.success else "error"
+                    self.session_manager.update_session_fields(
+                        persisted_session_id, {"status": status}
+                    )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
 
@@ -805,6 +808,9 @@ class AutonomousAgentRunner:
         main workflow.
         """
         # Prefer ordered event log for accurate message interleaving
+        # count_usage=False: the agent runner owns request_count/total_tokens via
+        # increment_session_usage at finish time; counting here too would
+        # double-count (#1003 / #1007 review).
         if result.event_log:
             for event in result.event_log:
                 if event.get("type") == "assistant":
@@ -819,6 +825,7 @@ class AutonomousAgentRunner:
                             if event.get("message_id")
                             else None
                         ),
+                        count_usage=False,
                     )
                 elif event.get("type") == "tool_use":
                     tool_input = event.get("tool_input", {})
@@ -839,6 +846,7 @@ class AutonomousAgentRunner:
                                 else {}
                             ),
                         },
+                        count_usage=False,
                     )
                 # usage events are metadata-only, not persisted as messages
         else:
@@ -849,6 +857,7 @@ class AutonomousAgentRunner:
                     milestone_id=milestone_id,
                     role="assistant",
                     content=result.response_text,
+                    count_usage=False,
                 )
             for tool_call in result.tool_calls:
                 tool_info = tool_call.get("tool", {})
@@ -864,6 +873,7 @@ class AutonomousAgentRunner:
                         else str(tool_input)
                     ),
                     metadata={"tool_name": tool_name},
+                    count_usage=False,
                 )
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:

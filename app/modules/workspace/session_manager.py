@@ -676,6 +676,52 @@ class SessionManager:
 
         return success
 
+    def increment_session_usage(
+        self,
+        session_id: str,
+        request_delta: int = 0,
+        total_tokens_delta: int = 0,
+        total_input_delta: int = 0,
+        total_output_delta: int = 0,
+    ) -> bool:
+        """Increment a session's cumulative usage counters by the given deltas.
+
+        ``agent_sessions.{request_count,total_tokens,total_input_tokens,
+        total_output_tokens}`` must be monotonically accumulated so that
+        ``Σ milestone.phase_* == session.*`` holds (#1003). The previous
+        per-call overwrite (update_session_fields) reset the column to each
+        call's local count, breaking the invariant. Callers pass the per-call
+        ``AgentTaskResult`` counters as deltas.
+        """
+        if not session_id:
+            return False
+        p = _param()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            UPDATE agent_sessions
+            SET request_count = COALESCE(request_count, 0) + {p},
+                total_tokens = COALESCE(total_tokens, 0) + {p},
+                total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
+                total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
+                updated_at = {p}
+            WHERE session_id = {p}
+            """,
+            (
+                request_delta,
+                total_tokens_delta,
+                total_input_delta,
+                total_output_delta,
+                datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                session_id,
+            ),
+        )
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return success
+
     def get_messages(
         self, session_id: str, limit: Optional[int] = None, before_id: Optional[int] = None
     ) -> list[SessionMessage]:
@@ -721,6 +767,7 @@ class SessionManager:
         model: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
         milestone_id: str = "",
+        count_usage: bool = True,
     ) -> Optional[SessionMessage]:
         """
         Add a message to a session.
@@ -732,6 +779,11 @@ class SessionManager:
             tokens_used: Tokens consumed by this message.
             model: Optional model name.
             metadata: Optional metadata dict.
+            count_usage: When True (default), accumulate request_count (assistant
+                messages) and total_tokens on the session. Autonomous local runs
+                pass False because the agent runner owns those counters via
+                increment_session_usage (avoids double-count); non-autonomous
+                callers (remote, session_sync) keep True as they rely on this.
 
         Returns:
             SessionMessage or None if session not found.
@@ -776,20 +828,35 @@ class SessionManager:
             ),
         )
 
-        # Update session message count, request count and token count
-        # Only assistant messages represent actual API requests (toolResult is local execution)
-        request_count_increment = 1 if role == "assistant" else 0
-        cursor.execute(
-            f"""
-            UPDATE agent_sessions
-            SET message_count = message_count + 1,
-                request_count = COALESCE(request_count, 0) + {_param()},
-                total_tokens = total_tokens + {_param()},
-                updated_at = {_param()}
-            WHERE session_id = {_param()}
-        """,
-            (request_count_increment, tokens_used, now.isoformat(), session_id),
-        )
+        # message_count always increments. request_count / total_tokens are
+        # accumulated ONLY for non-autonomous callers (count_usage=True) —
+        # remote_session_manager and session_sync rely on add_message for these.
+        # Autonomous local runs pass count_usage=False because the agent runner
+        # owns those counters via increment_session_usage (per-call delta), so
+        # counting here too would double-count (#1003 / #1007 review).
+        request_count_increment = 1 if (count_usage and role == "assistant") else 0
+        if count_usage:
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = message_count + 1,
+                    request_count = COALESCE(request_count, 0) + {_param()},
+                    total_tokens = total_tokens + {_param()},
+                    updated_at = {_param()}
+                WHERE session_id = {_param()}
+            """,
+                (request_count_increment, tokens_used, now.isoformat(), session_id),
+            )
+        else:
+            cursor.execute(
+                f"""
+                UPDATE agent_sessions
+                SET message_count = message_count + 1,
+                    updated_at = {_param()}
+                WHERE session_id = {_param()}
+            """,
+                (now.isoformat(), session_id),
+            )
 
         message.id = cursor.lastrowid
         conn.commit()
