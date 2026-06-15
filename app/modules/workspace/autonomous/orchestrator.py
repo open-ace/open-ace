@@ -236,7 +236,9 @@ API_RETRY_MAX_DELAY = 300  # max single retry delay (seconds)
 # Patterns are kept specific (status codes + unambiguous phrases) to avoid
 # false-positive retries on legitimate plans that merely discuss error handling.
 _TRANSIENT_API_ERROR_RE = re.compile(
-    r"api\s*error:?\s*(?:4\d{2}|5\d{2})"  # "API Error: 529", "API Error: 503"
+    # "API Error: 429" / "API Error: 5xx". Only 429 among 4xx is transient;
+    # 400/401/403/404/422 are permanent client errors and must NOT trigger retry.
+    r"api\s*error:?\s*(?:429|5\d{2})"
     r"|(?:429|quota\s+exceeded|rate[\s-]?limit|too\s+many\s+requests)"
     r"|overloaded"  # "The service may be temporarily overloaded"
     r"|bad\s+gateway|service\s+unavailable|gateway\s+timeout|internal\s+server\s+error",

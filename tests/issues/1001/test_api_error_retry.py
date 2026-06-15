@@ -85,6 +85,17 @@ class TestIsTransientApiError:
         plan = "## 实现方案\n构建一个用户登录系统，包含 JWT 认证、密码重置和审计日志功能。"
         assert not AutonomousOrchestrator._is_transient_api_error(plan)
 
+    def test_4xx_permanent_errors_not_transient(self):
+        # 400/401/403/404/422 are permanent client errors — must NOT retry.
+        for body in [
+            "API Error: 400 Bad Request",
+            "API Error: 401 Unauthorized",
+            "API Error: 403 Forbidden",
+            "API Error: 404 Not Found",
+            "API Error: 422 Unprocessable Entity",
+        ]:
+            assert not AutonomousOrchestrator._is_transient_api_error(body), body
+
     def test_empty_and_none(self):
         assert not AutonomousOrchestrator._is_transient_api_error("")
         assert not AutonomousOrchestrator._is_transient_api_error(None)

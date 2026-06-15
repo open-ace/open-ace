@@ -122,6 +122,16 @@ class AutonomousScheduler:
         scheduler from double-advancing it on resume (the in-flight advance()
         owns the resumption). The frozen parent does no git work, so concurrent
         fork execution is safe.
+
+        Caveat — resume window: ``resume_workflow`` only SIGCONTs + flips
+        status; it does NOT re-acquire the workspace/branch key. Between resume
+        and the in-flight ``advance()`` returning, the parent's workspace key is
+        absent from the set. If a *new-branch* workflow sharing the parent's
+        ``project_path`` starts in that window it could run concurrently and
+        race on the main repo dir. Forks (separate worktree) are unaffected.
+        The window is bounded by the agent finishing its resumed work, and in
+        practice the parent's own ``advance()`` re-checks git state on resume.
+        Acceptable for now; flagged in #1002 review.
         """
         with self._in_progress_lock:
             if not self._in_progress_ids:
