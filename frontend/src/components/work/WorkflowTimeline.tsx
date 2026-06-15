@@ -1389,7 +1389,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <span className="workflow-timeline-header-pill workflow-timeline-header-pill-status">
             {workflow.status}
           </span>
-          {workflow.github_issue_number &&
+          {(resolvedIssueUrl || workflow.github_issue_number) &&
             (resolvedIssueUrl ? (
               <a
                 href={resolvedIssueUrl}
@@ -1398,7 +1398,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 className="text-decoration-none workflow-timeline-header-link workflow-timeline-header-pill workflow-timeline-header-pill-link"
               >
                 <i className="bi bi-card-text me-1"></i>
-                {t('autoIssueBadge', language)} #{workflow.github_issue_number}
+                {workflow.github_issue_number
+                  ? `${t('autoIssueBadge', language)} #${workflow.github_issue_number}`
+                  : t('autoIssueBadge', language)}
               </a>
             ) : (
               <span className="workflow-timeline-header-pill workflow-timeline-header-pill-link">
