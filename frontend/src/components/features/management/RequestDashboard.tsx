@@ -35,11 +35,11 @@ import { formatNumber, createMatcherConfig } from '@/utils';
 
 // Date range preset values for the selector
 const DATE_RANGE_PRESET_VALUES = [
-  { value: '7', labelKey: 'dateRange7Days' },
-  { value: '14', labelKey: 'dateRange14Days' },
-  { value: '30', labelKey: 'dateRange30Days' },
-  { value: '60', labelKey: 'dateRange60Days' },
-  { value: '90', labelKey: 'dateRange90Days' },
+  { value: '7', labelKey: 'dateRangeLast7Days' },
+  { value: '14', labelKey: 'dateRangeLast14Days' },
+  { value: '30', labelKey: 'dateRangeLast30Days' },
+  { value: '60', labelKey: 'dateRangeLast60Days' },
+  { value: '90', labelKey: 'dateRangeLast90Days' },
 ] as const;
 
 // Helper to get date string N days ago
