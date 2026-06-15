@@ -95,7 +95,7 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
       >
         <div className="fork-branch-column__title fw-semibold">{title}</div>
         <div className="fork-branch-column__badges d-flex justify-content-center gap-1 mt-1">
-          <Badge variant={color as 'primary' | 'success' | 'warning' | 'info'}>
+          <Badge variant={statusConfig.variant}>
             {t(statusConfig.labelKey, language)}
           </Badge>
           {branchName && (
