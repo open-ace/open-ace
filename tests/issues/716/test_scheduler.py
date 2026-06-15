@@ -242,8 +242,12 @@ class TestSchedulerProcessWorkflows:
 
         mock_repo.update_workflow.assert_not_called()
 
-    def test_pending_workflows_are_prioritized_ahead_of_waiting(self):
+    def test_pending_workflows_are_prioritized_ahead_of_waiting(self, monkeypatch):
         """Execution slots should prefer pending work over wait-phase polling."""
+        # Cap concurrency to 1 slot so the prioritized workflow deterministically
+        # wins it (the ThreadPool's construction order is otherwise non-deterministic,
+        # making called_ids[0] racy).
+        monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
         scheduler = AutonomousScheduler()
         mock_repo = MagicMock()
         mock_repo.get_queued_workflows.return_value = []
@@ -265,4 +269,4 @@ class TestSchedulerProcessWorkflows:
                 scheduler._process_workflows()
 
                 called_ids = [call.args[0] for call in mock_orch_cls.call_args_list]
-                assert called_ids[0] == "wf-pending"
+                assert called_ids == ["wf-pending"]

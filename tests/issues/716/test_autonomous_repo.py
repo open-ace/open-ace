@@ -235,31 +235,26 @@ class TestWorkflowCRUD:
         )
         repo.update_milestone(
             "ms-plan",
-            {"completed_at": "2026-06-12 20:00:00", "started_at": "2026-06-12 20:00:00"},
+            {
+                "completed_at": "2026-06-12 20:00:00",
+                "started_at": "2026-06-12 20:00:00",
+                "phase_total_tokens": 300,
+                "phase_request_count": 2,
+            },
         )
         repo.update_milestone(
             "ms-dev",
-            {"completed_at": "2026-06-12 20:10:00", "started_at": "2026-06-12 20:10:00"},
+            {
+                "completed_at": "2026-06-12 20:10:00",
+                "started_at": "2026-06-12 20:10:00",
+                "phase_total_tokens": 1200,
+                "phase_request_count": 4,
+            },
         )
 
-        auto_db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL UNIQUE,
-                total_tokens INTEGER DEFAULT 0,
-                request_count INTEGER DEFAULT 0
-            )
-            """
-        )
-        auto_db.execute(
-            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
-            ("sess-plan", 1200, 4),
-        )
-        auto_db.execute(
-            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
-            ("sess-review", 300, 2),
-        )
+        # Per-milestone usage now comes from each milestone's own phase_*
+        # columns (the authoritative source since #984/#1003), not from an
+        # agent_sessions join.
 
         summary = repo.get_milestone_usage_summary(workflow["workflow_id"])
 
