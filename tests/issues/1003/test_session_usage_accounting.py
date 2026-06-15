@@ -14,9 +14,12 @@ now INCREMENTS via ``increment_session_usage``, and ``add_message`` only owns
 ``message_count``.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from app.modules.workspace import session_manager as sm_mod
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.session_manager import SessionManager
 
 
@@ -88,22 +91,68 @@ class TestIncrementSessionUsage:
         assert sqlite_sm.increment_session_usage("", request_delta=1) is False
 
 
-# ── add_message no longer touches counters ───────────────────────────────
+# ── add_message counter accounting (count_usage gate) ────────────────────
 
 
-class TestAddMessageOwnsMessageCountOnly:
-    def test_request_count_and_tokens_unchanged_by_add_message(self, sqlite_sm):
+class TestAddMessageCountUsageGate:
+    def test_autonomous_count_usage_false_leaves_counters(self, sqlite_sm):
+        """Autonomous runner passes count_usage=False (it owns the counters via
+        increment_session_usage), so add_message only bumps message_count."""
         sm = sqlite_sm
         _create(sm)
-        # counters set by the agent runner increment
         sm.increment_session_usage("sess-1", request_delta=5, total_tokens_delta=500)
-        # adding messages must NOT bump request_count/total_tokens
-        sm.add_message(session_id="sess-1", role="assistant", content="hello")
-        sm.add_message(session_id="sess-1", role="tool", content="result")
+        sm.add_message(session_id="sess-1", role="assistant", content="hi", count_usage=False)
+        sm.add_message(session_id="sess-1", role="tool", content="result", count_usage=False)
         s = sm.get_session("sess-1")
         assert s.request_count == 5  # unchanged
         assert s.total_tokens == 500  # unchanged
         assert s.message_count == 2  # add_message still owns this
+
+    def test_non_autonomous_default_accumulates(self, sqlite_sm):
+        """Non-autonomous callers (remote_session_manager, session_sync) rely on
+        add_message for request_count/total_tokens — the default count_usage=True
+        must keep accumulating (regression guard for the #1007 review)."""
+        sm = sqlite_sm
+        _create(sm)
+        sm.add_message(
+            session_id="sess-1", role="assistant", content="hi", tokens_used=120
+        )  # default count_usage=True
+        sm.add_message(session_id="sess-1", role="assistant", content="bye", tokens_used=80)
+        sm.add_message(session_id="sess-1", role="tool", content="r")  # tool: no request bump
+        s = sm.get_session("sess-1")
+        assert s.request_count == 2  # only assistant messages count
+        assert s.total_tokens == 200  # 120 + 80
+        assert s.message_count == 3
+
+
+# ── sidebar streaming sync must NOT write counters (Blocker from #1007 review)
+
+
+class TestSidebarSyncOmitsCounters:
+    """For local claude-code (sidebar session source), _sync_sidebar_session_totals
+    fires per assistant turn during streaming. It must NOT write the counters —
+    the finish-path increment_session_usage owns them, or it double-counts."""
+
+    def test_sidebar_sync_does_not_set_counters(self):
+        runner = AutonomousAgentRunner(session_manager=MagicMock())
+        session = MagicMock()
+        session.cli_tool = "claude-code"
+        session.workspace_type = "local"
+        session.persisted_session_id = "sidebar-1"
+        session.encoded_project_path = "-tmp-proj"
+        session.user_id = None
+
+        runner._sync_sidebar_session_totals(session, status="active")
+
+        fields = runner.session_manager.update_session_fields.call_args.args[1]
+        for counter in (
+            "request_count",
+            "total_tokens",
+            "total_input_tokens",
+            "total_output_tokens",
+        ):
+            assert counter not in fields, f"{counter} must not be written by sidebar-sync"
+        assert "project_path" in fields  # non-counter fields still synced
 
 
 # ── the invariant: Σ milestone == session ─────────────────────────────────
