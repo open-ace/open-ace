@@ -69,8 +69,9 @@ class TestGitHubOpsIssue:
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_issue(self, mock_run):
+        # gh issue create prints the issue URL to stdout (no --json support)
         mock_run.return_value = MagicMock(
-            returncode=0, stdout='{"number": 42, "url": "https://github.com/user/test/issues/42"}'
+            returncode=0, stdout="https://github.com/user/test/issues/42"
         )
         result = self.gh.create_issue("Bug fix", body="Fix the bug", labels=["bug"])
         assert result["number"] == 42
@@ -81,7 +82,7 @@ class TestGitHubOpsIssue:
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_issue_no_labels(self, mock_run):
         mock_run.return_value = MagicMock(
-            returncode=0, stdout='{"number": 43, "url": "https://github.com/user/test/issues/43"}'
+            returncode=0, stdout="https://github.com/user/test/issues/43"
         )
         result = self.gh.create_issue("Feature", body="New feature")
         assert result["number"] == 43
@@ -98,12 +99,9 @@ class TestGitHubOpsIssue:
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_add_issue_comment(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"id": 100, "url": "https://github.com/user/test/issues/42#issuecomment-100"}',
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         result = self.gh.add_issue_comment(42, "This is a comment")
-        assert result["id"] == 100
+        assert result["number"] == 42
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_list_issue_comments(self, mock_run):
@@ -180,10 +178,15 @@ class TestGitHubOpsPR:
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_pr(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"number": 10, "url": "https://github.com/user/test/pull/10", "headRefName": "feature/test"}',
-        )
+        # create_pr makes two gh calls: `pr create` (prints URL) then
+        # `pr view --json` (structured data).
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="https://github.com/user/test/pull/10"),
+            MagicMock(
+                returncode=0,
+                stdout='{"number": 10, "url": "https://github.com/user/test/pull/10", "headRefName": "feature/test"}',
+            ),
+        ]
         result = self.gh.create_pr(
             title="New feature", body="Description", head="feature/test", base="main"
         )
@@ -191,12 +194,16 @@ class TestGitHubOpsPR:
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_create_pr_draft(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout='{"number": 11, "url": "https://github.com/user/test/pull/11", "headRefName": "draft"}',
-        )
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="https://github.com/user/test/pull/11"),
+            MagicMock(
+                returncode=0,
+                stdout='{"number": 11, "url": "https://github.com/user/test/pull/11", "headRefName": "draft"}',
+            ),
+        ]
         self.gh.create_pr("Draft PR", draft=True)
-        cmd = mock_run.call_args[0][0]
+        # --draft is on the `pr create` call (the first one), not the follow-up view
+        cmd = mock_run.call_args_list[0][0][0]
         assert "--draft" in cmd
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")

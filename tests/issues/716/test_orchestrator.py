@@ -823,6 +823,15 @@ class TestOrchestratorDevelopment:
             orch.repo = mock_repo
             orch.emitter = MagicMock()
             orch._gh = MagicMock()
+            # Serializable defaults for gh methods the orchestrator json.dumps
+            # (commit_shas / diff_stats). Tests may override per-case.
+            orch._gh.get_current_commit.return_value = "abc1234"
+            orch._gh.get_commit_diff_stats.return_value = {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0,
+                "commits": 1,
+            }
 
         return orch, mock_repo
 
@@ -841,7 +850,7 @@ class TestOrchestratorDevelopment:
         orch, mock_repo = self._make_orchestrator(wf, milestones=[plan_ms])
         orch._runner = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result(
-            success=True, text="Development complete"
+            success=True, text="Development complete\nAll tests passed (5 passed)"
         )
         orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {"additions": 50, "deletions": 10, "files": 3}
@@ -895,29 +904,41 @@ class TestOrchestratorDevelopment:
         orch._do_development(wf)
 
         update_calls = mock_repo.update_workflow.call_args_list
-        failed_update = update_calls[-1]
-        assert failed_update[0][1]["status"] == "failed"
-        assert "Development failed" in failed_update[0][1]["error_message"]
+        # Dev failure sets workflow "failed"; the subsequent test phase may add
+        # more updates, so search for the failed-status update (not the last).
+        fields_list = [c[0][1] for c in update_calls if len(c[0]) > 1 and isinstance(c[0][1], dict)]
+        assert any(
+            f.get("status") == "failed" and "Development failed" in (f.get("error_message") or "")
+            for f in fields_list
+        )
 
     def test_development_test_failure_sets_error(self):
-        """When tests fail, workflow status becomes failed with test error."""
-        wf = _make_workflow(current_phase="development", status="developing")
+        """When tests fail past max retries, workflow status becomes failed."""
+        from app.modules.workspace.autonomous.orchestrator import MAX_TEST_RETRIES
+
+        # Pre-set test_retries so the next test failure exhausts the retry budget
+        # (the retry path defers via the scheduler — each failure bumps test_retries
+        # and returns; only when it exceeds MAX_TEST_RETRIES does it mark failed).
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            test_retries=MAX_TEST_RETRIES,
+        )
         orch, mock_repo = self._make_orchestrator(wf)
         orch._runner = MagicMock()
-        orch._runner.run_agent_task.side_effect = [
-            _make_agent_result(success=True, text="Dev done"),
-            _make_agent_result(success=False, error="Tests failed"),
-        ]
-        # commit_before="abc1234" -> commit_after dev="def5678" (dev changed code)
-        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678", "def5678"]
-        orch._gh.get_diff_stats.return_value = {}
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=False, error="Tests failed"
+        )
+        orch._gh.get_current_commit.return_value = "abc1234"
 
         orch._do_development(wf)
 
         update_calls = mock_repo.update_workflow.call_args_list
-        failed_update = update_calls[-1]
-        assert failed_update[0][1]["status"] == "failed"
-        assert "Tests failed" in failed_update[0][1]["error_message"]
+        fields_list = [c[0][1] for c in update_calls if len(c[0]) > 1 and isinstance(c[0][1], dict)]
+        assert any(
+            f.get("status") == "failed" and "Tests failed" in (f.get("error_message") or "")
+            for f in fields_list
+        )
 
     def test_development_posts_to_issue(self):
         """Development completion posts status to GitHub issue."""
@@ -928,16 +949,20 @@ class TestOrchestratorDevelopment:
         )
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
-        orch._runner.run_agent_task.return_value = _make_agent_result()
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            text="Dev done\nAll tests passed"
+        )
         orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
 
-        orch._gh.add_issue_comment.assert_called_once()
-        call_args = orch._gh.add_issue_comment.call_args
-        assert call_args[0][0] == 42
-        assert "Development Round 1 Completed" in call_args[0][1]
+        # Dev flow posts several comments (dev progress, test results, all-checks);
+        # verify the development-completion comment landed on the issue.
+        calls = orch._gh.add_issue_comment.call_args_list
+        dev_comments = [c for c in calls if "Development Round 1 Completed" in c[0][1]]
+        assert len(dev_comments) == 1
+        assert dev_comments[0][0][0] == 42
 
     def test_development_no_issue_no_comment(self):
         """No issue comment when github_issue_number is not set."""
@@ -1008,6 +1033,15 @@ class TestOrchestratorPrReview:
             orch.repo = mock_repo
             orch.emitter = MagicMock()
             orch._gh = MagicMock()
+            # Serializable defaults for gh methods the orchestrator json.dumps
+            # (commit_shas / diff_stats). Tests may override per-case.
+            orch._gh.get_current_commit.return_value = "abc1234"
+            orch._gh.get_commit_diff_stats.return_value = {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0,
+                "commits": 1,
+            }
             # Default safe return values for GitHub ops
             orch._gh.get_current_commit.return_value = ""
             # Default: branch has changes (most tests expect PR creation to proceed)
@@ -1347,7 +1381,7 @@ class TestOrchestratorReport:
         orch._gh.add_issue_comment.assert_called_once()
         call_args = orch._gh.add_issue_comment.call_args
         assert call_args[0][0] == 42
-        assert "Progress Report" in call_args[0][1]
+        assert "Dev Round 1 Summary" in call_args[0][1]
 
     def test_report_includes_stats(self):
         """Report includes token counts and diff stats."""
