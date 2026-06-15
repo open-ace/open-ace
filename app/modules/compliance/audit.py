@@ -489,7 +489,10 @@ class AuditAnalyzer:
         all_timestamps = []
         for log in logs:
             if log.timestamp:
-                all_timestamps.append(log.timestamp)
+                ts = log.timestamp
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                all_timestamps.append(ts.astimezone())
         for session in sessions_data:
             # Handle both dict and tuple formats
             if isinstance(session, dict):
