@@ -7,6 +7,8 @@ Provides validation and limits for quota values to ensure:
 - Values are valid numbers (not NaN)
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Optional, Tuple
 
