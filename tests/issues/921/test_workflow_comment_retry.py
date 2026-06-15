@@ -3,7 +3,7 @@ Tests for PR #922 autonomous workflow comment quality and retry fixes (Issue #92
 
 Covers:
 1. _clean_agent_text — Pass 1 (heading strip), Pass 2 (intro strip), Pass 3 (closing strip)
-2. _is_rate_limited — 429 error detection
+2. _is_transient_api_error — transient API error (429/5xx) detection
 """
 
 import pytest
@@ -166,41 +166,49 @@ class TestCleanAgentTextRealWorld:
         assert "代码审查通过" in result
 
 
-# ── Test _is_rate_limited ──────────────────────────────────────────────
+# ── Test _is_transient_api_error ───────────────────────────────────────
 
 
-class TestIsRateLimited:
-    """Test 429 rate limit detection."""
+class TestIsTransientApiError:
+    """Test transient API error (429/5xx) detection."""
 
     def test_detects_429_code(self):
-        assert AutonomousOrchestrator._is_rate_limited("API Error: Request rejected (429)")
+        assert AutonomousOrchestrator._is_transient_api_error("API Error: Request rejected (429)")
 
     def test_detects_quota_exceeded(self):
-        assert AutonomousOrchestrator._is_rate_limited(
+        assert AutonomousOrchestrator._is_transient_api_error(
             "usage allocated quota exceeded. please try again later."
         )
 
     def test_detects_rate_limit(self):
-        assert AutonomousOrchestrator._is_rate_limited("Rate limit reached for default model")
+        assert AutonomousOrchestrator._is_transient_api_error(
+            "Rate limit reached for default model"
+        )
 
     def test_detects_too_many_requests(self):
-        assert AutonomousOrchestrator._is_rate_limited("Too Many Requests - try again later")
+        assert AutonomousOrchestrator._is_transient_api_error("Too Many Requests - try again later")
 
     def test_case_insensitive(self):
-        assert AutonomousOrchestrator._is_rate_limited("QUOTA EXCEEDED for this request")
+        assert AutonomousOrchestrator._is_transient_api_error("QUOTA EXCEEDED for this request")
+
+    def test_4xx_permanent_errors_not_detected(self):
+        # 400/401/403 are permanent client errors — must NOT trigger retry
+        assert not AutonomousOrchestrator._is_transient_api_error("API Error: 401 Unauthorized")
+        assert not AutonomousOrchestrator._is_transient_api_error("API Error: 403 Forbidden")
+        assert not AutonomousOrchestrator._is_transient_api_error("API Error: 400 Bad Request")
 
     def test_normal_error_not_detected(self):
-        assert not AutonomousOrchestrator._is_rate_limited("File not found: config.json")
+        assert not AutonomousOrchestrator._is_transient_api_error("File not found: config.json")
 
     def test_empty_string(self):
-        assert not AutonomousOrchestrator._is_rate_limited("")
+        assert not AutonomousOrchestrator._is_transient_api_error("")
 
     def test_none(self):
-        assert not AutonomousOrchestrator._is_rate_limited(None)
+        assert not AutonomousOrchestrator._is_transient_api_error(None)
 
     def test_issue829_actual_error(self):
         """Test with the actual error from PR #915 Code Review (Round 2)."""
-        assert AutonomousOrchestrator._is_rate_limited(
+        assert AutonomousOrchestrator._is_transient_api_error(
             "API Error: Request rejected (429) · usage allocated quota exceeded. "
             "please try again later."
         )

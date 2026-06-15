@@ -224,11 +224,26 @@ _AGENT_CLOSING_PATTERNS = [
     re.compile(r"建议[：:]\s*$"),
 ]
 
-# 429 rate limit retry configuration.
-# Rate limit typically resolves within 30 minutes.
+# Transient API error retry configuration (429 rate limit, 5xx overload, etc.).
+# These typically resolve within 30 minutes.
 API_RETRY_TOTAL_TIMEOUT = 1800  # max total retry duration (seconds)
 API_RETRY_INITIAL_DELAY = 30  # first retry delay (seconds)
 API_RETRY_MAX_DELAY = 300  # max single retry delay (seconds)
+
+# Transient API error signatures in an agent response/error body. Used to decide
+# retry (with backoff) and, after retries are exhausted, to flag the result as a
+# failure so the error text isn't stored as plan/review content (#1001).
+# Patterns are kept specific (status codes + unambiguous phrases) to avoid
+# false-positive retries on legitimate plans that merely discuss error handling.
+_TRANSIENT_API_ERROR_RE = re.compile(
+    # "API Error: 429" / "API Error: 5xx". Only 429 among 4xx is transient;
+    # 400/401/403/404/422 are permanent client errors and must NOT trigger retry.
+    r"api\s*error:?\s*(?:429|5\d{2})"
+    r"|(?:429|quota\s+exceeded|rate[\s-]?limit|too\s+many\s+requests)"
+    r"|overloaded"  # "The service may be temporarily overloaded"
+    r"|bad\s+gateway|service\s+unavailable|gateway\s+timeout|internal\s+server\s+error",
+    re.IGNORECASE,
+)
 
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
@@ -712,20 +727,19 @@ class AutonomousOrchestrator:
             logger.warning("Failed to link session to milestone", exc_info=True)
 
     @staticmethod
-    def _is_rate_limited(response: str) -> bool:
-        """Detect 429 rate limit errors in agent response or error text."""
+    def _is_transient_api_error(response: str) -> bool:
+        """Detect transient API errors (429 rate limit, 5xx/overload) in a
+        response or error body. Used to trigger retry with backoff and, after
+        retries are exhausted, to flag the result as a failure (#1001).
+        """
         if not response:
             return False
-        response_lower = response.lower()
-        return any(
-            p in response_lower
-            for p in ["429", "quota exceeded", "rate limit", "too many requests"]
-        )
+        return bool(_TRANSIENT_API_ERROR_RE.search(response))
 
     def _run_agent(
         self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
     ) -> AgentTaskResult:
-        """Run an agent task with session-line tracking and 429 retry support.
+        """Run an agent task with session-line tracking and transient-API-error retry.
 
         Args:
             wf: Optional pre-fetched workflow dict to avoid extra DB queries.
@@ -778,27 +792,31 @@ class AutonomousOrchestrator:
             if field and not resume and not (workflow_data or {}).get(field):
                 self._update_workflow({field: result.session_id})
 
-        # 429 rate limit retry — exponential backoff, max 30 minutes total.
-        # Use interruptible sleep (check cancel signal every 5s) so the
-        # orchestrator can be paused/stopped during a retry wait.
+        # Transient API error retry (429 / 5xx / overload) — exponential
+        # backoff, max 30 minutes total. Interruptible sleep (cancel check
+        # every 5s) so the orchestrator can be paused/stopped during a wait.
         _CANCEL_POLL_INTERVAL = 5  # seconds between cancel checks
         retry_start = time.monotonic()
         delay = API_RETRY_INITIAL_DELAY
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
             response_text = result.response_text or ""
             error_text = result.error or ""
-            if not (self._is_rate_limited(response_text) or self._is_rate_limited(error_text)):
-                break  # Not a 429 error, no retry needed
+            if not (
+                self._is_transient_api_error(response_text)
+                or self._is_transient_api_error(error_text)
+            ):
+                break  # Not a transient API error, no retry needed
 
             elapsed = int(time.monotonic() - retry_start)
             logger.warning(
-                "API rate limit (429) detected, retrying in %ds (elapsed: %ds / %ds)",
+                "Transient API error detected, retrying in %ds (elapsed: %ds / %ds): %s",
                 delay,
                 elapsed,
                 API_RETRY_TOTAL_TIMEOUT,
+                (response_text or error_text)[:160],
             )
             self._emit(
-                "rate_limit_retry",
+                "api_error_retry",
                 {
                     "delay": delay,
                     "elapsed": elapsed,
@@ -814,7 +832,7 @@ class AutonomousOrchestrator:
                 time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
                 slept += _CANCEL_POLL_INTERVAL
                 if self._cancel_requested.is_set():
-                    logger.info("429 retry cancelled (cancel requested)")
+                    logger.info("API error retry cancelled (cancel requested)")
                     self._write_phase_usage(milestone_id, result)
                     with self._session_lock:
                         self._current_session_id = result.session_id
@@ -830,6 +848,25 @@ class AutonomousOrchestrator:
             result = self._runner.run_agent_task(**kwargs)
             if result.session_id:
                 self._link_session_to_current_milestone(result.session_id)
+
+        # If the runner reported success but the body is a transient API error
+        # that didn't resolve (e.g. a 529 "overloaded" body returned as
+        # assistant_text with no tokens generated), synthesize a failure so
+        # callers mark the milestone failed and don't store the error body as
+        # plan/review content. The tokens==0 gate avoids flagging a legitimate
+        # plan that merely mentions these phrases. #1001.
+        if result.success and self._is_transient_api_error(result.response_text or ""):
+            if (result.total_tokens or 0) == 0:
+                err_snippet = (result.response_text or "")[:200]
+                logger.warning(
+                    "API error response unresolved after retries, marking failed: %s",
+                    err_snippet,
+                )
+                result.success = False
+                result.error = (
+                    result.error or f"Transient API error not resolved after retries: {err_snippet}"
+                )
+                result.response_text = ""  # don't let callers store the error body
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result)
@@ -930,7 +967,7 @@ class AutonomousOrchestrator:
 
         Terminates the subprocess with SIGTERM/SIGKILL.
         """
-        self._cancel_requested.set()  # signal 429 retry loop to stop
+        self._cancel_requested.set()  # signal API-error retry loop to stop
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:

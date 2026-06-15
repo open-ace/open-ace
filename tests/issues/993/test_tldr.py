@@ -147,7 +147,7 @@ class TestTldrInstruction:
         orch._runner._uses_sidebar_session_source = MagicMock(return_value=False)
         orch._resolve_session_line = MagicMock(return_value=("sess", None, False))
         orch._link_session_to_current_milestone = MagicMock()
-        orch._is_rate_limited = MagicMock(return_value=False)
+        orch._is_transient_api_error = MagicMock(return_value=False)
         orch._write_phase_usage = MagicMock()
 
         orch._run_agent(prompt="基础 prompt")
