@@ -20,6 +20,7 @@ interface AutonomousWorkflowListProps {
 
 /** Shared active status set — used by both WorkflowList and WorkflowTimeline */
 export const ACTIVE_WORKFLOW_STATUSES = [
+  'queued',
   'pending',
   'preparing',
   'planning',
