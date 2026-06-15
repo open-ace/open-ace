@@ -12,7 +12,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.repositories.database import adapt_sql, get_database_url, is_postgresql
-from app.utils.smtp_password_manager import get_password_manager
+from app.utils.smtp_crypto import get_password_manager
 
 logger = logging.getLogger(__name__)
 

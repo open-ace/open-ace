@@ -79,6 +79,7 @@ class UserProject:
     id: Optional[int] = None
     user_id: int = 0
     project_id: int = 0
+    username: Optional[str] = None  # Populated by JOIN query with users table
     first_access_at: Optional[datetime] = None
     last_access_at: Optional[datetime] = None
     total_sessions: int = 0
@@ -92,6 +93,7 @@ class UserProject:
             "id": self.id,
             "user_id": self.user_id,
             "project_id": self.project_id,
+            "username": self.username,
             "first_access_at": (self.first_access_at.isoformat() if self.first_access_at else None),
             "last_access_at": (self.last_access_at.isoformat() if self.last_access_at else None),
             "total_sessions": self.total_sessions,
@@ -117,6 +119,7 @@ class UserProject:
             id=data.get("id"),
             user_id=data.get("user_id", 0),
             project_id=data.get("project_id", 0),
+            username=data.get("username"),
             first_access_at=parse_datetime(data.get("first_access_at")),
             last_access_at=parse_datetime(data.get("last_access_at")),
             total_sessions=data.get("total_sessions", 0),
