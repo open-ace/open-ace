@@ -9,7 +9,7 @@ set -e
 # ============================================================================
 validate_node_environment() {
     echo "Validating Node.js environment..."
-    
+
     # Check node executable exists in PATH
     if ! command -v node &>/dev/null; then
         echo "ERROR: Node.js not found in PATH. Cannot start container."
@@ -17,20 +17,20 @@ validate_node_environment() {
         echo "       Please rebuild the image with proper Node.js installation."
         exit 1
     fi
-    
+
     NODE_PATH=$(which node)
-    
+
     # Verify node is executable
     if [ ! -x "$NODE_PATH" ]; then
         echo "ERROR: Node.js at $NODE_PATH is not executable."
         echo "       Please check file permissions or rebuild the image."
         exit 1
     fi
-    
+
     # Get and display node version
     NODE_VERSION=$(node --version 2>/dev/null || echo "unknown")
     echo "  Node.js: $NODE_PATH ($NODE_VERSION)"
-    
+
     # Verify CLI file exists
     CLI_PATH="/usr/lib/node_modules/@qwen-code/qwen-code/cli.js"
     if [ ! -f "$CLI_PATH" ]; then
@@ -40,7 +40,7 @@ validate_node_environment() {
         exit 1
     fi
     echo "  CLI: $CLI_PATH"
-    
+
     # Verify WebUI executable exists
     WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
     if [ ! -x "$WEBUI_PATH" ]; then
@@ -49,7 +49,7 @@ validate_node_environment() {
         exit 1
     fi
     echo "  WebUI: $WEBUI_PATH"
-    
+
     echo "Node.js environment validated successfully."
 }
 
