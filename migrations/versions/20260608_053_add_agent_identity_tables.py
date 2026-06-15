@@ -54,7 +54,7 @@ def upgrade() -> None:
             sa.Column("created_by", sa.Integer, nullable=False),
             sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
             sa.Column("expires_at", sa.DateTime, nullable=True),
-            sa.Column("is_consumed", sa.Integer, server_default="0"),
+            sa.Column("is_consumed", sa.Boolean, server_default=sa.text("false")),
             sa.Column("consumed_at", sa.DateTime, nullable=True),
         )
         op.create_index(
@@ -71,7 +71,7 @@ def upgrade() -> None:
             sa.Column("token_hash", sa.String, nullable=False, unique=True),
             sa.Column("machine_id", sa.String, nullable=False),
             sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-            sa.Column("is_revoked", sa.Integer, server_default="0"),
+            sa.Column("is_revoked", sa.Boolean, server_default=sa.text("false")),
             sa.Column("revoked_at", sa.DateTime, nullable=True),
             sa.Column("revoked_by", sa.Integer, nullable=True),
             sa.Column("rotated_at", sa.DateTime, nullable=True),
@@ -85,8 +85,8 @@ def upgrade() -> None:
             "remote_machines",
             sa.Column(
                 "legacy_mode",
-                sa.Integer,
-                server_default="0",
+                sa.Boolean,
+                server_default=sa.text("false"),
                 nullable=True,
             ),
         )
