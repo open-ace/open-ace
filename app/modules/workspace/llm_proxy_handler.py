@@ -147,7 +147,8 @@ def _record_messages(
                                     model=model or resp_data.get("model"),
                                 )
             except (json.JSONDecodeError, ValueError):
-                # Handle SSE streaming response
+                # Handle SSE streaming response - accumulate delta content
+                assistant_content_parts = []
                 for line in response_body.split(b"\n"):
                     line = line.strip()
                     if not line or not line.startswith(b"data:"):
@@ -160,12 +161,23 @@ def _record_messages(
                         choices = chunk.get("choices", [])
                         if choices:
                             delta = choices[0].get("delta", {})
-                            if delta.get("content"):
-                                # For streaming, we only log final usage stats
-                                # Message content would need accumulation
-                                pass
+                            content_part = delta.get("content")
+                            if content_part:
+                                assistant_content_parts.append(content_part)
                     except (json.JSONDecodeError, ValueError):
                         continue
+
+                # Record accumulated assistant message for streaming response
+                if assistant_content_parts:
+                    full_content = "".join(assistant_content_parts)
+                    if full_content:
+                        sm.add_message(
+                            session_id=session_id,
+                            role="assistant",
+                            content=full_content[:10000],
+                            tokens_used=output_tokens,
+                            model=model,
+                        )
     except Exception:
         logger.debug("Failed to record messages", exc_info=True)
 
@@ -240,7 +252,11 @@ def _record_llm_usage(
                 logger.info("Auto-created session %s for user %d", session_id, user_id)
             except Exception as exc:
                 logger.warning("Failed to auto-create session %s: %s", session_id, exc)
-                return
+                # Retry get_session - another concurrent request may have created it
+                session = sm.get_session(session_id)
+                if not session:
+                    logger.error("Session %s still not found after retry", session_id)
+                    return
 
         # Update session token counts
         session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
@@ -667,7 +683,12 @@ def handle_llm_proxy_request(
                     yield chunk
                 try:
                     _record_llm_usage(
-                        total_content, session_id, user_id, provider, _content_type, request_body=_body
+                        total_content,
+                        session_id,
+                        user_id,
+                        provider,
+                        _content_type,
+                        request_body=_body,
                     )
                 except Exception as exc:
                     logger.error("Failed to record LLM usage: %s", exc)
@@ -687,7 +708,9 @@ def handle_llm_proxy_request(
 
             content = resp.content
             try:
-                _record_llm_usage(content, session_id, user_id, provider, content_type, request_body=body)
+                _record_llm_usage(
+                    content, session_id, user_id, provider, content_type, request_body=body
+                )
             except Exception as exc:
                 logger.error("Failed to record LLM usage: %s", exc)
             return Response(
