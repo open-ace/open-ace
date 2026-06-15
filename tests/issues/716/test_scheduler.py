@@ -74,7 +74,7 @@ class TestSchedulerProcessWorkflows:
         ]
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
@@ -97,7 +97,7 @@ class TestSchedulerProcessWorkflows:
         ]
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
@@ -113,7 +113,7 @@ class TestSchedulerProcessWorkflows:
         mock_repo.get_active_workflows.return_value = []
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             # Should not raise
@@ -126,7 +126,7 @@ class TestSchedulerProcessWorkflows:
         mock_repo.get_active_workflows.side_effect = Exception("DB error")
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             # Should not raise
@@ -143,7 +143,7 @@ class TestSchedulerProcessWorkflows:
         mock_repo.get_active_workflows.return_value = workflows
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
@@ -167,7 +167,7 @@ class TestSchedulerProcessWorkflows:
         ]
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
@@ -196,7 +196,7 @@ class TestSchedulerProcessWorkflows:
         scheduler._in_progress_ids.add("wf-1")
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
@@ -253,7 +253,7 @@ class TestSchedulerProcessWorkflows:
         ]
 
         with patch(
-            "app.repositories.autonomous_repo.AutonomousWorkflowRepository",
+            "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
             with patch(
