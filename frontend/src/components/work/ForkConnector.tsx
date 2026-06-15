@@ -19,42 +19,33 @@ export const ForkConnector: React.FC<ForkConnectorProps> = ({ feedback, branchCo
   const language = useLanguage();
 
   return (
-    <div className="position-relative my-3">
-      {/* Horizontal divider */}
+    <div className="timeline-fork-connector position-relative my-3">
       <hr className="my-0" />
 
-      {/* Centered fork badge */}
-      <div className="position-absolute top-0 start-50 translate-middle bg-body px-2">
+      <div className="position-absolute top-0 start-50 translate-middle px-2 timeline-fork-connector__badge">
         <Badge variant="info">
           <i className="bi bi-diagram-3 me-1"></i>
           {t('autoForkPoint', language)}
         </Badge>
       </div>
 
-      {/* Feedback summary */}
       {feedback && (
-        <div className="text-center mt-2">
-          <small className="text-muted fst-italic">
+        <div className="timeline-fork-connector__feedback text-center mt-2">
+          <small className="fst-italic">
             {feedback.length > 120 ? feedback.slice(0, 120) + '...' : feedback}
           </small>
         </div>
       )}
 
-      {/* Vertical drop lines to each branch column */}
-      <div className="d-flex mt-2" style={{ height: '14px', gap: '0' }}>
+      <div className="d-flex mt-2 timeline-fork-connector__lines" style={{ height: '14px', gap: '0' }}>
         {Array.from({ length: branchCount }, (_, i) => (
           <div
             key={i}
-            style={{
-              flex: 1,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
+            className="timeline-fork-connector__line-slot"
           >
             <div
+              className="timeline-fork-connector__line"
               style={{
-                width: '2px',
-                height: '14px',
                 backgroundColor: `var(--bs-${i === 0 ? 'primary' : 'success'})`,
               }}
             />
@@ -85,26 +76,46 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
   colorIndex = 0,
   children,
 }) => {
+  const language = useLanguage();
   const color = BRANCH_COLORS[colorIndex % BRANCH_COLORS.length];
+  const statusLabelKey =
+    status === 'completed'
+      ? 'autoStatusCompleted'
+      : status === 'failed'
+        ? 'autoStatusFailed'
+        : status === 'paused'
+          ? 'autoStatusPaused'
+          : status === 'cancelled'
+            ? 'autoStatusCancelled'
+            : status === 'waiting'
+              ? 'autoStatusWaiting'
+              : status === 'planning'
+                ? 'autoStatusPlanning'
+                : status === 'developing'
+                  ? 'autoStatusDeveloping'
+                  : status === 'pr_review'
+                    ? 'autoStatusPRReview'
+                    : status === 'planning_timeout'
+                      ? 'autoStatusPlanningTimeout'
+                      : 'autoStatusPending';
 
   return (
     <div
-      className="d-flex flex-column"
+      className="fork-branch-column d-flex flex-column"
       style={{
         borderTop: `3px solid var(--bs-${color})`,
         minHeight: '100px',
       }}
     >
-      {/* Branch header */}
       <div
-        className="p-2 rounded-top text-center"
+        className="fork-branch-column__header p-2 rounded-top"
         style={{ backgroundColor: `var(--bs-${color}-bg-subtle, var(--bs-${color}-rgb))` }}
       >
-        <div className="fw-semibold" style={{ fontSize: '0.85rem' }}>
-          {title}
-        </div>
-        <div className="d-flex justify-content-center gap-1 mt-1">
-          <Badge variant={color as 'primary' | 'success' | 'warning' | 'info'}>{status}</Badge>
+        <div className="fork-branch-column__title fw-semibold">{title}</div>
+        <div className="fork-branch-column__badges d-flex justify-content-center gap-1 mt-1">
+          <Badge variant={color as 'primary' | 'success' | 'warning' | 'info'}>
+            {t(statusLabelKey, language)}
+          </Badge>
           {branchName && (
             <Badge variant="light">
               <i className="bi bi-git me-1"></i>
@@ -114,8 +125,7 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
         </div>
       </div>
 
-      {/* Branch milestones */}
-      <div className="flex-grow-1 p-2">{children}</div>
+      <div className="fork-branch-column__body flex-grow-1 p-2">{children}</div>
     </div>
   );
 };
