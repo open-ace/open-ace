@@ -414,20 +414,23 @@ class AutonomousAgentRunner:
                 except Exception as e:
                     logger.warning("Failed to persist session messages: %s", e)
 
-            # Update session record
+            # Update session record. Counters are INCREMENTED (not overwritten)
+            # so the session columns stay cumulative and Σ milestone == Σ session
+            # holds (#1003). The previous overwrite reset the columns to each
+            # call's local count, breaking the invariant.
             if self.session_manager and persisted_session_id:
                 try:
-                    update_fields = {
-                        "request_count": result.request_count,
-                        "total_tokens": result.total_tokens,
-                        "total_input_tokens": result.total_input_tokens,
-                        "total_output_tokens": result.total_output_tokens,
-                    }
-                    if result.success:
-                        update_fields["status"] = "completed"
-                    else:
-                        update_fields["status"] = "error"
-                    self.session_manager.update_session_fields(persisted_session_id, update_fields)
+                    self.session_manager.increment_session_usage(
+                        persisted_session_id,
+                        request_delta=result.request_count or 0,
+                        total_tokens_delta=result.total_tokens or 0,
+                        total_input_delta=result.total_input_tokens or 0,
+                        total_output_delta=result.total_output_tokens or 0,
+                    )
+                    status = "completed" if result.success else "error"
+                    self.session_manager.update_session_fields(
+                        persisted_session_id, {"status": status}
+                    )
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
 
