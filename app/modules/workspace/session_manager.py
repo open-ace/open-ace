@@ -379,6 +379,12 @@ class SessionManager:
         except Exception:
             pass  # Column already exists
 
+        # Add milestone_id column to session_messages if not present (migration 061)
+        try:
+            cursor.execute("ALTER TABLE session_messages ADD COLUMN milestone_id TEXT DEFAULT ''")
+        except Exception:
+            pass  # Column already exists
+
         conn.commit()
         conn.close()
 
