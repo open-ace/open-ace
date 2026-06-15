@@ -9,6 +9,7 @@ import React from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Badge } from '@/components/common';
+import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
 
 interface ForkConnectorProps {
   feedback?: string;
@@ -78,26 +79,7 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
 }) => {
   const language = useLanguage();
   const color = BRANCH_COLORS[colorIndex % BRANCH_COLORS.length];
-  const statusLabelKey =
-    status === 'completed'
-      ? 'autoStatusCompleted'
-      : status === 'failed'
-        ? 'autoStatusFailed'
-        : status === 'paused'
-          ? 'autoStatusPaused'
-          : status === 'cancelled'
-            ? 'autoStatusCancelled'
-            : status === 'waiting'
-              ? 'autoStatusWaiting'
-              : status === 'planning'
-                ? 'autoStatusPlanning'
-                : status === 'developing'
-                  ? 'autoStatusDeveloping'
-                  : status === 'pr_review'
-                    ? 'autoStatusPRReview'
-                    : status === 'planning_timeout'
-                      ? 'autoStatusPlanningTimeout'
-                      : 'autoStatusPending';
+  const statusConfig = getAutonomousWorkflowStatusConfig(status);
 
   return (
     <div
@@ -114,7 +96,7 @@ export const BranchColumn: React.FC<BranchColumnProps> = ({
         <div className="fork-branch-column__title fw-semibold">{title}</div>
         <div className="fork-branch-column__badges d-flex justify-content-center gap-1 mt-1">
           <Badge variant={color as 'primary' | 'success' | 'warning' | 'info'}>
-            {t(statusLabelKey, language)}
+            {t(statusConfig.labelKey, language)}
           </Badge>
           {branchName && (
             <Badge variant="light">

@@ -11,32 +11,12 @@ import { t } from '@/i18n';
 import { Badge, Loading } from '@/components/common';
 import { useWorkflows, useDeleteWorkflow } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
+import { AUTONOMOUS_WORKFLOW_STATUS_CONFIG } from './autonomousWorkflowStatus';
 
 interface AutonomousWorkflowListProps {
   selectedId: string | null;
   onSelect: (workflow: AutonomousWorkflow) => void;
 }
-
-const STATUS_CONFIG: Record<string, { variant: string; icon: string; labelKey: string }> = {
-  queued: { variant: 'secondary', icon: 'bi-hourglass-split', labelKey: 'autoStatusQueued' },
-  pending: { variant: 'secondary', icon: 'bi-hourglass', labelKey: 'autoStatusPending' },
-  preparing: { variant: 'info', icon: 'bi-gear', labelKey: 'autoStatusPreparing' },
-  planning: { variant: 'info', icon: 'bi-lightbulb', labelKey: 'autoStatusPlanning' },
-  developing: { variant: 'primary', icon: 'bi-code-slash', labelKey: 'autoStatusDeveloping' },
-  pr_review: { variant: 'warning', icon: 'bi-eye', labelKey: 'autoStatusPRReview' },
-  reporting: { variant: 'info', icon: 'bi-file-text', labelKey: 'autoStatusReporting' },
-  waiting: { variant: 'secondary', icon: 'bi-clock', labelKey: 'autoStatusWaiting' },
-  merging: { variant: 'info', icon: 'bi-git-merge', labelKey: 'autoStatusMerging' },
-  completed: { variant: 'success', icon: 'bi-check-circle', labelKey: 'autoStatusCompleted' },
-  failed: { variant: 'danger', icon: 'bi-x-circle', labelKey: 'autoStatusFailed' },
-  cancelled: { variant: 'secondary', icon: 'bi-slash-circle', labelKey: 'autoStatusCancelled' },
-  paused: { variant: 'warning', icon: 'bi-pause-circle', labelKey: 'autoStatusPaused' },
-  planning_timeout: {
-    variant: 'warning',
-    icon: 'bi-clock-history',
-    labelKey: 'autoStatusPlanningTimeout',
-  },
-};
 
 /** Shared active status set — used by both WorkflowList and WorkflowTimeline */
 export const ACTIVE_WORKFLOW_STATUSES = [
@@ -114,7 +94,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
 
   // Render a single workflow item
   const renderWorkflowItem = (workflow: AutonomousWorkflow, isForkChild: boolean) => {
-    const statusCfg = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.pending;
+    const statusCfg =
+      AUTONOMOUS_WORKFLOW_STATUS_CONFIG[workflow.status] ??
+      AUTONOMOUS_WORKFLOW_STATUS_CONFIG.pending;
     const isSelected = selectedId === workflow.workflow_id;
     const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
     const isConfirming = confirmDeleteId === workflow.workflow_id;

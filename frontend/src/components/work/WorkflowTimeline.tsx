@@ -14,7 +14,7 @@ import { useQueries } from '@tanstack/react-query';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import type { Language } from '@/i18n';
-import { Button, Badge, Loading, Modal, type BadgeVariant } from '@/components/common';
+import { Button, Badge, Loading, Modal } from '@/components/common';
 import {
   useWorkflowTimeline,
   useWorkflowActivity,
@@ -35,6 +35,7 @@ import CancelRoundModal from './CancelRoundModal';
 import ForkFromHereModal from './ForkFromHereModal';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
+import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
 import { cn, formatDateTime, formatDuration, formatTokens, formatToolName } from '@/utils';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
 import './WorkflowTimeline.css';
@@ -58,96 +59,6 @@ interface ArtifactPreviewState {
   title: string;
   content: string;
 }
-
-const WORKFLOW_STATUS_CONFIG: Record<
-  string,
-  { variant: BadgeVariant; icon: string; labelKey: string; tone: 'info' | 'warning' | 'success' | 'danger' }
-> = {
-  queued: {
-    variant: 'secondary',
-    icon: 'bi-hourglass-split',
-    labelKey: 'autoStatusQueued',
-    tone: 'info',
-  },
-  pending: {
-    variant: 'secondary',
-    icon: 'bi-hourglass',
-    labelKey: 'autoStatusPending',
-    tone: 'info',
-  },
-  preparing: {
-    variant: 'info',
-    icon: 'bi-gear',
-    labelKey: 'autoStatusPreparing',
-    tone: 'info',
-  },
-  planning: {
-    variant: 'info',
-    icon: 'bi-lightbulb',
-    labelKey: 'autoStatusPlanning',
-    tone: 'info',
-  },
-  developing: {
-    variant: 'primary',
-    icon: 'bi-code-slash',
-    labelKey: 'autoStatusDeveloping',
-    tone: 'info',
-  },
-  pr_review: {
-    variant: 'warning',
-    icon: 'bi-eye',
-    labelKey: 'autoStatusPRReview',
-    tone: 'warning',
-  },
-  reporting: {
-    variant: 'info',
-    icon: 'bi-file-text',
-    labelKey: 'autoStatusReporting',
-    tone: 'info',
-  },
-  waiting: {
-    variant: 'secondary',
-    icon: 'bi-clock',
-    labelKey: 'autoStatusWaiting',
-    tone: 'warning',
-  },
-  merging: {
-    variant: 'info',
-    icon: 'bi-git-merge',
-    labelKey: 'autoStatusMerging',
-    tone: 'info',
-  },
-  completed: {
-    variant: 'success',
-    icon: 'bi-check-circle',
-    labelKey: 'autoStatusCompleted',
-    tone: 'success',
-  },
-  failed: {
-    variant: 'danger',
-    icon: 'bi-x-circle',
-    labelKey: 'autoStatusFailed',
-    tone: 'danger',
-  },
-  cancelled: {
-    variant: 'secondary',
-    icon: 'bi-slash-circle',
-    labelKey: 'autoStatusCancelled',
-    tone: 'warning',
-  },
-  paused: {
-    variant: 'warning',
-    icon: 'bi-pause-circle',
-    labelKey: 'autoStatusPaused',
-    tone: 'warning',
-  },
-  planning_timeout: {
-    variant: 'warning',
-    icon: 'bi-clock-history',
-    labelKey: 'autoStatusPlanningTimeout',
-    tone: 'warning',
-  },
-};
 
 const MILESTONE_STATUS_CONFIG: Record<
   string,
@@ -194,10 +105,6 @@ const PHASE_LABEL_KEYS: Record<string, string> = {
   wait: 'autoPhaseWait',
   merge: 'autoPhaseMerge',
 };
-
-function getWorkflowStatusMeta(status: string) {
-  return WORKFLOW_STATUS_CONFIG[status] ?? WORKFLOW_STATUS_CONFIG.pending;
-}
 
 function getMilestoneStatusMeta(status: string) {
   return MILESTONE_STATUS_CONFIG[status] ?? MILESTONE_STATUS_CONFIG.pending;
@@ -521,7 +428,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     .sort((a, b) => a - b);
 
   const session = sessionData?.session as MilestoneSession | undefined;
-  const workflowStatusMeta = getWorkflowStatusMeta(workflow.status);
+  const workflowStatusMeta = getAutonomousWorkflowStatusConfig(workflow.status);
   const workflowStatusLabel = t(workflowStatusMeta.labelKey, language);
   const currentPhaseLabel = t(PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation', language);
   const workflowDuration = getDurationBetween(workflow.created_at, workflow.completed_at ?? workflow.updated_at);
