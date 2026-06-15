@@ -1872,6 +1872,10 @@ install_systemd_service() {
     fi
     print_info "Using Python: $python_path"
 
+    # Generate SECRET_KEY for Flask session and API key encryption
+    local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+    print_info "Generated SECRET_KEY for Flask encryption"
+
     # Create service file from template
     print_info "Creating systemd service file..."
     sed -e "s|__USER__|$user|g" \
@@ -1881,6 +1885,7 @@ install_systemd_service() {
         -e "s|__HOST__|$host|g" \
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
+        -e "s|__SECRET_KEY__|$secret_key|g" \
         "$service_template" > "$service_file"
 
     if [ $? -ne 0 ]; then
@@ -1975,6 +1980,10 @@ install_systemd_service_remote() {
     fi
     print_info "Using Python on remote: $python_path"
 
+    # Generate SECRET_KEY for Flask session and API key encryption
+    local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+    print_info "Generated SECRET_KEY for Flask encryption"
+
     # Generate service file content locally using sed
     local service_content=$(sed -e "s|__USER__|$user|g" \
         -e "s|__GROUP__|$group|g" \
@@ -1983,6 +1992,7 @@ install_systemd_service_remote() {
         -e "s|__HOST__|$host|g" \
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
+        -e "s|__SECRET_KEY__|$secret_key|g" \
         "$service_template")
 
     # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
