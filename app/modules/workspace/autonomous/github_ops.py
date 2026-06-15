@@ -384,6 +384,23 @@ class GitHubOps:
             logger.warning("Failed to parse CI checks for PR #%s: %s", pr_number, raw[:200])
             return []
 
+    def get_pr_diff(self, number: int) -> str:
+        """Get the full diff of a PR (head vs base) via `gh pr diff`.
+
+        Returns the diff as a string. Returns "" when the PR is missing or
+        the command fails, so callers can render an empty state instead of 500.
+        """
+        result = self._run_gh(["pr", "diff", str(number)], check=False)
+        if result.returncode != 0:
+            logger.warning(
+                "gh pr diff #%s failed (exit %s): %s",
+                number,
+                result.returncode,
+                (result.stderr or "").strip()[:200],
+            )
+            return ""
+        return result.stdout or ""
+
     # ── Diff Operations ─────────────────────────────────────────────
 
     def get_diff(self, base: str = "HEAD~1", head: str = "HEAD") -> str:
@@ -421,6 +438,27 @@ class GitHubOps:
         """Get the diff for a specific commit."""
         result = self._run_git(["show", "--format=", sha])
         return result.stdout
+
+    def get_commit_diff_stats(self, sha: str) -> dict:
+        """Get diff statistics for a specific commit."""
+        result = self._run_git(["show", "--numstat", "--format=", sha])
+        total_additions = 0
+        total_deletions = 0
+        files = 0
+        for line in result.stdout.strip().split("\n"):
+            if line.strip():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    total_additions += int(parts[0]) if parts[0] != "-" else 0
+                    total_deletions += int(parts[1]) if parts[1] != "-" else 0
+                    files += 1
+
+        return {
+            "additions": total_additions,
+            "deletions": total_deletions,
+            "files": files,
+            "commits": 1 if files or total_additions or total_deletions else 0,
+        }
 
     # ── Git Operations ──────────────────────────────────────────────
 

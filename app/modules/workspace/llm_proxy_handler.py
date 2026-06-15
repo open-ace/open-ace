@@ -83,18 +83,124 @@ def _determine_target_url(
     return f"{target_base}{suffix}"
 
 
-def _record_llm_usage(
-    content: bytes, session_id: str, user_id: int, provider: str, content_type: str
+def _record_messages(
+    sm: Any,
+    session_id: str,
+    request_body: bytes | None,
+    response_body: bytes,
+    output_tokens: int,
+    model: str | None = None,
 ) -> None:
-    """Extract and record token usage from LLM responses."""
+    """Parse request/response and record messages to session_messages."""
+    try:
+        # Parse user messages from request body
+        if request_body:
+            try:
+                req_data = json.loads(request_body)
+                messages = req_data.get("messages", [])
+                if isinstance(messages, list) and messages:
+                    # Record the last user message (avoid duplicates)
+                    user_content = None
+                    for msg in reversed(messages):
+                        if not isinstance(msg, dict):
+                            continue
+                        if msg.get("role") == "user":
+                            content = msg.get("content", "")
+                            if isinstance(content, list):
+                                # Handle multi-part content
+                                text_parts = []
+                                for part in content:
+                                    if isinstance(part, dict) and part.get("type") == "text":
+                                        text_parts.append(part.get("text", ""))
+                                user_content = " ".join(text_parts)
+                            elif isinstance(content, str):
+                                user_content = content
+                            if user_content:
+                                break
+
+                    if user_content:
+                        sm.add_message(
+                            session_id=session_id,
+                            role="user",
+                            content=user_content[:10000],  # Truncate to prevent overflow
+                        )
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Parse assistant message from response body
+        if response_body:
+            try:
+                resp_data = json.loads(response_body)
+                choices = resp_data.get("choices", [])
+                if isinstance(choices, list) and choices:
+                    choice = choices[0]
+                    if isinstance(choice, dict):
+                        msg = choice.get("message", {})
+                        if isinstance(msg, dict) and msg.get("role") == "assistant":
+                            content = msg.get("content", "")
+                            if isinstance(content, str) and content:
+                                sm.add_message(
+                                    session_id=session_id,
+                                    role="assistant",
+                                    content=content[:10000],
+                                    tokens_used=output_tokens,
+                                    model=model or resp_data.get("model"),
+                                )
+            except (json.JSONDecodeError, ValueError):
+                # Handle SSE streaming response - accumulate delta content
+                assistant_content_parts = []
+                for line in response_body.split(b"\n"):
+                    line = line.strip()
+                    if not line or not line.startswith(b"data:"):
+                        continue
+                    payload = line[len(b"data:") :].strip()
+                    if payload == b"[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            content_part = delta.get("content")
+                            if content_part:
+                                assistant_content_parts.append(content_part)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+
+                # Record accumulated assistant message for streaming response
+                if assistant_content_parts:
+                    full_content = "".join(assistant_content_parts)
+                    if full_content:
+                        sm.add_message(
+                            session_id=session_id,
+                            role="assistant",
+                            content=full_content[:10000],
+                            tokens_used=output_tokens,
+                            model=model,
+                        )
+    except Exception:
+        logger.debug("Failed to record messages", exc_info=True)
+
+
+def _record_llm_usage(
+    content: bytes,
+    session_id: str,
+    user_id: int,
+    provider: str,
+    content_type: str,
+    request_body: bytes | None = None,
+) -> None:
+    """Extract and record token usage and messages from LLM responses."""
     try:
         if b"usage" not in content:
             return
 
         usage = None
+        response_model = None
         try:
             data = json.loads(content)
             usage = data.get("usage", {})
+            response_model = data.get("model")
         except json.JSONDecodeError:
             for line in content.split(b"\n"):
                 line = line.strip()
@@ -109,6 +215,7 @@ def _record_llm_usage(
                     continue
                 if "usage" in chunk:
                     usage = chunk["usage"]
+                    response_model = chunk.get("model")
                     break
 
         if not usage or not isinstance(usage, dict):
@@ -131,12 +238,42 @@ def _record_llm_usage(
 
         sm = get_session_manager()
         session = sm.get_session(session_id)
-        if session:
-            session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
-            session.total_output_tokens = (session.total_output_tokens or 0) + output_tokens
-            session.total_tokens = (session.total_tokens or 0) + input_tokens + output_tokens
-            session.request_count = (session.request_count or 0) + 1
-            sm.update_session(session)
+
+        # Auto-create session if not exists (for WebUI sessions like "webui:1")
+        if not session:
+            try:
+                session = sm.create_session(
+                    session_id=session_id,
+                    session_type="webui",
+                    tool_name="qwen-code",
+                    user_id=user_id,
+                    title="WebUI Session",
+                )
+                logger.info("Auto-created session %s for user %d", session_id, user_id)
+            except Exception as exc:
+                logger.warning("Failed to auto-create session %s: %s", session_id, exc)
+                # Retry get_session - another concurrent request may have created it
+                session = sm.get_session(session_id)
+                if not session:
+                    logger.error("Session %s still not found after retry", session_id)
+                    return
+
+        # Update session token counts
+        session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
+        session.total_output_tokens = (session.total_output_tokens or 0) + output_tokens
+        session.total_tokens = (session.total_tokens or 0) + input_tokens + output_tokens
+        session.request_count = (session.request_count or 0) + 1
+        sm.update_session(session)
+
+        # Record messages to session_messages table
+        _record_messages(
+            sm=sm,
+            session_id=session_id,
+            request_body=request_body,
+            response_body=content,
+            output_tokens=output_tokens,
+            model=response_model,
+        )
 
         try:
             from app.repositories.daily_stats_repo import DailyStatsRepository
@@ -539,13 +676,20 @@ def handle_llm_proxy_request(
 
             content_type = resp.headers.get("Content-Type", "")
 
-            def generate(_resp=resp, _content_type=content_type):
+            def generate(_resp=resp, _content_type=content_type, _body=body):
                 total_content = b""
                 for chunk in _resp.iter_content(chunk_size=4096):
                     total_content += chunk
                     yield chunk
                 try:
-                    _record_llm_usage(total_content, session_id, user_id, provider, _content_type)
+                    _record_llm_usage(
+                        total_content,
+                        session_id,
+                        user_id,
+                        provider,
+                        _content_type,
+                        request_body=_body,
+                    )
                 except Exception as exc:
                     logger.error("Failed to record LLM usage: %s", exc)
 
@@ -564,7 +708,9 @@ def handle_llm_proxy_request(
 
             content = resp.content
             try:
-                _record_llm_usage(content, session_id, user_id, provider, content_type)
+                _record_llm_usage(
+                    content, session_id, user_id, provider, content_type, request_body=body
+                )
             except Exception as exc:
                 logger.error("Failed to record LLM usage: %s", exc)
             return Response(

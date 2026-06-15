@@ -1,0 +1,22 @@
+<div class="recommendations">
+    <h2>Recommendations</h2>
+    {% if recommendations | length > 0 %}
+    <ul>
+        {% for rec in recommendations %}
+        <li>
+            {% if rec.startswith('URGENT:') %}
+            <span class="recommendation-urgent">{{ rec | e }}</span>
+            {% elif rec.startswith('Review:') %}
+            <span class="recommendation-review">{{ rec | e }}</span>
+            {% else %}
+            {{ rec | e }}
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <p>No recommendations available</p>
+    </div>
+    {% endif %}
+</div>

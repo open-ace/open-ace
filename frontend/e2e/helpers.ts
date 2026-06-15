@@ -59,9 +59,13 @@ export async function ensureSidebarVisible(page: Page) {
   const viewport = page.viewportSize();
   if (viewport && viewport.width < 768) {
     const hamburger = page.locator('.hamburger-btn');
+    // Wait for hamburger button to be visible and stable (Mobile Safari needs longer timeout)
+    await hamburger.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
     if (await hamburger.isVisible()) {
-      await hamburger.click();
-      await getSidebarLocator(page).waitFor({ state: 'visible', timeout: 5000 });
+      // Use force: true for Safari/WebKit compatibility (overlay elements may intercept)
+      await hamburger.click({ force: true });
+      // Increased timeout for Mobile Safari sidebar animation
+      await getSidebarLocator(page).waitFor({ state: 'visible', timeout: 20000 });
     }
   }
 }

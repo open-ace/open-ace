@@ -56,6 +56,8 @@ def get_ddl_statements():
             batch_id TEXT,
             batch_order INTEGER,
             batch_total INTEGER,
+            auto_merge {bool_type} DEFAULT {bool_true},
+            definition_snapshot TEXT,
             current_phase TEXT DEFAULT 'preparation',
             current_round INTEGER DEFAULT 0,
             dev_round INTEGER DEFAULT 1,

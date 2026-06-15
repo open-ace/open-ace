@@ -21,6 +21,10 @@ import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
+import { initializeQueryKeyRegistry } from '@/utils';
+
+// Initialize query key registry on app load
+initializeQueryKeyRegistry();
 
 // Lazy-loaded page components for code splitting
 // Each page is loaded only when navigated to, reducing initial bundle size
@@ -122,6 +126,11 @@ const RemoteMachineManagement = lazy(() =>
 const APIKeyManagement = lazy(() =>
   import('@/components/features/management/APIKeyManagement').then((m) => ({
     default: m.APIKeyManagement,
+  }))
+);
+const SmtpConfig = lazy(() =>
+  import('@/components/features/management/SmtpConfig').then((m) => ({
+    default: m.SmtpConfig,
   }))
 );
 
@@ -321,6 +330,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="/settings/sso" element={<SSOSettings />} />
           <Route path="/settings/api-keys" element={<APIKeyManagement />} />
           <Route path="/settings/ai-agent" element={<AiAgentSettings />} />
+          <Route path="/settings/smtp" element={<SmtpConfig />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />

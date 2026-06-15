@@ -301,50 +301,61 @@ export const Workspace: React.FC = () => {
       // This allows the iframe to inform the workspace about its current session
       if (event.data?.type === 'qwen-code-session-update') {
         const { sessionId, encodedProjectName, toolName, title, settings } = event.data;
-        // Update the current active tab with session info
-        if (sessionId) {
-          const currentActiveTabId = useAppStore.getState().workspaceActiveTabId;
-          if (currentActiveTabId) {
-            // Filter out generic "Conversation(xxx...)" titles from iframe
-            const isGenericTitle = title && /^Conversation\([a-f0-9]+\.\.\.\)$/i.test(title);
-            // Only update title if it's explicitly provided (not undefined) and not generic
-            // Otherwise keep the existing title (e.g., "New Session")
-            const updateData: Partial<StoreWorkspaceTab> = {
-              sessionId,
-              encodedProjectName,
-              toolName,
-              settings, // Save settings for tab restoration (Issue #70)
-            };
-            if (title && !isGenericTitle) {
-              updateData.title = title;
+
+        // Find the tab that sent this message by matching event.source to iframe contentWindow
+        // This prevents session info from being incorrectly assigned to the wrong tab
+        // when multiple iframes send updates simultaneously (Issue #916)
+        let sourceTabId: string | null = null;
+        if (event.source) {
+          for (const [tabId, iframe] of iframeRefs.current.entries()) {
+            if (iframe.contentWindow === event.source) {
+              sourceTabId = tabId;
+              break;
             }
-            // Fallback: use decoded project name if title is generic Conversation(xxx...)
-            if (isGenericTitle && encodedProjectName) {
-              updateData.title = decodeURIComponent(encodedProjectName);
-            }
-            useAppStore.getState().updateWorkspaceTab(currentActiveTabId, updateData);
-            // Also update local tabs state
-            const effectiveTitle =
-              title && !isGenericTitle
-                ? title
-                : isGenericTitle && encodedProjectName
-                  ? decodeURIComponent(encodedProjectName)
-                  : undefined;
-            setTabs((prev) =>
-              prev.map((tab) =>
-                tab.id === currentActiveTabId
-                  ? {
-                      ...tab,
-                      sessionId,
-                      encodedProjectName,
-                      toolName,
-                      title: effectiveTitle ?? tab.title,
-                      settings,
-                    }
-                  : tab
-              )
-            );
           }
+        }
+
+        // Only process session update if we can identify the source tab
+        if (sessionId && sourceTabId) {
+          // Filter out generic "Conversation(xxx...)" titles from iframe
+          const isGenericTitle = title && /^Conversation\([a-f0-9]+\.\.\.\)$/i.test(title);
+          // Only update title if it's explicitly provided (not undefined) and not generic
+          // Otherwise keep the existing title (e.g., "New Session")
+          const updateData: Partial<StoreWorkspaceTab> = {
+            sessionId,
+            encodedProjectName,
+            toolName,
+            settings, // Save settings for tab restoration (Issue #70)
+          };
+          if (title && !isGenericTitle) {
+            updateData.title = title;
+          }
+          // Fallback: use decoded project name if title is generic Conversation(xxx...)
+          if (isGenericTitle && encodedProjectName) {
+            updateData.title = decodeURIComponent(encodedProjectName);
+          }
+          useAppStore.getState().updateWorkspaceTab(sourceTabId, updateData);
+          // Also update local tabs state
+          const effectiveTitle =
+            title && !isGenericTitle
+              ? title
+              : isGenericTitle && encodedProjectName
+                ? decodeURIComponent(encodedProjectName)
+                : undefined;
+          setTabs((prev) =>
+            prev.map((tab) =>
+              tab.id === sourceTabId
+                ? {
+                    ...tab,
+                    sessionId,
+                    encodedProjectName,
+                    toolName,
+                    title: effectiveTitle ?? tab.title,
+                    settings,
+                  }
+                : tab
+            )
+          );
         }
       }
 

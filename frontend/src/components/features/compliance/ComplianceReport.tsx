@@ -15,6 +15,7 @@ import { t } from '@/i18n';
 import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import { complianceApi, type ReportType, type SavedReport } from '@/api';
 import { formatDateTime } from '@/utils';
+import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 
 const FORMAT_OPTIONS = [
   { value: 'json', label: 'JSON' },
@@ -151,9 +152,11 @@ export const ComplianceReport: React.FC = () => {
               >
                 <div className="d-flex align-items-center">
                   <i className={cn('bi me-2', getReportIcon(type.type))} />
-                  <strong>{type.name}</strong>
+                  <strong>{getReportTypeName(type.type, language, type.name)}</strong>
                 </div>
-                <small className="text-muted d-block mt-1">{type.description}</small>
+                <small className="text-muted d-block mt-1">
+                  {getReportTypeDesc(type.type, language) || type.description}
+                </small>
               </div>
             </div>
           ))}
@@ -219,10 +222,14 @@ export const ComplianceReport: React.FC = () => {
                 {savedReports.map((report) => (
                   <tr key={report.report_id}>
                     <td>
-                      <strong>{report.report_type}</strong>
+                      <strong>
+                        {getReportTypeName(report.report_type, language, report.report_type)}
+                      </strong>
                     </td>
                     <td>
-                      <Badge variant="secondary">{report.report_type}</Badge>
+                      <Badge variant="secondary">
+                        {getReportTypeName(report.report_type, language, report.report_type)}
+                      </Badge>
                     </td>
                     <td>
                       <small>{formatDateTime(report.generated_at)}</small>

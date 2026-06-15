@@ -12,10 +12,12 @@ import logging
 import os
 import queue
 import re
+import signal
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
@@ -112,6 +114,123 @@ def _get_event_emitter():
     return AutonomousEventEmitter.instance()
 
 
+def _resolve_milestone_session_id(milestone: dict[str, Any]) -> str:
+    """Prefer review session when present because it is the latest LLM round."""
+    return milestone.get("review_session_id") or milestone.get("session_id") or ""
+
+
+def _enrich_milestones_with_usage(
+    workflow_id: str, milestones: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach per-milestone LLM usage/session metadata for the timeline UI."""
+    repo = _get_repo()
+    usage_by_milestone = repo.get_milestone_usage_summary(workflow_id, milestones)
+    enriched: list[dict[str, Any]] = []
+    for milestone in milestones:
+        milestone_id = milestone.get("milestone_id", "")
+        usage = usage_by_milestone.get(milestone_id, {})
+        enriched.append(
+            {
+                **milestone,
+                "llm_session_id": usage.get("llm_session_id")
+                or _resolve_milestone_session_id(milestone),
+                "llm_total_tokens": usage.get("llm_total_tokens", 0),
+                "llm_request_count": usage.get("llm_request_count", 0),
+            }
+        )
+    return enriched
+
+
+def _parse_commit_shas(commit_shas_raw: str) -> list[str]:
+    """Parse milestone commit_shas field into a normalized SHA list."""
+    if not commit_shas_raw:
+        return []
+    try:
+        shas = (
+            json.loads(commit_shas_raw)
+            if commit_shas_raw.startswith("[")
+            else commit_shas_raw.split(",")
+        )
+    except (ValueError, TypeError):
+        shas = [commit_shas_raw]
+    return [str(sha).strip().strip('"').strip("'") for sha in shas if str(sha).strip()]
+
+
+def _enrich_milestones_with_diff_stats(
+    workflow: dict[str, Any], milestones: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Backfill missing diff_stats for milestones that have commits and persist them."""
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    if not project_path:
+        return milestones
+
+    repo = _get_repo()
+    targets = [
+        milestone
+        for milestone in milestones
+        if milestone.get("commit_shas") and not milestone.get("diff_stats")
+    ]
+    if not targets:
+        return milestones
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    gh = GitHubOps(project_path)
+    by_id: dict[str, dict[str, Any]] = {}
+    for milestone in targets:
+        milestone_id = milestone.get("milestone_id", "")
+        shas = _parse_commit_shas(milestone.get("commit_shas", ""))
+        if not shas:
+            continue
+
+        additions = 0
+        deletions = 0
+        files = 0
+        commits = 0
+        had_error = False
+        for sha in shas:
+            try:
+                stats = gh.get_commit_diff_stats(sha)
+                additions += int(stats.get("additions", 0) or 0)
+                deletions += int(stats.get("deletions", 0) or 0)
+                files += int(stats.get("files", 0) or 0)
+                commits += int(stats.get("commits", 0) or 0)
+            except Exception as exc:
+                had_error = True
+                logger.warning(
+                    "Failed to backfill diff stats for %s (%s): %s",
+                    milestone_id[:8],
+                    sha[:8],
+                    exc,
+                )
+
+        if had_error:
+            continue
+
+        diff_stats_json = json.dumps(
+            {
+                "additions": additions,
+                "deletions": deletions,
+                "files": files,
+                "commits": commits,
+            }
+        )
+        try:
+            repo.update_milestone(milestone_id, {"diff_stats": diff_stats_json})
+        except Exception as exc:
+            logger.warning("Failed to persist diff stats for %s: %s", milestone_id[:8], exc)
+            continue
+
+        by_id[milestone_id] = {
+            **milestone,
+            "diff_stats": diff_stats_json,
+        }
+
+    if not by_id:
+        return milestones
+    return [by_id.get(milestone.get("milestone_id", ""), milestone) for milestone in milestones]
+
+
 def _normalize_issue_url(value: str) -> str:
     """Trim whitespace and trailing slash from an issue URL."""
     return value.strip().rstrip("/")
@@ -184,6 +303,89 @@ def _format_issue_title(base_title: str, issue_number: int, is_multi: bool) -> s
     return f"Issue #{issue_number}"
 
 
+def _serialize_definition_snapshot(snapshot: dict[str, Any]) -> str:
+    """Serialize a workflow definition snapshot for storage."""
+    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+
+def _build_definition_snapshot(
+    data: dict,
+    requirements_text: str,
+    requirements_issue_input: str,
+    requirements_issue_url: str,
+    issue_selectors: list[dict] | None = None,
+    ignored_issue_tokens: list[str] | None = None,
+    batch_id: str | None = None,
+    batch_order: int | None = None,
+    batch_total: int | None = None,
+    resolved_issue_number: int | None = None,
+    resolved_issue_url: str | None = None,
+) -> dict[str, Any]:
+    """Capture the creation-time workflow definition before runtime fields drift."""
+    return {
+        "title": data.get("title", ""),
+        "requirements_mode": "text" if requirements_text else "issue_input",
+        "requirements_text": data.get("requirements_text", ""),
+        "requirements_issue_input_raw": data.get("requirements_issue_input", ""),
+        "requirements_issue_url_raw": data.get("requirements_issue_url", ""),
+        "parsed_issue_selectors": issue_selectors or [],
+        "ignored_issue_tokens": ignored_issue_tokens or [],
+        "project_path": data.get("project_path", ""),
+        "project_repo_url": data.get("project_repo_url", ""),
+        "is_new_project": data.get("is_new_project", False),
+        "is_private": data.get("is_private", True),
+        "cli_tool": data.get("cli_tool", ""),
+        "model": data.get("model", ""),
+        "permission_mode": data.get("permission_mode", "auto-edit"),
+        "branch_strategy": data.get("branch_strategy", "new-branch"),
+        "branch_name": data.get("branch_name", ""),
+        "workspace_type": data.get("workspace_type", "local"),
+        "remote_machine_id": data.get("remote_machine_id", ""),
+        "max_plan_rounds": data.get("max_plan_rounds", 3),
+        "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
+        "auto_merge": data.get("auto_merge", True),
+        "batch_id": batch_id,
+        "batch_order": batch_order,
+        "batch_total": batch_total,
+        "resolved_issue_number": resolved_issue_number,
+        "resolved_issue_url": resolved_issue_url,
+    }
+
+
+def _parse_definition_snapshot(value: Any) -> dict[str, Any] | None:
+    """Parse a stored definition snapshot into the API response shape."""
+    if not value:
+        return None
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _workflow_response(workflow: dict | None) -> dict | None:
+    """Normalize workflow records before sending them over the API."""
+    if not workflow:
+        return workflow
+    normalized = dict(workflow)
+    normalized["definition_snapshot"] = _parse_definition_snapshot(
+        normalized.get("definition_snapshot")
+    )
+    return normalized
+
+
+def _parse_int_arg(name: str, default: int) -> int:
+    """Parse integer query params without turning bad input into a 500."""
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 # ── Workflow CRUD ───────────────────────────────────────────────────
 
 
@@ -196,7 +398,9 @@ def create_workflow():
     requirements_text = (data.get("requirements_text") or "").strip()
     requirements_issue_input = (data.get("requirements_issue_input") or "").strip()
     requirements_issue_url = (data.get("requirements_issue_url") or "").strip()
-    is_issue_mode = not requirements_text and bool(requirements_issue_input or requirements_issue_url)
+    is_issue_mode = not requirements_text and bool(
+        requirements_issue_input or requirements_issue_url
+    )
 
     # Rate limit: max 10 workflows per user per hour
     if not _workflow_rate_limiter.is_allowed(user_id):
@@ -257,6 +461,7 @@ def create_workflow():
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
+        "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
     }
 
     try:
@@ -274,6 +479,19 @@ def create_workflow():
 
             for index, selector in enumerate(issue_selectors, start=1):
                 workflow_data = dict(base_workflow_data)
+                definition_snapshot = _build_definition_snapshot(
+                    data,
+                    requirements_text,
+                    requirements_issue_input,
+                    requirements_issue_url,
+                    issue_selectors=issue_selectors,
+                    ignored_issue_tokens=ignored_issue_tokens,
+                    batch_id=batch_id,
+                    batch_order=index if is_multi_issue else None,
+                    batch_total=len(issue_selectors) if is_multi_issue else None,
+                    resolved_issue_number=selector["issue_number"],
+                    resolved_issue_url=selector["requirements_issue_url"],
+                )
                 workflow_data.update(
                     {
                         "title": _format_issue_title(
@@ -288,6 +506,7 @@ def create_workflow():
                         "batch_order": index if is_multi_issue else None,
                         "batch_total": len(issue_selectors) if is_multi_issue else None,
                         "status": "pending" if index == 1 else "queued",
+                        "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)
@@ -300,16 +519,26 @@ def create_workflow():
                     {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
                 )
 
-            response_data = {
+            response_data: dict[str, Any] = {
                 "success": True,
-                "workflow": created_workflows[0],
+                "workflow": _workflow_response(created_workflows[0]),
             }
             if is_multi_issue:
-                response_data["workflows"] = created_workflows
+                response_data["workflows"] = [
+                    _workflow_response(workflow) for workflow in created_workflows
+                ]
             if ignored_issue_tokens:
                 response_data["ignored_issue_tokens"] = ignored_issue_tokens
             return jsonify(response_data), 201
 
+        base_workflow_data["definition_snapshot"] = _serialize_definition_snapshot(
+            _build_definition_snapshot(
+                data,
+                requirements_text,
+                requirements_issue_input,
+                requirements_issue_url,
+            )
+        )
         workflow = repo.create_workflow(base_workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
@@ -320,7 +549,7 @@ def create_workflow():
             {"workflow_id": workflow["workflow_id"], "title": workflow.get("title", "")},
         )
 
-        return jsonify({"success": True, "workflow": workflow}), 201
+        return jsonify({"success": True, "workflow": _workflow_response(workflow)}), 201
     except Exception as e:
         logger.error("Failed to create workflow: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -336,17 +565,33 @@ def list_workflows():
     # Non-admin users can only see their own workflows
     filter_user_id = None if is_admin else user_id
     status = request.args.get("status")
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = int(request.args.get("offset", 0))
+    search = (request.args.get("search") or "").strip() or None
+    limit = max(1, min(_parse_int_arg("limit", 50), 200))
+    offset = max(0, _parse_int_arg("offset", 0))
 
     try:
-        workflows = _get_repo().list_workflows(
+        repo = _get_repo()
+        workflows = repo.list_workflows(
             user_id=filter_user_id,
             status=status,
+            search=search,
             limit=limit,
             offset=offset,
         )
-        return jsonify({"success": True, "workflows": workflows})
+        total = repo.count_workflows(
+            user_id=filter_user_id,
+            status=status,
+            search=search,
+        )
+        return jsonify(
+            {
+                "success": True,
+                "workflows": [_workflow_response(workflow) for workflow in workflows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
     except Exception as e:
         logger.error("Failed to list workflows: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -364,7 +609,7 @@ def get_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    return jsonify({"success": True, "workflow": workflow})
+    return jsonify({"success": True, "workflow": _workflow_response(workflow)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>", methods=["DELETE"])
@@ -386,6 +631,27 @@ def delete_workflow(workflow_id):
         return jsonify({"error": str(e)}), 500
 
 
+@autonomous_bp.route("/batches/<batch_id>", methods=["DELETE"])
+@auth_required
+def delete_batch(batch_id):
+    """Delete an entire batch of workflows."""
+    workflows = _get_repo().list_batch_workflows(batch_id)
+    if not workflows:
+        return jsonify({"error": "Batch not found"}), 404
+
+    if g.user_role != "admin":
+        for workflow in workflows:
+            if workflow.get("user_id") != g.user_id:
+                return jsonify({"error": "Access denied"}), 403
+
+    try:
+        deleted_count = _get_repo().delete_batch(batch_id)
+        return jsonify({"success": True, "deleted_count": deleted_count})
+    except Exception as e:
+        logger.error("Failed to delete batch %s: %s", batch_id, e)
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Workflow Control ────────────────────────────────────────────────
 
 
@@ -402,8 +668,8 @@ def pause_workflow(workflow_id):
     if workflow.get("status") == "paused":
         return jsonify({"error": "Workflow already paused"}), 400
 
-    # Signal running orchestrator to cancel its active agent task
-    _cancel_running_task(workflow_id)
+    # Suspend the running agent subprocess (SIGSTOP)
+    _pause_running_task(workflow_id)
 
     from datetime import datetime, timezone
 
@@ -432,6 +698,9 @@ def resume_workflow(workflow_id):
     if workflow.get("status") != "paused":
         return jsonify({"error": "Workflow is not paused"}), 400
 
+    # Resume the paused agent subprocess (SIGCONT)
+    _resume_running_task(workflow_id)
+
     phase = workflow.get("current_phase", "preparation")
     status = PHASE_TO_STATUS.get(phase, "pending")
 
@@ -457,8 +726,8 @@ def stop_workflow(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    # Signal running orchestrator to cancel its active agent task
-    _cancel_running_task(workflow_id)
+    # Kill the running agent subprocess (SIGTERM → SIGKILL)
+    _stop_running_task(workflow_id)
 
     from datetime import datetime, timezone
 
@@ -477,7 +746,10 @@ def stop_workflow(workflow_id):
         cancelled_count = _get_repo().cancel_queued_batch_workflows(batch_id, workflow_id)
         if cancelled_count:
             for sibling in _get_repo().list_batch_workflows(batch_id):
-                if sibling.get("workflow_id") == workflow_id or sibling.get("status") != "cancelled":
+                if (
+                    sibling.get("workflow_id") == workflow_id
+                    or sibling.get("status") != "cancelled"
+                ):
                     continue
                 _emit_event_safe(sibling["workflow_id"], "status_change", {"status": "cancelled"})
 
@@ -597,7 +869,10 @@ def get_timeline(workflow_id):
     if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
         return jsonify({"error": "Access denied"}), 403
 
-    milestones = _get_repo().list_milestones(workflow_id)
+    milestones = _enrich_milestones_with_usage(
+        workflow_id, _get_repo().list_milestones(workflow_id)
+    )
+    milestones = _enrich_milestones_with_diff_stats(workflow, milestones)
     return jsonify({"success": True, "milestones": milestones})
 
 
@@ -694,37 +969,46 @@ def fork_milestone(workflow_id, milestone_id):
     fork_phase = milestone.get("phase", "planning")
 
     # Create new workflow (copy settings from original)
-    fork_workflow = _get_repo().create_workflow(
-        {
-            "user_id": workflow.get("user_id"),
-            "title": f"{workflow.get('title', '')} [Fork]",
-            "requirements_text": workflow.get("requirements_text", ""),
-            "requirements_issue_url": workflow.get("requirements_issue_url", ""),
-            "project_path": workflow.get("project_path", ""),
-            "project_repo_url": workflow.get("project_repo_url", ""),
-            "is_new_project": False,
-            "is_private": workflow.get("is_private", True),
-            "cli_tool": workflow.get("cli_tool", "claude-code"),
-            "model": workflow.get("model", ""),
-            "permission_mode": workflow.get("permission_mode", "auto-edit"),
-            "branch_name": fork_branch,
-            "branch_strategy": "worktree",  # Force worktree for parallel execution
-            "workspace_type": workflow.get("workspace_type", "local"),
-            "remote_machine_id": workflow.get("remote_machine_id", ""),
-            "max_plan_rounds": workflow.get("max_plan_rounds", 3),
-            "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
-            "github_issue_number": workflow.get("github_issue_number"),
-            # Fork-specific fields
-            "parent_workflow_id": workflow_id,
-            "fork_milestone_id": milestone_id,
-            "user_feedback": user_feedback,
-            "original_branch_name": workflow.get("branch_name", ""),
-            # Start at the next phase (preparation handles worktree + phase jump)
-            "status": "pending",
-            "current_phase": "preparation",
-            "dev_round": milestone.get("dev_round", 1),
-        }
+    fork_workflow_data = {
+        "user_id": workflow.get("user_id"),
+        "title": f"{workflow.get('title', '')} [Fork]",
+        "requirements_text": workflow.get("requirements_text", ""),
+        "requirements_issue_url": workflow.get("requirements_issue_url", ""),
+        "project_path": workflow.get("project_path", ""),
+        "project_repo_url": workflow.get("project_repo_url", ""),
+        "is_new_project": False,
+        "is_private": workflow.get("is_private", True),
+        "cli_tool": workflow.get("cli_tool", "claude-code"),
+        "model": workflow.get("model", ""),
+        "permission_mode": workflow.get("permission_mode", "auto-edit"),
+        "branch_name": fork_branch,
+        "branch_strategy": "worktree",  # Force worktree for parallel execution
+        "workspace_type": workflow.get("workspace_type", "local"),
+        "remote_machine_id": workflow.get("remote_machine_id", ""),
+        "max_plan_rounds": workflow.get("max_plan_rounds", 3),
+        "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
+        "github_issue_number": workflow.get("github_issue_number"),
+        # Fork-specific fields
+        "parent_workflow_id": workflow_id,
+        "fork_milestone_id": milestone_id,
+        "user_feedback": user_feedback,
+        "original_branch_name": workflow.get("branch_name", ""),
+        # Start at the next phase (preparation handles worktree + phase jump)
+        "status": "pending",
+        "current_phase": "preparation",
+        "dev_round": milestone.get("dev_round", 1),
+    }
+    fork_workflow_data["definition_snapshot"] = _serialize_definition_snapshot(
+        _build_definition_snapshot(
+            fork_workflow_data,
+            fork_workflow_data["requirements_text"],
+            "",
+            fork_workflow_data["requirements_issue_url"],
+            resolved_issue_number=workflow.get("github_issue_number"),
+            resolved_issue_url=workflow.get("requirements_issue_url", ""),
+        )
     )
+    fork_workflow = _get_repo().create_workflow(fork_workflow_data)
 
     # Copy milestones up to fork point to new workflow
     _get_repo().copy_milestones_to_workflow(workflow_id, fork_workflow["workflow_id"], milestone_id)
@@ -776,7 +1060,7 @@ def fork_milestone(workflow_id, milestone_id):
             "fork_milestone_id": milestone_id,
         },
     )
-    return jsonify({"success": True, "fork_workflow": fork_workflow})
+    return jsonify({"success": True, "fork_workflow": _workflow_response(fork_workflow)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/forks", methods=["GET"])
@@ -844,7 +1128,7 @@ def get_milestone_session(workflow_id, milestone_id):
     if not milestone or milestone.get("workflow_id") != workflow_id:
         return jsonify({"error": "Milestone not found"}), 404
 
-    session_id = milestone.get("session_id", "")
+    session_id = _resolve_milestone_session_id(milestone)
     if not session_id:
         return jsonify({"success": True, "session": None})
 
@@ -853,6 +1137,15 @@ def get_milestone_session(workflow_id, milestone_id):
 
     sm = SessionManager()
     session_data = sm.get_session(session_id, include_messages=True)
+
+    # Multiple milestones may share a session (main/review/test lines via
+    # --resume); surface only this milestone's own messages.
+    if session_data and getattr(session_data, "messages", None):
+        session_data.messages = [
+            m
+            for m in session_data.messages
+            if (getattr(m, "milestone_id", "") or "") == milestone_id
+        ]
 
     return jsonify({"success": True, "session": session_data})
 
@@ -907,6 +1200,38 @@ def get_milestone_diff(workflow_id, milestone_id):
             logger.warning("Failed to get diff for %s: %s", sha[:8], e)
 
     return jsonify({"success": True, "diff": "\n\n".join(diff_parts)})
+
+
+@autonomous_bp.route("/workflows/<workflow_id>/pr-diff", methods=["GET"])
+@auth_required
+def get_workflow_pr_diff(workflow_id):
+    """Get the cumulative PR diff (head vs base) for a workflow.
+
+    Returns ``{success, diff, pr_number}``. When the workflow has no PR yet,
+    returns ``pr_number=null, diff=""`` (200) so the caller can render an empty
+    state instead of erroring. gh failures degrade to an empty diff + warning.
+    """
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    pr_number = workflow.get("github_pr_number")
+    if not pr_number:
+        return jsonify({"success": True, "diff": "", "pr_number": None})
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    gh = GitHubOps(project_path)
+    try:
+        diff = gh.get_pr_diff(int(pr_number))
+    except Exception as e:
+        logger.warning("Failed to get PR diff for #%s: %s", pr_number, e)
+        diff = ""
+
+    return jsonify({"success": True, "diff": diff, "pr_number": int(pr_number)})
 
 
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
@@ -1011,7 +1336,188 @@ def _emit_event_safe(workflow_id: str, event_type: str, data: dict):
 
 
 def _cancel_running_task(workflow_id: str):
-    """Signal a running orchestrator to cancel its current agent task."""
+    """Legacy: cancel a running task. Delegates to _stop_running_task."""
+    _stop_running_task(workflow_id)
+
+
+def _pid_matches_expected(pid: int) -> bool:
+    """Best-effort check that PID likely belongs to a CLI agent process.
+
+    Helps guard against PID recycling on long-running servers by verifying
+    the process command line contains known agent binary names.
+    """
+    try:
+        import subprocess as _sp
+
+        result = _sp.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return False  # process doesn't exist
+        comm = result.stdout.strip().lower()
+        return any(name in comm for name in ("claude", "qwen", "codex", "openclaw", "node"))
+    except Exception:
+        # If we can't check, assume it matches (conservative: try to stop it)
+        return True
+
+
+def _kill_pid(pid: int) -> bool:
+    """Kill a process by PID with SIGTERM -> SIGKILL escalation.
+
+    Works with process groups created via ``start_new_session=True``.
+    Returns True if the process was killed or was already gone.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True  # already gone
+
+    # Stage 1: SIGTERM
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return True
+
+    # Stage 2: poll for exit, up to 5 seconds
+    for _ in range(10):
+        time.sleep(0.5)
+        try:
+            os.killpg(pgid, 0)  # existence check
+        except (ProcessLookupError, OSError):
+            return True  # died after SIGTERM
+
+    # Stage 3: SIGKILL
+    logger.warning("PID %d still alive after SIGTERM, sending SIGKILL", pid)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        return True
+
+    # Final check
+    time.sleep(1)
+    try:
+        os.killpg(pgid, 0)
+        return False  # still alive even after SIGKILL
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _suspend_pid(pid: int) -> bool:
+    """Suspend a process by PID using SIGSTOP."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True
+
+    try:
+        os.killpg(pgid, signal.SIGSTOP)
+        return True
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _resume_pid(pid: int) -> bool:
+    """Resume a suspended process by PID using SIGCONT."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return True
+
+    try:
+        os.killpg(pgid, signal.SIGCONT)
+        return True
+    except (ProcessLookupError, OSError):
+        return True
+
+
+def _pause_running_task(workflow_id: str):
+    """Pause the running agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.pause_current_task()
+    Strategy 2: PID from database → direct SIGSTOP
+    Strategy 3: Scan runner's in-memory sessions → SIGSTOP matching sessions
+    """
+    affected_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator (fast path)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.pause_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        affected_pids.add(session.process.pid)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Pause strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database (covers scheduler poll gap)
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in affected_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Pause strategy 2: suspending DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _suspend_pid(pid)
+                affected_pids.add(pid)
+            # Keep agent_pid in DB (needed for resume)
+    except Exception as e:
+        logger.warning("Pause strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 3: scan runner sessions (last resort)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            runner = orchestrator._runner
+            for _sid, session in list(runner._local_sessions.items()):
+                if session.workflow_id == workflow_id:
+                    if session.process and session.process.returncode is None:
+                        pid = session.process.pid
+                        if pid not in affected_pids:
+                            try:
+                                os.killpg(os.getpgid(pid), signal.SIGSTOP)
+                                affected_pids.add(pid)
+                            except (ProcessLookupError, OSError):
+                                pass
+    except Exception as e:
+        logger.warning("Pause strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+
+def _stop_running_task(workflow_id: str):
+    """Stop (kill) the running agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.cancel_current_task()
+    Strategy 2: PID from database → direct SIGTERM/SIGKILL
+    Strategy 3: Scan runner's in-memory sessions → kill matching sessions
+    """
+    killed_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator (fast path)
     try:
         from app.services.autonomous_scheduler import AutonomousScheduler
 
@@ -1019,5 +1525,113 @@ def _cancel_running_task(workflow_id: str):
         orchestrator = scheduler.get_running_orchestrator(workflow_id)
         if orchestrator:
             orchestrator.cancel_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        killed_pids.add(session.process.pid)
+            except Exception:
+                pass
     except Exception as e:
-        logger.warning("Failed to cancel running task for %s: %s", workflow_id[:8], e)
+        logger.warning("Stop strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database (covers scheduler poll gap / server restart)
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in killed_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Stop strategy 2: killing DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _kill_pid(pid)
+                killed_pids.add(pid)
+            # Clear PID from DB
+            repo.update_workflow(workflow_id, {"agent_pid": None, "agent_session_id": ""})
+    except Exception as e:
+        logger.warning("Stop strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 3: scan runner sessions (last resort)
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            runner = orchestrator._runner
+            for _sid, session in list(runner._local_sessions.items()):
+                if session.workflow_id == workflow_id:
+                    if session.process and session.process.returncode is None:
+                        pid = session.process.pid
+                        if pid not in killed_pids:
+                            try:
+                                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                                killed_pids.add(pid)
+                            except (ProcessLookupError, OSError):
+                                pass
+                    runner.stop_session(_sid)
+    except Exception as e:
+        logger.warning("Stop strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+
+def _resume_running_task(workflow_id: str):
+    """Resume a paused agent task using multiple strategies.
+
+    Strategy 1: In-memory orchestrator → orchestrator.resume_current_task()
+    Strategy 2: PID from database → direct SIGCONT
+    """
+    resumed_pids: set[int] = set()
+
+    # Strategy 1: in-memory orchestrator
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        scheduler = AutonomousScheduler.instance()
+        orchestrator = scheduler.get_running_orchestrator(workflow_id)
+        if orchestrator:
+            orchestrator.resume_current_task()
+            try:
+                with orchestrator._session_lock:
+                    sid = orchestrator._current_session_id
+                if sid:
+                    session = orchestrator._runner._local_sessions.get(sid)
+                    if session and session.process and session.process.returncode is None:
+                        resumed_pids.add(session.process.pid)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Resume strategy 1 (in-memory) failed for %s: %s", workflow_id[:8], e)
+
+    # Strategy 2: PID from database
+    try:
+        repo = _get_repo()
+        workflow = repo.get_workflow(workflow_id)
+        if workflow:
+            pid = workflow.get("agent_pid")
+            if (
+                pid
+                and isinstance(pid, int)
+                and pid > 0
+                and pid not in resumed_pids
+                and _pid_matches_expected(pid)
+            ):
+                logger.info(
+                    "Resume strategy 2: resuming DB-tracked PID %d for workflow %s",
+                    pid,
+                    workflow_id[:8],
+                )
+                _resume_pid(pid)
+                resumed_pids.add(pid)
+    except Exception as e:
+        logger.warning("Resume strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)

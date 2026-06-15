@@ -287,7 +287,8 @@ _LIKE_PATTERN_RE = re.compile(
 )
 
 # #22: Context window expanded from ±3 to ±5 lines
-_ESCAPE_LIKE_WINDOW = 5
+# #951: Expanded to ±7 lines to handle parameterized queries where params appear after SQL string
+_ESCAPE_LIKE_WINDOW = 7
 
 
 def _check_sql003(content: str, filepath: str) -> list[dict]:

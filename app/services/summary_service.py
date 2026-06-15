@@ -6,18 +6,15 @@ Provides fast dashboard queries by maintaining a summary table.
 """
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
+from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
-
-# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
-_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
 
 class SummaryService:
@@ -384,17 +381,28 @@ class SummaryService:
         Returns:
             List[str]: List of unique host names.
         """
-        query = """
+        # Get SQL filter clause
+        sql_filter = get_hostname_filter_sql()
+
+        query = f"""
             SELECT DISTINCT host_name
             FROM usage_summary
-            WHERE host_name != ''
-            AND (host_name NOT LIKE '<%%>' OR host_name IS NULL)
+            WHERE {sql_filter}
             ORDER BY host_name
         """
         rows = self.db.fetch_all(query)
-        # Additional Python-side filter for placeholder patterns
-        return [
-            row["host_name"]
-            for row in rows
-            if not _PLACEHOLDER_HOST_PATTERN.match(row["host_name"])
-        ]
+
+        # Python-side validation (double-check for edge cases)
+        valid_hosts = []
+        for row in rows:
+            host_name = row["host_name"]
+            # Defensive check - if SQL filter missed invalid hosts, log warning
+            if not is_valid_hostname(host_name):
+                logger.warning(
+                    f"SQL filter missed invalid hostname: '{host_name}' - "
+                    "this indicates a filter logic inconsistency"
+                )
+                continue
+            valid_hosts.append(host_name)
+
+        return valid_hosts

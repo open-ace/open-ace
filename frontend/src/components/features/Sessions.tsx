@@ -29,6 +29,7 @@ import {
   Badge,
   Modal,
   SessionDetailContent,
+  Pagination,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, formatTokens, formatToolName } from '@/utils';
@@ -432,40 +433,12 @@ export const Sessions: React.FC = () => {
 
           {/* Pagination */}
           {pagination && pagination.totalPages > 1 && (
-            <div className="d-flex justify-content-center mt-4">
-              <nav>
-                <ul className="pagination">
-                  <li className={cn('page-item', page === 1 && 'disabled')}>
-                    <button
-                      className="page-link"
-                      onClick={() => setPage(page - 1)}
-                      disabled={page === 1}
-                    >
-                      {t('previous', language) ?? 'Previous'}
-                    </button>
-                  </li>
-                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button className="page-link" onClick={() => setPage(pageNum)}>
-                          {pageNum}
-                        </button>
-                      </li>
-                    );
-                  })}
-                  <li className={cn('page-item', page === pagination.totalPages && 'disabled')}>
-                    <button
-                      className="page-link"
-                      onClick={() => setPage(page + 1)}
-                      disabled={page === pagination.totalPages}
-                    >
-                      {t('next', language) ?? 'Next'}
-                    </button>
-                  </li>
-                </ul>
-              </nav>
-            </div>
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              onPageChange={setPage}
+              className="mt-4"
+            />
           )}
 
           {/* Total count */}

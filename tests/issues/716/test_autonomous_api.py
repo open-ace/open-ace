@@ -101,6 +101,7 @@ def _make_repo():
     }
     repo.get_workflow.return_value = None
     repo.list_workflows.return_value = []
+    repo.count_workflows.return_value = 0
     repo.list_milestones.return_value = []
     repo.create_milestone.return_value = {"milestone_id": "ms-mock", "workflow_id": "wf-mock"}
     repo.create_event.return_value = {"id": 1}
@@ -157,6 +158,11 @@ class TestCreateWorkflow:
         assert resp.status_code == 201
         data = resp.get_json()
         assert data["success"] is True
+        payload = repo.create_workflow.call_args[0][0]
+        snapshot = json.loads(payload["definition_snapshot"])
+        assert snapshot["requirements_mode"] == "text"
+        assert snapshot["requirements_text"] == "Build a feature"
+        assert snapshot["cli_tool"] == "claude-code"
 
     def test_create_missing_requirements(self, client):
         with _mock_auth():
@@ -247,6 +253,13 @@ class TestCreateWorkflow:
         call_payloads = [call.args[0] for call in repo.create_workflow.call_args_list]
         assert [payload["github_issue_number"] for payload in call_payloads] == [12, 14, 15]
         assert [payload["status"] for payload in call_payloads] == ["pending", "queued", "queued"]
+        snapshots = [json.loads(payload["definition_snapshot"]) for payload in call_payloads]
+        assert all(
+            snapshot["requirements_issue_input_raw"] == "12 14-15 bad-token"
+            for snapshot in snapshots
+        )
+        assert [snapshot["resolved_issue_number"] for snapshot in snapshots] == [12, 14, 15]
+        assert [snapshot["batch_order"] for snapshot in snapshots] == [1, 2, 3]
 
     def test_create_with_only_invalid_issue_selectors(self, client):
         repo = _make_repo()
@@ -286,6 +299,7 @@ class TestListWorkflows:
             {"workflow_id": "wf-1", "title": "Task 1"},
             {"workflow_id": "wf-2", "title": "Task 2"},
         ]
+        repo.count_workflows.return_value = 2
         with _mock_auth(role="admin"):
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.get("/api/autonomous/workflows")
@@ -293,6 +307,9 @@ class TestListWorkflows:
         data = resp.get_json()
         assert data["success"] is True
         assert len(data["workflows"]) == 2
+        assert data["total"] == 2
+        assert data["limit"] == 50
+        assert data["offset"] == 0
 
     def test_list_regular_user_filters_own(self, client):
         """Non-admin users should only see their own workflows."""
@@ -314,6 +331,25 @@ class TestListWorkflows:
                 call_kwargs = repo.list_workflows.call_args
                 assert call_kwargs[1]["user_id"] is None
 
+    def test_list_passes_search_limit_offset_and_status(self, client):
+        repo = _make_repo()
+        repo.count_workflows.return_value = 7
+        with _mock_auth(role="admin"):
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get(
+                    "/api/autonomous/workflows?status=queued&search=issue%2012&limit=25&offset=50"
+                )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["total"] == 7
+        assert data["limit"] == 25
+        assert data["offset"] == 50
+        call_kwargs = repo.list_workflows.call_args[1]
+        assert call_kwargs["status"] == "queued"
+        assert call_kwargs["search"] == "issue 12"
+        assert call_kwargs["limit"] == 25
+        assert call_kwargs["offset"] == 50
+
 
 class TestGetWorkflow:
     """Tests for GET /api/autonomous/workflows/<id>."""
@@ -330,6 +366,21 @@ class TestGetWorkflow:
                 resp = client.get("/api/autonomous/workflows/wf-1")
         assert resp.status_code == 200
         assert resp.get_json()["workflow"]["workflow_id"] == "wf-1"
+
+    def test_get_parses_definition_snapshot(self, client):
+        repo = _make_repo()
+        repo.get_workflow.return_value = {
+            "workflow_id": "wf-1",
+            "user_id": 1,
+            "title": "Test",
+            "definition_snapshot": json.dumps({"requirements_mode": "text"}),
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.get("/api/autonomous/workflows/wf-1")
+        assert resp.status_code == 200
+        snapshot = resp.get_json()["workflow"]["definition_snapshot"]
+        assert snapshot["requirements_mode"] == "text"
 
     def test_get_not_found(self, client):
         repo = _make_repo()
@@ -368,6 +419,42 @@ class TestDeleteWorkflow:
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.delete("/api/autonomous/workflows/nonexistent")
         assert resp.status_code == 404
+
+
+class TestDeleteBatch:
+    """Tests for DELETE /api/autonomous/batches/<id>."""
+
+    def test_delete_batch_success(self, client):
+        repo = _make_repo()
+        repo.list_batch_workflows.return_value = [
+            {"workflow_id": "wf-1", "user_id": 1, "batch_id": "batch-1"},
+            {"workflow_id": "wf-2", "user_id": 1, "batch_id": "batch-1"},
+        ]
+        repo.delete_batch.return_value = 2
+        with _mock_auth(user_id=1, role="user"):
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.delete("/api/autonomous/batches/batch-1")
+        assert resp.status_code == 200
+        assert resp.get_json()["deleted_count"] == 2
+        repo.delete_batch.assert_called_once_with("batch-1")
+
+    def test_delete_batch_not_found(self, client):
+        repo = _make_repo()
+        repo.list_batch_workflows.return_value = []
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.delete("/api/autonomous/batches/missing-batch")
+        assert resp.status_code == 404
+
+    def test_delete_batch_forbidden_for_other_users(self, client):
+        repo = _make_repo()
+        repo.list_batch_workflows.return_value = [
+            {"workflow_id": "wf-1", "user_id": 2, "batch_id": "batch-1"},
+        ]
+        with _mock_auth(user_id=1, role="user"):
+            with patch("app.routes.autonomous.auto_repo", repo):
+                resp = client.delete("/api/autonomous/batches/batch-1")
+        assert resp.status_code == 403
 
 
 # ── Workflow Control Tests ───────────────────────────────────────────────
@@ -504,12 +591,109 @@ class TestGetTimeline:
             {"milestone_id": "ms-1", "phase": "planning", "status": "completed"},
             {"milestone_id": "ms-2", "phase": "development", "status": "in_progress"},
         ]
+        repo.get_milestone_usage_summary.return_value = {
+            "ms-1": {
+                "llm_session_id": "sess-plan",
+                "llm_total_tokens": 1234,
+                "llm_request_count": 7,
+            }
+        }
         with _mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
                 resp = client.get("/api/autonomous/workflows/wf-1/timeline")
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data["milestones"]) == 2
+        assert data["milestones"][0]["llm_session_id"] == "sess-plan"
+        assert data["milestones"][0]["llm_total_tokens"] == 1234
+        assert data["milestones"][0]["llm_request_count"] == 7
+        assert data["milestones"][1]["llm_total_tokens"] == 0
+
+    def test_get_timeline_backfills_diff_stats_per_milestone(self, client):
+        repo = _make_repo()
+        repo.get_workflow.return_value = {
+            "workflow_id": "wf-1",
+            "user_id": 1,
+            "worktree_path": "/tmp/test-worktree",
+            "project_path": "/tmp/test-project",
+        }
+        repo.list_milestones.return_value = [
+            {
+                "milestone_id": "ms-dev",
+                "phase": "development",
+                "status": "completed",
+                "commit_shas": json.dumps(["aaa111", "bbb222"]),
+                "diff_stats": "",
+            },
+            {
+                "milestone_id": "ms-pr-fix",
+                "phase": "pr_review",
+                "status": "completed",
+                "commit_shas": json.dumps(["ccc333"]),
+                "diff_stats": "",
+            },
+        ]
+        repo.get_milestone_usage_summary.return_value = {}
+
+        gh = MagicMock()
+        gh.get_commit_diff_stats.side_effect = [
+            {"additions": 100, "deletions": 20, "files": 2, "commits": 1},
+            {"additions": 30, "deletions": 5, "files": 1, "commits": 1},
+            {"additions": 8, "deletions": 3, "files": 2, "commits": 1},
+        ]
+
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                with patch(
+                    "app.modules.workspace.autonomous.github_ops.GitHubOps",
+                    return_value=gh,
+                ):
+                    resp = client.get("/api/autonomous/workflows/wf-1/timeline")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        ms_dev_stats = json.loads(data["milestones"][0]["diff_stats"])
+        assert ms_dev_stats == {
+            "additions": 130,
+            "deletions": 25,
+            "files": 3,
+            "commits": 2,
+        }
+
+        ms_pr_fix_stats = json.loads(data["milestones"][1]["diff_stats"])
+        assert ms_pr_fix_stats == {
+            "additions": 8,
+            "deletions": 3,
+            "files": 2,
+            "commits": 1,
+        }
+        repo.update_milestone.assert_any_call(
+            "ms-dev",
+            {
+                "diff_stats": json.dumps(
+                    {
+                        "additions": 130,
+                        "deletions": 25,
+                        "files": 3,
+                        "commits": 2,
+                    }
+                )
+            },
+        )
+        repo.update_milestone.assert_any_call(
+            "ms-pr-fix",
+            {
+                "diff_stats": json.dumps(
+                    {
+                        "additions": 8,
+                        "deletions": 3,
+                        "files": 2,
+                        "commits": 1,
+                    }
+                )
+            },
+        )
 
 
 class TestCancelMilestone:

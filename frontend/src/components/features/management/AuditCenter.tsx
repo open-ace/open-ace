@@ -23,9 +23,10 @@ import {
   Badge,
   PieChart,
   BarChart,
+  PageRefreshControl,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { formatDateTime } from '@/utils';
+import { formatDateTime, createMatcherConfig } from '@/utils';
 import {
   complianceApi,
   type AuditPattern,
@@ -34,6 +35,7 @@ import {
   type UserProfile,
 } from '@/api';
 import type { AuditLogFilters } from '@/api';
+import { usePageRefresh } from '@/hooks';
 
 type AuditLog = {
   id: number;
@@ -70,12 +72,20 @@ export const AuditCenter: React.FC = () => {
   const { data: users, isLoading: usersLoading } = useUsers();
   const [activeTab, setActiveTab] = useState<TabType>('log');
 
+  // --- Page Refresh Control ---
+  const pageRefresh = usePageRefresh({
+    page: '/manage/audit',
+    refreshKey: createMatcherConfig([['audit']], 'prefix'),
+    interval: 0, // No auto refresh - manual only for audit logs
+    enabled: false,
+  });
+
   // --- Audit Log State ---
   const [filters, setFilters] = useState<AuditLogFilters>({});
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useAuditLogs({
+  const { data, isLoading, isError, error, refetch } = useAuditLogs({
     ...filters,
     page,
     limit: ITEMS_PER_PAGE,
@@ -1033,21 +1043,20 @@ export const AuditCenter: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('auditCenter', language)}</h2>
         <div className="d-flex gap-2">
+          {/* Page Refresh Control */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
           {activeTab === 'analysis' && (
             <Button variant="outline-success" size="sm" onClick={handleExportReport}>
               <i className="bi bi-download me-1" />
               {t('exportReport', language)}
             </Button>
           )}
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => (activeTab === 'log' ? refetch() : fetchAnalysisData())}
-            loading={isFetching}
-          >
-            {isFetching ? null : <i className="bi bi-arrow-clockwise me-1" />}
-            {t('refresh', language)}
-          </Button>
         </div>
       </div>
 

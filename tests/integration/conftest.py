@@ -47,6 +47,7 @@ def _create_sqlite_tables(db):
     try:
         cursor = conn.cursor()
 
+        from app.modules.compliance.report import get_ddl_statements as report_ddl
         from app.modules.compliance.retention import get_ddl_statements as ret_ddl
         from app.modules.sso.manager import get_ddl_statements as sso_ddl
         from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
@@ -65,6 +66,7 @@ def _create_sqlite_tables(db):
             ram_ddl,
             sso_ddl,
             ret_ddl,
+            report_ddl,
             ps_ddl,
             auth_ddl,
         ]:
@@ -142,6 +144,24 @@ def _create_sqlite_tables(db):
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_stats_date_tool_host_sender
             ON daily_stats (date, tool_name, host_name, sender_name)
+        """
+        )
+        # daily_usage table for compliance report tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                host_name TEXT DEFAULT 'localhost' NOT NULL,
+                tokens_used INTEGER DEFAULT 0,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cache_tokens INTEGER DEFAULT 0,
+                request_count INTEGER DEFAULT 0,
+                models_used TEXT,
+                created_at TEXT
+            )
         """
         )
         cursor.execute(
@@ -319,6 +339,23 @@ def _create_sqlite_tables(db):
             )
         """
         )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_permissions (
@@ -358,42 +395,7 @@ def _get_pg_base_url():
 
 def _create_pg_tables(db):
     """Create all tables needed by integration tests (PostgreSQL DDL)."""
-    conn = db.get_connection()
-    try:
-        cursor = conn.cursor()
-
-        # Reuse DDL functions that already emit PostgreSQL-compatible SQL
-        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
-        from app.modules.sso.manager import get_ddl_statements as sso_ddl
-        from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
-        from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
-        from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
-        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
-        from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
-        from app.services.auth_service import get_ddl_statements as auth_ddl
-        from app.services.permission_service import get_ddl_statements as ps_ddl
-
-        for ddl_fn in [
-            sm_ddl,
-            collab_ddl,
-            pl_ddl,
-            akp_ddl,
-            ram_ddl,
-            sso_ddl,
-            ret_ddl,
-            ps_ddl,
-            auth_ddl,
-        ]:
-            try:
-                for sql in ddl_fn():
-                    cursor.execute(sql)
-            except Exception as exc:
-                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
-
-        conn.commit()
-    finally:
-        conn.close()
-
+    # First, create base tables that DDL functions depend on (tenants, users)
     conn = db.get_connection()
     try:
         cursor = conn.cursor()
@@ -555,6 +557,7 @@ def _create_pg_tables(db):
                 data_retention_days INTEGER DEFAULT 365,
                 sso_enabled BOOLEAN DEFAULT false,
                 sso_provider TEXT,
+                auto_provision_users BOOLEAN DEFAULT false,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id)
             )
         """
@@ -630,6 +633,23 @@ def _create_pg_tables(db):
             )
         """
         )
+        # user_daily_stats table for user stats tests
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_daily_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                requests INTEGER DEFAULT 0 NOT NULL,
+                tokens INTEGER DEFAULT 0 NOT NULL,
+                input_tokens INTEGER DEFAULT 0 NOT NULL,
+                output_tokens INTEGER DEFAULT 0 NOT NULL,
+                cache_tokens INTEGER DEFAULT 0 NOT NULL,
+                created_at TEXT,
+                updated_at TEXT
+            )
+        """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_permissions (
@@ -652,6 +672,45 @@ def _create_pg_tables(db):
             )
         """
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Second, execute DDL functions that depend on base tables
+    conn = db.get_connection()
+    try:
+        cursor = conn.cursor()
+
+        # Reuse DDL functions that already emit PostgreSQL-compatible SQL
+        from app.modules.compliance.report import get_ddl_statements as report_ddl
+        from app.modules.compliance.retention import get_ddl_statements as ret_ddl
+        from app.modules.sso.manager import get_ddl_statements as sso_ddl
+        from app.modules.workspace.api_key_proxy import get_ddl_statements as akp_ddl
+        from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
+        from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
+        from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
+        from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
+        from app.services.auth_service import get_ddl_statements as auth_ddl
+        from app.services.permission_service import get_ddl_statements as ps_ddl
+
+        for ddl_fn in [
+            sm_ddl,
+            collab_ddl,
+            pl_ddl,
+            akp_ddl,
+            ram_ddl,
+            sso_ddl,
+            ret_ddl,
+            report_ddl,
+            ps_ddl,
+            auth_ddl,
+        ]:
+            try:
+                for sql in ddl_fn():
+                    cursor.execute(sql)
+            except Exception as exc:
+                logger.warning("DDL function %s failed: %s", ddl_fn.__module__, exc)
+
         conn.commit()
     finally:
         conn.close()
@@ -710,3 +769,43 @@ def pg_db():
             conn.cursor().execute(f'DROP DATABASE IF EXISTS "{test_db_name}"')
         finally:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Flask app fixtures for API tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app(tmp_db):
+    """Create Flask app for testing with temporary database."""
+    from flask import Flask
+
+    from app.routes.compliance import compliance_bp
+
+    app = Flask(__name__)
+    app.register_blueprint(compliance_bp)
+    app.config["TESTING"] = True
+
+    # Patch database to use tmp_db
+    with patch("app.repositories.database.Database", return_value=tmp_db):
+        with patch("app.routes.compliance.report_generator.db", tmp_db):
+            yield app
+
+
+@pytest.fixture
+def client(app):
+    """Create test client."""
+    return app.test_client()
+
+
+@pytest.fixture
+def auth_headers():
+    """Headers for authenticated user (simulates login)."""
+    # For admin_required decorator, we need to mock g.user_id
+    from unittest.mock import patch
+
+    from flask import g
+
+    # In tests, we'll patch g.user_id before each request
+    return {"Content-Type": "application/json"}

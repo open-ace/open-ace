@@ -6,6 +6,38 @@ import { apiClient } from './client';
 
 // ── Types ──────────────────────────────────────────────────────────
 
+export interface WorkflowDefinitionSnapshot {
+  title?: string;
+  requirements_mode?: 'text' | 'issue_input' | string;
+  requirements_text?: string;
+  requirements_issue_input_raw?: string;
+  requirements_issue_url_raw?: string;
+  parsed_issue_selectors?: Array<{
+    issue_number?: number;
+    requirements_issue_url?: string;
+  }>;
+  ignored_issue_tokens?: string[];
+  project_path?: string;
+  project_repo_url?: string;
+  is_new_project?: boolean;
+  is_private?: boolean;
+  cli_tool?: string;
+  model?: string;
+  permission_mode?: string;
+  branch_strategy?: string;
+  branch_name?: string;
+  workspace_type?: string;
+  remote_machine_id?: string;
+  max_plan_rounds?: number;
+  max_pr_review_rounds?: number;
+  auto_merge?: boolean;
+  batch_id?: string | null;
+  batch_order?: number | null;
+  batch_total?: number | null;
+  resolved_issue_number?: number | null;
+  resolved_issue_url?: string | null;
+}
+
 export interface AutonomousWorkflow {
   id?: number;
   workflow_id: string;
@@ -31,6 +63,8 @@ export interface AutonomousWorkflow {
   batch_id: string | null;
   batch_order: number | null;
   batch_total: number | null;
+  auto_merge: boolean;
+  definition_snapshot: WorkflowDefinitionSnapshot | null;
   current_phase: string;
   current_round: number;
   dev_round: number;
@@ -70,6 +104,7 @@ export interface WorkflowMilestone {
   commit_shas: string;
   diff_stats: string;
   result_summary: string;
+  tldr: string;
   plan_content: string;
   review_content: string;
   error_message: string;
@@ -77,6 +112,9 @@ export interface WorkflowMilestone {
   fork_branch: string;
   fork_workflow_id: string;
   metadata: string;
+  llm_session_id?: string;
+  llm_total_tokens?: number;
+  llm_request_count?: number;
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;
@@ -116,15 +154,29 @@ export interface CreateWorkflowRequest {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
+  auto_merge?: boolean; // Auto merge PR for batch workflows
+}
+
+export interface WorkflowListParams {
+  status?: string;
+  search?: string;
+  limit?: string;
+  offset?: string;
+}
+
+export interface WorkflowListResponse {
+  success: boolean;
+  workflows: AutonomousWorkflow[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 // ── API Client ─────────────────────────────────────────────────────
 
 export const autonomousApi = {
   // Workflow CRUD
-  async createWorkflow(
-    data: CreateWorkflowRequest
-  ): Promise<{
+  async createWorkflow(data: CreateWorkflowRequest): Promise<{
     success: boolean;
     workflow: AutonomousWorkflow;
     workflows?: AutonomousWorkflow[];
@@ -133,10 +185,11 @@ export const autonomousApi = {
     return apiClient.post('/api/autonomous/workflows', data);
   },
 
-  async listWorkflows(
-    params?: Record<string, string>
-  ): Promise<{ success: boolean; workflows: AutonomousWorkflow[] }> {
-    return apiClient.get('/api/autonomous/workflows', params);
+  async listWorkflows(params?: WorkflowListParams): Promise<WorkflowListResponse> {
+    return apiClient.get<WorkflowListResponse>(
+      '/api/autonomous/workflows',
+      params as Record<string, string> | undefined
+    );
   },
 
   async getWorkflow(
@@ -147,6 +200,10 @@ export const autonomousApi = {
 
   async deleteWorkflow(workflowId: string): Promise<{ success: boolean }> {
     return apiClient.delete(`/api/autonomous/workflows/${workflowId}`);
+  },
+
+  async deleteBatch(batchId: string): Promise<{ success: boolean; deleted_count: number }> {
+    return apiClient.delete(`/api/autonomous/batches/${batchId}`);
   },
 
   // Workflow Control
@@ -240,6 +297,12 @@ export const autonomousApi = {
     milestoneId: string
   ): Promise<{ success: boolean; diff: string }> {
     return apiClient.get(`/api/autonomous/workflows/${workflowId}/milestones/${milestoneId}/diff`);
+  },
+
+  async getWorkflowPrDiff(
+    workflowId: string
+  ): Promise<{ success: boolean; diff: string; pr_number: number | null }> {
+    return apiClient.get(`/api/autonomous/workflows/${workflowId}/pr-diff`);
   },
 
   // SSE Event Stream URL

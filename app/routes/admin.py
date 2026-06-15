@@ -15,6 +15,7 @@ from flask import Blueprint, g, jsonify, request
 from app.auth.decorators import admin_required
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
+from app.schemas.quota import validate_quota_update
 from app.utils.validators import validate_email, validate_password, validate_username
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,32 @@ def api_update_user_quota(user_id):
     """Update a user's quota."""
     data = request.get_json() or {}
 
+    # Validate quota values before updating
+    is_valid, errors = validate_quota_update(
+        daily_token_quota=data.get("daily_token_quota"),
+        monthly_token_quota=data.get("monthly_token_quota"),
+        daily_request_quota=data.get("daily_request_quota"),
+        monthly_request_quota=data.get("monthly_request_quota"),
+    )
+
+    if not is_valid:
+        # Return validation errors with i18n-friendly format
+        error_messages = []
+        for field, msg in errors.items():
+            error_messages.append(f"{field}: {msg}")
+
+        return (
+            jsonify(
+                {
+                    "error": "Quota validation failed",
+                    "details": errors,
+                    "message": "; ".join(error_messages),
+                }
+            ),
+            400,
+        )
+
+    # If validation passes, proceed with update
     success = user_repo.update_user_quota(
         user_id=user_id,
         daily_token_quota=data.get("daily_token_quota"),

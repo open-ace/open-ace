@@ -16,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,7 +35,27 @@ def _ensure_usage_parser():
     """Import extract_stream_usage once remote-agent is on sys.path."""
     global _extract_stream_usage
     if _extract_stream_usage is None:
-        from cli_adapters.usage_parser import extract_stream_usage
+        try:
+            from cli_adapters.usage_parser import extract_stream_usage
+        except (ImportError, ModuleNotFoundError):
+            logger.warning("Falling back to built-in stream usage parser")
+
+            def extract_stream_usage(_cli_tool: str, parsed: dict) -> dict | None:
+                usage = parsed.get("usage")
+                if not isinstance(usage, dict):
+                    message = parsed.get("message", {})
+                    if isinstance(message, dict):
+                        usage = message.get("usage")
+                if not isinstance(usage, dict):
+                    data = parsed.get("data", {})
+                    if isinstance(data, dict):
+                        usage = data.get("usage")
+                if not isinstance(usage, dict):
+                    return None
+                return {
+                    "input": int(usage.get("input_tokens", 0) or 0),
+                    "output": int(usage.get("output_tokens", 0) or 0),
+                }
 
         _extract_stream_usage = extract_stream_usage
 
@@ -46,13 +67,17 @@ except (ValueError, TypeError):
     logger.warning("Invalid AUTONOMOUS_TASK_TIMEOUT value, using default 3600")
     DEFAULT_TASK_TIMEOUT = 3600
 
+SESSION_DETECTION_GRACE_SECONDS = 5.0
+SESSION_DETECTION_WAIT_SECONDS = 5.0
+SESSION_DETECTION_POLL_INTERVAL = 0.25
+
 
 @dataclass
 class _LocalSession:
     """Tracks a local CLI subprocess session."""
 
     session_id: str
-    process: subprocess.Popen
+    process: subprocess.Popen | None
     cli_tool: str = "claude-code"
     allowed_tools: list[str] | None = None
     output_lines: list[str] = field(default_factory=list)
@@ -61,6 +86,7 @@ class _LocalSession:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    request_count: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
     _stopped: threading.Event = field(default_factory=threading.Event)
@@ -69,6 +95,22 @@ class _LocalSession:
     # Ordered event log for preserving actual message interleaving
     # Each entry: {"type": "assistant"|"tool_use"|"usage", ...}
     event_log: list[dict] = field(default_factory=list)
+    project_path: str = ""
+    encoded_project_path: str = ""
+    workflow_id: str = ""
+    user_id: int | None = None
+    workspace_type: str = "local"
+    remote_machine_id: str | None = None
+    started_at_epoch: float = 0.0
+    persisted_session_id: str = ""
+    # Real Claude session_id captured from the SDK init control_response.
+    # Preferred over mtime-based JSONL guessing so resume chains stay correct.
+    cli_session_id: str = ""
+    init_request_id: str = ""  # SDK initialize request_id for matching control_response
+    sdk_initialized: threading.Event = field(default_factory=threading.Event)
+    # Milestone this task belongs to — tags session_messages for per-phase detail views.
+    milestone_id: str = ""
+    _paused: bool = False  # True when process is suspended via SIGSTOP
 
 
 class AutonomousAgentRunner:
@@ -80,6 +122,8 @@ class AutonomousAgentRunner:
         remote_session_manager=None,
         server_url: str = "",
         activity_callback=None,
+        on_pid_registered=None,
+        on_pid_cleared=None,
     ):
         """
         Args:
@@ -89,6 +133,10 @@ class AutonomousAgentRunner:
             activity_callback: Optional callback ``(session_id, activity_dict)``
                 invoked for each assistant/tool_use/usage event, enabling
                 real-time streaming of agent activity to the frontend.
+            on_pid_registered: Optional callback ``(session_id, pid)`` called
+                when a local subprocess is created, for PID persistence.
+            on_pid_cleared: Optional callback ``(session_id)`` called when a
+                local subprocess exits, for PID cleanup.
         """
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
@@ -96,7 +144,167 @@ class AutonomousAgentRunner:
             "OPENACE_SERVER_URL", "http://localhost:5000"
         )
         self._activity_callback = activity_callback
+        self._on_pid_registered = on_pid_registered
+        self._on_pid_cleared = on_pid_cleared
         self._local_sessions: dict[str, _LocalSession] = {}
+
+    @staticmethod
+    def _uses_sidebar_session_source(cli_tool: str, workspace_type: str) -> bool:
+        """Whether this task should resolve to the real sidebar Claude session."""
+        return workspace_type == "local" and cli_tool == "claude-code"
+
+    @staticmethod
+    def _encode_project_path(project_path: str) -> str:
+        """Best-effort match for the encoded project path used by Claude session history.
+
+        Today Claude stores absolute paths by replacing "/" with "-". Keep this logic
+        isolated here because it is an implementation detail outside our control.
+        """
+        return project_path.replace("/", "-") if project_path.startswith("/") else project_path
+
+    def _find_latest_claude_session_id(
+        self,
+        encoded_project_path: str,
+        min_mtime_epoch: float,
+    ) -> str:
+        """Find the latest Claude JSONL session created for the active worktree.
+
+        This is best-effort discovery based on the encoded worktree path and file mtime.
+        It assumes only one local autonomous Claude task is creating a new session for a
+        given worktree at a time; concurrent tasks on the same worktree can still race.
+        """
+        if not encoded_project_path:
+            return ""
+
+        project_dir = Path.home() / ".claude" / "projects" / encoded_project_path
+        if not project_dir.is_dir():
+            return ""
+
+        latest_file = None
+        latest_mtime = min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
+        try:
+            for candidate in project_dir.glob("*.jsonl"):
+                try:
+                    stat = candidate.stat()
+                except OSError:
+                    continue
+                if (
+                    stat.st_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
+                    and stat.st_mtime >= latest_mtime
+                ):
+                    latest_file = candidate
+                    latest_mtime = stat.st_mtime
+        except OSError:
+            return ""
+
+        return latest_file.stem if latest_file else ""
+
+    def _ensure_sidebar_session(self, session: _LocalSession) -> str:
+        """Resolve and create the single persisted sidebar session for local Claude."""
+        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+            return session.session_id
+        if session.persisted_session_id:
+            return session.persisted_session_id
+
+        # Prefer the real CLI session_id captured from the SDK init
+        # control_response; fall back to mtime-based JSONL discovery only when
+        # the control_response was never received (older CLI / parse miss).
+        if session.cli_session_id:
+            persisted_id = session.cli_session_id
+        else:
+            # mtime fallback — this is the original #848 pollution mechanism.
+            # control_response covers the vast majority of cases; if this fires
+            # and the guessed id is wrong, it can get pinned to a session line
+            # and propagated via --resume. Warn so it's traceable.
+            persisted_id = self._find_latest_claude_session_id(
+                session.encoded_project_path,
+                session.started_at_epoch,
+            )
+            logger.warning(
+                "Using mtime fallback to resolve session (control_response missed) — "
+                "workflow=%s path=%s -> %s",
+                session.workflow_id,
+                session.encoded_project_path,
+                (persisted_id or "<none>")[:8],
+            )
+        if not persisted_id:
+            return ""
+
+        if self.session_manager:
+            try:
+                self.session_manager.create_session(
+                    session_id=persisted_id,
+                    session_type="chat",
+                    title=f"claude - {persisted_id[:8]}",
+                    tool_name="claude",
+                    user_id=session.user_id,
+                    project_path=session.encoded_project_path,
+                    workspace_type=session.workspace_type,
+                    remote_machine_id=session.remote_machine_id,
+                    context={"workflow_id": session.workflow_id},
+                )
+            except Exception as e:
+                logger.warning("Failed to create resolved sidebar session: %s", e)
+                return ""
+
+        session.persisted_session_id = persisted_id
+        if self._activity_callback:
+            self._activity_callback(
+                persisted_id,
+                {
+                    "type": "session_resolved",
+                    "session_id": persisted_id,
+                },
+            )
+
+        return persisted_id
+
+    def _resolve_sidebar_session(
+        self,
+        session: _LocalSession,
+        wait_timeout: float = 0.0,
+    ) -> str:
+        """Resolve the persisted sidebar session, optionally waiting for late JSONL flushes."""
+        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+            return session.session_id
+        if session.persisted_session_id:
+            return session.persisted_session_id
+
+        deadline = time.monotonic() + max(wait_timeout, 0.0)
+        while True:
+            persisted_id = self._ensure_sidebar_session(session)
+            if persisted_id:
+                return persisted_id
+            if time.monotonic() >= deadline:
+                return ""
+            time.sleep(SESSION_DETECTION_POLL_INTERVAL)
+
+    def _sync_sidebar_session_totals(
+        self, session: _LocalSession, status: str | None = None
+    ) -> None:
+        """Write the current local Claude usage into the persisted sidebar session."""
+        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+            return
+        persisted_id = session.persisted_session_id or self._resolve_sidebar_session(session)
+        if not persisted_id or not self.session_manager:
+            return
+
+        updates = {
+            "request_count": session.request_count,
+            "total_tokens": session.total_tokens,
+            "total_input_tokens": session.total_input_tokens,
+            "total_output_tokens": session.total_output_tokens,
+            "project_path": session.encoded_project_path,
+        }
+        if session.user_id:
+            updates["user_id"] = session.user_id
+        if status:
+            updates["status"] = status
+
+        try:
+            self.session_manager.update_session_fields(persisted_id, updates)
+        except Exception as e:
+            logger.warning("Failed to sync sidebar session totals: %s", e)
 
     def run_agent_task(
         self,
@@ -111,7 +319,11 @@ class AutonomousAgentRunner:
         session_type: str = "workflow",
         timeout: int = DEFAULT_TASK_TIMEOUT,
         session_id: str = None,
+        user_id: int | None = None,
         allowed_tools: list[str] | None = None,
+        resume: bool = False,
+        resume_session_id: str = None,
+        milestone_id: str = "",
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -133,15 +345,17 @@ class AutonomousAgentRunner:
             AgentTaskResult with response text, messages, tokens, etc.
         """
         session_id = session_id or str(uuid.uuid4())
+        uses_sidebar_session = self._uses_sidebar_session_source(cli_tool, workspace_type)
 
-        # Create session record
-        if self.session_manager:
+        # Create wrapper sessions only for tools without a native sidebar session source.
+        if self.session_manager and not uses_sidebar_session:
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
                     session_type=session_type,
                     title=f"Autonomous: {workflow_id[:8]}",
                     tool_name=cli_tool,
+                    user_id=user_id,
                     project_path=project_path,
                     workspace_type=workspace_type,
                     remote_machine_id=remote_machine_id,
@@ -180,20 +394,31 @@ class AutonomousAgentRunner:
                     prompt=prompt,
                     permission_mode=permission_mode,
                     timeout=timeout,
+                    workflow_id=workflow_id,
+                    user_id=user_id,
+                    workspace_type=workspace_type,
                     allowed_tools=allowed_tools,
+                    resume=resume,
+                    resume_session_id=resume_session_id,
+                    milestone_id=milestone_id,
                 )
 
+            persisted_session_id = (
+                result.session_id if uses_sidebar_session else (result.session_id or session_id)
+            )
+
             # Persist session messages to database (Issue #776 Bug 1)
-            if self.session_manager and session_id:
+            if self.session_manager and persisted_session_id and workspace_type == "local":
                 try:
-                    self._persist_local_session_messages(session_id, result)
+                    self._persist_local_session_messages(persisted_session_id, result, milestone_id)
                 except Exception as e:
                     logger.warning("Failed to persist session messages: %s", e)
 
             # Update session record
-            if self.session_manager:
+            if self.session_manager and persisted_session_id:
                 try:
                     update_fields = {
+                        "request_count": result.request_count,
                         "total_tokens": result.total_tokens,
                         "total_input_tokens": result.total_input_tokens,
                         "total_output_tokens": result.total_output_tokens,
@@ -202,10 +427,7 @@ class AutonomousAgentRunner:
                         update_fields["status"] = "completed"
                     else:
                         update_fields["status"] = "error"
-                    self.session_manager.update_session_fields(
-                        session_id,
-                        update_fields,
-                    )
+                    self.session_manager.update_session_fields(persisted_session_id, update_fields)
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
 
@@ -214,7 +436,8 @@ class AutonomousAgentRunner:
         except Exception as e:
             logger.error("Agent task failed: %s", e)
             return AgentTaskResult(
-                session_id=session_id,
+                session_id="" if uses_sidebar_session else session_id,
+                tracking_session_id=session_id,
                 success=False,
                 error=str(e),
             )
@@ -228,7 +451,13 @@ class AutonomousAgentRunner:
         prompt: str,
         permission_mode: str,
         timeout: int,
+        workflow_id: str,
+        user_id: int | None,
+        workspace_type: str,
         allowed_tools: list[str] | None = None,
+        resume: bool = False,
+        resume_session_id: str = None,
+        milestone_id: str = "",
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -249,7 +478,12 @@ class AutonomousAgentRunner:
         executable = shutil.which(exe_name)
         if not executable:
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=(
+                    ""
+                    if self._uses_sidebar_session_source(cli_tool, workspace_type)
+                    else session_id
+                ),
+                tracking_session_id=session_id,
                 success=False,
                 error=f"CLI tool '{exe_name}' not found",
             )
@@ -262,12 +496,17 @@ class AutonomousAgentRunner:
         env = dict(os.environ)
 
         # Build command
+        # When resuming an established session, pass the real CLI session_id
+        # so the adapter emits `--resume <id>`; otherwise let the CLI mint a new
+        # session and capture its id from the control_response.
+        resume_target = resume_session_id if (resume and resume_session_id) else session_id
         adapter_args = adapter.build_start_args(
-            session_id,
+            resume_target,
             project_path,
             model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume=resume,
         )
         cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
@@ -285,7 +524,12 @@ class AutonomousAgentRunner:
             )
         except (OSError, subprocess.SubprocessError) as e:
             return AgentTaskResult(
-                session_id=session_id,
+                session_id=(
+                    ""
+                    if self._uses_sidebar_session_source(cli_tool, workspace_type)
+                    else session_id
+                ),
+                tracking_session_id=session_id,
                 success=False,
                 error=f"Failed to start process: {e}",
             )
@@ -295,8 +539,28 @@ class AutonomousAgentRunner:
             process=process,
             cli_tool=cli_tool,
             allowed_tools=allowed_tools,
+            project_path=project_path,
+            encoded_project_path=self._encode_project_path(project_path),
+            workflow_id=workflow_id,
+            user_id=user_id,
+            workspace_type=workspace_type,
+            started_at_epoch=time.time(),
+            milestone_id=milestone_id,
         )
+        # For a resumed session the real CLI session_id is known up front; pin
+        # it so sidebar detection reuses the existing record instead of guessing.
+        if resume and resume_session_id:
+            session.cli_session_id = resume_session_id
+            session.persisted_session_id = resume_session_id
+            session.sdk_initialized.set()
         self._local_sessions[session_id] = session
+
+        # Persist PID to database for reliable cancel/pause
+        if self._on_pid_registered:
+            try:
+                self._on_pid_registered(session_id, process.pid)
+            except Exception as e:
+                logger.warning("on_pid_registered callback failed: %s", e)
 
         # Start output reader threads
         session._stdout_thread = threading.Thread(
@@ -334,13 +598,52 @@ class AutonomousAgentRunner:
 
         self._local_sessions.pop(session_id, None)
 
-        if not completed:
+        # Clear PID from database
+        if self._on_pid_cleared:
+            try:
+                self._on_pid_cleared(session_id)
+            except Exception as e:
+                logger.warning("on_pid_cleared callback failed: %s", e)
+
+        if (
+            completed
+            and self._uses_sidebar_session_source(cli_tool, workspace_type)
+            and not session.persisted_session_id
+        ):
+            self._resolve_sidebar_session(
+                session,
+                wait_timeout=min(SESSION_DETECTION_WAIT_SECONDS, max(timeout, 0)),
+            )
+
+        resolved_session_id = (
+            session.persisted_session_id
+            if self._uses_sidebar_session_source(cli_tool, workspace_type)
+            else session_id
+        )
+        if self._uses_sidebar_session_source(cli_tool, workspace_type) and not resolved_session_id:
             return AgentTaskResult(
-                session_id=session_id,
+                session_id="",
+                tracking_session_id=session_id,
                 response_text=session.assistant_text,
                 total_tokens=session.total_tokens,
                 total_input_tokens=session.total_input_tokens,
                 total_output_tokens=session.total_output_tokens,
+                request_count=session.request_count,
+                tool_calls=session.tool_calls,
+                success=False,
+                error="Failed to detect Claude sidebar session JSONL for autonomous task",
+                event_log=session.event_log,
+            )
+
+        if not completed:
+            return AgentTaskResult(
+                session_id=resolved_session_id,
+                tracking_session_id=session_id,
+                response_text=session.assistant_text,
+                total_tokens=session.total_tokens,
+                total_input_tokens=session.total_input_tokens,
+                total_output_tokens=session.total_output_tokens,
+                request_count=session.request_count,
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
@@ -348,11 +651,13 @@ class AutonomousAgentRunner:
             )
 
         return AgentTaskResult(
-            session_id=session_id,
+            session_id=resolved_session_id,
+            tracking_session_id=session_id,
             response_text=session.assistant_text,
             total_tokens=session.total_tokens,
             total_input_tokens=session.total_input_tokens,
             total_output_tokens=session.total_output_tokens,
+            request_count=session.request_count,
             tool_calls=session.tool_calls,
             success=session.error is None,
             error=session.error,
@@ -375,6 +680,7 @@ class AutonomousAgentRunner:
         if not self.remote_session_manager:
             return AgentTaskResult(
                 session_id=session_id,
+                tracking_session_id=session_id,
                 success=False,
                 error="Remote session manager not available",
             )
@@ -399,6 +705,7 @@ class AutonomousAgentRunner:
             if not result.get("success"):
                 return AgentTaskResult(
                     session_id=session_id,
+                    tracking_session_id=session_id,
                     success=False,
                     error=result.get("error", "Failed to create remote session"),
                 )
@@ -415,6 +722,7 @@ class AutonomousAgentRunner:
             if not self.session_manager:
                 return AgentTaskResult(
                     session_id=session_id,
+                    tracking_session_id=session_id,
                     success=False,
                     error="Session manager not available for remote session polling",
                 )
@@ -426,6 +734,7 @@ class AutonomousAgentRunner:
                 if local_session and local_session._stopped.is_set():
                     return AgentTaskResult(
                         session_id=session_id,
+                        tracking_session_id=session_id,
                         success=False,
                         error="Remote session cancelled by orchestrator",
                     )
@@ -447,11 +756,13 @@ class AutonomousAgentRunner:
 
                         return AgentTaskResult(
                             session_id=session_id,
+                            tracking_session_id=session_id,
                             response_text=assistant_text,
                             messages=messages,
                             total_tokens=session_data.get("total_tokens", 0),
                             total_input_tokens=session_data.get("total_input_tokens", 0),
                             total_output_tokens=session_data.get("total_output_tokens", 0),
+                            request_count=session_data.get("request_count", 0),
                             success=status == "completed",
                             error=(
                                 session_data.get("error_message") if status != "completed" else None
@@ -461,6 +772,7 @@ class AutonomousAgentRunner:
 
             return AgentTaskResult(
                 session_id=session_id,
+                tracking_session_id=session_id,
                 success=False,
                 error=f"Remote agent task timed out after {timeout}s",
             )
@@ -468,6 +780,7 @@ class AutonomousAgentRunner:
         except Exception as e:
             return AgentTaskResult(
                 session_id=session_id,
+                tracking_session_id=session_id,
                 success=False,
                 error=f"Remote execution error: {e}",
             )
@@ -477,7 +790,9 @@ class AutonomousAgentRunner:
 
     # ── Local helpers ──────────────────────────────────────────────
 
-    def _persist_local_session_messages(self, session_id: str, result: AgentTaskResult) -> None:
+    def _persist_local_session_messages(
+        self, session_id: str, result: AgentTaskResult, milestone_id: str = ""
+    ) -> None:
         """Write agent conversation to session_messages preserving order.
 
         Uses the ordered event_log from _LocalSession to maintain the actual
@@ -495,20 +810,35 @@ class AutonomousAgentRunner:
                 if event.get("type") == "assistant":
                     self.session_manager.add_message(
                         session_id=session_id,
+                        milestone_id=milestone_id,
                         role="assistant",
                         content=event.get("text", ""),
+                        model=event.get("model"),
+                        metadata=(
+                            {"message_id": event.get("message_id")}
+                            if event.get("message_id")
+                            else None
+                        ),
                     )
                 elif event.get("type") == "tool_use":
                     tool_input = event.get("tool_input", {})
                     self.session_manager.add_message(
                         session_id=session_id,
+                        milestone_id=milestone_id,
                         role="tool",
                         content=(
                             json.dumps(tool_input)
                             if isinstance(tool_input, (dict, list))
                             else str(tool_input)
                         ),
-                        metadata={"tool_name": event.get("tool_name", "unknown")},
+                        metadata={
+                            "tool_name": event.get("tool_name", "unknown"),
+                            **(
+                                {"tool_use_id": event.get("tool_use_id")}
+                                if event.get("tool_use_id")
+                                else {}
+                            ),
+                        },
                     )
                 # usage events are metadata-only, not persisted as messages
         else:
@@ -516,6 +846,7 @@ class AutonomousAgentRunner:
             if result.response_text:
                 self.session_manager.add_message(
                     session_id=session_id,
+                    milestone_id=milestone_id,
                     role="assistant",
                     content=result.response_text,
                 )
@@ -525,6 +856,7 @@ class AutonomousAgentRunner:
                 tool_input = tool_info.get("input", {})
                 self.session_manager.add_message(
                     session_id=session_id,
+                    milestone_id=milestone_id,
                     role="tool",
                     content=(
                         json.dumps(tool_input)
@@ -535,10 +867,12 @@ class AutonomousAgentRunner:
                 )
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:
-        """Send SDK initialize message."""
+        """Send SDK initialize message and record request_id for response matching."""
+        request_id = str(uuid.uuid4())
+        session.init_request_id = request_id
         init_msg = {
             "type": "control_request",
-            "request_id": str(uuid.uuid4()),
+            "request_id": request_id,
             "request": {"subtype": "initialize"},
         }
         return self._write_stdin(session, json.dumps(init_msg))
@@ -557,6 +891,8 @@ class AutonomousAgentRunner:
     def _write_stdin(self, session: _LocalSession, payload: str) -> bool:
         """Write a JSON message to the subprocess stdin."""
         try:
+            if session.process is None:
+                return False
             session.process.stdin.write((payload + "\n").encode("utf-8"))
             session.process.stdin.flush()
             return True
@@ -568,6 +904,8 @@ class AutonomousAgentRunner:
         """Read stdout lines from the subprocess."""
         try:
             while not session._stopped.is_set():
+                if session.process is None:
+                    break
                 line = session.process.stdout.readline()
                 if not line:
                     break
@@ -580,6 +918,8 @@ class AutonomousAgentRunner:
                 session.output_lines.append(line)
 
                 try:
+                    if not session.persisted_session_id:
+                        self._resolve_sidebar_session(session)
                     parsed = json.loads(line)
                     msg_type = parsed.get("type", "")
 
@@ -587,6 +927,7 @@ class AutonomousAgentRunner:
                         # Accumulate assistant text
                         msg = parsed.get("message", {})
                         content = msg.get("content", "")
+                        message_id = msg.get("id")
                         text_delta = ""
                         if isinstance(content, list):
                             for block in content:
@@ -602,12 +943,14 @@ class AutonomousAgentRunner:
                                 {
                                     "type": "assistant",
                                     "text": text_delta,  # full text for DB persistence
+                                    "message_id": message_id,
+                                    "model": msg.get("model"),
                                 }
                             )
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
-                                session.session_id,
+                                session.persisted_session_id or session.session_id,
                                 {
                                     "type": "assistant",
                                     "text": text_delta[:500],  # truncate for SSE
@@ -623,12 +966,13 @@ class AutonomousAgentRunner:
                                 "type": "tool_use",
                                 "tool_name": tool_info.get("name", "unknown"),
                                 "tool_input": tool_info.get("input", {}),
+                                "tool_use_id": tool_info.get("id"),
                             }
                         )
                         # Emit tool call activity
                         if self._activity_callback:
                             self._activity_callback(
-                                session.session_id,
+                                session.persisted_session_id or session.session_id,
                                 {
                                     "type": "tool_use",
                                     "tool_name": tool_info.get("name", "unknown"),
@@ -645,18 +989,36 @@ class AutonomousAgentRunner:
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )
+                        session.request_count += 1
+                        self._sync_sidebar_session_totals(session, status="active")
                         session.completed.set()
                         # Emit usage activity for real-time token display
                         if self._activity_callback:
                             self._activity_callback(
-                                session.session_id,
+                                session.persisted_session_id or session.session_id,
                                 {
                                     "type": "usage",
                                     "total_tokens": session.total_tokens,
                                     "total_input_tokens": session.total_input_tokens,
                                     "total_output_tokens": session.total_output_tokens,
+                                    "request_count": session.request_count,
                                 },
                             )
+
+                    elif msg_type == "control_response":
+                        # Capture the real Claude session_id from the SDK
+                        # initialize response (mirrors remote executor.py).
+                        resp = parsed.get("response", {}) or {}
+                        if (
+                            session.init_request_id
+                            and resp.get("request_id") == session.init_request_id
+                        ):
+                            if resp.get("subtype") == "success":
+                                inner = resp.get("response", {}) or {}
+                                cli_sid = inner.get("session_id", "")
+                                if cli_sid and not session.cli_session_id:
+                                    session.cli_session_id = cli_sid
+                            session.sdk_initialized.set()
 
                     elif msg_type == "control_request":
                         # Auto-approve permissions in autonomous mode,
@@ -688,7 +1050,7 @@ class AutonomousAgentRunner:
                                 logger.warning(
                                     "Denied tool '%s' for session %s " "(not in allowed list)",
                                     tool_name,
-                                    session.session_id[:8],
+                                    (session.persisted_session_id or session.session_id)[:8],
                                 )
                             else:
                                 # Approve (no restriction, or tool is allowed)
@@ -711,13 +1073,15 @@ class AutonomousAgentRunner:
             # If process exited without sending result, mark completed
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
-                if session.process.returncode is not None:
+                if session.process and session.process.returncode is not None:
                     session.completed.set()
 
     def _read_stderr(self, session: _LocalSession) -> None:
         """Read stderr from the subprocess."""
         try:
             while not session._stopped.is_set():
+                if session.process is None:
+                    break
                 line = session.process.stderr.readline()
                 if not line:
                     break
@@ -728,12 +1092,90 @@ class AutonomousAgentRunner:
             pass
 
     def stop_session(self, session_id: str) -> None:
-        """Stop a running local session."""
+        """Stop a running local session with SIGTERM + SIGKILL escalation.
+
+        If the process is currently paused (SIGSTOP), it will be resumed
+        first with SIGCONT so it can handle SIGTERM.
+        """
         session = self._local_sessions.get(session_id)
-        if session and session.process.returncode is None:
-            try:
-                os.killpg(os.getpgid(session.process.pid), signal.SIGTERM)
-            except (ProcessLookupError, OSError):
-                pass
+        if not session or not session.process or session.process.returncode is not None:
+            return
+
+        try:
+            pgid = os.getpgid(session.process.pid)
+        except (ProcessLookupError, OSError):
             session._stopped.set()
             session.completed.set()
+            return
+
+        # If paused, resume first so it can handle SIGTERM
+        if session._paused:
+            try:
+                os.killpg(pgid, signal.SIGCONT)
+                session._paused = False
+            except (ProcessLookupError, OSError):
+                pass
+
+        # Stage 1: SIGTERM
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            session._stopped.set()
+            session.completed.set()
+            return
+
+        # Stage 2: wait up to 5 seconds for graceful exit
+        try:
+            session.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Stage 3: SIGKILL
+            logger.warning(
+                "Process %d did not exit after SIGTERM, sending SIGKILL",
+                session.process.pid,
+            )
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+                session.process.wait(timeout=3)
+            except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+                pass
+
+        session._stopped.set()
+        session.completed.set()
+
+    def pause_session(self, session_id: str) -> bool:
+        """Suspend a running local session using SIGSTOP.
+
+        The process is frozen in place and can be resumed with
+        :meth:`resume_session` using SIGCONT.
+        """
+        session = self._local_sessions.get(session_id)
+        if not session or not session.process or session.process.returncode is not None:
+            return False
+        if session._paused:
+            return True
+        try:
+            pgid = os.getpgid(session.process.pid)
+            os.killpg(pgid, signal.SIGSTOP)
+            session._paused = True
+            logger.info("Paused session %s (pid %d)", session_id[:8], session.process.pid)
+            return True
+        except (ProcessLookupError, OSError) as e:
+            logger.error("Failed to pause session %s: %s", session_id[:8], e)
+            return False
+
+    def resume_session(self, session_id: str) -> bool:
+        """Resume a paused local session using SIGCONT."""
+        session = self._local_sessions.get(session_id)
+        if not session or not session.process or session.process.returncode is not None:
+            return False
+        if not session._paused:
+            return True
+        try:
+            pgid = os.getpgid(session.process.pid)
+            os.killpg(pgid, signal.SIGCONT)
+            session._paused = False
+            logger.info("Resumed session %s (pid %d)", session_id[:8], session.process.pid)
+            return True
+        except (ProcessLookupError, OSError) as e:
+            logger.error("Failed to resume session %s: %s", session_id[:8], e)
+            return False

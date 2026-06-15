@@ -45,12 +45,14 @@ export const Button: React.FC<ButtonProps> = ({
   className,
   id,
   'data-testid': testId,
+  title,
 }) => {
   return (
     <button
       type={type}
       id={id}
       data-testid={testId}
+      title={title}
       className={cn(
         'btn',
         variantClasses[variant],

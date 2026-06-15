@@ -7,13 +7,14 @@
  */
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { cn } from '@/utils';
+import { cn, createMatcherConfig } from '@/utils';
 import {
   useConversationHistory,
   useConversationTimeline,
   useHosts,
   useSenders,
   useTools,
+  usePageRefresh,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -29,8 +30,9 @@ import {
   Dropdown,
   LineChart,
   Skeleton,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatDateTime, formatTokens, formatToolName } from '@/utils';
+import { formatDateTime, formatTokens, formatToolName, copyToClipboard } from '@/utils';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
@@ -44,6 +46,7 @@ interface ColumnDef {
 }
 
 const defaultColumns: ColumnDef[] = [
+  { key: 'conversation_id', label: 'sessionId', visible: true, sortable: true },
   { key: 'date', label: 'tableDate', visible: true, sortable: true },
   { key: 'tool_name', label: 'tableTool', visible: true, sortable: true },
   { key: 'host_name', label: 'tableHost', visible: true, sortable: true },
@@ -60,21 +63,29 @@ const TableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
     <table className="table table-hover">
       <thead>
         <tr>
-          {['Date', 'Tool', 'Host', 'Sender', 'Messages', 'Tokens', 'Last Message', 'Actions'].map(
-            (header) => (
-              <th key={header}>
-                <Skeleton height={16} width="80%" />
-              </th>
-            )
-          )}
+          {[
+            'Session ID',
+            'Date',
+            'Tool',
+            'Host',
+            'Sender',
+            'Messages',
+            'Tokens',
+            'Last Message',
+            'Actions',
+          ].map((header) => (
+            <th key={header}>
+              <Skeleton height={16} width="80%" />
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
         {Array.from({ length: rows }).map((_, i) => (
           <tr key={i}>
-            {Array.from({ length: 8 }).map((_, j) => (
+            {Array.from({ length: 9 }).map((_, j) => (
               <td key={j}>
-                <Skeleton height={14} width={j === 7 ? 40 : '90%'} />
+                <Skeleton height={14} width={j === 8 ? 40 : '90%'} />
               </td>
             ))}
           </tr>
@@ -96,6 +107,14 @@ export const ConversationHistory: React.FC = () => {
   const [page, setPage] = useState(1);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Page refresh control - manual refresh for conversation history
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/conversation-history',
+    refreshKey: createMatcherConfig([['conversation-history']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   // ESC key to exit fullscreen (Issue #103)
   useEffect(() => {
@@ -509,8 +528,15 @@ export const ConversationHistory: React.FC = () => {
   return (
     <div className="conversation-history">
       {/* Page Header */}
-      <div className="page-header mb-4">
+      <div className="page-header mb-4 d-flex justify-content-between align-items-center">
         <h2>{t('conversationHistory', language)}</h2>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
       {tableContent}
       {/* Conversation Detail Modal */}
@@ -545,6 +571,26 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
 
   const renderCell = (key: string) => {
     switch (key) {
+      case 'conversation_id': {
+        const sessionId = conversation.conversation_id;
+        const truncatedId = sessionId.substring(0, 8);
+        return (
+          <div className="d-flex align-items-center gap-1">
+            <span title={sessionId} className="text-muted">
+              {truncatedId}...
+            </span>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              className="py-0 px-1"
+              title={t('copy', _language)}
+              onClick={() => copyToClipboard(sessionId)}
+            >
+              <i className="bi bi-clipboard" style={{ fontSize: '0.75rem' }} />
+            </Button>
+          </div>
+        );
+      }
       case 'date':
         return conversation.date;
       case 'tool_name':
@@ -836,10 +882,10 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   // Role filter options
   const roleFilterOptions = [
     { value: 'all', label: t('all', language) },
-    { value: 'user', label: 'User' },
-    { value: 'assistant', label: 'Assistant' },
-    { value: 'system', label: 'System' },
-    { value: 'toolResult', label: 'Tool Result' },
+    { value: 'user', label: t('messageRoleUser', language) },
+    { value: 'assistant', label: t('messageRoleAssistant', language) },
+    { value: 'system', label: t('messageRoleSystem', language) },
+    { value: 'toolResult', label: t('messageRoleToolResult', language) },
   ];
 
   return (

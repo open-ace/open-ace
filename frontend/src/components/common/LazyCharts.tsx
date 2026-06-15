@@ -80,6 +80,10 @@ export interface DoughnutChartProps {
   showLegend?: boolean;
   cutout?: string;
   className?: string;
+  /** Descriptions for each segment, displayed in tooltip */
+  descriptions?: string[];
+  /** Show percentage in tooltip */
+  showPercentage?: boolean;
 }
 
 export interface TokenTrendChartProps {

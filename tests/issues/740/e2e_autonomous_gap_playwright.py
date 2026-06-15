@@ -14,8 +14,10 @@ features NOT tested in the original suite:
   7. task_timeout configurable field
   8. Workflow creation with all parameters
   9. Workflow ownership check (non-owner → 403)
- 10. Idempotent milestone creation guard
- 11. New Task Modal form completeness (all fields)
+10. Idempotent milestone creation guard
+11. New Task Modal form completeness (all fields)
+ 12. Workflow list search / queued tab / pagination UI
+ 13. Workflow definition snapshot modal UI
 
 Run:
   HEADLESS=true  python tests/issues/740/e2e_autonomous_gap_playwright.py
@@ -106,6 +108,49 @@ def create_workflow_via_api(overrides=None, token=None):
         base.update(overrides)
     r = api("post", "/api/autonomous/workflows", token=token, json=base)
     return r
+
+
+def create_workflow_via_repo(
+    *,
+    title,
+    status="pending",
+    requirements_text="Build a simple hello world feature",
+    definition_snapshot=None,
+    batch_id=None,
+    batch_order=None,
+    batch_total=None,
+    branch_name="",
+):
+    """Create a workflow directly via repository for UI seed data."""
+    try:
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        repo = AutonomousWorkflowRepository()
+    except ImportError as e:
+        log("SETUP", f"⚠️  Cannot import app module: {e}")
+        return None
+
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,
+            "title": title,
+            "status": status,
+            "requirements_text": requirements_text,
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-test-project",
+            "branch_strategy": "new-branch",
+            "branch_name": branch_name,
+            "max_plan_rounds": 3,
+            "max_pr_review_rounds": 5,
+            "definition_snapshot": json.dumps(definition_snapshot) if definition_snapshot else None,
+            "batch_id": batch_id,
+            "batch_order": batch_order,
+            "batch_total": batch_total,
+        }
+    )
+    created_workflow_ids.append(workflow["workflow_id"])
+    return workflow
 
 
 def cleanup_all_test_workflows():
@@ -1938,6 +1983,222 @@ def step_test_empty_timeline(page):
 
 
 # ══════════════════════════════════════════════════════════
+# Test 21: Workflow list controls (queued tab, search, pagination, empty-state)
+# ══════════════════════════════════════════════════════════
+
+
+def step_test_workflow_list_controls(page):
+    """Test list UI elements introduced for batch workflow navigation."""
+    log("LIST-UI", "Testing queued tab, search box, pagination, and filtered empty state")
+
+    seeded = []
+    for idx in range(55):
+        wf = create_workflow_via_repo(
+            title=f"Paged Queue Workflow {idx:02d}",
+            status="queued",
+            requirements_text=f"Queue workflow seed {idx:02d}",
+        )
+        if wf:
+            seeded.append(wf)
+
+    active_wf = create_workflow_via_repo(
+        title="Active Workflow Only",
+        status="planning",
+        requirements_text="Planning workflow should not appear in queued filter",
+    )
+    if active_wf:
+        seeded.append(active_wf)
+
+    assert len(seeded) >= 52, "Expected enough workflows to exercise pagination"
+
+    page.goto(f"{BASE_URL}/work/autonomous")
+    page.wait_for_timeout(2000)
+    shot(page, "gap-20-workflow-list-controls")
+
+    # Search input visible
+    search_input = page.locator("input[placeholder='Search workflows...']")
+    assert search_input.count() > 0, "Search workflows input should be visible"
+    log("LIST-UI", "  ✅ Search input visible")
+
+    # New queued tab visible alongside existing tabs
+    tab_labels = ["All", "Queued", "Active", "Completed", "Failed"]
+    for label in tab_labels:
+        btn = page.locator(f"button:has-text('{label}')")
+        assert btn.count() > 0, f"{label} filter tab should be visible"
+    log("LIST-UI", "  ✅ Filter tabs visible")
+
+    # Existing workflows should suppress the create-first-task empty state
+    page_content = page.content()
+    assert (
+        "Create First Task" not in page_content
+    ), "Create First Task should not show when workflows exist"
+    log("LIST-UI", "  ✅ Existing workflows suppress first-task empty state")
+
+    # Queued filter should hide the active-only seed workflow
+    page.locator("button:has-text('Queued')").first.click()
+    page.wait_for_timeout(1200)
+    queued_html = page.content()
+    assert (
+        "Active Workflow Only" not in queued_html
+    ), "Active workflow should not appear in queued filter"
+    assert (
+        "Paged Queue Workflow" in queued_html
+    ), "Queued workflows should remain visible in queued filter"
+    log("LIST-UI", "  ✅ Queued tab filters correctly")
+
+    # Pagination should appear when there are > 50 workflows
+    pagination = page.locator(".pagination")
+    assert pagination.count() > 0, "Pagination should be visible for large workflow lists"
+    before_title = page.locator(".list-group-item .fw-semibold").first.text_content() or ""
+    next_btn = page.locator(".pagination button[aria-label='Next page']").first
+    assert next_btn.is_visible(), "Next page button should be visible"
+    next_btn.click()
+    page.wait_for_timeout(1500)
+    after_title = page.locator(".list-group-item .fw-semibold").first.text_content() or ""
+    assert before_title != after_title, "Pagination should change the visible workflow slice"
+    log("LIST-UI", "  ✅ Pagination changes visible workflows")
+
+    # Search should narrow results and show a clear button
+    search_input.fill("Paged Queue Workflow 07")
+    page.wait_for_timeout(1600)
+    filtered_html = page.content()
+    assert "Paged Queue Workflow 07" in filtered_html, "Search should find the seeded workflow"
+    clear_btn = page.locator("button[title='Reset']").first
+    assert clear_btn.is_visible(), "Search clear button should appear after typing"
+    clear_btn.click()
+    page.wait_for_timeout(1200)
+    cleared_title = page.locator(".list-group-item .fw-semibold").first.text_content() or ""
+    assert cleared_title == before_title, "Clearing search should reset pagination back to page 1"
+    search_input.fill("no-workflow-should-match-this-keyword")
+    page.wait_for_timeout(1600)
+    log("LIST-UI", "  ✅ Search and clear button work")
+
+    # No-match search should show the filtered empty state, not the create-first-task CTA
+    no_match_html = page.content()
+    assert (
+        "No workflows match this view" in no_match_html
+    ), "Filtered empty state text should appear"
+    assert (
+        "Create First Task" not in no_match_html
+    ), "Filtered empty state should not use first-task CTA"
+    log("LIST-UI", "  ✅ Filtered empty state rendered")
+
+
+# ══════════════════════════════════════════════════════════
+# Test 22: Definition snapshot modal UI
+# ══════════════════════════════════════════════════════════
+
+
+def step_test_definition_snapshot_modal(page):
+    """Test all newly introduced definition snapshot UI elements."""
+    log("DEF-MODAL", "Testing workflow definition snapshot button and modal content")
+
+    snapshot = {
+        "title": "Snapshot UI Workflow",
+        "requirements_mode": "issue_input",
+        "requirements_text": "",
+        "requirements_issue_input_raw": "101 102 nope-token",
+        "requirements_issue_url_raw": "",
+        "parsed_issue_selectors": [
+            {"issue_number": 101, "requirements_issue_url": ""},
+            {"issue_number": 102, "requirements_issue_url": ""},
+        ],
+        "ignored_issue_tokens": ["nope-token"],
+        "project_path": "/tmp/e2e-test-project",
+        "project_repo_url": "https://github.com/example/open-ace",
+        "is_new_project": False,
+        "is_private": True,
+        "cli_tool": "claude-code",
+        "model": "claude-sonnet-4-6",
+        "permission_mode": "auto-edit",
+        "branch_strategy": "new-branch",
+        "branch_name": "feature/snapshot-ui",
+        "workspace_type": "local",
+        "remote_machine_id": "",
+        "max_plan_rounds": 3,
+        "max_pr_review_rounds": 5,
+        "auto_merge": True,
+        "batch_id": "batch-ui-snapshot",
+        "batch_order": 2,
+        "batch_total": 2,
+        "resolved_issue_number": 102,
+        "resolved_issue_url": "https://github.com/example/open-ace/issues/102",
+    }
+    wf = create_workflow_via_repo(
+        title="Snapshot UI Workflow",
+        status="queued",
+        requirements_text="",
+        branch_name="feature/snapshot-ui",
+        batch_id="batch-ui-snapshot",
+        batch_order=2,
+        batch_total=2,
+        definition_snapshot=snapshot,
+    )
+    assert wf, "Snapshot UI workflow should be created"
+
+    page.goto(f"{BASE_URL}/work/autonomous?workflow={wf['workflow_id']}")
+    page.wait_for_timeout(2000)
+
+    definition_btn = page.locator("button:has-text('View Definition')").first
+    assert (
+        definition_btn.is_visible()
+    ), "View Definition button should be visible for workflows with snapshots"
+    definition_btn.click()
+    page.wait_for_timeout(1200)
+    shot(page, "gap-21-definition-snapshot-modal")
+
+    dialog = page.locator("[role='dialog']").first
+    assert dialog.is_visible(), "Definition snapshot modal should open"
+
+    modal_html = dialog.inner_html()
+    required_texts = [
+        "Workflow Definition",
+        "GitHub Issue",
+        "Ignored tokens",
+        "Parsed issue selectors",
+        "Creation parameters",
+        "Batch",
+        "Resolved Issue",
+        "Resolved Issue URL",
+        "Project Path",
+        "Repository",
+        "Branch Strategy",
+        "Branch Name",
+        "Agent Tool",
+        "Model",
+        "2/2",
+        "101 102 nope-token",
+        "https://github.com/example/open-ace/issues/102",
+    ]
+    for text in required_texts:
+        assert text in modal_html, f"Definition modal should include '{text}'"
+
+    selector_badges = dialog.locator(".badge:has-text('#101'), .badge:has-text('#102')")
+    assert selector_badges.count() >= 2, "Parsed issue selector badges should be visible"
+
+    footer_close_btn = dialog.locator("button:has-text('Close')").last
+    assert footer_close_btn.is_visible(), "Definition modal footer close button should be visible"
+    close_btn = dialog.locator(".btn-close").first
+    assert close_btn.is_visible(), "Definition modal close button should be visible"
+    close_btn.click()
+    page.wait_for_timeout(500)
+
+    legacy_wf = create_workflow_via_repo(
+        title="Legacy Workflow Without Snapshot",
+        status="queued",
+        requirements_text="Historical workflow without snapshot data",
+    )
+    assert legacy_wf, "Legacy workflow should be created"
+
+    page.goto(f"{BASE_URL}/work/autonomous?workflow={legacy_wf['workflow_id']}")
+    page.wait_for_timeout(1500)
+    assert (
+        page.locator("button:has-text('View Definition')").count() == 0
+    ), "Historical workflows without snapshots should not show the definition button"
+    log("DEF-MODAL", "  ✅ Definition snapshot modal elements verified")
+
+
+# ══════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════
 
@@ -2040,6 +2301,8 @@ def run_tests():
         browser_tests = [
             ("New Task Modal Form", lambda: step_test_new_task_modal_form(page)),
             ("Modal Toggles", lambda: step_test_modal_toggles(page)),
+            ("Workflow List Controls", lambda: step_test_workflow_list_controls(page)),
+            ("Definition Snapshot Modal", lambda: step_test_definition_snapshot_modal(page)),
             ("Timeline Details", lambda: step_test_timeline_details(page)),
             ("Session + Diff Modals", lambda: step_test_session_and_diff_modals(page)),
             ("Milestone Error", lambda: step_test_milestone_error(page)),

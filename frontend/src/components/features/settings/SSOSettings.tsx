@@ -76,7 +76,10 @@ export const SSOSettings: React.FC = () => {
 
   // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
-    if (!tenantId) return;
+    if (!tenantId) {
+      setIsLoading(false);
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -189,6 +192,19 @@ export const SSOSettings: React.FC = () => {
 
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
+  }
+
+  if (!tenantId) {
+    return (
+      <div className="sso-settings">
+        <h2>{t('ssoSettings', language)}</h2>
+        <EmptyState
+          icon="bi-building"
+          title={t('noTenantConfigured', language)}
+          description={t('ssoRequiresTenant', language)}
+        />
+      </div>
+    );
   }
 
   if (error) {

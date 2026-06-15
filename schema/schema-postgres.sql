@@ -244,6 +244,7 @@ CREATE TABLE daily_stats (
     tool_name character varying(50) NOT NULL,
     host_name character varying(100) DEFAULT 'localhost'::character varying NOT NULL,
     sender_name character varying(100),
+    user_id integer,
     total_tokens bigint NOT NULL,
     total_input_tokens bigint NOT NULL,
     total_output_tokens bigint NOT NULL,
@@ -1372,6 +1373,7 @@ CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
+CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
 
 --

@@ -147,10 +147,12 @@ ignore = [
     "B904",  # raise without from inside except (compatibility)
     "SIM115", # open file without context handler (scripts)
     "UP031", # printf string formatting (migration risk)
+    "UP006", # use tuple instead of Tuple (Python 3.9 compatibility)
+    "UP035", # typing.Tuple deprecated (Python 3.9 compatibility)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "PLR2004", "F401", "F811", "TCH"]
+"tests/*" = ["S101", "PLR2004", "F401", "F811", "TCH", "B017"]
 "scripts/*" = ["TCH", "F401", "I001"]
 "**/__init__.py" = ["F401"]
 

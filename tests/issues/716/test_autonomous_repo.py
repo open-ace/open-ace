@@ -81,6 +81,7 @@ class TestWorkflowCRUD:
             "cli_tool": "claude-code",
             "model": "claude-sonnet-4-6",
             "project_path": "/tmp/test-project",
+            "definition_snapshot": json.dumps({"requirements_mode": "text"}),
         }
         result = repo.create_workflow(data)
         assert result is not None
@@ -88,6 +89,7 @@ class TestWorkflowCRUD:
         assert result["title"] == "Test Task"
         assert result["status"] == "pending"
         assert result["cli_tool"] == "claude-code"
+        assert json.loads(result["definition_snapshot"])["requirements_mode"] == "text"
 
     def test_get_workflow(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
@@ -124,6 +126,7 @@ class TestWorkflowCRUD:
 
         workflows = repo.list_workflows()
         assert len(workflows) == 3
+        assert repo.count_workflows() == 3
 
     def test_list_workflows_filter_user(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
@@ -197,6 +200,103 @@ class TestWorkflowCRUD:
         result = repo.list_workflows(status="planning,developing")
         assert len(result) == 2
 
+    def test_get_milestone_usage_summary(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        workflow = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Usage Summary",
+                "requirements_text": "Collect milestone usage",
+                "cli_tool": "claude-code",
+                "project_path": "/tmp",
+            }
+        )
+
+        repo.create_milestone(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "milestone_id": "ms-plan",
+                "phase": "planning",
+                "milestone_type": "plan_created",
+                "status": "completed",
+                "session_id": "sess-plan",
+                "review_session_id": "sess-review",
+            }
+        )
+        repo.create_milestone(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "milestone_id": "ms-dev",
+                "phase": "development",
+                "milestone_type": "dev_completed",
+                "status": "completed",
+                "session_id": "sess-plan",
+            }
+        )
+        repo.update_milestone(
+            "ms-plan",
+            {"completed_at": "2026-06-12 20:00:00", "started_at": "2026-06-12 20:00:00"},
+        )
+        repo.update_milestone(
+            "ms-dev",
+            {"completed_at": "2026-06-12 20:10:00", "started_at": "2026-06-12 20:10:00"},
+        )
+
+        auto_db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL UNIQUE,
+                total_tokens INTEGER DEFAULT 0,
+                request_count INTEGER DEFAULT 0
+            )
+            """
+        )
+        auto_db.execute(
+            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
+            ("sess-plan", 1200, 4),
+        )
+        auto_db.execute(
+            "INSERT INTO agent_sessions (session_id, total_tokens, request_count) VALUES (?, ?, ?)",
+            ("sess-review", 300, 2),
+        )
+
+        summary = repo.get_milestone_usage_summary(workflow["workflow_id"])
+
+        assert summary["ms-plan"]["llm_session_id"] == "sess-review"
+        assert summary["ms-plan"]["llm_total_tokens"] == 300
+        assert summary["ms-plan"]["llm_request_count"] == 2
+        assert summary["ms-dev"]["llm_total_tokens"] == 1200
+        assert summary["ms-dev"]["llm_request_count"] == 4
+
+    def test_list_workflows_search_and_pagination(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        first = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Batch Issue 123",
+                "requirements_text": "Add billing export",
+                "cli_tool": "claude-code",
+                "model": "sonnet",
+                "project_path": "/tmp/billing",
+                "branch_name": "feature/billing-export",
+            }
+        )
+        repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Other Task",
+                "requirements_text": "Unrelated",
+                "cli_tool": "codex",
+                "project_path": "/tmp/other",
+            }
+        )
+
+        result = repo.list_workflows(search="BILLING", limit=1, offset=0)
+        assert len(result) == 1
+        assert result[0]["workflow_id"] == first["workflow_id"]
+        assert repo.count_workflows(search="billing") == 1
+
     def test_update_workflow(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
         wf = repo.create_workflow(
@@ -260,7 +360,7 @@ class TestWorkflowCRUD:
         assert fetched["total_tokens"] == 500
         assert fetched["total_input_tokens"] == 300
         assert fetched["total_output_tokens"] == 200
-        assert fetched["total_requests"] == 1
+        assert fetched["total_requests"] == 0
 
         # Accumulate more
         repo.update_workflow_tokens(
@@ -275,7 +375,7 @@ class TestWorkflowCRUD:
 
         fetched = repo.get_workflow(wf["workflow_id"])
         assert fetched["total_tokens"] == 600
-        assert fetched["total_requests"] == 2
+        assert fetched["total_requests"] == 0
 
     def test_get_active_workflows(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)
@@ -342,6 +442,40 @@ class TestWorkflowCRUD:
         assert repo.get_workflow(wf_id) is None
         assert repo.list_milestones(wf_id) == []
         assert repo.list_events(wf_id) == []
+
+    def test_delete_batch_cascades(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        batch_workflows = []
+        for index in range(2):
+            workflow = repo.create_workflow(
+                {
+                    "user_id": 1,
+                    "title": f"Batch {index + 1}",
+                    "requirements_text": "t",
+                    "cli_tool": "cc",
+                    "project_path": "/tmp",
+                    "batch_id": "batch-1",
+                    "batch_order": index + 1,
+                    "batch_total": 2,
+                }
+            )
+            batch_workflows.append(workflow)
+            repo.create_milestone(
+                {
+                    "workflow_id": workflow["workflow_id"],
+                    "phase": "planning",
+                    "milestone_type": "plan_created",
+                }
+            )
+            repo.create_event({"workflow_id": workflow["workflow_id"], "event_type": "test"})
+
+        deleted_count = repo.delete_batch("batch-1")
+
+        assert deleted_count == 2
+        for workflow in batch_workflows:
+            assert repo.get_workflow(workflow["workflow_id"]) is None
+            assert repo.list_milestones(workflow["workflow_id"]) == []
+            assert repo.list_events(workflow["workflow_id"]) == []
 
 
 class TestMilestoneCRUD:

@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo, startTransition } from 'react';
 import { cn } from '@/utils';
-import { useDashboard, useTools } from '@/hooks';
+import { useDashboard, useTools, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -16,8 +16,9 @@ import {
   TokenDistributionChart,
   DashboardSkeleton,
   TextInput,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName, createMatcherConfig } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -35,14 +36,14 @@ const TOOL_COLORS: Record<string, { border: string; background: string; card: st
   qwen: { border: 'rgba(54, 162, 235, 1)', background: 'rgba(54, 162, 235, 0.2)', card: 'bg-info' },
 };
 
-// Date range presets
-const DATE_RANGE_PRESETS = [
-  { value: '7', label: 'Last 7 Days' },
-  { value: '30', label: 'Last 30 Days' },
-  { value: 'month', label: 'This Month' },
-  { value: 'last_month', label: 'Last Month' },
-  { value: 'custom', label: 'Custom' },
-];
+// Date range preset values (labels will be internationalized)
+const DATE_RANGE_PRESET_VALUES = [
+  { value: '7', labelKey: 'dateRangeLast7Days' },
+  { value: '30', labelKey: 'dateRangeLast30Days' },
+  { value: 'month', labelKey: 'dateRangeThisMonth' },
+  { value: 'last_month', labelKey: 'dateRangeLastMonth' },
+  { value: 'custom', labelKey: 'dateRangeCustom' },
+] as const;
 
 // Helper to get date string N days ago
 const getDaysAgo = (days: number): string => {
@@ -73,6 +74,9 @@ const getToday = (): string => {
   return new Date().toISOString().split('T')[0];
 };
 
+// Date validation error type
+type DateErrorType = 'invalid_range' | 'future_date' | null;
+
 // Sort configuration type
 type SortKey =
   | 'total_tokens'
@@ -95,6 +99,44 @@ export const Dashboard: React.FC = () => {
   const [customStartDate, setCustomStartDate] = useState(getDaysAgo(30));
   const [customEndDate, setCustomEndDate] = useState(getToday());
   const [useCustomRange, setUseCustomRange] = useState(false);
+  const [dateError, setDateError] = useState<DateErrorType>(null);
+
+  // Validate date range
+  const validateDateRange = (start: string, end: string): DateErrorType => {
+    const today = getToday();
+    const startDateObj = new Date(start);
+    const endDateObj = new Date(end);
+    const todayDateObj = new Date(today);
+
+    // Check if start date is after end date
+    if (startDateObj > endDateObj) {
+      return 'invalid_range';
+    }
+
+    // Check if any date is in the future
+    if (startDateObj > todayDateObj || endDateObj > todayDateObj) {
+      return 'future_date';
+    }
+
+    return null;
+  };
+
+  // Handle date change with validation
+  const handleStartDateChange = (value: string) => {
+    setCustomStartDate(value);
+    if (useCustomRange) {
+      const error = validateDateRange(value, customEndDate);
+      setDateError(error);
+    }
+  };
+
+  const handleEndDateChange = (value: string) => {
+    setCustomEndDate(value);
+    if (useCustomRange) {
+      const error = validateDateRange(customStartDate, value);
+      setDateError(error);
+    }
+  };
 
   // Compute actual date range based on preset or custom
   const { startDate, endDate } = useMemo(() => {
@@ -119,20 +161,36 @@ export const Dashboard: React.FC = () => {
   const handlePresetChange = (value: string) => {
     if (value === 'custom') {
       setUseCustomRange(true);
+      // Validate current custom dates when switching to custom mode
+      const error = validateDateRange(customStartDate, customEndDate);
+      setDateError(error);
     } else {
       setUseCustomRange(false);
       setDateRangePreset(value);
+      setDateError(null); // Clear error when switching to preset
     }
   };
 
   // Use combined dashboard hook with trend data for parallel fetching
+  // Note: autoRefresh parameter is deprecated - use usePageRefresh instead
   const { todayData, summaryData, hosts, trendData, isLoading, isError, error, refetch } =
     useDashboard({
       tool: selectedTool || undefined,
       host: selectedHost || undefined,
       startDate,
       endDate,
+      // DEPRECATED: autoRefresh parameter - will be removed in future versions
+      // Use PageRefreshControl component for refresh management
+      autoRefresh: false,
     });
+
+  // Page refresh control - manages auto refresh for dashboard queries
+  const pageRefresh = usePageRefresh({
+    page: '/manage/dashboard',
+    refreshKey: createMatcherConfig([['dashboard']], 'prefix', [['dashboard', 'hosts']]),
+    interval: 60000, // 1 minute default
+    enabled: true, // Enable by default for real-time data
+  });
 
   // Sort handler - use startTransition for non-urgent updates (rerender-transitions optimization)
   const handleSort = (key: SortKey) => {
@@ -180,10 +238,14 @@ export const Dashboard: React.FC = () => {
     [dynamicTools, language]
   );
 
-  // Date range preset options
+  // Date range preset options with internationalized labels
   const dateRangeOptions = useMemo(
-    () => DATE_RANGE_PRESETS.map((preset) => ({ value: preset.value, label: preset.label })),
-    []
+    () =>
+      DATE_RANGE_PRESET_VALUES.map((preset) => ({
+        value: preset.value,
+        label: t(preset.labelKey, language),
+      })),
+    [language]
   );
 
   if (isLoading) {
@@ -199,7 +261,14 @@ export const Dashboard: React.FC = () => {
       {/* Header */}
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
-        <div className="page-header-controls d-flex gap-2 align-items-center">
+        <div className="page-header-controls d-flex gap-2 align-items-center flex-wrap">
+          {/* Page Refresh Control */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            showLastRefreshTime={true}
+            showNextRefreshTime={false}
+          />
+
           {/* Date Range Selector */}
           <Select
             options={dateRangeOptions}
@@ -210,18 +279,46 @@ export const Dashboard: React.FC = () => {
           />
           {useCustomRange && (
             <>
+              {/* Visually hidden labels for accessibility */}
+              <label htmlFor="date-start-input" className="visually-hidden">
+                {t('dateRangeStartDate', language)}
+              </label>
               <TextInput
+                id="date-start-input"
                 type="date"
                 value={customStartDate}
-                onChange={setCustomStartDate}
+                onChange={handleStartDateChange}
                 className="date-input-narrow"
+                aria-describedby={dateError ? 'date-range-error' : undefined}
               />
+              {/* Separator with aria-hidden to avoid duplicate announcement */}
+              <span aria-hidden="true" className="text-muted">
+                {t('dateRangeSeparator', language)}
+              </span>
+              <label htmlFor="date-end-input" className="visually-hidden">
+                {t('dateRangeEndDate', language)}
+              </label>
               <TextInput
+                id="date-end-input"
                 type="date"
                 value={customEndDate}
-                onChange={setCustomEndDate}
+                onChange={handleEndDateChange}
                 className="date-input-narrow"
+                aria-describedby={dateError ? 'date-range-error' : undefined}
               />
+              {/* Error message container with aria-live for screen readers */}
+              {dateError && (
+                <div
+                  id="date-range-error"
+                  className="text-danger small"
+                  role="alert"
+                  aria-live="polite"
+                >
+                  {dateError === 'invalid_range'
+                    ? t('dateRangeErrorInvalid', language)
+                    : t('dateRangeErrorFuture', language)}
+                </div>
+              )}
             </>
           )}
           <Select

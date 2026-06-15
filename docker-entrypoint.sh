@@ -4,10 +4,62 @@
 
 set -e
 
-# If a custom command is passed, execute it directly
+# ============================================================================
+# 0. Pre-flight Validation (Issue #1006)
+# ============================================================================
+validate_node_environment() {
+    echo "Validating Node.js environment..."
+
+    # Check node executable exists in PATH
+    if ! command -v node &>/dev/null; then
+        echo "ERROR: Node.js not found in PATH. Cannot start container."
+        echo "       This indicates a Docker image build failure."
+        echo "       Please rebuild the image with proper Node.js installation."
+        exit 1
+    fi
+
+    NODE_PATH=$(which node)
+
+    # Verify node is executable
+    if [ ! -x "$NODE_PATH" ]; then
+        echo "ERROR: Node.js at $NODE_PATH is not executable."
+        echo "       Please check file permissions or rebuild the image."
+        exit 1
+    fi
+
+    # Get and display node version
+    NODE_VERSION=$(node --version 2>/dev/null || echo "unknown")
+    echo "  Node.js: $NODE_PATH ($NODE_VERSION)"
+
+    # Verify CLI file exists
+    CLI_PATH="/usr/lib/node_modules/@qwen-code/qwen-code/cli.js"
+    if [ ! -f "$CLI_PATH" ]; then
+        echo "ERROR: qwen-code CLI not found at $CLI_PATH."
+        echo "       This indicates npm install failed during image build."
+        echo "       Please rebuild the image with proper npm installation."
+        exit 1
+    fi
+    echo "  CLI: $CLI_PATH"
+
+    # Verify WebUI executable exists
+    WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
+    if [ ! -x "$WEBUI_PATH" ]; then
+        echo "ERROR: qwen-code-webui not executable at $WEBUI_PATH."
+        echo "       Please check installation or rebuild the image."
+        exit 1
+    fi
+    echo "  WebUI: $WEBUI_PATH"
+
+    echo "Node.js environment validated successfully."
+}
+
+# If a custom command is passed, execute it directly (skip validation)
 if [ "$1" != "" ] && [ "$1" != "gunicorn" ]; then
     exec "$@"
 fi
+
+# Run validation before starting the application
+validate_node_environment
 
 echo "=========================================="
 echo "  Open ACE - Starting..."

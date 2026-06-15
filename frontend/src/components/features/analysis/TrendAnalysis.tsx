@@ -30,9 +30,10 @@ import {
   LineChart,
   DoughnutChart,
   Skeleton,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatToolName } from '@/utils';
-import { useBatchAnalysis, useHosts, useTools } from '@/hooks';
+import { formatTokens, formatToolName, createMatcherConfig } from '@/utils';
+import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 
 // Skeleton components
 const MetricsSkeleton: React.FC = () => (
@@ -69,7 +70,56 @@ export const TrendAnalysis: React.FC = () => {
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
 
+  // Track if this is the initial load
+  const isInitialLoad = useRef(true);
+
+  // Page refresh control - manual refresh for trend analysis
+  const pageRefresh = usePageRefresh({
+    page: '/manage/analysis/trend',
+    refreshKey: createMatcherConfig([['analysis', 'trend']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
+
+  // Initial date range for first render (before batchData is available)
+  // This is needed to bootstrap the batch analysis request
+  const initialDateRange = useMemo(() => {
+    const end = new Date();
+    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default 30 days
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    };
+  }, []);
+
+  const [startDate, setStartDate] = useState(initialDateRange.start);
+  const [endDate, setEndDate] = useState(initialDateRange.end);
+
+  // Fetch all data in a single batch request
+  // NOTE: This hook call must be BEFORE useMemo that uses dataRange from batchData
+  const {
+    data: batchData,
+    isLoading,
+    isError,
+    error,
+  } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
+
+  // Extract dataRange from batchData - use useRef for stable reference
+  // to avoid unnecessary useMemo recalculation when API returns new object
+  // with the same min_date/max_date values
+  const dataRangeRef = useRef<{ min_date: string; max_date: string } | null>(null);
+  const rawDataRange = batchData?.data_range;
+  if (
+    rawDataRange &&
+    (dataRangeRef.current?.min_date !== rawDataRange.min_date ||
+      dataRangeRef.current?.max_date !== rawDataRange.max_date)
+  ) {
+    dataRangeRef.current = rawDataRange;
+  }
+  const dataRange = dataRangeRef.current;
+
   // Date range based on quick range selection
+  // Uses dataRange for 'all' case, fallback to 365 days if dataRange unavailable
   const dateRange = useMemo(() => {
     const end = new Date();
     let start: Date;
@@ -86,7 +136,15 @@ export const TrendAnalysis: React.FC = () => {
         break;
       case 'all':
       default:
-        start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        // Use actual data range from API if available, otherwise fallback to 365 days
+        if (dataRange?.min_date && dataRange?.max_date) {
+          start = new Date(dataRange.min_date);
+          // Use the actual max date from data range
+          end.setTime(new Date(dataRange.max_date).getTime());
+        } else {
+          // Fallback: 365 days ago when data_range is not available or invalid
+          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        }
         break;
     }
 
@@ -94,27 +152,13 @@ export const TrendAnalysis: React.FC = () => {
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
     };
-  }, [quickRange]);
-
-  const [startDate, setStartDate] = useState(dateRange.start);
-  const [endDate, setEndDate] = useState(dateRange.end);
-
-  // Track if this is the initial load
-  const isInitialLoad = useRef(true);
+  }, [quickRange, dataRange]);
 
   // Update date range when quick range changes
   useEffect(() => {
     setStartDate(dateRange.start);
     setEndDate(dateRange.end);
   }, [dateRange]);
-
-  // Fetch all data in a single batch request
-  const {
-    data: batchData,
-    isLoading,
-    isError,
-    error,
-  } = useBatchAnalysis(startDate, endDate, selectedHost || undefined);
 
   // Mark initial load complete
   useEffect(() => {
@@ -153,6 +197,7 @@ export const TrendAnalysis: React.FC = () => {
   const conversationStats = batchData?.conversation_stats;
   const toolComparison = batchData?.tool_comparison;
   const userSegmentation = batchData?.user_segmentation;
+  // Note: dataRange is already extracted above (before useMemo for dateRange)
 
   // Prepare chart data
   const dailyTrend = dailyHourly?.daily ?? [];
@@ -217,6 +262,14 @@ export const TrendAnalysis: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tokenTrend', language)}</h2>
+        {/* Page Refresh Control - compact mode */}
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
 
       {/* Filters */}
@@ -486,7 +539,10 @@ export const TrendAnalysis: React.FC = () => {
           </Card>
         </div>
         <div className="col-md-6">
-          <Card title={t('userSegmentation', language)}>
+          <Card
+            title={t('userSegmentation', language)}
+            helpTooltip={t('userSegmentationStandard', language)}
+          >
             {userSegmentation &&
             userSegmentation.high +
               userSegmentation.medium +
@@ -494,7 +550,12 @@ export const TrendAnalysis: React.FC = () => {
               userSegmentation.dormant >
               0 ? (
               <DoughnutChart
-                labels={['High (>10K)', 'Medium (1K-10K)', 'Low (<1K)', 'Dormant']}
+                labels={[
+                  `${t('userSegmentationHigh', language)} (>10K)`,
+                  `${t('userSegmentationMedium', language)} (1K-10K)`,
+                  `${t('userSegmentationLow', language)} (<1K)`,
+                  t('userSegmentationDormant', language),
+                ]}
                 data={[
                   userSegmentation.high || 0,
                   userSegmentation.medium || 0,
@@ -507,6 +568,13 @@ export const TrendAnalysis: React.FC = () => {
                   'rgba(75, 192, 192, 0.8)',
                   'rgba(201, 203, 207, 0.8)',
                 ]}
+                descriptions={[
+                  t('userSegmentationHighDesc', language),
+                  t('userSegmentationMediumDesc', language),
+                  t('userSegmentationLowDesc', language),
+                  t('userSegmentationDormantDesc', language),
+                ]}
+                showPercentage={true}
                 height={200}
               />
             ) : (

@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { autonomousApi } from '@/api/autonomous';
-import type { CreateWorkflowRequest } from '@/api/autonomous';
+import type { CreateWorkflowRequest, WorkflowListParams } from '@/api/autonomous';
 
 /** Session message shape returned by milestone session API */
 export interface SessionMessage {
@@ -21,10 +21,10 @@ export interface MilestoneSession {
 
 // ── Workflow Queries ───────────────────────────────────────────────
 
-export function useWorkflows(filters?: { status?: string }) {
+export function useWorkflows(filters?: WorkflowListParams) {
   return useQuery({
     queryKey: ['autonomous', 'workflows', filters],
-    queryFn: () => autonomousApi.listWorkflows(filters as Record<string, string> | undefined),
+    queryFn: () => autonomousApi.listWorkflows(filters),
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
   });
@@ -57,6 +57,7 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 export interface AgentActivity {
   session_id: string;
   type: 'assistant' | 'tool_use' | 'usage';
+  timestamp?: string;
   text?: string;
   tool_name?: string;
   tool_input?: string;
@@ -85,7 +86,16 @@ export function useWorkflowActivity(workflowId: string, enabled = true) {
       try {
         const data = JSON.parse(event.data);
         if (data.event_type === 'agent_activity') {
-          setActivities((prev) => [...prev.slice(-49), data.data]);
+          setActivities((prev) => [
+            ...prev.slice(-49),
+            {
+              ...data.data,
+              timestamp:
+                typeof data.data?.timestamp === 'string' && data.data.timestamp
+                  ? data.data.timestamp
+                  : new Date().toISOString(),
+            },
+          ]);
         }
       } catch {
         // Ignore parse errors
@@ -328,11 +338,30 @@ export function useDeleteWorkflow() {
   });
 }
 
+export function useDeleteBatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: string) => autonomousApi.deleteBatch(batchId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['autonomous', 'workflows'] });
+    },
+  });
+}
+
 export function useMilestoneDiff(workflowId: string, milestoneId: string, enabled = true) {
   return useQuery({
     queryKey: ['autonomous', 'diff', workflowId, milestoneId],
     queryFn: () => autonomousApi.getMilestoneDiff(workflowId, milestoneId),
     enabled: enabled && !!workflowId && !!milestoneId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useWorkflowPrDiff(workflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'pr-diff', workflowId],
+    queryFn: () => autonomousApi.getWorkflowPrDiff(workflowId),
+    enabled: enabled && !!workflowId,
     staleTime: 5 * 60 * 1000,
   });
 }

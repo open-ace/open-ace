@@ -178,6 +178,13 @@ const navSections: NavSection[] = [
         path: '/manage/settings/ai-agent',
         adminOnly: true,
       },
+      {
+        id: 'smtp',
+        label: 'smtpConfiguration',
+        icon: 'bi-envelope',
+        path: '/manage/settings/smtp',
+        adminOnly: true,
+      },
     ],
   },
 ];

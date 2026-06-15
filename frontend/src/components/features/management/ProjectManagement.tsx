@@ -21,9 +21,11 @@ import {
   Badge,
   Avatar,
   Divider,
+  PageRefreshControl,
 } from '@/components/common';
 import { getAllProjectStats, deleteProject, type ProjectStats } from '@/api/projects';
-import { formatDateTime } from '@/utils';
+import { formatDateTime, createMatcherConfig } from '@/utils';
+import { usePageRefresh } from '@/hooks';
 
 type ProjectSortKey =
   | 'project_name'
@@ -69,6 +71,14 @@ export const ProjectManagement: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sortKey, setSortKey] = useState<ProjectSortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Page refresh control - manual refresh for project management
+  const pageRefresh = usePageRefresh({
+    page: '/manage/projects',
+    refreshKey: createMatcherConfig([['projects']], 'prefix'),
+    interval: 0, // No auto refresh - manual only
+    enabled: false,
+  });
 
   const fetchStats = async () => {
     setIsLoading(true);
@@ -172,6 +182,13 @@ export const ProjectManagement: React.FC = () => {
       {/* Page Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
+        <PageRefreshControl
+          refresh={pageRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
       </div>
 
       {/* Summary Cards */}
@@ -224,10 +241,6 @@ export const ProjectManagement: React.FC = () => {
               <i className="bi bi-folder me-2" />
               {t('projects', language)}
             </h5>
-            <Button variant="primary" size="sm" onClick={fetchStats}>
-              <i className="bi bi-arrow-clockwise me-1" />
-              {t('refresh', language)}
-            </Button>
           </div>
 
           <div className="table-responsive">

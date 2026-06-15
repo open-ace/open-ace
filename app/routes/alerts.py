@@ -159,6 +159,8 @@ def get_preferences():
                     "webhook_url": prefs.webhook_url,
                     "alert_types": prefs.alert_types,
                     "min_severity": prefs.min_severity,
+                    "notification_email": prefs.notification_email,
+                    "email_verified": prefs.email_verified,
                 },
             }
         )
@@ -187,6 +189,8 @@ def update_preferences():
             webhook_url=data.get("webhook_url"),
             alert_types=data.get("alert_types", ["quota", "system", "security"]),
             min_severity=data.get("min_severity", "warning"),
+            notification_email=data.get("notification_email"),
+            email_verified=data.get("email_verified", False),
         )
 
         success = notifier.set_notification_preferences(prefs)

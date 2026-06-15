@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'components/summary_table.html' %}
+
+{% if details | length > 0 %}
+<div class="details-section">
+    <h2>Data Access Details</h2>
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Timestamp</th>
+                <th scope="col">Action</th>
+                <th scope="col">User ID</th>
+                <th scope="col">Severity</th>
+                <th scope="col">Resource Type</th>
+                <th scope="col">Resource ID</th>
+                <th scope="col">Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detail in details %}
+            <tr>
+                <td>{{ detail.timestamp | e }}</td>
+                <td>{{ detail.action | e }}</td>
+                <td>{{ detail.user_id | e }}</td>
+                <td>
+                    {% if detail.severity == 'high' %}
+                    <span class="badge badge-danger">{{ detail.severity | e }}</span>
+                    {% elif detail.severity == 'medium' %}
+                    <span class="badge badge-warning">{{ detail.severity | e }}</span>
+                    {% else %}
+                    <span class="badge badge-secondary">{{ detail.severity | e }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ detail.resource_type | e }}</td>
+                <td>{{ detail.resource_id | e }}</td>
+                <td>{{ detail.details | e }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon" aria-hidden="true">&#128196;</div>
+    <p>No data access records available for this period</p>
+</div>
+{% endif %}
+
+{% include 'components/compliance_checks.html' %}
+{% include 'components/recommendations.html' %}
+{% endblock %}

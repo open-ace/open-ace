@@ -11,6 +11,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import type { Language } from '@/types';
 import {
   Card,
   StatCard,
@@ -21,8 +22,11 @@ import {
   EmptyState,
   Modal,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
-import { formatDateTime } from '@/utils';
+import { ReportPreviewModal } from './ReportPreviewModal';
+import { formatDateTime, createMatcherConfig } from '@/utils';
+import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 import {
   complianceApi,
   type ReportType,
@@ -30,26 +34,151 @@ import {
   type RetentionRule,
   type RetentionHistory,
   type StorageEstimate,
+  type RetentionReport,
 } from '@/api';
+import { usePageRefresh } from '@/hooks';
 
 const FORMAT_OPTIONS = [
   { value: 'json', label: 'JSON' },
   { value: 'csv', label: 'CSV' },
+  { value: 'html', label: 'HTML' },
+  { value: 'excel', label: 'Excel' },
 ];
 
-const DATA_TYPES = [
-  { value: 'messages', label: 'Messages', defaultDays: 90 },
-  { value: 'sessions', label: 'Sessions', defaultDays: 180 },
-  { value: 'audit_logs', label: 'Audit Logs', defaultDays: 365 },
-  { value: 'usage_stats', label: 'Usage Stats', defaultDays: 365 },
-  { value: 'alerts', label: 'Alerts', defaultDays: 30 },
-];
+/**
+ * Data type metadata mapping table
+ * Maps backend retention rule keys to display labels, icons, and storage estimate keys
+ * Synchronized with backend DEFAULT_RULES in app/modules/compliance/retention.py
+ */
+const DATA_TYPE_META: Record<
+  string,
+  {
+    i18nKey: string;
+    icon: string;
+    fallbackLabel: string;
+    storageEstimateKey?: string; // Maps retention rule key to storage estimate API key
+  }
+> = {
+  audit_logs: {
+    i18nKey: 'dataTypeAuditLogs',
+    icon: 'bi-journal-text',
+    fallbackLabel: 'Audit Logs',
+  },
+  quota_alerts: {
+    i18nKey: 'dataTypeQuotaAlerts',
+    icon: 'bi-bell',
+    fallbackLabel: 'Quota Alerts',
+  },
+  sessions: {
+    i18nKey: 'dataTypeSessions',
+    icon: 'bi-chat-square',
+    fallbackLabel: 'Sessions',
+  },
+  sso_sessions: {
+    i18nKey: 'dataTypeSsoSessions',
+    icon: 'bi-key',
+    fallbackLabel: 'SSO Sessions',
+  },
+  usage_data: {
+    i18nKey: 'dataTypeUsageData',
+    icon: 'bi-bar-chart',
+    fallbackLabel: 'Usage Data',
+    storageEstimateKey: 'daily_usage',
+  },
+  messages: {
+    i18nKey: 'dataTypeMessages',
+    icon: 'bi-envelope',
+    fallbackLabel: 'Messages',
+    storageEstimateKey: 'daily_messages',
+  },
+  user_activity: {
+    i18nKey: 'dataTypeUserActivity',
+    icon: 'bi-person-activity',
+    fallbackLabel: 'User Activity',
+  },
+};
+
+/**
+ * Format snake_case key to Title Case for fallback display
+ * Example: 'audit_logs' -> 'Audit Logs'
+ */
+function formatDataTypeKey(key: string): string {
+  return key
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
+ * Get display label for a data type key
+ * Uses i18n translation if available, otherwise uses fallback label or formatted key
+ */
+function getDataTypeLabel(key: string, language: Language): string {
+  const meta = DATA_TYPE_META[key];
+  if (meta) {
+    // Try i18n translation, fallback to fallbackLabel
+    const translated = t(meta.i18nKey, language);
+    // If translation returns the key itself (not found), use fallback
+    return translated === meta.i18nKey ? meta.fallbackLabel : translated;
+  }
+  // Unknown type: format snake_case to Title Case
+  return formatDataTypeKey(key);
+}
+
+/**
+ * Get icon for a data type key
+ */
+function getDataTypeIcon(key: string): string {
+  const meta = DATA_TYPE_META[key];
+  return meta?.icon ?? 'bi-database';
+}
+
+/**
+ * Get storage estimate display label for a storage estimate data type key
+ * Maps storage estimate API keys back to retention rule display labels
+ */
+function getStorageEstimateLabel(storageKey: string, language: Language): string {
+  // First, try to find a retention rule key that maps to this storage key
+  for (const [ruleKey, meta] of Object.entries(DATA_TYPE_META)) {
+    if (meta.storageEstimateKey === storageKey) {
+      return getDataTypeLabel(ruleKey, language);
+    }
+  }
+  // If no mapping found, format the storage key itself
+  return formatDataTypeKey(storageKey);
+}
+
+/**
+ * Adapt backend rules object to table data array
+ * Filters null/undefined rules, preserves all valid rules including disabled ones
+ */
+function adaptRulesToTableData(
+  rules: Record<string, RetentionRule>,
+  language: Language
+): Array<{ key: string; label: string; icon: string; rule: RetentionRule }> {
+  return Object.entries(rules)
+    .filter(([, rule]) => rule !== null && rule !== undefined) // Filter null/undefined
+    .map(([key, rule]) => ({
+      key,
+      label: getDataTypeLabel(key, language),
+      icon: getDataTypeIcon(key),
+      rule,
+    }));
+}
 
 type TabType = 'reports' | 'retention';
 
 export const ComplianceMgmt: React.FC = () => {
   const language = useLanguage();
   const [activeTab, setActiveTab] = useState<TabType>('reports');
+
+  // --- Page Refresh Control ---
+  const pageRefresh = usePageRefresh({
+    page: '/manage/compliance',
+    refreshKey: createMatcherConfig([['compliance']], 'prefix'),
+    interval: 0, // No auto refresh - manual only for compliance data
+    enabled: false,
+  });
 
   // --- Reports State ---
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
@@ -72,12 +201,20 @@ export const ComplianceMgmt: React.FC = () => {
   const [retentionError, setRetentionError] = useState<string | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showCleanupPreviewModal, setShowCleanupPreviewModal] = useState(false);
+  const [showReportPreviewModal, setShowReportPreviewModal] = useState(false);
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editDays, setEditDays] = useState(90);
-  const [editAction, setEditAction] = useState<'delete' | 'archive'>('delete');
-  const [previewResult, setPreviewResult] = useState<Record<string, unknown> | null>(null);
+  const [editAction, setEditAction] = useState<'delete' | 'archive' | 'anonymize'>('delete');
+  const [previewResult, setPreviewResult] = useState<RetentionReport | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Report preview state
+  const [previewHtmlContent, setPreviewHtmlContent] = useState<string>('');
+  const [previewReportType, setPreviewReportType] = useState<string>('');
+  const [previewReportId, setPreviewReportId] = useState<string>('');
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
 
   // Initialize dates for reports
   useEffect(() => {
@@ -150,44 +287,110 @@ export const ComplianceMgmt: React.FC = () => {
         report_type: selectedType,
         period_start: startDate,
         period_end: endDate,
-        format: format as 'json' | 'csv',
+        format: format as 'json' | 'csv' | 'html' | 'excel',
+        language: previewLanguage,
       });
 
-      // Download the report
-      const isCsv = format === 'csv';
-      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
-        type: isCsv ? 'text/csv' : 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Handle different formats
+      if (format === 'html') {
+        // Preview HTML content
+        setPreviewHtmlContent(report as string);
+        setPreviewReportType(selectedType);
+        setPreviewReportId('');
+        setShowReportPreviewModal(true);
+      } else if (format === 'excel') {
+        // Download Excel file
+        const blob = report as Blob;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${selectedType}_${timestamp}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // JSON or CSV - download
+        const isCsv = format === 'csv';
+        const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+          type: isCsv ? 'text/csv' : 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compliance_report_${selectedType}_${startDate}_${endDate}.${format}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
 
       // Refresh saved reports
       const reports = await complianceApi.getSavedReports();
       setSavedReports(reports);
     } catch (err) {
+      const errorMessage =
+        err instanceof Error ? (err as Error).message : 'Failed to generate report';
+      setReportsError(errorMessage);
       console.error('Failed to generate report:', err);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleDownload = async (reportId: string, reportFormat: 'json' | 'csv') => {
+  // Preview saved report
+  const handlePreviewSavedReport = async (reportId: string, reportType: string) => {
+    setIsPreviewLoading(true);
     try {
-      const report = await complianceApi.getSavedReport(reportId, reportFormat);
-      const isCsv = reportFormat === 'csv';
-      const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
-        type: isCsv ? 'text/csv' : 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `compliance_report_${reportId}.${reportFormat}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const htmlContent = await complianceApi.getSavedReport(reportId, 'html', previewLanguage);
+      setPreviewHtmlContent(htmlContent as string);
+      setPreviewReportType(reportType);
+      setPreviewReportId(reportId);
+      setShowReportPreviewModal(true);
+    } catch (err) {
+      console.error('Failed to preview report:', err);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  // Download saved report in different formats
+  const handleDownloadSavedReport = async (
+    reportId: string,
+    _reportType: string,
+    downloadFormat: 'json' | 'csv' | 'html' | 'excel'
+  ) => {
+    try {
+      const report = await complianceApi.getSavedReport(reportId, downloadFormat, previewLanguage);
+
+      if (downloadFormat === 'excel') {
+        const blob = report as Blob;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${reportId}_${timestamp}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (downloadFormat === 'html') {
+        const htmlContent = report as string;
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `compliance_report_${reportId}_${timestamp}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const isCsv = downloadFormat === 'csv';
+        const blob = new Blob([isCsv ? (report as string) : JSON.stringify(report, null, 2)], {
+          type: isCsv ? 'text/csv' : 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compliance_report_${reportId}.${downloadFormat}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
     } catch (err) {
       console.error('Failed to download report:', err);
     }
@@ -222,7 +425,7 @@ export const ComplianceMgmt: React.FC = () => {
     try {
       const result = await complianceApi.runCleanup(true);
       setPreviewResult(result);
-      setShowPreviewModal(true);
+      setShowCleanupPreviewModal(true);
     } catch (err) {
       console.error('Failed to preview cleanup:', err);
     } finally {
@@ -235,7 +438,7 @@ export const ComplianceMgmt: React.FC = () => {
     setIsRunning(true);
     try {
       await complianceApi.runCleanup(false);
-      setShowPreviewModal(false);
+      setShowCleanupPreviewModal(false);
       fetchRetentionData();
     } catch (err) {
       console.error('Failed to execute cleanup:', err);
@@ -271,9 +474,11 @@ export const ComplianceMgmt: React.FC = () => {
                 >
                   <div className="d-flex align-items-center">
                     <i className={cn('bi me-2', getReportIcon(type.type))} />
-                    <strong>{type.name}</strong>
+                    <strong>{getReportTypeName(type.type, language, type.name)}</strong>
                   </div>
-                  <small className="text-muted d-block mt-1">{type.description}</small>
+                  <small className="text-muted d-block mt-1">
+                    {getReportTypeDesc(type.type, language) || type.description}
+                  </small>
                 </div>
               </div>
             ))}
@@ -339,10 +544,14 @@ export const ComplianceMgmt: React.FC = () => {
                   {savedReports.map((report) => (
                     <tr key={report.report_id}>
                       <td>
-                        <strong>{report.report_type}</strong>
+                        <strong>
+                          {getReportTypeName(report.report_type, language, report.report_type)}
+                        </strong>
                       </td>
                       <td>
-                        <Badge variant="secondary">{report.report_type}</Badge>
+                        <Badge variant="secondary">
+                          {getReportTypeName(report.report_type, language, report.report_type)}
+                        </Badge>
                       </td>
                       <td>
                         <small>{formatDateTime(report.generated_at)}</small>
@@ -355,18 +564,63 @@ export const ComplianceMgmt: React.FC = () => {
                       <td>
                         <div className="btn-group btn-group-sm">
                           <Button
+                            variant="outline-info"
+                            size="sm"
+                            onClick={() =>
+                              handlePreviewSavedReport(report.report_id, report.report_type)
+                            }
+                            loading={isPreviewLoading}
+                            title={t('preview', language)}
+                          >
+                            <i className="bi bi-eye" />
+                          </Button>
+                          <Button
                             variant="outline-primary"
                             size="sm"
-                            onClick={() => handleDownload(report.report_id, 'json')}
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'json'
+                              )
+                            }
                           >
                             <i className="bi bi-filetype-json" />
                           </Button>
                           <Button
                             variant="outline-secondary"
                             size="sm"
-                            onClick={() => handleDownload(report.report_id, 'csv')}
+                            onClick={() =>
+                              handleDownloadSavedReport(report.report_id, report.report_type, 'csv')
+                            }
                           >
                             <i className="bi bi-filetype-csv" />
+                          </Button>
+                          <Button
+                            variant="outline-warning"
+                            size="sm"
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'html'
+                              )
+                            }
+                          >
+                            <i className="bi bi-filetype-html" />
+                          </Button>
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() =>
+                              handleDownloadSavedReport(
+                                report.report_id,
+                                report.report_type,
+                                'excel'
+                              )
+                            }
+                          >
+                            <i className="bi bi-filetype-xlsx" />
                           </Button>
                         </div>
                       </td>
@@ -390,6 +644,9 @@ export const ComplianceMgmt: React.FC = () => {
     if (retentionError) {
       return <Error message={retentionError} onRetry={fetchRetentionData} />;
     }
+
+    // Adapt backend rules to table data
+    const adaptedRules = adaptRulesToTableData(rules, language);
 
     const totalRecords = storage.reduce((sum, s) => sum + s.record_count, 0);
     const totalSize = storage.reduce((sum, s) => sum + s.estimated_size_mb, 0);
@@ -429,7 +686,7 @@ export const ComplianceMgmt: React.FC = () => {
           <div className="col-md-3">
             <StatCard
               label={t('retentionRules', language)}
-              value={Object.keys(rules).length.toString()}
+              value={adaptedRules.length.toString()}
               icon={<i className="bi bi-gear fs-4" />}
               variant="default"
             />
@@ -449,15 +706,17 @@ export const ComplianceMgmt: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {DATA_TYPES.map((dt) => {
-                  const rule = rules[dt.value];
+                {adaptedRules.map(({ key, label, icon, rule }) => {
                   return (
-                    <tr key={dt.value}>
+                    <tr key={key}>
                       <td>
-                        <strong>{dt.label}</strong>
+                        <div className="d-flex align-items-center">
+                          <i className={cn('bi me-2', icon)} />
+                          <strong>{label}</strong>
+                        </div>
                       </td>
                       <td>
-                        {rule ? (
+                        {rule.retention_days > 0 ? (
                           <span>
                             {rule.retention_days} {t('days', language)}
                           </span>
@@ -466,19 +725,28 @@ export const ComplianceMgmt: React.FC = () => {
                         )}
                       </td>
                       <td>
-                        {rule ? (
-                          <Badge variant={rule.action === 'delete' ? 'danger' : 'info'}>
-                            {rule.action}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted">-</span>
-                        )}
+                        <Badge
+                          variant={
+                            rule.action === 'delete'
+                              ? 'danger'
+                              : rule.action === 'anonymize'
+                                ? 'warning'
+                                : rule.action === 'archive'
+                                  ? 'info'
+                                  : 'secondary'
+                          }
+                        >
+                          {t(
+                            `action${rule.action.charAt(0).toUpperCase() + rule.action.slice(1)}`,
+                            language
+                          )}
+                        </Badge>
                       </td>
                       <td>
                         <Button
                           variant="outline-primary"
                           size="sm"
-                          onClick={() => handleOpenEdit(dt.value)}
+                          onClick={() => handleOpenEdit(key)}
                         >
                           <i className="bi bi-pencil" />
                         </Button>
@@ -505,7 +773,12 @@ export const ComplianceMgmt: React.FC = () => {
               <tbody>
                 {storage.map((s) => (
                   <tr key={s.data_type}>
-                    <td>{s.data_type}</td>
+                    <td>
+                      <div className="d-flex align-items-center">
+                        <i className={cn('bi me-2', getDataTypeIcon(s.data_type))} />
+                        {getStorageEstimateLabel(s.data_type, language)}
+                      </div>
+                    </td>
                     <td>{s.record_count.toLocaleString()}</td>
                     <td>{s.estimated_size_mb.toFixed(2)} MB</td>
                   </tr>
@@ -583,24 +856,27 @@ export const ComplianceMgmt: React.FC = () => {
               <select
                 className="form-select"
                 value={editAction}
-                onChange={(e) => setEditAction(e.target.value as 'delete' | 'archive')}
+                onChange={(e) =>
+                  setEditAction(e.target.value as 'delete' | 'archive' | 'anonymize')
+                }
               >
-                <option value="delete">{t('delete', language)}</option>
-                <option value="archive">{t('archive', language)}</option>
+                <option value="delete">{t('actionDelete', language)}</option>
+                <option value="archive">{t('actionArchive', language)}</option>
+                <option value="anonymize">{t('actionAnonymize', language)}</option>
               </select>
             </div>
           </div>
         </Modal>
 
-        {/* Preview Modal */}
+        {/* Cleanup Preview Modal */}
         <Modal
-          isOpen={showPreviewModal}
-          onClose={() => setShowPreviewModal(false)}
+          isOpen={showCleanupPreviewModal}
+          onClose={() => setShowCleanupPreviewModal(false)}
           title={t('cleanupPreview', language)}
           size="lg"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setShowPreviewModal(false)}>
+              <Button variant="secondary" onClick={() => setShowCleanupPreviewModal(false)}>
                 {t('cancel', language)}
               </Button>
               <Button variant="danger" onClick={handleExecuteCleanup} loading={isRunning}>
@@ -616,6 +892,24 @@ export const ComplianceMgmt: React.FC = () => {
             </div>
           )}
         </Modal>
+
+        {/* Report Preview Modal */}
+        <ReportPreviewModal
+          isOpen={showReportPreviewModal}
+          onClose={() => setShowReportPreviewModal(false)}
+          htmlContent={previewHtmlContent}
+          reportType={previewReportType}
+          reportId={previewReportId}
+          onDownload={(fmt) => {
+            if (previewReportId) {
+              handleDownloadSavedReport(previewReportId, previewReportType, fmt);
+            } else {
+              // For newly generated report without saved ID, generate and download
+              handleGenerate();
+            }
+          }}
+          isDownloading={isGenerating}
+        />
       </>
     );
   };
@@ -625,23 +919,33 @@ export const ComplianceMgmt: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('complianceManagement', language)}</h2>
-        {activeTab === 'retention' && (
-          <div className="d-flex gap-2">
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              onClick={handlePreview}
-              loading={isRunning}
-            >
-              <i className="bi bi-eye me-1" />
-              {t('preview', language)}
-            </Button>
-            <Button variant="danger" size="sm" onClick={handleExecuteCleanup} loading={isRunning}>
-              <i className="bi bi-trash me-1" />
-              {t('runCleanup', language)}
-            </Button>
-          </div>
-        )}
+        <div className="d-flex gap-2 align-items-center">
+          {/* Page Refresh Control */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
+          {activeTab === 'retention' && (
+            <>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={handlePreview}
+                loading={isRunning}
+              >
+                <i className="bi bi-eye me-1" />
+                {t('preview', language)}
+              </Button>
+              <Button variant="danger" size="sm" onClick={handleExecuteCleanup} loading={isRunning}>
+                <i className="bi bi-trash me-1" />
+                {t('runCleanup', language)}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tab Navigation */}

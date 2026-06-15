@@ -229,6 +229,7 @@ export interface BaseComponentProps {
   id?: string;
   style?: React.CSSProperties;
   'data-testid'?: string;
+  title?: string;
 }
 
 export interface LoadingProps extends BaseComponentProps {
@@ -289,6 +290,8 @@ export interface CardProps extends BaseComponentProps {
   variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** Help tooltip text displayed next to title */
+  helpTooltip?: string;
 }
 
 // Button types

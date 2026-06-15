@@ -8,9 +8,9 @@ Database operations for the AI autonomous development feature.
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
-from app.repositories.database import Database, adapt_sql, is_postgresql
+from app.repositories.database import Database, adapt_sql, escape_like, is_postgresql
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ class AutonomousWorkflowRepository:
         "batch_id",
         "batch_order",
         "batch_total",
+        "auto_merge",
+        "definition_snapshot",
         "current_phase",
         "current_round",
         "dev_round",
@@ -64,6 +66,11 @@ class AutonomousWorkflowRepository:
         "updated_at",
         "completed_at",
         "paused_at",
+        "agent_pid",
+        "agent_session_id",
+        "main_session_id",
+        "review_session_id",
+        "test_session_id",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -83,6 +90,11 @@ class AutonomousWorkflowRepository:
         "result_summary",
         "plan_content",
         "review_content",
+        "tldr",
+        "phase_total_tokens",
+        "phase_input_tokens",
+        "phase_output_tokens",
+        "phase_request_count",
         "error_message",
         "parent_milestone_id",
         "fork_branch",
@@ -95,6 +107,44 @@ class AutonomousWorkflowRepository:
 
     def __init__(self, db: Optional[Database] = None):
         self.db = db or Database()
+
+    # ── Agent PID helpers ──────────────────────────────────────────
+
+    def get_workflows_with_active_pid(self) -> list[dict]:
+        """Find workflows that have an agent PID set and are in an active status.
+
+        Used by the orphan process cleanup at server startup.
+        """
+        active_statuses = (
+            "pending",
+            "preparing",
+            "planning",
+            "developing",
+            "pr_review",
+            "reporting",
+            "waiting",
+            "merging",
+        )
+        placeholders = ", ".join(["?"] * len(active_statuses))
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    f"""
+                    SELECT workflow_id, agent_pid, status
+                    FROM autonomous_workflows
+                    WHERE agent_pid IS NOT NULL
+                      AND agent_pid > 0
+                      AND status IN ({placeholders})
+                    """
+                ),
+                list(active_statuses),
+            )
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
     # ── Workflow CRUD ──────────────────────────────────────────────
 
@@ -126,12 +176,13 @@ class AutonomousWorkflowRepository:
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, github_issue_number, batch_id,
-                     batch_order, batch_total, current_phase, dev_round,
+                     batch_order, batch_total, auto_merge, definition_snapshot,
+                     current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -156,6 +207,8 @@ class AutonomousWorkflowRepository:
                     data.get("batch_id"),
                     data.get("batch_order"),
                     data.get("batch_total"),
+                    self._coerce_bool(data.get("auto_merge"), True),
+                    data.get("definition_snapshot"),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -179,12 +232,13 @@ class AutonomousWorkflowRepository:
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
                      remote_machine_id, github_issue_number, batch_id,
-                     batch_order, batch_total, current_phase, dev_round,
+                     batch_order, batch_total, auto_merge, definition_snapshot,
+                     current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -208,6 +262,8 @@ class AutonomousWorkflowRepository:
                     data.get("batch_id"),
                     data.get("batch_order"),
                     data.get("batch_total"),
+                    self._coerce_bool(data.get("auto_merge"), True),
+                    data.get("definition_snapshot"),
                     data.get("current_phase", "preparation"),
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
@@ -245,24 +301,16 @@ class AutonomousWorkflowRepository:
         self,
         user_id: Optional[int] = None,
         status: Optional[str] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list:
         """List workflows with optional filters."""
-        conditions = []
-        params = []
-
-        if user_id is not None:
-            conditions.append("user_id = ?")
-            params.append(user_id)
-        if status is not None:
-            # Support comma-separated statuses
-            statuses = [s.strip() for s in status.split(",")]
-            placeholders = ",".join(["?"] * len(statuses))
-            conditions.append(f"status IN ({placeholders})")
-            params.extend(statuses)
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where, params = self._build_workflow_list_filters(
+            user_id=user_id,
+            status=status,
+            search=search,
+        )
         params.append(limit)
         params.append(offset)
 
@@ -270,6 +318,65 @@ class AutonomousWorkflowRepository:
             f"SELECT * FROM autonomous_workflows {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         )
+
+    def count_workflows(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """Count workflows with the same filters used by list_workflows."""
+        where, params = self._build_workflow_list_filters(
+            user_id=user_id,
+            status=status,
+            search=search,
+        )
+        result = self.db.fetch_one(
+            f"SELECT COUNT(*) AS total FROM autonomous_workflows {where}",
+            tuple(params),
+        )
+        return int(result["total"] if result else 0)
+
+    def _build_workflow_list_filters(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> tuple[str, list[Any]]:
+        """Build WHERE conditions for workflow list/count queries."""
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if user_id is not None:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+        if status:
+            # Support comma-separated statuses.
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if statuses:
+                placeholders = ",".join(["?"] * len(statuses))
+                conditions.append(f"status IN ({placeholders})")
+                params.extend(statuses)
+        if search:
+            search_fields = (
+                "title",
+                "workflow_id",
+                "requirements_text",
+                "requirements_issue_url",
+                "project_path",
+                "cli_tool",
+                "model",
+                "branch_name",
+            )
+            search_pattern = f"%{escape_like(search.strip().lower())}%"
+            search_clauses = [
+                f"LOWER(COALESCE({field}, '')) LIKE ? ESCAPE '\\'" for field in search_fields
+            ]
+            conditions.append(f"({' OR '.join(search_clauses)})")
+            params.extend([search_pattern] * len(search_fields))
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where, params
 
     def get_active_workflows(self) -> list:
         """Get all workflows that need processing."""
@@ -340,7 +447,7 @@ class AutonomousWorkflowRepository:
             return self.get_workflow(workflow_id)
 
         # Boolean columns — coerce to Python bool for PostgreSQL BOOLEAN type
-        _BOOL_COLS = {"is_new_project", "is_private"}
+        _BOOL_COLS = {"is_new_project", "is_private", "auto_merge"}
 
         set_clauses = []
         params = []
@@ -405,6 +512,64 @@ class AutonomousWorkflowRepository:
                 workflow_id,
             ),
         )
+
+    def refresh_workflow_usage_from_sessions(self, workflow_id: str) -> None:
+        """Refresh workflow token/request totals from per-milestone phase usage.
+
+        Sums each milestone's phase_* increment so shared sessions are counted
+        once per milestone, rather than via cumulative agent_sessions totals
+        (which double-count when a session spans multiple milestones).
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self.db.execute(
+            adapt_sql(
+                """
+                UPDATE autonomous_workflows SET
+                    total_tokens = COALESCE((
+                        SELECT SUM(COALESCE(phase_total_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
+                    ), 0),
+                    total_input_tokens = COALESCE((
+                        SELECT SUM(COALESCE(phase_input_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
+                    ), 0),
+                    total_output_tokens = COALESCE((
+                        SELECT SUM(COALESCE(phase_output_tokens, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
+                    ), 0),
+                    total_requests = COALESCE((
+                        SELECT SUM(COALESCE(phase_request_count, 0))
+                        FROM workflow_milestones WHERE workflow_id = ?
+                    ), 0),
+                    updated_at = ?
+                WHERE workflow_id = ?
+                """
+            ),
+            (workflow_id, workflow_id, workflow_id, workflow_id, now, workflow_id),
+        )
+
+    def get_milestone_usage_summary(
+        self, workflow_id: str, milestones: Optional[list[dict]] = None
+    ) -> dict[str, dict[str, Any]]:
+        """Return per-milestone usage from each milestone's own phase_* columns.
+
+        Each milestone stores only its own increment (phase_total_tokens etc.),
+        so shared sessions (main/review/test lines) no longer duplicate
+        cumulative session totals across milestones.
+        """
+        milestones = milestones or self.list_milestones(workflow_id)
+        result: dict[str, dict[str, Any]] = {}
+        for milestone in milestones:
+            milestone_id = milestone.get("milestone_id", "")
+            session_id = (
+                milestone.get("review_session_id") or milestone.get("session_id") or ""
+            ).strip()
+            result[milestone_id] = {
+                "llm_session_id": session_id,
+                "llm_total_tokens": int(milestone.get("phase_total_tokens", 0) or 0),
+                "llm_request_count": int(milestone.get("phase_request_count", 0) or 0),
+            }
+        return result
 
     def list_forks(self, workflow_id: str) -> list:
         """List all child workflows forked from the given parent."""
@@ -528,6 +693,40 @@ class AutonomousWorkflowRepository:
         finally:
             conn.close()
 
+    def delete_batch(self, batch_id: str) -> int:
+        """Delete all workflows and related records for a batch."""
+        workflows = self.list_batch_workflows(batch_id)
+        if not workflows:
+            return 0
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            workflow_ids = [
+                workflow.get("workflow_id", "")
+                for workflow in workflows
+                if workflow.get("workflow_id")
+            ]
+            if not workflow_ids:
+                return 0
+            placeholders = ",".join(["?"] * len(workflow_ids))
+            cursor.execute(
+                adapt_sql(f"DELETE FROM workflow_events WHERE workflow_id IN ({placeholders})"),
+                tuple(workflow_ids),
+            )
+            cursor.execute(
+                adapt_sql(f"DELETE FROM workflow_milestones WHERE workflow_id IN ({placeholders})"),
+                tuple(workflow_ids),
+            )
+            cursor.execute(
+                adapt_sql("DELETE FROM autonomous_workflows WHERE batch_id = ?"),
+                (batch_id,),
+            )
+            conn.commit()
+            return len(workflow_ids)
+        finally:
+            conn.close()
+
     # ── Milestone CRUD ─────────────────────────────────────────────
 
     def create_milestone(self, data: dict) -> dict:
@@ -544,11 +743,13 @@ class AutonomousWorkflowRepository:
                      session_id, review_session_id,
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
-                     plan_content, review_content,
+                     plan_content, review_content, tldr,
                      parent_milestone_id, fork_branch, metadata,
                      error_message,
+                     phase_total_tokens, phase_input_tokens,
+                     phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -571,10 +772,15 @@ class AutonomousWorkflowRepository:
                     data.get("result_summary", ""),
                     data.get("plan_content", ""),
                     data.get("review_content", ""),
+                    data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
+                    data.get("phase_total_tokens", 0),
+                    data.get("phase_input_tokens", 0),
+                    data.get("phase_output_tokens", 0),
+                    data.get("phase_request_count", 0),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,
@@ -591,11 +797,13 @@ class AutonomousWorkflowRepository:
                      session_id, review_session_id,
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
-                     plan_content, review_content,
+                     plan_content, review_content, tldr,
                      parent_milestone_id, fork_branch, metadata,
                      error_message,
+                     phase_total_tokens, phase_input_tokens,
+                     phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("workflow_id", ""),
@@ -617,10 +825,15 @@ class AutonomousWorkflowRepository:
                     data.get("result_summary", ""),
                     data.get("plan_content", ""),
                     data.get("review_content", ""),
+                    data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
+                    data.get("phase_total_tokens", 0),
+                    data.get("phase_input_tokens", 0),
+                    data.get("phase_output_tokens", 0),
+                    data.get("phase_request_count", 0),
                     now if data.get("status") == "in_progress" else None,
                     now,
                     now,

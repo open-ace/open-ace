@@ -61,6 +61,7 @@ class SessionMessage:
     model: Optional[str] = None
     timestamp: Optional[datetime] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    milestone_id: str = ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -73,6 +74,7 @@ class SessionMessage:
             "model": self.model,
             "timestamp": _format_dt(self.timestamp),
             "metadata": self.metadata,
+            "milestone_id": self.milestone_id,
         }
 
     @classmethod
@@ -87,6 +89,7 @@ class SessionMessage:
             model=data.get("model"),
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else None,
             metadata=data.get("metadata", {}),
+            milestone_id=data.get("milestone_id", ""),
         )
 
 
@@ -315,6 +318,7 @@ class SessionManager:
                 model TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 metadata TEXT,
+                milestone_id TEXT DEFAULT '',
                 FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
             )
         """
@@ -716,6 +720,7 @@ class SessionManager:
         tokens_used: int = 0,
         model: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        milestone_id: str = "",
     ) -> Optional[SessionMessage]:
         """
         Add a message to a session.
@@ -756,8 +761,8 @@ class SessionManager:
 
         cursor.execute(
             f"""
-            INSERT INTO session_messages (session_id, role, content, tokens_used, model, timestamp, metadata)
-            VALUES ({_params(7)})
+            INSERT INTO session_messages (session_id, role, content, tokens_used, model, timestamp, metadata, milestone_id)
+            VALUES ({_params(8)})
         """,
             (
                 message.session_id,
@@ -767,6 +772,7 @@ class SessionManager:
                 message.model,
                 message.timestamp.isoformat() if message.timestamp else None,
                 json.dumps(message.metadata),
+                milestone_id,
             ),
         )
 
@@ -1236,6 +1242,7 @@ class SessionManager:
             model=get_value("model"),
             timestamp=parse_datetime(get_value("timestamp")),
             metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
+            milestone_id=get_value("milestone_id") or "",
         )
 
 

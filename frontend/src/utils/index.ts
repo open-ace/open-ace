@@ -42,3 +42,24 @@ export function formatToolName(name: string): string {
 export { TOOL_DISPLAY_NAMES };
 
 export { copyToClipboard } from './clipboard';
+
+// Query key utilities
+export {
+  hashQueryKey,
+  exactMatch,
+  prefixMatch,
+  shouldExclude,
+  matchQueryKey,
+  filterQueryKeys,
+  createMatcherConfig,
+  type QueryKeyMatchMode,
+  type QueryKeyMatcherConfig,
+} from './queryKeyMatcher';
+
+export {
+  queryKeyRegistry,
+  initializeQueryKeyRegistry,
+  queryKeys,
+  type RefreshScope,
+  type QueryKeyRegistration,
+} from './queryKeyRegistry';

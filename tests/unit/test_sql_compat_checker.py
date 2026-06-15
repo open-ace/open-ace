@@ -423,10 +423,11 @@ class TestSQL003:
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 0
 
-    def test_escape_like_beyond_window(self):  # #22
-        """escape_like beyond ±5 lines should NOT suppress the violation."""
-        # escape_like on line 1, LIKE on line 7: distance = 6 lines (beyond ±5 window)
-        padding_lines = ["x = 1"] * 5
+    def test_escape_like_beyond_window(self):  # #22/#951
+        """escape_like beyond ±7 lines should NOT suppress the violation."""
+        # escape_like on line 1, LIKE on line 9: distance = 8 lines (beyond ±7 window)
+        # Window expanded from ±5 to ±7 in PR #951 to handle usage_repo.py:1102 case
+        padding_lines = ["x = 1"] * 7
         code = (
             "safe = escape_like(q)\n"
             + "\n".join(padding_lines)

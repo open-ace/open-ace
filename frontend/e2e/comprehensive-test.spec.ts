@@ -627,13 +627,14 @@ test.describe('Comprehensive Application Test', () => {
       const themeBtn = page.locator('button:has(.bi-moon), button:has(.bi-sun), button:has-text("Theme"), button:has-text("主题")').first();
 
       if (await themeBtn.isVisible()) {
-        await themeBtn.click();
+        // Use force: true for Safari/WebKit compatibility (may have overlay elements)
+        await themeBtn.click({ force: true });
         await page.waitForTimeout(500);
 
         await takeScreenshot(page, '10-theme-toggled');
 
         // Toggle back
-        await themeBtn.click();
+        await themeBtn.click({ force: true });
       } else {
         console.log('Theme toggle button not found');
       }

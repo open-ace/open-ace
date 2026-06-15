@@ -93,7 +93,7 @@ export interface AuditThresholds {
 export interface RetentionRule {
   data_type: string;
   retention_days: number;
-  action: 'delete' | 'archive';
+  action: 'delete' | 'archive' | 'anonymize';
 }
 
 export interface RetentionHistory {
@@ -109,6 +109,22 @@ export interface StorageEstimate {
   estimated_size_mb: number;
 }
 
+export interface AppliedRule {
+  data_type: string;
+  action: 'delete' | 'archive' | 'anonymize';
+  cutoff: string;
+  records_affected: number;
+}
+
+export interface RetentionReport {
+  timestamp: string;
+  rules_applied: AppliedRule[];
+  records_deleted: number;
+  records_archived: number;
+  records_anonymized: number;
+  errors: string[];
+}
+
 // API
 export const complianceApi = {
   // Reports
@@ -121,15 +137,42 @@ export const complianceApi = {
     report_type: string;
     period_start?: string;
     period_end?: string;
-    format?: 'json' | 'csv';
+    format?: 'json' | 'csv' | 'html' | 'excel';
+    language?: 'en' | 'zh' | 'ja' | 'ko';
     tenant_id?: number;
     filters?: Record<string, unknown>;
-  }): Promise<ComplianceReport | string> {
+  }): Promise<ComplianceReport | string | Blob> {
     const isCsv = data.format === 'csv';
+    const isHtml = data.format === 'html';
+    const isExcel = data.format === 'excel';
+
     if (isCsv) {
       // CSV format returns raw text
       return apiClient.post<string>('/api/compliance/reports', data, undefined, undefined, true);
     }
+
+    if (isHtml) {
+      // HTML format returns raw text
+      return apiClient.post<string>('/api/compliance/reports', data, undefined, undefined, true);
+    }
+
+    if (isExcel) {
+      // Excel format returns binary data - need special handling
+      const response = await fetch('/api/compliance/reports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to generate report');
+      }
+      const blob = await response.blob();
+      return blob;
+    }
+
     return apiClient.post<ComplianceReport>('/api/compliance/reports', data);
   },
 
@@ -152,10 +195,17 @@ export const complianceApi = {
 
   async getSavedReport(
     reportId: string,
-    format?: 'json' | 'csv'
-  ): Promise<ComplianceReport | string> {
-    const queryParams: Record<string, string> = format ? { format } : {};
+    format?: 'json' | 'csv' | 'html' | 'excel',
+    language?: 'en' | 'zh' | 'ja' | 'ko'
+  ): Promise<ComplianceReport | string | Blob> {
+    const queryParams: Record<string, string> = {};
+    if (format) queryParams.format = format;
+    if (language) queryParams.language = language;
+
     const isCsv = format === 'csv';
+    const isHtml = format === 'html';
+    const isExcel = format === 'excel';
+
     if (isCsv) {
       // CSV format returns raw text
       return apiClient.get<string>(
@@ -165,6 +215,29 @@ export const complianceApi = {
         true
       );
     }
+
+    if (isHtml) {
+      // HTML format returns raw text
+      return apiClient.get<string>(
+        `/api/compliance/reports/${reportId}`,
+        queryParams,
+        undefined,
+        true
+      );
+    }
+
+    if (isExcel) {
+      // Excel format returns binary data
+      const url = `/api/compliance/reports/${reportId}?${new URLSearchParams(queryParams).toString()}`;
+      const response = await fetch(url, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to get report');
+      }
+      return response.blob();
+    }
+
     return apiClient.get<ComplianceReport>(`/api/compliance/reports/${reportId}`, queryParams);
   },
 
@@ -223,7 +296,7 @@ export const complianceApi = {
   async setRetentionRule(data: {
     data_type: string;
     retention_days: number;
-    action?: 'delete' | 'archive';
+    action?: 'delete' | 'archive' | 'anonymize';
   }): Promise<RetentionRule> {
     const response = await apiClient.put<{ rule: RetentionRule }>(
       '/api/compliance/retention/rules',
@@ -232,12 +305,12 @@ export const complianceApi = {
     return response.rule;
   },
 
-  async runCleanup(dryRun?: boolean): Promise<Record<string, unknown>> {
+  async runCleanup(dryRun?: boolean): Promise<RetentionReport> {
     let url = '/api/compliance/retention/cleanup';
     if (dryRun) {
       url += '?dry_run=true';
     }
-    return apiClient.post<Record<string, unknown>>(url);
+    return apiClient.post<RetentionReport>(url);
   },
 
   async getRetentionHistory(limit?: number): Promise<RetentionHistory[]> {

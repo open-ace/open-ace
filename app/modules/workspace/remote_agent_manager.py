@@ -14,7 +14,7 @@ import time
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import gevent
 from gevent.event import Event
@@ -1071,7 +1071,7 @@ class RemoteAgentManager:
         with self._lock:
             self._pending_requests.pop(request_id, None)
 
-        return cast(Optional[dict], result)
+        return cast("dict | None", result)
 
     def handle_command_response(self, data: dict) -> None:
         """
@@ -1679,8 +1679,6 @@ def get_ddl_statements() -> list[str]:
         "CREATE INDEX IF NOT EXISTS idx_registration_tokens_hash ON registration_tokens(token_hash)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash)",
         "CREATE INDEX IF NOT EXISTS idx_agent_tokens_machine ON agent_tokens(machine_id)",
-        # --- ALTER TABLE for legacy_mode column (idempotent) ---
-        "ALTER TABLE remote_machines ADD COLUMN legacy_mode INTEGER DEFAULT 0",
     ]
 
 

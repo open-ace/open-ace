@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'components/summary_table.html' %}
+
+{% if details | length > 0 %}
+<div class="details-section">
+    <h2>Usage Details</h2>
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Tool Name</th>
+                <th scope="col">Host Name</th>
+                <th scope="col">Input Tokens</th>
+                <th scope="col">Output Tokens</th>
+                <th scope="col">Total Tokens</th>
+                <th scope="col">Requests</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for detail in details %}
+            <tr>
+                <td>{{ detail.date | e }}</td>
+                <td>{{ detail.tool_name | e }}</td>
+                <td>{{ detail.host_name | e }}</td>
+                <td>{{ detail.total_input_tokens | default(0) }}</td>
+                <td>{{ detail.total_output_tokens | default(0) }}</td>
+                <td>{{ detail.total_tokens | default(0) }}</td>
+                <td>{{ detail.total_requests | default(0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon" aria-hidden="true">&#128196;</div>
+    <p>No usage data available for this period</p>
+</div>
+{% endif %}
+
+{% include 'components/compliance_checks.html' %}
+{% include 'components/recommendations.html' %}
+{% endblock %}

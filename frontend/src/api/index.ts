@@ -83,6 +83,8 @@ export type {
   RetentionRule,
   RetentionHistory,
   StorageEstimate,
+  AppliedRule,
+  RetentionReport,
 } from './compliance';
 export { roiApi } from './roi';
 export type {
@@ -135,3 +137,10 @@ export type {
   RemoteSessionOutput,
   CreateRemoteSessionRequest,
 } from './remote';
+export { smtpConfigApi } from './smtpConfig';
+export type {
+  SMTPConfig,
+  SMTPTestResult,
+  EmailStatistics,
+  SendTestEmailResult,
+} from './smtpConfig';

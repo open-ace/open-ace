@@ -6,18 +6,15 @@ Repository for usage data access operations.
 
 import json
 import logging
-import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
+from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
-
-# Pattern to match placeholder hostnames like <HOST_NAME>, <hostname>, etc.
-_PLACEHOLDER_HOST_PATTERN = re.compile(r"^<[A-Za-z_]+>$")
 
 
 # Cache for JSON parsing to avoid repeated parsing of same strings
@@ -411,20 +408,32 @@ class UsageRepository:
         Returns:
             List[str]: List of host names.
         """
-        query = """
+        # Get SQL filter clause
+        sql_filter = get_hostname_filter_sql()
+
+        query = f"""
             SELECT DISTINCT host_name
             FROM daily_messages
-            WHERE (host_name NOT LIKE '<%%>' OR host_name IS NULL)
+            WHERE {sql_filter}
             ORDER BY host_name
         """
 
         rows = self.db.fetch_all(query)
-        # Additional Python-side filter for placeholder patterns
-        return [
-            row["host_name"]
-            for row in rows
-            if not _PLACEHOLDER_HOST_PATTERN.match(row["host_name"])
-        ]
+
+        # Python-side validation (double-check for edge cases)
+        valid_hosts = []
+        for row in rows:
+            host_name = row["host_name"]
+            # Defensive check - if SQL filter missed invalid hosts, log warning
+            if not is_valid_hostname(host_name):
+                logger.warning(
+                    f"SQL filter missed invalid hostname: '{host_name}' - "
+                    "this indicates a filter logic inconsistency"
+                )
+                continue
+            valid_hosts.append(host_name)
+
+        return valid_hosts
 
     def get_daily_aggregated(
         self, start_date: str, end_date: str, host_name: Optional[str] = None
@@ -818,6 +827,12 @@ class UsageRepository:
         results = []
         for row in rows:
             username = row.get("unified_username") or row.get("sender_name") or "unknown"
+
+            # Skip unidentifiable users, only return valid user data
+            # This fixes Issue #811 where "unknown" user appears in stats
+            if username == "unknown":
+                continue
+
             results.append(
                 {
                     "user": username,
@@ -1078,12 +1093,14 @@ class UsageRepository:
         # Local CLI usage from daily_messages
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
         # to avoid double counting
+        # Uses escape_like() for safe LIKE pattern (see params below)
         local_row = self.db.fetch_one(
             """
             SELECT
                 COALESCE(SUM(tokens_used), 0) as tokens,
                 COUNT(*) as requests
             FROM daily_messages
+            -- Uses escape_like() for safe LIKE pattern
             WHERE sender_name LIKE ?
               AND date >= ? AND date <= ?
               AND role = 'assistant'
@@ -1141,12 +1158,14 @@ class UsageRepository:
         """
         # Local CLI usage from daily_messages
         # Exclude messages with agent_session_id (WebUI session messages, counted in session_messages)
+        # Uses escape_like() for safe LIKE pattern (see params below)
         local_rows = self.db.fetch_all(
             """
             SELECT date, tool_name, SUM(tokens_used) as tokens_used,
                    SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
                    COUNT(*) as request_count
             FROM daily_messages
+            -- Uses escape_like() for safe LIKE pattern
             WHERE sender_name LIKE ?
               AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
