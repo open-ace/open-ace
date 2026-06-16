@@ -862,19 +862,64 @@ const translations: Record<Language, Translations> = {
     impact: 'Impact',
 
     // ROI Optimization Suggestions
-    suggestionModelSwitchTitle: 'Switch to cheaper model for simple tasks',
-    suggestionModelSwitchDesc: 'Consider using a more cost-effective model for shorter requests',
+    suggestionModelSwitchTitle: 'Switch to {cheaper_model} for simple tasks',
+    suggestionModelSwitchDesc:
+      'Model {model} is used for short requests (avg {avg_tokens} tokens). Consider using {cheaper_model} for tasks under {threshold} tokens.',
     suggestionUsagePatternTitle: 'Optimize usage patterns',
-    suggestionUsagePatternDesc: 'Adjust usage patterns for better efficiency',
-    suggestionQuotaAdjustmentTitle: 'Adjust quota allocation',
+    suggestionUsagePatternDesc: 'Adjust usage patterns for better efficiency.',
+    suggestionQuotaAdjustmentTitle: 'Optimize quota allocation',
     suggestionQuotaAdjustmentDesc:
-      'Review and optimize quota limits for better resource utilization',
+      'Found {low_usage_count} users with usage below {usage_threshold}% of average. Consider reallocating unused quotas.',
     suggestionToolConsolidationTitle: 'Consolidate tool usage',
-    suggestionToolConsolidationDesc: 'Reduce redundant tool usage to improve efficiency',
-    suggestionTimeOptimizationTitle: 'Optimize timing',
-    suggestionTimeOptimizationDesc: 'Schedule tasks during off-peak hours for better performance',
-    suggestionTokenOptimizationTitle: 'Reduce token waste',
-    suggestionTokenOptimizationDesc: 'Minimize unnecessary token consumption',
+    suggestionToolConsolidationDesc:
+      'Currently using {tool_count} different AI tools. Consolidation may enable volume discounts.',
+    suggestionTimeOptimizationTitle: 'Optimize usage time distribution',
+    suggestionTimeOptimizationDesc:
+      'Peak hours ({peak_hours}:00) concentrate {peak_percentage}% of requests. Distributing usage more evenly can improve response times.',
+    suggestionTokenOptimizationTitle: 'Optimize prompt efficiency',
+    suggestionTokenOptimizationDesc:
+      'Output ratio is only {output_ratio}%. Consider optimizing prompts to reduce input tokens.',
+
+    // Priority / Impact enums
+    priorityHigh: 'High',
+    priorityMedium: 'Medium',
+    priorityLow: 'Low',
+    impactHigh: 'High',
+    impactMedium: 'Medium',
+    impactLow: 'Low',
+
+    // Efficiency recommendation items
+    recommendationLowEfficiency:
+      'Efficiency score is low ({efficiency_score}); review usage patterns to optimize cost.',
+    recommendationLowOutputRatio:
+      'Output ratio is low ({output_ratio}%); optimize prompts to reduce input token usage.',
+    recommendationHighCostPerRequest:
+      'Cost per request is high (${avg_cost_per_request}); consider a more economical model.',
+    recommendationHighAvgTokens:
+      'Average tokens per request is high ({avg_tokens_per_request}); split tasks or optimize prompts.',
+    recommendationHighModelConcentration:
+      'Usage is highly concentrated on {top_model} ({top_share}%); explore other models to reduce risk.',
+    recommendationHealthy: 'Usage patterns are healthy; keep up the good practices.',
+
+    // Suggestion action items
+    actionItems: 'Action items',
+    showActions: 'Show actions',
+    hideActions: 'Hide actions',
+    actionModelSwitch1: 'Route requests under {threshold} tokens to {cheaper_model}',
+    actionModelSwitch2: 'Keep complex tasks on current model',
+    actionModelSwitch3: 'Implement automatic model selection based on task complexity',
+    actionTimeOptimization1: 'Schedule batch tasks during off-peak hours',
+    actionTimeOptimization2: 'Implement request queuing for non-urgent tasks',
+    actionTimeOptimization3: 'Monitor response times and adjust scheduling',
+    actionQuotaAdjustment1: 'Review quota settings for low-usage users',
+    actionQuotaAdjustment2: 'Consider quota pooling or reallocation',
+    actionQuotaAdjustment3: 'Implement quota expiration and recycling',
+    actionToolConsolidation1: 'Evaluate usage frequency and cost per tool',
+    actionToolConsolidation2: 'Negotiate volume discounts with providers',
+    actionToolConsolidation3: 'Consider standardizing on primary tools',
+    actionTokenOptimization1: 'Review and optimize prompt templates',
+    actionTokenOptimization2: 'Remove unnecessary context from prompts',
+    actionTokenOptimization3: 'Use prompt caching where available',
 
     // Tenant Management
     totalTenants: 'Total Tenants',
@@ -2175,18 +2220,63 @@ const translations: Record<Language, Translations> = {
     impact: '影响',
 
     // ROI Optimization Suggestions
-    suggestionModelSwitchTitle: '切换到更便宜的模型处理简单任务',
-    suggestionModelSwitchDesc: '考虑使用更经济的模型处理较短的请求',
+    suggestionModelSwitchTitle: '简单任务改用 {cheaper_model}',
+    suggestionModelSwitchDesc:
+      '模型 {model} 用于短请求（平均 {avg_tokens} tokens）。建议 {threshold} tokens 以下的任务改用 {cheaper_model}。',
     suggestionUsagePatternTitle: '优化使用模式',
-    suggestionUsagePatternDesc: '调整使用模式以提高效率',
-    suggestionQuotaAdjustmentTitle: '调整配额分配',
-    suggestionQuotaAdjustmentDesc: '审查并优化配额限制以提高资源利用率',
+    suggestionUsagePatternDesc: '调整使用模式以提高效率。',
+    suggestionQuotaAdjustmentTitle: '优化配额分配',
+    suggestionQuotaAdjustmentDesc:
+      '发现 {low_usage_count} 个用户的使用量低于平均水平的 {usage_threshold}%，建议重新分配未使用的配额。',
     suggestionToolConsolidationTitle: '整合工具使用',
-    suggestionToolConsolidationDesc: '减少冗余的工具使用以提高效率',
-    suggestionTimeOptimizationTitle: '优化时间安排',
-    suggestionTimeOptimizationDesc: '将任务安排在非高峰时段以获得更好的性能',
-    suggestionTokenOptimizationTitle: '减少 Token 浪费',
-    suggestionTokenOptimizationDesc: '最小化不必要的 Token 消耗',
+    suggestionToolConsolidationDesc:
+      '当前使用 {tool_count} 种不同的 AI 工具，整合可能获得批量折扣。',
+    suggestionTimeOptimizationTitle: '优化使用时间分布',
+    suggestionTimeOptimizationDesc:
+      '高峰时段（{peak_hours}:00）集中了 {peak_percentage}% 的请求。更均匀地分配使用可改善响应时间。',
+    suggestionTokenOptimizationTitle: '优化提示词效率',
+    suggestionTokenOptimizationDesc:
+      '输出比例仅为 {output_ratio}%，建议优化提示词以减少输入 token。',
+
+    // Priority / Impact enums
+    priorityHigh: '高',
+    priorityMedium: '中',
+    priorityLow: '低',
+    impactHigh: '高',
+    impactMedium: '中',
+    impactLow: '低',
+
+    // Efficiency recommendation items
+    recommendationLowEfficiency: '效率评分较低（{efficiency_score}），建议检查使用模式以优化成本。',
+    recommendationLowOutputRatio:
+      '输出比例较低（{output_ratio}%），建议优化提示词以减少输入 token 使用。',
+    recommendationHighCostPerRequest:
+      '单请求成本较高（${avg_cost_per_request}），建议使用更经济的模型。',
+    recommendationHighAvgTokens:
+      '平均每请求 token 较高（{avg_tokens_per_request}），可考虑拆分任务或优化提示词。',
+    recommendationHighModelConcentration:
+      '模型使用高度集中于 {top_model}（{top_share}%），建议探索其他模型以降低风险。',
+    recommendationHealthy: '使用模式健康，继续保持良好习惯。',
+
+    // Suggestion action items
+    actionItems: '操作建议',
+    showActions: '展开操作建议',
+    hideActions: '收起操作建议',
+    actionModelSwitch1: '将 {threshold} tokens 以下的请求路由到 {cheaper_model}',
+    actionModelSwitch2: '复杂任务继续使用当前模型',
+    actionModelSwitch3: '根据任务复杂度实现自动模型选择',
+    actionTimeOptimization1: '在非高峰时段安排批量任务',
+    actionTimeOptimization2: '为非紧急任务实现请求排队',
+    actionTimeOptimization3: '监控响应时间并调整调度',
+    actionQuotaAdjustment1: '审查低使用量用户的配额设置',
+    actionQuotaAdjustment2: '考虑配额池化或重新分配',
+    actionQuotaAdjustment3: '实现配额过期与回收',
+    actionToolConsolidation1: '评估各工具的使用频率和成本',
+    actionToolConsolidation2: '与供应商协商批量折扣',
+    actionToolConsolidation3: '考虑以主要工具为标准',
+    actionTokenOptimization1: '审查并优化提示词模板',
+    actionTokenOptimization2: '从提示词中移除不必要的上下文',
+    actionTokenOptimization3: '在可用时使用提示词缓存',
 
     // Tenant Management
     totalTenants: '总租户数',
@@ -3301,6 +3391,80 @@ const translations: Record<Language, Translations> = {
     japanese: '日本語',
     korean: '韓国語',
 
+    // Request labels
+    requests: 'リクエスト',
+    requestsMessages: 'リクエスト / メッセージ',
+
+    // ROI Analysis
+    overallEfficiency: '全体効率',
+    avgCostPerRequest: '平均コスト/リクエスト',
+    avgTokensPerRequest: '平均 Token/リクエスト',
+    wastePercentage: '無駄 %',
+    optimizationSuggestions: '最適化の提案',
+    potentialSavings: '節約見込み',
+    noSuggestions: '最適化の提案はありません',
+    impact: '影響',
+
+    // ROI Optimization Suggestions
+    suggestionModelSwitchTitle: '簡単なタスクには {cheaper_model} を使用',
+    suggestionModelSwitchDesc:
+      'モデル {model} は短いリクエストに使用されています（平均 {avg_tokens} tokens）。{threshold} tokens 未満のタスクには {cheaper_model} の使用を検討してください。',
+    suggestionUsagePatternTitle: '使用パターンの最適化',
+    suggestionUsagePatternDesc: '効率を向上させるため使用パターンを調整してください。',
+    suggestionQuotaAdjustmentTitle: 'クォータ割り当ての最適化',
+    suggestionQuotaAdjustmentDesc:
+      '平均の {usage_threshold}% 未満の使用量のユーザーが {low_usage_count} 人見つかりました。未使用クォータの再割り当てを検討してください。',
+    suggestionToolConsolidationTitle: 'ツール使用の統合',
+    suggestionToolConsolidationDesc:
+      '現在 {tool_count} 種類の AI ツールを使用中です。統合によりボリューム割引が得られる可能性があります。',
+    suggestionTimeOptimizationTitle: '使用時間の分散を最適化',
+    suggestionTimeOptimizationDesc:
+      'ピーク時間帯（{peak_hours}:00）にリクエストの {peak_percentage}% が集中しています。使用をより均等に分散すると応答時間が改善します。',
+    suggestionTokenOptimizationTitle: 'プロンプト効率の最適化',
+    suggestionTokenOptimizationDesc:
+      '出力比率はわずか {output_ratio}% です。入力 token を減らすためプロンプトの最適化を検討してください。',
+
+    // Priority / Impact enums
+    priorityHigh: '高',
+    priorityMedium: '中',
+    priorityLow: '低',
+    impactHigh: '高',
+    impactMedium: '中',
+    impactLow: '低',
+
+    // Efficiency recommendation items
+    recommendationLowEfficiency:
+      '効率スコアが低いです（{efficiency_score}）。コスト最適化のため使用パターンを見直してください。',
+    recommendationLowOutputRatio:
+      '出力比率が低いです（{output_ratio}%）。入力 token 使用を減らすためプロンプトを最適化してください。',
+    recommendationHighCostPerRequest:
+      'リクエスト単価が高いです（${avg_cost_per_request}）。より経済的なモデルの使用を検討してください。',
+    recommendationHighAvgTokens:
+      'リクエストあたりの平均 token が多いです（{avg_tokens_per_request}）。タスクの分割やプロンプトの最適化を検討してください。',
+    recommendationHighModelConcentration:
+      '使用が {top_model}（{top_share}%）に高度に集中しています。リスクを下げるため他のモデルも検討してください。',
+    recommendationHealthy: '使用パターンは健全です。良い習慣を続けてください。',
+
+    // Suggestion action items
+    actionItems: 'アクション項目',
+    showActions: 'アクション項目を表示',
+    hideActions: 'アクション項目を非表示',
+    actionModelSwitch1: '{threshold} tokens 未満のリクエストを {cheaper_model} にルーティング',
+    actionModelSwitch2: '複雑なタスクは現在のモデルを維持',
+    actionModelSwitch3: 'タスクの複雑さに基づく自動モデル選択を実装',
+    actionTimeOptimization1: 'オフピーク時間帯にバッチタスクをスケジュール',
+    actionTimeOptimization2: '緊急でないタスクのリクエストキューを実装',
+    actionTimeOptimization3: '応答時間を監視しスケジュールを調整',
+    actionQuotaAdjustment1: '低使用量ユーザーのクォータ設定を確認',
+    actionQuotaAdjustment2: 'クォータプールや再割り当てを検討',
+    actionQuotaAdjustment3: 'クォータの有効期限と再利用を実装',
+    actionToolConsolidation1: '各ツールの使用頻度とコストを評価',
+    actionToolConsolidation2: 'プロバイダーとボリューム割引を交渉',
+    actionToolConsolidation3: '主要ツールへの標準化を検討',
+    actionTokenOptimization1: 'プロンプトテンプレートを確認・最適化',
+    actionTokenOptimization2: 'プロンプトから不要なコンテキストを削除',
+    actionTokenOptimization3: '利用可能な場合はプロンプトキャッシュを使用',
+
     // Insights
     insights: 'AI インサイト',
     insightsTitle: 'AI 会話インサイトレポート',
@@ -4282,6 +4446,80 @@ const translations: Record<Language, Translations> = {
     japanese: '일본어',
     korean: '한국어',
 
+    // Request labels
+    requests: '요청',
+    requestsMessages: '요청 / 메시지',
+
+    // ROI Analysis
+    overallEfficiency: '전체 효율',
+    avgCostPerRequest: '평균 비용/요청',
+    avgTokensPerRequest: '평균 Token/요청',
+    wastePercentage: '낭비 %',
+    optimizationSuggestions: '최적화 제안',
+    potentialSavings: '절감 가능액',
+    noSuggestions: '최적화 제안이 없습니다',
+    impact: '영향',
+
+    // ROI Optimization Suggestions
+    suggestionModelSwitchTitle: '간단한 작업에 {cheaper_model} 사용',
+    suggestionModelSwitchDesc:
+      '모델 {model} 이(가) 짧은 요청에 사용되고 있습니다(평균 {avg_tokens} tokens). {threshold} tokens 미만 작업에는 {cheaper_model} 사용을 고려하세요.',
+    suggestionUsagePatternTitle: '사용 패턴 최적화',
+    suggestionUsagePatternDesc: '효율성 향상을 위해 사용 패턴을 조정하세요.',
+    suggestionQuotaAdjustmentTitle: '할당량 할당 최적화',
+    suggestionQuotaAdjustmentDesc:
+      '평균의 {usage_threshold}% 미만 사용량 사용자가 {low_usage_count}명 발견되었습니다. 미사용 할당량 재할당을 고려하세요.',
+    suggestionToolConsolidationTitle: '도구 사용 통합',
+    suggestionToolConsolidationDesc:
+      '현재 {tool_count} 종류의 AI 도구를 사용 중입니다. 통합하면 볼륨 할인이 가능할 수 있습니다.',
+    suggestionTimeOptimizationTitle: '사용 시간 분산 최적화',
+    suggestionTimeOptimizationDesc:
+      '피크 시간대({peak_hours}:00)에 요청의 {peak_percentage}%가 집중되어 있습니다. 사용을 더 균등하게 분산하면 응답 시간이 개선됩니다.',
+    suggestionTokenOptimizationTitle: '프롬프트 효율 최적화',
+    suggestionTokenOptimizationDesc:
+      '출력 비율이 {output_ratio}%에 불과합니다. 입력 token을 줄이기 위해 프롬프트 최적화를 고려하세요.',
+
+    // Priority / Impact enums
+    priorityHigh: '높음',
+    priorityMedium: '중간',
+    priorityLow: '낮음',
+    impactHigh: '높음',
+    impactMedium: '중간',
+    impactLow: '낮음',
+
+    // Efficiency recommendation items
+    recommendationLowEfficiency:
+      '효율 점수가 낮습니다({efficiency_score}). 비용 최적화를 위해 사용 패턴을 점검하세요.',
+    recommendationLowOutputRatio:
+      '출력 비율이 낮습니다({output_ratio}%). 입력 token 사용을 줄이도록 프롬프트를 최적화하세요.',
+    recommendationHighCostPerRequest:
+      '요청당 비용이 높습니다(${avg_cost_per_request}). 더 경제적인 모델 사용을 고려하세요.',
+    recommendationHighAvgTokens:
+      '요청당 평균 token이 많습니다({avg_tokens_per_request}). 작업 분할이나 프롬프트 최적화를 고려하세요.',
+    recommendationHighModelConcentration:
+      '사용이 {top_model}({top_share}%)에 고도로 집중되어 있습니다. 위험을 줄이기 위해 다른 모델도 고려하세요.',
+    recommendationHealthy: '사용 패턴이 양호합니다. 좋은 습관을 유지하세요.',
+
+    // Suggestion action items
+    actionItems: '실행 항목',
+    showActions: '실행 항목 표시',
+    hideActions: '실행 항목 숨기기',
+    actionModelSwitch1: '{threshold} tokens 미만 요청을 {cheaper_model}로 라우팅',
+    actionModelSwitch2: '복잡한 작업은 현재 모델 유지',
+    actionModelSwitch3: '작업 복잡도 기반 자동 모델 선택 구현',
+    actionTimeOptimization1: '오프피크 시간대에 일괄 작업 예약',
+    actionTimeOptimization2: '긴급하지 않은 작업의 요청 큐 구현',
+    actionTimeOptimization3: '응답 시간 모니터링 및 일정 조정',
+    actionQuotaAdjustment1: '저사용 사용자의 할당량 설정 검토',
+    actionQuotaAdjustment2: '할당량 풀링 또는 재할당 고려',
+    actionQuotaAdjustment3: '할당량 만료 및 재활용 구현',
+    actionToolConsolidation1: '각 도구의 사용 빈도와 비용 평가',
+    actionToolConsolidation2: '공급자와 볼륨 할인 협상',
+    actionToolConsolidation3: '주요 도구로의 표준화 고려',
+    actionTokenOptimization1: '프롬프트 템플릿 검토 및 최적화',
+    actionTokenOptimization2: '프롬프트에서 불필요한 컨텍스트 제거',
+    actionTokenOptimization3: '가능한 경우 프롬프트 캐싱 사용',
+
     // Insights
     insights: 'AI 인사이트',
     insightsTitle: 'AI 대화 인사이트 보고서',
@@ -4603,10 +4841,24 @@ export function getLanguage(): Language {
   return currentLanguage;
 }
 
-export function t(key: string, language?: Language): string {
+export function t(
+  key: string,
+  language?: Language,
+  params?: Record<string, string | number>
+): string {
   const lang = language ?? currentLanguage;
   const langTranslations = translations[lang] ?? translations.en;
-  return langTranslations[key] ?? key;
+  const template = langTranslations[key] ?? key;
+  // Interpolate {placeholder} params into the template. A missing param leaves
+  // the placeholder intact (never throws); pass all expected params to avoid
+  // showing a literal {x} to users.
+  if (!params) {
+    return template;
+  }
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+    const value = params[name];
+    return value === undefined || value === null ? match : String(value);
+  });
 }
 
 export function initLanguage(): void {
