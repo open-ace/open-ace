@@ -135,6 +135,163 @@ if ! "$PYTHON_PATH" -m pip --version &>/dev/null; then
 fi
 log_success "pip found"
 
+# Step 1.5: Check for existing agent installation
+log_info "Checking for existing agent installation..."
+
+# Function to extract server_url from config.json (normalized, no trailing slash)
+extract_server_url() {
+    local config_path="$1"
+    "$PYTHON_PATH" -c "
+import json
+try:
+    with open('$config_path') as f:
+        cfg = json.load(f)
+    url = cfg.get('server_url', '')
+    print(url.rstrip('/'))
+except:
+    print('')
+" 2>/dev/null || echo ""
+}
+
+# Function to extract machine_id from config.json
+extract_machine_id() {
+    local config_path="$1"
+    "$PYTHON_PATH" -c "
+import json
+try:
+    with open('$config_path') as f:
+        cfg = json.load(f)
+    print(cfg.get('machine_id', ''))
+except:
+    print('')
+" 2>/dev/null || echo ""
+}
+
+# Check all possible config locations
+EXISTING_CONFIG_FOUND=false
+EXISTING_SERVER=""
+EXISTING_DIR=""
+EXISTING_MACHINE_ID=""
+
+# Check 1: Current specified directory
+if [[ -f "${INSTALL_DIR}/config.json" ]]; then
+    EXISTING_CONFIG_FOUND=true
+    EXISTING_DIR="$INSTALL_DIR"
+    EXISTING_SERVER=$(extract_server_url "${INSTALL_DIR}/config.json")
+    EXISTING_MACHINE_ID=$(extract_machine_id "${INSTALL_DIR}/config.json")
+fi
+
+# Check 2: Default directory (if different from specified)
+DEFAULT_DIR="$HOME/.open-ace-agent"
+if [[ -f "${DEFAULT_DIR}/config.json" && "$DEFAULT_DIR" != "$INSTALL_DIR" ]]; then
+    if [[ "$EXISTING_CONFIG_FOUND" == false ]]; then
+        EXISTING_CONFIG_FOUND=true
+        EXISTING_DIR="$DEFAULT_DIR"
+        EXISTING_SERVER=$(extract_server_url "${DEFAULT_DIR}/config.json")
+        EXISTING_MACHINE_ID=$(extract_machine_id "${DEFAULT_DIR}/config.json")
+    fi
+fi
+
+# Check 3: systemd service file
+SYSTEMD_SERVICE_FILE="/etc/systemd/system/open-ace-agent.service"
+if [[ -f "$SYSTEMD_SERVICE_FILE" ]]; then
+    SERVICE_DIR=$(grep "WorkingDirectory=" "$SYSTEMD_SERVICE_FILE" | cut -d= -f2 || echo "")
+    if [[ -n "$SERVICE_DIR" && -f "${SERVICE_DIR}/config.json" ]]; then
+        if [[ "$EXISTING_CONFIG_FOUND" == false ]]; then
+            EXISTING_CONFIG_FOUND=true
+            EXISTING_DIR="$SERVICE_DIR"
+            EXISTING_SERVER=$(extract_server_url "${SERVICE_DIR}/config.json")
+            EXISTING_MACHINE_ID=$(extract_machine_id "${SERVICE_DIR}/config.json")
+        fi
+    fi
+fi
+
+# Compare server URLs (both normalized)
+NEW_URL="${SERVER_URL%/}"
+
+if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
+    log_info "Found existing agent installation at: $EXISTING_DIR"
+    log_info "Existing server: $EXISTING_SERVER"
+    
+    if [[ "$EXISTING_SERVER" == "$NEW_URL" ]]; then
+        # Same server: upgrade scenario
+        log_info "Same server detected. Upgrading existing agent..."
+        
+        # Stop systemd service if exists
+        if systemctl is-active open-ace-agent >/dev/null 2>&1; then
+            log_warn "Stopping systemd service..."
+            sudo systemctl stop open-ace-agent 2>/dev/null || true
+            log_success "Systemd service stopped"
+        fi
+        
+        # Kill processes by exact install directory match
+        CURRENT_USER=$(whoami)
+        pgrep -u "$CURRENT_USER" -f "python.*${EXISTING_DIR}/agent.py" 2>/dev/null | while read pid; do
+            log_warn "Stopping agent process (PID: $pid)..."
+            kill "$pid" 2>/dev/null || true
+        done
+        sleep 2
+        
+        # Force kill if still running
+        pgrep -u "$CURRENT_USER" -f "python.*${EXISTING_DIR}/agent.py" 2>/dev/null | while read pid; do
+            log_warn "Force killing stubborn process (PID: $pid)..."
+            kill -9 "$pid" 2>/dev/null || true
+        done
+        
+        # Clean up orphan processes (user-limited, verify it's open-ace-agent)
+        pgrep -u "$CURRENT_USER" -f "python.*agent.py" 2>/dev/null | while read pid; do
+            if ps -p "$pid" -o args= 2>/dev/null | grep -q "open-ace-agent"; then
+                log_warn "Cleaning orphan agent process (PID: $pid)..."
+                kill "$pid" 2>/dev/null || true
+            fi
+        done
+        
+        log_success "Existing agent stopped"
+        
+        # Preserve machine_id
+        if [[ -n "$EXISTING_MACHINE_ID" ]]; then
+            log_info "Preserving machine_id: $EXISTING_MACHINE_ID"
+            # Will be used when generating config
+        fi
+        
+    else
+        # Different server: migration scenario - abort and prompt uninstall
+        log_warn "Existing agent is configured for different server:"
+        log_warn "  Current: $EXISTING_SERVER"
+        log_warn "  New:     $NEW_URL"
+        log_error ""
+        log_error "Cannot proceed. Please uninstall the existing agent first:"
+        log_error ""
+        
+        # Check if old server is available
+        OLD_SERVER_AVAILABLE=false
+        if curl -s -o /dev/null -w "%{http_code}" "${EXISTING_SERVER}/api/remote/agent/uninstall.sh" 2>/dev/null | grep -q "200"; then
+            OLD_SERVER_AVAILABLE=true
+            log_error "  curl -fsSL ${EXISTING_SERVER}/api/remote/agent/uninstall.sh | bash"
+        else
+            log_error "  # Old server is unavailable, use local uninstall:"
+        fi
+        
+        # Check if local uninstall.sh exists
+        if [[ -f "${EXISTING_DIR}/uninstall.sh" ]]; then
+            log_error "  bash ${EXISTING_DIR}/uninstall.sh"
+        fi
+        
+        # Manual uninstall instructions
+        log_error ""
+        log_error "  # Or manually:"
+        log_error "  sudo systemctl stop open-ace-agent"
+        log_error "  sudo systemctl disable open-ace-agent"
+        log_error "  rm -rf ${EXISTING_DIR}"
+        log_error ""
+        log_error "Then re-run the install command for the new server."
+        
+        exit 1
+    fi
+fi
+
+log_success "No conflicting installation found"
+
 # Step 2: Create installation directory
 log_info "Creating installation directory..."
 mkdir -p "$INSTALL_DIR"
@@ -457,7 +614,15 @@ fi
 
 # Step 6: Generate machine ID and save config
 log_info "Generating configuration..."
-MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
+
+# Use existing machine_id if upgrading (same server), otherwise generate new one
+if [[ -n "$EXISTING_MACHINE_ID" && "$EXISTING_SERVER" == "$NEW_URL" ]]; then
+    MACHINE_ID="$EXISTING_MACHINE_ID"
+    log_info "Using preserved machine_id: $MACHINE_ID"
+else
+    MACHINE_ID=$("$PYTHON_PATH" -c "import uuid; print(uuid.uuid4())")
+    log_info "Generated new machine_id: $MACHINE_ID"
+fi
 
 cat > "${INSTALL_DIR}/config.json" << EOF
 {
