@@ -1,213 +1,655 @@
-.workflow-timeline-leading-icon {
-  display: inline-flex;
+.timeline-shell {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.timeline-header {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary) 18%),
+    var(--bg-primary)
+  );
+}
+
+.timeline-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.timeline-header-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-header-title-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 1.8rem;
-  min-width: 1.8rem;
-  height: 1.8rem;
-  line-height: 1;
-}
-
-.workflow-timeline-card {
-  cursor: default;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: #ffffff;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
-}
-
-.workflow-timeline-card:hover {
-  transform: translateY(-1px);
-  background: #f8fbff;
-  border-color: rgba(59, 130, 246, 0.22);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.workflow-timeline-card-expanded {
-  background: #dcecff;
-  border-color: rgba(59, 130, 246, 0.34);
-  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.1);
-}
-
-.workflow-timeline-card-expanded:hover {
-  background: #d4e7ff;
-}
-
-.workflow-timeline-meta {
-  font-size: 0.75rem;
-}
-
-/* One-line per-round summary on the milestone card (agent TL;DR, falling back
-   to result_summary). Plain text — no markdown — clamped to 2 lines. */
-.workflow-timeline-card-summary {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  font-size: 0.78rem;
-  color: var(--text-tertiary);
-  line-height: 1.4;
-}
-
-.workflow-timeline-meta-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.75rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  background: #f8fbff;
-  border: 1px solid rgba(191, 219, 254, 0.9);
-  color: #365172;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.workflow-timeline-session-pill {
-  cursor: pointer;
-  appearance: none;
-  font: inherit;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
-}
-
-.workflow-timeline-session-pill-reused {
-  font-weight: 600;
-}
-
-.workflow-timeline-session-pill:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.workflow-timeline-action-row {
-  min-height: 2rem;
-  font-size: 0.75rem;
-  row-gap: 0.45rem;
-}
-
-.workflow-timeline-inline-btn {
-  border-radius: 999px;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.workflow-timeline-action-row .workflow-timeline-meta-pill {
-  font-size: 0.75rem;
-}
-
-.workflow-timeline-detail {
-  background: #ffffff;
-  border-radius: 0 0.85rem 0.85rem 0;
-}
-
-.workflow-timeline-header-meta {
-  min-height: 2rem;
-  margin-bottom: 0.55rem;
-}
-
-.workflow-timeline-header-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.85rem;
-  padding: 0.22rem 0.76rem;
-  border-radius: 999px;
-  font-size: 0.82rem;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.workflow-timeline-header-pill-subtle {
-  color: #52637a;
-  background: #f6f8fb;
-  border: 1px solid rgba(203, 213, 225, 0.9);
-}
-
-.workflow-timeline-header-pill-status {
-  color: #ffffff;
-  background: #6b7280;
-}
-
-.workflow-timeline-header-pill-light {
-  color: #42556f;
-  background: #f8fbff;
-  border: 1px solid rgba(191, 219, 254, 0.95);
-}
-
-.workflow-timeline-header-pill-link {
-  color: #42556f;
-  background: #f8fbff;
-  border: 1px solid rgba(191, 219, 254, 0.95);
-}
-
-.workflow-timeline-header-pill-link:hover {
-  background: #eef5ff;
-  border-color: rgba(147, 197, 253, 0.98);
-}
-
-.workflow-timeline-header-link {
-  display: inline-flex;
-  align-items: center;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
-}
-
-.workflow-timeline-controls {
-  flex: 1 1 auto;
+  gap: 10px;
   min-width: 0;
 }
 
-.workflow-timeline-definition-btn {
-  flex-shrink: 1;
-  max-width: 100%;
-  padding-inline: 0.8rem;
-  font-size: 0.8rem;
+.timeline-header-fork-icon {
+  color: var(--color-primary);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.timeline-header-title {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-header-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.timeline-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.timeline-chip,
+.timeline-pill-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.timeline-pill-link:hover {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--border-color) 72%);
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
+}
+
+.timeline-chip--neutral {
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary) 18%);
+}
+
+.timeline-chip--subtle {
+  background: var(--bg-primary);
+}
+
+.timeline-chip--info {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--bg-primary) 90%);
+  border-color: color-mix(in srgb, var(--color-primary) 22%, var(--border-color) 78%);
+}
+
+.timeline-chip--success {
+  color: var(--color-success-hover);
+  background: color-mix(in srgb, var(--color-success) 10%, var(--bg-primary) 90%);
+  border-color: color-mix(in srgb, var(--color-success) 24%, var(--border-color) 76%);
+}
+
+.timeline-chip--danger {
+  color: var(--color-danger-hover);
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--bg-primary) 90%);
+  border-color: color-mix(in srgb, var(--color-danger) 24%, var(--border-color) 76%);
+}
+
+.timeline-chip--warning {
+  color: color-mix(in srgb, var(--color-warning) 70%, black 30%);
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-primary) 88%);
+  border-color: color-mix(in srgb, var(--color-warning) 24%, var(--border-color) 76%);
+}
+
+.timeline-chip--muted {
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+}
+
+.timeline-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.timeline-inline-link:hover {
+  color: var(--color-primary-hover);
+}
+
+.timeline-inline-link--embedded {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.timeline-header-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.timeline-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary) 12%);
+}
+
+.timeline-meta-item__label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.timeline-meta-item__value {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workflow-timeline-summary {
-  font-size: 0.82rem;
+.timeline-output-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.workflow-timeline-summary small {
-  font-size: inherit;
+.timeline-output-rail__label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.workflow-timeline-live-activity {
-  padding: 0.85rem 0.95rem;
-  border-radius: 0.95rem;
-  border: 1px solid rgba(191, 219, 254, 0.9);
-  background: #f8fbff;
-  max-height: 240px;
-  overflow-y: auto;
+.timeline-output-rail__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.workflow-timeline-live-activity-line {
+.timeline-output-btn {
+  min-height: 42px;
+  padding-inline: 0.95rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.timeline-state-banner {
   display: flex;
   align-items: flex-start;
-  gap: 0.55rem;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-left-width: 4px;
+  border-radius: var(--border-radius);
+}
+
+.timeline-state-banner--error {
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--bg-primary) 90%);
+  border-color: color-mix(in srgb, var(--color-danger) 24%, var(--border-color) 76%);
+  border-left-color: var(--color-danger);
+}
+
+.timeline-state-banner--warning {
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-primary) 88%);
+  border-color: color-mix(in srgb, var(--color-warning) 24%, var(--border-color) 76%);
+  border-left-color: var(--color-warning);
+}
+
+.timeline-state-banner--info {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-primary) 92%);
+  border-color: color-mix(in srgb, var(--color-primary) 22%, var(--border-color) 78%);
+  border-left-color: var(--color-primary);
+}
+
+.timeline-state-banner__copy {
+  min-width: 0;
+}
+
+.timeline-state-banner__title {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.timeline-state-banner__message {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.timeline-state-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.timeline-body {
+  background: var(--bg-primary);
+  padding: 1rem;
+}
+
+.timeline-layout,
+.timeline-shared-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.timeline-round {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timeline-round--compact {
+  gap: 8px;
+}
+
+.timeline-round-title,
+.timeline-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timeline-round-heading,
+.timeline-section-title {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.timeline-round-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-round-micro-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timeline-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timeline-empty-state {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.timeline-empty-state i {
+  font-size: 2rem;
+  color: var(--text-muted);
+}
+
+.timeline-milestone-card {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: var(--bg-primary);
+  overflow: hidden;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.timeline-milestone-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+.timeline-milestone-card--expanded {
+  border-color: rgba(59, 130, 246, 0.28);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+}
+
+.timeline-milestone-card--failed {
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.timeline-milestone-card--success {
+  border-color: rgba(16, 185, 129, 0.22);
+}
+
+.timeline-milestone-card--info {
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.timeline-milestone-card--warning {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.timeline-milestone-summary {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.timeline-milestone-card--compact .timeline-milestone-summary {
+  padding: 14px;
+}
+
+.timeline-milestone-summary-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-milestone-status {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.timeline-milestone-status--success {
+  color: var(--color-success-hover);
+  background: color-mix(in srgb, var(--color-success) 10%, var(--bg-primary) 90%);
+}
+
+.timeline-milestone-status--info {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--bg-primary) 90%);
+}
+
+.timeline-milestone-status--warning {
+  color: color-mix(in srgb, var(--color-warning) 72%, black 28%);
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-primary) 88%);
+}
+
+.timeline-milestone-status--danger {
+  color: var(--color-danger-hover);
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--bg-primary) 90%);
+}
+
+.timeline-milestone-status--muted {
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+}
+
+.timeline-milestone-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-milestone-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.timeline-milestone-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timeline-milestone-title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.timeline-milestone-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.timeline-milestone-preview {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+}
+
+.timeline-milestone-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.timeline-milestone-chevron {
+  color: var(--text-muted);
+  padding-top: 4px;
+  flex-shrink: 0;
+}
+
+.timeline-milestone-details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 18px 18px 64px;
+  border-top: 1px solid var(--border-color-light);
+  background: color-mix(in srgb, var(--bg-secondary) 34%, var(--bg-primary) 66%);
+}
+
+.timeline-milestone-card--compact .timeline-milestone-details {
+  padding-left: 18px;
+}
+
+.timeline-milestone-section {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color-light);
+}
+
+.timeline-milestone-details .timeline-milestone-section:first-child {
+  border-top: none;
+}
+
+.timeline-milestone-section-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.timeline-milestone-section-body {
+  min-width: 0;
+}
+
+.timeline-milestone-detail-text,
+.timeline-milestone-detail-note {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timeline-milestone-detail-text--primary {
+  color: var(--text-primary);
+}
+
+.timeline-milestone-detail-note {
+  margin-top: 6px;
+}
+
+.timeline-milestone-detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-milestone-detail-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.timeline-milestone-detail-chip span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timeline-milestone-detail-chip code {
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.timeline-milestone-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.timeline-inline-btn {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.timeline-session-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-color) 76%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.timeline-session-link--reused {
+  font-weight: 700;
+}
+
+.timeline-milestone-activity {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, var(--border-color) 80%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
+}
+
+.timeline-milestone-activity-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.timeline-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-primary) 12%, transparent 88%);
+}
+
+.timeline-milestone-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-milestone-activity-item {
+  display: grid;
+  grid-template-columns: 58px 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text-secondary);
   font-size: 0.76rem;
   line-height: 1.45;
-  color: #50637c;
 }
 
-.workflow-timeline-live-activity-line + .workflow-timeline-live-activity-line {
-  margin-top: 0.38rem;
-}
-
-.workflow-timeline-live-activity-time {
-  flex-shrink: 0;
-  min-width: 3.9rem;
-  color: #7b8ba2;
+.timeline-milestone-activity-time {
+  color: var(--text-muted);
   font-family:
     ui-monospace,
     SFMono-Regular,
@@ -217,9 +659,131 @@
     monospace;
 }
 
-.workflow-timeline-live-activity-text {
+.timeline-milestone-activity-text {
   min-width: 0;
   word-break: break-word;
+}
+
+.timeline-milestone-section--error {
+  color: var(--color-danger-hover);
+}
+
+.timeline-milestone-error {
+  margin: 0;
+  color: var(--color-danger-hover);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.timeline-fork-connector__badge {
+  background: var(--bg-primary);
+}
+
+.timeline-fork-connector__feedback {
+  color: var(--text-muted);
+}
+
+.timeline-fork-connector__line-slot {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.timeline-fork-connector__line {
+  width: 2px;
+  height: 14px;
+}
+
+.timeline-fork-branches {
+  align-items: stretch;
+}
+
+.fork-branch-column {
+  border-radius: 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+
+.fork-branch-column__header {
+  text-align: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent 16%);
+}
+
+.fork-branch-column__title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.fork-branch-column__badges {
+  flex-wrap: wrap;
+}
+
+.fork-branch-column__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 960px) {
+  .timeline-header-top,
+  .timeline-state-banner,
+  .timeline-round-title,
+  .timeline-section-title {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline-header-actions {
+    justify-content: flex-start;
+  }
+
+  .timeline-milestone-title-row,
+  .timeline-milestone-section {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-milestone-time {
+    white-space: normal;
+  }
+
+  .timeline-milestone-details {
+    padding-left: 18px;
+  }
+
+  .timeline-milestone-card--compact .timeline-milestone-details {
+    padding-left: 18px;
+  }
+}
+
+@media (max-width: 720px) {
+  .timeline-header {
+    padding: 16px;
+  }
+
+  .timeline-header-title {
+    font-size: 1.5rem;
+    white-space: normal;
+  }
+
+  .timeline-output-rail__buttons {
+    flex-direction: column;
+  }
+
+  .timeline-output-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .timeline-fork-branches {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .timeline-body {
+    padding: 16px;
+  }
 }
 
 .workflow-timeline-diff-modal {
@@ -245,17 +809,17 @@
   min-height: 70vh;
   max-height: 75vh;
   overflow: hidden;
-  border: 1px solid rgba(226, 232, 240, 0.95);
+  border: 1px solid var(--border-color);
   border-radius: 1rem;
-  background: #f8fafc;
+  background: var(--bg-secondary);
 }
 
 .workflow-timeline-diff-sidebar {
   width: 280px;
   min-width: 280px;
   overflow-y: auto;
-  border-right: 1px solid rgba(226, 232, 240, 0.95);
-  background: #ffffff;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-primary);
 }
 
 .workflow-timeline-diff-resizer {
@@ -294,18 +858,18 @@
   width: 100%;
   padding: 0.8rem 0.95rem;
   border: 0;
-  border-bottom: 1px solid rgba(241, 245, 249, 0.95);
+  border-bottom: 1px solid var(--border-color-light);
   background: transparent;
   text-align: left;
   transition: background-color 160ms ease;
 }
 
 .workflow-timeline-diff-file:hover {
-  background: #f8fbff;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
 }
 
 .workflow-timeline-diff-file-active {
-  background: #e8f2ff;
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--bg-primary) 86%);
 }
 
 .workflow-timeline-diff-file-badge {
@@ -316,7 +880,7 @@
 .workflow-timeline-diff-file-path {
   min-width: 0;
   overflow: hidden;
-  color: #334155;
+  color: var(--text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.78rem;
@@ -356,13 +920,13 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 0.9rem 1rem;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.95);
-  background: #ffffff;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
 }
 
 .workflow-timeline-diff-viewer-path {
   overflow: hidden;
-  color: #0f172a;
+  color: var(--text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.9rem;
@@ -371,7 +935,7 @@
 
 .workflow-timeline-diff-viewer-commit {
   margin-top: 0.2rem;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 0.74rem;
   font-family:
     ui-monospace,
@@ -405,7 +969,7 @@
   flex: 1;
   overflow: auto;
   padding: 0.8rem 0;
-  background: #ffffff;
+  background: var(--bg-primary);
   font-size: 0.76rem;
   font-family:
     ui-monospace,
@@ -419,26 +983,26 @@
 .workflow-timeline-diff-line {
   padding: 0.12rem 1rem;
   white-space: pre;
-  color: #334155;
+  color: var(--text-secondary);
 }
 
 .workflow-timeline-diff-line-add {
-  background: #ecfdf3;
-  color: #166534;
+  background: color-mix(in srgb, var(--color-success) 14%, var(--bg-primary) 86%);
+  color: var(--color-success-hover);
 }
 
 .workflow-timeline-diff-line-del {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--bg-primary) 88%);
+  color: var(--color-danger-hover);
 }
 
 .workflow-timeline-diff-line-hunk {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: color-mix(in srgb, var(--color-info) 12%, var(--bg-primary) 88%);
+  color: var(--color-info-hover);
 }
 
 .workflow-timeline-diff-line-meta {
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 @media (max-width: 991px) {
@@ -451,17 +1015,10 @@
     min-width: 0;
     max-height: 220px;
     border-right: 0;
-    border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .workflow-timeline-diff-resizer {
     display: none;
-  }
-}
-
-@media (max-width: 1200px) {
-  .workflow-timeline-controls {
-    width: 100%;
-    justify-content: flex-start !important;
   }
 }

@@ -38,6 +38,7 @@ import ForkFromHereModal from './ForkFromHereModal';
 import { MarkdownContent } from './MarkdownContent';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
+import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
 import type {
   AutonomousWorkflow,
   WorkflowDefinitionSnapshot,
@@ -94,6 +95,30 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
 // worth viewing after the run finishes (the live activity stream is run-time only).
 const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
 const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
+const PHASE_LABEL_KEYS: Record<string, string> = {
+  preparation: 'autoPhasePreparation',
+  planning: 'autoPhasePlanning',
+  development: 'autoPhaseDevelopment',
+  pr_review: 'autoPhasePRReview',
+  report: 'autoPhaseReport',
+  wait: 'autoPhaseWait',
+  merge: 'autoPhaseMerge',
+};
+
+const MILESTONE_ICON_COLORS: Record<string, string> = {
+  dark: 'var(--text-primary)',
+  info: 'var(--color-info)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  primary: 'var(--color-primary)',
+  secondary: 'var(--text-tertiary)',
+};
+
+function truncateInlineText(text: string, max = 220): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max).trimEnd()}...`;
+}
 
 // ── Branch data type for parallel view ──────────────────────────────
 
@@ -114,6 +139,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const language = useLanguage();
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen } = useAppStore();
+  const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [viewingSession, setViewingSession] = useState<{
     milestoneId: string;
@@ -777,6 +803,49 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const workflowStartTime =
     milestones.length > 0 ? getMilestoneAnchorTime(milestones[0]) : workflow.created_at;
+  const workflowStatusConfig = getAutonomousWorkflowStatusConfig(workflow.status);
+  const workflowStatusLabel = t(workflowStatusConfig.labelKey, language);
+  const workflowPhaseLabel = t(
+    PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation',
+    language
+  );
+  const latestMilestoneWithSession = [...milestones]
+    .reverse()
+    .find(
+      (milestone) => milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id
+    );
+  const latestFailedMilestone = [...milestones]
+    .reverse()
+    .find((milestone) => milestone.error_message || milestone.status === 'failed');
+  const milestoneWithFinalChanges = [...milestones]
+    .reverse()
+    .find((milestone) => milestone.commit_shas);
+  const stateBannerTone = workflow.error_message
+    ? 'error'
+    : workflow.status === 'planning_timeout' ||
+        workflow.status === 'paused' ||
+        workflow.status === 'waiting'
+      ? 'warning'
+      : 'info';
+  const stateBannerMessage = workflow.error_message
+    ? workflow.error_message
+    : workflow.status === 'planning_timeout'
+      ? t('autoBannerPlanningTimeout', language)
+      : workflow.status === 'paused'
+        ? t('autoBannerPaused', language)
+        : workflow.status === 'waiting'
+          ? t('autoBannerWaiting', language)
+          : '';
+  const showStateBanner = Boolean(
+    workflow.error_message ||
+    workflow.status === 'planning_timeout' ||
+    workflow.status === 'paused' ||
+    workflow.status === 'waiting'
+  );
+
+  const toggleExpandMilestone = (milestoneId: string) => {
+    setExpandedMilestone((current) => (current === milestoneId ? null : milestoneId));
+  };
 
   const parsedDiffFiles = useMemo(() => parseDiffFiles(diffData?.diff ?? ''), [diffData?.diff]);
 
@@ -879,6 +948,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   ) => {
     const showForkCancel = options?.showForkCancel ?? true;
     const compact = options?.compact ?? false;
+    const isExpanded = expandedMilestone === milestone.milestone_id;
     const display = MILESTONE_DISPLAY[milestone.milestone_type] || {
       icon: 'bi-circle',
       color: 'secondary',
@@ -919,216 +989,356 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       (milestone.status === 'completed' || milestone.status === 'in_progress');
     const canCancel =
       !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
-    const canInlineAction = !!llmSessionId || canViewChanges;
-    const showActionRow =
-      !compact &&
-      (!!llmSessionId ||
-        canViewChanges ||
-        canViewPlanContent ||
-        canViewReviewContent ||
-        (canInlineAction && (canFork || canCancel)));
-    const showExpandedDetail = milestone.status === 'in_progress' && hasLiveActivity;
-    // One-line per-round summary (agent TL;DR, falling back to result_summary).
-    // Plain text, clamped to 2 lines via CSS; the title is capped so a verbose
-    // result_summary (e.g. tests_run full output) can't flood the hover tooltip.
-    const rawSummary = (milestone.tldr || milestone.result_summary || '').trim();
-    const cardSummaryEl =
-      !rawSummary || compact ? null : (
-        <div
-          className="workflow-timeline-card-summary mt-1"
-          title={rawSummary.length > 200 ? rawSummary.slice(0, 200) + '…' : rawSummary}
-        >
-          {rawSummary}
-        </div>
-      );
+    const canExpand =
+      !!llmSessionId ||
+      canViewChanges ||
+      canViewPlanContent ||
+      canViewReviewContent ||
+      canFork ||
+      canCancel ||
+      hasLiveActivity ||
+      !!milestone.error_message ||
+      !!milestone.description?.trim() ||
+      !!milestone.result_summary?.trim() ||
+      !!milestone.tldr?.trim();
+    const rawSummary = (
+      milestone.tldr ||
+      milestone.result_summary ||
+      milestone.description ||
+      milestone.plan_content ||
+      milestone.review_content ||
+      ''
+    ).trim();
+    const milestoneSummary = rawSummary ? truncateInlineText(rawSummary, compact ? 120 : 220) : '';
+    const statusTone =
+      milestone.status === 'completed'
+        ? 'success'
+        : milestone.status === 'failed'
+          ? 'danger'
+          : milestone.status === 'in_progress'
+            ? 'info'
+            : milestone.status === 'cancelled'
+              ? 'warning'
+              : 'muted';
+    const statusLabel =
+      milestone.status === 'completed'
+        ? t('autoStatusCompleted', language)
+        : milestone.status === 'failed'
+          ? t('autoStatusFailed', language)
+          : milestone.status === 'in_progress'
+            ? t('autoStatusDeveloping', language)
+            : milestone.status === 'cancelled'
+              ? t('autoStatusCancelled', language)
+              : t('autoStatusPending', language);
+    const milestoneDuration =
+      milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
+        ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
+        : '';
+    const previewPlan = canViewPlanContent ? milestone.plan_content.trim() : '';
+    const previewReview = canViewReviewContent ? milestone.review_content.trim() : '';
+    const showDetailSections = isExpanded && canExpand;
+    const showLiveActivitySection = milestone.status === 'in_progress' && hasLiveActivity;
 
     return (
-      <div key={milestone.milestone_id} className="mb-2">
-        <div
-          className={`workflow-timeline-card d-flex align-items-start p-3 rounded ${
-            showExpandedDetail ? 'workflow-timeline-card-expanded' : ''
-          }`}
+      <article
+        key={milestone.milestone_id}
+        className={`timeline-milestone-card ${
+          compact ? 'timeline-milestone-card--compact' : ''
+        } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusTone}`}
+      >
+        <button
+          type="button"
+          className="timeline-milestone-summary"
+          onClick={() => canExpand && toggleExpandMilestone(milestone.milestone_id)}
         >
-          <div className="workflow-timeline-leading-icon me-3">
-            <i
-              className={`bi ${statusIcon}`}
-              style={{ fontSize: compact ? '0.95rem' : '1.05rem' }}
-            />
-          </div>
-          <div className="flex-grow-1 min-width-0">
-            <div className="d-flex align-items-center gap-2 flex-wrap">
-              <i className={`bi ${display.icon} text-${display.color}`}></i>
-              <span className="fw-semibold" style={{ fontSize: compact ? '0.8rem' : '0.925rem' }}>
-                {formatMilestoneTitle(milestone)}
-              </span>
-              {milestone.round_number > 0 && (
-                <Badge variant="light" style={{ fontSize: '0.65rem' }}>
-                  R{milestone.round_number}
-                </Badge>
-              )}
+          <div className="timeline-milestone-summary-main">
+            <div className={`timeline-milestone-status timeline-milestone-status--${statusTone}`}>
+              <i className={`bi ${statusIcon}`}></i>
             </div>
-            <div className="workflow-timeline-meta mt-2 d-flex align-items-center gap-2 flex-wrap">
-              <span className="workflow-timeline-meta-pill">
-                <i className="bi bi-clock me-1"></i>
-                {milestoneTime || '--:--:--'}
-              </span>
-              {showUsageMetrics && (
-                <span className="workflow-timeline-meta-pill">
-                  <i className="bi bi-bar-chart-line me-1"></i>
-                  {llmTotalTokens > 0 ? formatTokens(llmTotalTokens) : '--'}
-                </span>
-              )}
-              {showUsageMetrics && (
-                <span className="workflow-timeline-meta-pill">
-                  <i className="bi bi-arrow-up-circle me-1"></i>
-                  {llmRequestCount > 0 ? llmRequestCount : '--'} {t('requests', language)}
-                </span>
-              )}
-              {diffStats && !compact && (
-                <span className="workflow-timeline-meta-pill">
-                  +{diffStats.additions}/-{diffStats.deletions} · {diffStats.files} files
-                </span>
-              )}
-            </div>
-            {cardSummaryEl}
-            {showActionRow && (
-              <div
-                className="workflow-timeline-action-row mt-2 d-flex align-items-center gap-2 flex-wrap"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {llmSessionId && (
-                  <button
-                    type="button"
-                    className={`workflow-timeline-meta-pill workflow-timeline-session-pill ${
-                      reusedSessionCount > 1 ? 'workflow-timeline-session-pill-reused' : ''
-                    }`}
-                    style={
-                      reusedSessionColor
-                        ? {
-                            backgroundColor: reusedSessionColor.background,
-                            borderColor: reusedSessionColor.border,
-                            color: reusedSessionColor.color,
-                          }
-                        : undefined
-                    }
-                    onClick={() => {
-                      setViewingSession({
-                        milestoneId: milestone.milestone_id,
-                        sessionId: llmSessionId,
-                      });
+            <div className="timeline-milestone-copy">
+              <div className="timeline-milestone-title-row">
+                <div className="timeline-milestone-title-group">
+                  <i
+                    className={`bi ${display.icon}`}
+                    style={{
+                      color: MILESTONE_ICON_COLORS[display.color] ?? 'var(--text-secondary)',
                     }}
-                    title={
-                      reusedSessionCount > 1
-                        ? `Session ${llmSessionId.slice(0, 8)} · reused ${reusedSessionCount} times`
-                        : `Session ${llmSessionId.slice(0, 8)}`
-                    }
-                  >
-                    <i className="bi bi-chat-square-text me-1"></i>
-                    {t('autoSessionIdLabel', language)} {llmSessionId.slice(0, 4)}
-                  </button>
-                )}
-                {canViewPlanContent && (
-                  <Button
-                    size="sm"
-                    variant="outline-success"
-                    className="workflow-timeline-inline-btn"
-                    onClick={() =>
-                      setViewingContent({
-                        title: t('autoViewPlanTitle', language),
-                        content: milestone.plan_content,
-                      })
-                    }
-                  >
-                    <i className="bi bi-file-text me-1"></i>
-                    {t('autoViewPlan', language)}
-                  </Button>
-                )}
-                {canViewReviewContent && (
-                  <Button
-                    size="sm"
-                    variant="outline-info"
-                    className="workflow-timeline-inline-btn"
-                    onClick={() =>
-                      setViewingContent({
-                        title: t('autoViewReviewTitle', language),
-                        content: milestone.review_content,
-                      })
-                    }
-                  >
-                    <i className="bi bi-chat-text me-1"></i>
-                    {t('autoViewReview', language)}
-                  </Button>
-                )}
-                {canViewChanges && (
-                  <Button
-                    size="sm"
-                    variant="outline-primary"
-                    className="workflow-timeline-inline-btn"
-                    onClick={() => setViewingDiff(milestone.milestone_id)}
-                  >
-                    <i className="bi bi-file-diff me-1"></i>
-                    {t('autoViewChanges', language)}
-                  </Button>
-                )}
-                {canInlineAction && canFork && (
-                  <Button
-                    size="sm"
-                    variant="outline-info"
-                    className="workflow-timeline-inline-btn"
-                    onClick={() => setShowForkModal(milestone.milestone_id)}
-                  >
-                    <i className="bi bi-diagram-3 me-1"></i>
-                    {t('autoForkFromHere', language)}
-                  </Button>
-                )}
-                {canInlineAction && canCancel && (
-                  <Button
-                    size="sm"
-                    variant="outline-secondary"
-                    className="workflow-timeline-inline-btn"
-                    onClick={() => setShowCancelModal(milestone.milestone_id)}
-                  >
-                    <i className="bi bi-x-circle me-1"></i>
-                    {t('autoCancelRound', language)}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {showExpandedDetail && (
-          <div
-            className="workflow-timeline-detail ms-4 mt-1 p-3 border-start border-3"
-            style={{ borderColor: `var(--bs-${display.color})` }}
-          >
-            {hasLiveActivity && (
-              <div className="workflow-timeline-live-activity mt-2">
-                <div className="d-flex align-items-center gap-2 mb-2">
-                  <span
-                    className="spinner-border spinner-border-sm text-primary"
-                    style={{ width: '0.85rem', height: '0.85rem' }}
-                  ></span>
-                  <strong className="text-primary">{t('autoAiActivity', language)}</strong>
+                  ></i>
+                  <span className="timeline-milestone-title">
+                    {formatMilestoneTitle(milestone)}
+                  </span>
                 </div>
-                {milestoneActivities.slice(-15).map((activity, index) => {
-                  const line = formatLiveActivityLine(activity);
-                  return (
-                    <div
-                      key={`${milestone.milestone_id}-live-${index}`}
-                      className="workflow-timeline-live-activity-line"
-                    >
-                      <span className="workflow-timeline-live-activity-time">{line.timestamp}</span>
-                      <i className={`bi ${line.icon}`}></i>
-                      <span className="workflow-timeline-live-activity-text">{line.content}</span>
-                    </div>
-                  );
-                })}
+                <div className="timeline-milestone-time">
+                  <span>{milestoneTime || '--:--:--'}</span>
+                  {milestoneDuration && <span>{milestoneDuration}</span>}
+                </div>
               </div>
+              {!compact && milestoneSummary && (
+                <p
+                  className="timeline-milestone-preview"
+                  title={rawSummary.length > 220 ? rawSummary : undefined}
+                >
+                  {milestoneSummary}
+                </p>
+              )}
+              <div className="timeline-milestone-badges">
+                <span className={`timeline-chip timeline-chip--${statusTone}`}>{statusLabel}</span>
+                {milestone.round_number > 0 && (
+                  <span className="timeline-chip timeline-chip--subtle">
+                    R{milestone.round_number}
+                  </span>
+                )}
+                {showUsageMetrics && (
+                  <>
+                    <span className="timeline-chip timeline-chip--neutral">
+                      {llmTotalTokens > 0 ? formatTokens(llmTotalTokens) : '--'}
+                    </span>
+                    <span className="timeline-chip timeline-chip--neutral">
+                      {llmRequestCount > 0 ? llmRequestCount : '--'} {t('requests', language)}
+                    </span>
+                  </>
+                )}
+                {diffStats && !compact && (
+                  <span className="timeline-chip timeline-chip--neutral">
+                    +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          {canExpand && (
+            <span className="timeline-milestone-chevron">
+              <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+            </span>
+          )}
+        </button>
+
+        {showDetailSections && (
+          <div className="timeline-milestone-details">
+            {(milestone.tldr || milestone.result_summary || milestone.description) && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoSummarySection', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  {milestone.tldr?.trim() && (
+                    <p className="timeline-milestone-detail-text timeline-milestone-detail-text--primary">
+                      {milestone.tldr.trim()}
+                    </p>
+                  )}
+                  {milestone.result_summary?.trim() &&
+                    milestone.result_summary.trim() !== milestone.tldr?.trim() && (
+                      <p className="timeline-milestone-detail-text">
+                        {milestone.result_summary.trim()}
+                      </p>
+                    )}
+                  {milestone.description?.trim() && (
+                    <p className="timeline-milestone-detail-note">{milestone.description.trim()}</p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {canViewPlanContent && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoOutputSection', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  <div className="timeline-milestone-detail-text">{previewPlan}</div>
+                  <div className="timeline-milestone-inline-actions">
+                    <Button
+                      size="sm"
+                      variant="outline-success"
+                      className="timeline-inline-btn"
+                      onClick={() =>
+                        setViewingContent({
+                          title: t('autoViewPlanTitle', language),
+                          content: milestone.plan_content,
+                        })
+                      }
+                    >
+                      <i className="bi bi-file-text me-1"></i>
+                      {t('autoViewPlan', language)}
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {canViewReviewContent && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoReviewSection', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  <div className="timeline-milestone-detail-text">{previewReview}</div>
+                  <div className="timeline-milestone-inline-actions">
+                    <Button
+                      size="sm"
+                      variant="outline-info"
+                      className="timeline-inline-btn"
+                      onClick={() =>
+                        setViewingContent({
+                          title: t('autoViewReviewTitle', language),
+                          content: milestone.review_content,
+                        })
+                      }
+                    >
+                      <i className="bi bi-chat-text me-1"></i>
+                      {t('autoViewReview', language)}
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {canViewChanges && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoCodeChanges', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  <div className="timeline-milestone-detail-grid">
+                    <div className="timeline-milestone-detail-chip">
+                      <span>{t('autoCommits', language)}</span>
+                      <code>{milestone.commit_shas}</code>
+                    </div>
+                    {diffStats && (
+                      <div className="timeline-milestone-detail-chip">
+                        <span>{t('autoViewChanges', language)}</span>
+                        <strong>
+                          +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files} files
+                        </strong>
+                      </div>
+                    )}
+                  </div>
+                  <div className="timeline-milestone-inline-actions">
+                    <Button
+                      size="sm"
+                      variant="outline-primary"
+                      className="timeline-inline-btn"
+                      onClick={() => setViewingDiff(milestone.milestone_id)}
+                    >
+                      <i className="bi bi-file-diff me-1"></i>
+                      {t('autoViewChanges', language)}
+                    </Button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {(llmSessionId || showLiveActivitySection) && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoSessionTrace', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  {llmSessionId && (
+                    <button
+                      type="button"
+                      className={`timeline-session-link ${
+                        reusedSessionCount > 1 ? 'timeline-session-link--reused' : ''
+                      }`}
+                      style={
+                        reusedSessionColor
+                          ? {
+                              backgroundColor: reusedSessionColor.background,
+                              borderColor: reusedSessionColor.border,
+                              color: reusedSessionColor.color,
+                            }
+                          : undefined
+                      }
+                      onClick={() =>
+                        setViewingSession({
+                          milestoneId: milestone.milestone_id,
+                          sessionId: llmSessionId ?? '',
+                        })
+                      }
+                    >
+                      <i className="bi bi-chat-square-text"></i>
+                      <span>
+                        {t('autoSessionIdLabel', language)} {llmSessionId.slice(0, 8)}
+                      </span>
+                    </button>
+                  )}
+
+                  {showLiveActivitySection && (
+                    <div className="timeline-milestone-activity">
+                      <div className="timeline-milestone-activity-title">
+                        <span className="timeline-live-dot"></span>
+                        {t('autoAiActivity', language)}
+                      </div>
+                      <div className="timeline-milestone-activity-list">
+                        {milestoneActivities.slice(-15).map((activity, index) => {
+                          const line = formatLiveActivityLine(activity);
+                          return (
+                            <div
+                              key={`${milestone.milestone_id}-live-${index}`}
+                              className="timeline-milestone-activity-item"
+                            >
+                              <span className="timeline-milestone-activity-time">
+                                {line.timestamp}
+                              </span>
+                              <i className={`bi ${line.icon}`}></i>
+                              <span className="timeline-milestone-activity-text">
+                                {line.content}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {milestone.error_message && (
+              <section className="timeline-milestone-section timeline-milestone-section--error">
+                <div className="timeline-milestone-section-label">{t('error', language)}</div>
+                <div className="timeline-milestone-section-body">
+                  <p className="timeline-milestone-error">{milestone.error_message}</p>
+                </div>
+              </section>
+            )}
+
+            {(canFork || canCancel) && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoActionsSection', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  <div className="timeline-milestone-inline-actions">
+                    {canFork && (
+                      <Button
+                        size="sm"
+                        variant="outline-info"
+                        className="timeline-inline-btn"
+                        onClick={() => setShowForkModal(milestone.milestone_id)}
+                      >
+                        <i className="bi bi-diagram-3 me-1"></i>
+                        {t('autoForkFromHere', language)}
+                      </Button>
+                    )}
+                    {canCancel && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn"
+                        onClick={() => setShowCancelModal(milestone.milestone_id)}
+                      >
+                        <i className="bi bi-x-circle me-1"></i>
+                        {t('autoCancelRound', language)}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </section>
             )}
           </div>
         )}
-      </div>
+      </article>
     );
   };
 
@@ -1147,15 +1357,19 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       .sort((a, b) => a - b);
 
     return rounds.map((round) => (
-      <div key={round} className="mb-3">
-        <h6 className="text-muted border-bottom pb-2 mb-2" style={{ fontSize: '0.8rem' }}>
-          <i className="bi bi-arrow-repeat me-1"></i>
-          {t('autoDevRoundLabel', language)} {round}
-        </h6>
-        <div className="ps-3">
+      <section key={round} className="timeline-round">
+        <div className="timeline-round-title">
+          <div className="timeline-round-heading">
+            <i className="bi bi-arrow-repeat"></i>
+            <span>
+              {t('autoDevRoundLabel', language)} {round}
+            </span>
+          </div>
+        </div>
+        <div className="timeline-stack">
           {grouped[round].map((ms) => renderMilestoneCard(ms, { showForkCancel: false }))}
         </div>
-      </div>
+      </section>
     ));
   };
 
@@ -1190,14 +1404,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       .sort((a, b) => a - b);
 
     return rounds.map((round) => (
-      <div key={round} className="mb-2">
+      <section key={round} className="timeline-round timeline-round--compact">
         {rounds.length > 1 && (
-          <div className="text-muted mb-1" style={{ fontSize: '0.7rem' }}>
+          <div className="timeline-round-micro-label">
             {t('autoDevRoundLabel', language)} {round}
           </div>
         )}
-        {grouped[round].map((ms) => renderMilestoneCard(ms, { compact: true }))}
-      </div>
+        <div className="timeline-stack">
+          {grouped[round].map((ms) => renderMilestoneCard(ms, { compact: true }))}
+        </div>
+      </section>
     ));
   };
 
@@ -1214,86 +1430,98 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // ── Main Render ───────────────────────────────────────────────────
 
   return (
-    <div className="d-flex flex-column h-100">
-      {/* Header / Controls */}
-      <div className="border-bottom p-3">
-        <div className="d-flex align-items-start justify-content-between gap-3 mb-2 flex-wrap">
-          <div className="min-width-0 flex-grow-1">
-            <h5 className="mb-1">
-              {isForkChild && <i className="bi bi-diagram-3 me-1 text-info"></i>}
-              {workflow.title || workflow.requirements_text?.slice(0, 80) || 'Workflow'}
-            </h5>
+    <div className="timeline-shell d-flex flex-column h-100">
+      <div className="timeline-header">
+        <div className="timeline-header-top">
+          <div className="timeline-header-main">
+            <div className="timeline-header-title-row">
+              {isForkChild && <i className="bi bi-diagram-3 timeline-header-fork-icon"></i>}
+              <h5 className="timeline-header-title">
+                {workflow.title || workflow.requirements_text?.slice(0, 80) || 'Workflow'}
+              </h5>
+            </div>
+            <div className="timeline-header-badges">
+              <Badge variant={workflowStatusConfig.variant}>
+                <i className={`bi ${workflowStatusConfig.icon} me-1`}></i>
+                {workflowStatusLabel}
+              </Badge>
+              {workflow.cli_tool && (
+                <span className="timeline-chip timeline-chip--neutral">
+                  <i className="bi bi-tools me-1"></i>
+                  {workflow.cli_tool}
+                </span>
+              )}
+              {(resolvedIssueUrl || workflow.github_issue_number) &&
+                (resolvedIssueUrl ? (
+                  <a
+                    href={resolvedIssueUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="timeline-pill-link"
+                  >
+                    <i className="bi bi-card-text"></i>
+                    <span>
+                      {workflow.github_issue_number
+                        ? `${t('autoIssueBadge', language)} #${workflow.github_issue_number}`
+                        : t('autoIssueBadge', language)}
+                    </span>
+                  </a>
+                ) : (
+                  <span className="timeline-chip timeline-chip--subtle">
+                    <i className="bi bi-card-text me-1"></i>
+                    {t('autoIssueBadge', language)} #{workflow.github_issue_number}
+                  </span>
+                ))}
+              {workflow.github_pr_number &&
+                (workflow.github_pr_url ? (
+                  <a
+                    href={workflow.github_pr_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="timeline-pill-link"
+                  >
+                    <i className="bi bi-git-pull-request"></i>
+                    <span>
+                      {t('autoPrBadge', language)}
+                      {workflow.github_pr_number}
+                    </span>
+                  </a>
+                ) : (
+                  <span className="timeline-chip timeline-chip--subtle">
+                    <i className="bi bi-git-pull-request me-1"></i>
+                    {t('autoPrBadge', language)}
+                    {workflow.github_pr_number}
+                  </span>
+                ))}
+              {isForkChild && parentWorkflow && (
+                <span className="timeline-chip timeline-chip--info">
+                  <i className="bi bi-diagram-3 me-1"></i>
+                  {t('autoForkedFrom', language)}
+                  {onNavigateToWorkflow ? (
+                    <button
+                      type="button"
+                      className="timeline-inline-link timeline-inline-link--embedded"
+                      onClick={() => onNavigateToWorkflow(parentWorkflow.workflow_id)}
+                    >
+                      {parentWorkflow.title?.slice(0, 30) || parentWorkflow.workflow_id.slice(0, 8)}
+                    </button>
+                  ) : (
+                    <span className="ms-1">
+                      {parentWorkflow.title?.slice(0, 30) || parentWorkflow.workflow_id.slice(0, 8)}
+                    </span>
+                  )}
+                </span>
+              )}
+              {isForkParent && (
+                <span className="timeline-chip timeline-chip--info">
+                  <i className="bi bi-diagram-3 me-1"></i>
+                  {t('autoForkedWorkflows', language)} ({forks.length})
+                </span>
+              )}
+            </div>
           </div>
-          <div className="d-flex gap-2 flex-wrap justify-content-end workflow-timeline-controls">
-            {definitionSnapshot && (
-              <Button
-                size="sm"
-                variant="outline-secondary"
-                className="workflow-timeline-definition-btn"
-                onClick={() => setShowDefinitionSnapshot(true)}
-              >
-                <i className="bi bi-file-earmark-text me-1"></i>
-                {t('autoViewDefinition', language)}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="workflow-timeline-definition-btn"
-              disabled={!latestPlanFinalized}
-              onClick={() =>
-                latestPlanFinalized &&
-                setViewingContent({
-                  title: t('autoViewPlanTitle', language),
-                  content: latestPlanFinalized.plan_content,
-                })
-              }
-            >
-              <i className="bi bi-clipboard-check me-1"></i>
-              {t('autoFinalPlan', language)}
-              {latestPlanFinalized && (
-                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
-                  {t('autoRoundBadge', language).replace(
-                    '{n}',
-                    String(latestPlanFinalized.dev_round || 1)
-                  )}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="workflow-timeline-definition-btn"
-              disabled={!latestPrReviewSummary}
-              onClick={() =>
-                latestPrReviewSummary &&
-                setViewingContent({
-                  title: t('autoViewReviewTitle', language),
-                  content: latestPrReviewSummary.review_content,
-                })
-              }
-            >
-              <i className="bi bi-check2-circle me-1"></i>
-              {t('autoPrReviewSummary', language)}
-              {latestPrReviewSummary && (
-                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
-                  {t('autoRoundBadge', language).replace(
-                    '{n}',
-                    String(latestPrReviewSummary.dev_round || 1)
-                  )}
-                </Badge>
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="workflow-timeline-definition-btn"
-              disabled={!hasPr}
-              onClick={() => setViewingPrDiff(true)}
-            >
-              <i className="bi bi-file-diff me-1"></i>
-              {t('autoFinalCodeChanges', language)}
-            </Button>
+
+          <div className="timeline-header-actions">
             {workspaceFullscreen && (
               <Button
                 size="sm"
@@ -1365,7 +1593,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </Button>
               </>
             )}
-            {isWaiting && (
+            {!showStateBanner && isWaiting && (
               <Button
                 size="sm"
                 variant="success"
@@ -1379,146 +1607,200 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
         </div>
 
-        <div className="workflow-timeline-header-meta d-flex align-items-center gap-2 flex-wrap">
-          {workflow.cli_tool && (
-            <span className="workflow-timeline-header-pill workflow-timeline-header-pill-subtle">
-              <i className="bi bi-tools me-1"></i>
-              {workflow.cli_tool}
-            </span>
-          )}
-          <span className="workflow-timeline-header-pill workflow-timeline-header-pill-status">
-            {workflow.status}
-          </span>
-          {(resolvedIssueUrl || workflow.github_issue_number) &&
-            (resolvedIssueUrl ? (
-              <a
-                href={resolvedIssueUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-decoration-none workflow-timeline-header-link workflow-timeline-header-pill workflow-timeline-header-pill-link"
-              >
-                <i className="bi bi-card-text me-1"></i>
-                {workflow.github_issue_number
-                  ? `${t('autoIssueBadge', language)} #${workflow.github_issue_number}`
-                  : t('autoIssueBadge', language)}
-              </a>
-            ) : (
-              <span className="workflow-timeline-header-pill workflow-timeline-header-pill-link">
-                <i className="bi bi-card-text me-1"></i>
-                {t('autoIssueBadge', language)} #{workflow.github_issue_number}
-              </span>
-            ))}
-          {workflow.github_pr_number &&
-            (workflow.github_pr_url ? (
-              <a
-                href={workflow.github_pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-decoration-none workflow-timeline-header-link workflow-timeline-header-pill workflow-timeline-header-pill-link"
-              >
-                <i className="bi bi-git-pull-request me-1"></i>
-                {t('autoPrBadge', language)}
-                {workflow.github_pr_number}
-              </a>
-            ) : (
-              <span className="workflow-timeline-header-pill workflow-timeline-header-pill-link">
-                <i className="bi bi-git-pull-request me-1"></i>
-                {t('autoPrBadge', language)}
-                {workflow.github_pr_number}
-              </span>
-            ))}
-          {isForkChild && parentWorkflow && (
-            <Badge variant="info">
-              <i className="bi bi-diagram-3 me-1"></i>
-              {t('autoForkedFrom', language)}
-              {onNavigateToWorkflow ? (
-                <a
-                  href="#"
-                  className="text-white text-decoration-none ms-1"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onNavigateToWorkflow(parentWorkflow.workflow_id);
-                  }}
-                >
-                  {parentWorkflow.title?.slice(0, 30) || parentWorkflow.workflow_id.slice(0, 8)}
-                </a>
-              ) : (
-                <span className="ms-1">
-                  {parentWorkflow.title?.slice(0, 30) || parentWorkflow.workflow_id.slice(0, 8)}
-                </span>
-              )}
-            </Badge>
-          )}
-          {isForkParent && (
-            <Badge variant="info">
-              <i className="bi bi-diagram-3 me-1"></i>
-              {t('autoForkedWorkflows', language)} ({forks.length})
-            </Badge>
-          )}
+        <div className="timeline-header-meta-grid">
+          <div className="timeline-meta-item">
+            <span className="timeline-meta-item__label">{t('autoCurrentPhase', language)}</span>
+            <span className="timeline-meta-item__value">{workflowPhaseLabel}</span>
+          </div>
           {workflow.model && (
-            <span className="workflow-timeline-header-pill workflow-timeline-header-pill-subtle">
-              <i className="bi bi-cpu me-1"></i>
-              {workflow.model}
+            <div className="timeline-meta-item">
+              <span className="timeline-meta-item__label">{t('autoModel', language)}</span>
+              <span className="timeline-meta-item__value">{workflow.model}</span>
+            </div>
+          )}
+          <div className="timeline-meta-item">
+            <span className="timeline-meta-item__label">{t('autoStartTime', language)}</span>
+            <span className="timeline-meta-item__value">
+              {formatWorkflowDateTime(workflowStartTime)}
             </span>
-          )}
-        </div>
-
-        {/* Token Usage */}
-        <div className="workflow-timeline-summary d-flex gap-3 flex-wrap">
-          <small className="text-muted">
-            <i className="bi bi-clock me-1"></i>
-            {t('autoStartTime', language)}: {formatWorkflowDateTime(workflowStartTime)}
-          </small>
-          <small className="text-muted">
-            <i className="bi bi-hourglass-split me-1"></i>
-            {t('autoDuration', language)}:{' '}
-            {formatDuration(workflowStartTime, workflow.completed_at ?? workflow.updated_at)}
-          </small>
-          <small className="text-muted">
-            <i className="bi bi-bar-chart-line me-1"></i>
-            {t('autoTokenUsage', language)}: {formatTokens(workflow.total_tokens)}
-          </small>
-          <small className="text-muted">
-            <i className="bi bi-arrow-up-circle me-1"></i>
-            {workflow.total_requests} {t('totalRequests', language)}
-          </small>
+          </div>
+          <div className="timeline-meta-item">
+            <span className="timeline-meta-item__label">{t('autoDuration', language)}</span>
+            <span className="timeline-meta-item__value">
+              {formatDuration(workflowStartTime, workflow.completed_at ?? workflow.updated_at)}
+            </span>
+          </div>
+          <div className="timeline-meta-item">
+            <span className="timeline-meta-item__label">{t('autoTokenUsage', language)}</span>
+            <span className="timeline-meta-item__value">{formatTokens(workflow.total_tokens)}</span>
+          </div>
+          <div className="timeline-meta-item">
+            <span className="timeline-meta-item__label">{t('totalRequests', language)}</span>
+            <span className="timeline-meta-item__value">{workflow.total_requests}</span>
+          </div>
           {workflow.dev_round > 1 && (
-            <small className="text-muted">
-              <i className="bi bi-flag me-1"></i>
-              {t('autoDevRoundLabel', language)} {workflow.dev_round}
-            </small>
+            <div className="timeline-meta-item">
+              <span className="timeline-meta-item__label">{t('autoDevRoundLabel', language)}</span>
+              <span className="timeline-meta-item__value">{workflow.dev_round}</span>
+            </div>
           )}
         </div>
 
-        {/* Error message */}
-        {workflow.error_message && (
-          <div className="alert alert-danger py-1 px-2 mt-2 mb-0" style={{ fontSize: '0.8rem' }}>
-            {workflow.error_message}
+        <div className="timeline-output-rail">
+          <div className="timeline-output-rail__label">{t('autoTimelineOutputs', language)}</div>
+          <div className="timeline-output-rail__buttons">
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="timeline-output-btn"
+              disabled={!definitionSnapshot}
+              onClick={() => definitionSnapshot && setShowDefinitionSnapshot(true)}
+            >
+              <i className="bi bi-file-earmark-text me-1"></i>
+              {t('autoViewDefinition', language)}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="timeline-output-btn"
+              disabled={!latestPlanFinalized}
+              onClick={() =>
+                latestPlanFinalized &&
+                setViewingContent({
+                  title: t('autoViewPlanTitle', language),
+                  content: latestPlanFinalized.plan_content,
+                })
+              }
+            >
+              <i className="bi bi-clipboard-check me-1"></i>
+              {t('autoFinalPlan', language)}
+              {latestPlanFinalized && (
+                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                  {t('autoRoundBadge', language).replace(
+                    '{n}',
+                    String(latestPlanFinalized.dev_round || 1)
+                  )}
+                </Badge>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="timeline-output-btn"
+              disabled={!latestPrReviewSummary}
+              onClick={() =>
+                latestPrReviewSummary &&
+                setViewingContent({
+                  title: t('autoViewReviewTitle', language),
+                  content: latestPrReviewSummary.review_content,
+                })
+              }
+            >
+              <i className="bi bi-check2-circle me-1"></i>
+              {t('autoPrReviewSummary', language)}
+              {latestPrReviewSummary && (
+                <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
+                  {t('autoRoundBadge', language).replace(
+                    '{n}',
+                    String(latestPrReviewSummary.dev_round || 1)
+                  )}
+                </Badge>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              className="timeline-output-btn"
+              disabled={!hasPr}
+              onClick={() => setViewingPrDiff(true)}
+            >
+              <i className="bi bi-file-diff me-1"></i>
+              {t('autoFinalCodeChanges', language)}
+            </Button>
+          </div>
+        </div>
+
+        {showStateBanner && (
+          <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
+            <div className="timeline-state-banner__copy">
+              <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
+              {stateBannerMessage && (
+                <div className="timeline-state-banner__message">{stateBannerMessage}</div>
+              )}
+            </div>
+            <div className="timeline-state-banner__actions">
+              {isWaiting && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={handleMarkDone}
+                  disabled={markDoneMutation.isPending}
+                >
+                  <i className="bi bi-check-circle me-1"></i>
+                  {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
+              {latestFailedMilestone && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() => setExpandedMilestone(latestFailedMilestone.milestone_id)}
+                >
+                  {t('autoOpenLatestMilestone', language)}
+                </button>
+              )}
+              {latestMilestoneWithSession && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() =>
+                    setViewingSession({
+                      milestoneId: latestMilestoneWithSession.milestone_id,
+                      sessionId:
+                        latestMilestoneWithSession.llm_session_id ??
+                        latestMilestoneWithSession.review_session_id ??
+                        latestMilestoneWithSession.session_id ??
+                        '',
+                    })
+                  }
+                >
+                  {t('autoViewSession', language)}
+                </button>
+              )}
+              {milestoneWithFinalChanges && (
+                <button
+                  type="button"
+                  className="timeline-inline-link"
+                  onClick={() => setViewingDiff(milestoneWithFinalChanges.milestone_id)}
+                >
+                  {t('autoViewChanges', language)}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── Timeline Body ─────────────────────────────────────────── */}
-      <div className="flex-grow-1 overflow-auto p-3">
+      <div className="timeline-body flex-grow-1 overflow-auto">
         {forkViz ? (
           /* ── Fork Parallel View ────────────────────────────────── */
-          <>
+          <div className="timeline-layout">
             {/* Shared history section */}
             {forkViz.sharedMilestones.length > 0 && (
-              <div className="mb-2">
-                <h6 className="text-muted mb-2" style={{ fontSize: '0.8rem' }}>
-                  <i className="bi bi-clock-history me-1"></i>
-                  {t('autoSharedHistory', language)}
-                </h6>
+              <section className="timeline-shared-section">
+                <div className="timeline-section-title">
+                  <i className="bi bi-clock-history"></i>
+                  <span>{t('autoSharedHistory', language)}</span>
+                </div>
                 {renderSharedSection(forkViz.sharedMilestones)}
-              </div>
+              </section>
             )}
 
             {/* Fork connector */}
             <ForkConnector feedback={forkViz.feedback} branchCount={forkViz.branches.length} />
 
             {/* Parallel branch columns */}
-            <div className="d-flex" ref={parallelContainerRef}>
+            <div className="timeline-fork-branches d-flex" ref={parallelContainerRef}>
               {forkViz.branches.map((branch, idx) => (
                 <React.Fragment key={branch.id}>
                   {/* Branch column */}
@@ -1569,33 +1851,39 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </React.Fragment>
               ))}
             </div>
-          </>
+          </div>
         ) : (
           /* ── Normal Timeline View ──────────────────────────────── */
           <>
             {sortedRounds.length === 0 ? (
-              <div className="text-center text-muted py-5">
-                <i className="bi bi-hourglass-split fs-1 d-block mb-2"></i>
+              <div className="timeline-empty-state">
+                <i className="bi bi-hourglass-split"></i>
                 <p>{t('autoStatusPreparing', language)}...</p>
               </div>
             ) : (
-              sortedRounds.map((round) => (
-                <div key={round} className="mb-4">
-                  <h6 className="text-muted border-bottom pb-2 mb-3">
-                    <i className="bi bi-arrow-repeat me-1"></i>
-                    {t('autoDevRoundLabel', language)} {round}
-                    {round === workflow.dev_round && isActive && (
-                      <Badge variant="primary" className="ms-2">
-                        {t('autoStatusDeveloping', language)}
-                      </Badge>
-                    )}
-                  </h6>
+              <div className="timeline-layout">
+                {sortedRounds.map((round) => (
+                  <section key={round} className="timeline-round">
+                    <div className="timeline-round-title">
+                      <div className="timeline-round-heading">
+                        <i className="bi bi-arrow-repeat"></i>
+                        <span>
+                          {t('autoDevRoundLabel', language)} {round}
+                        </span>
+                      </div>
+                      {round === workflow.dev_round && isActive && (
+                        <span className="timeline-chip timeline-chip--info">
+                          {t('autoStatusDeveloping', language)}
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="ps-3">
-                    {groupedMilestones[round].map((milestone) => renderMilestoneCard(milestone))}
-                  </div>
-                </div>
-              ))
+                    <div className="timeline-stack">
+                      {groupedMilestones[round].map((milestone) => renderMilestoneCard(milestone))}
+                    </div>
+                  </section>
+                ))}
+              </div>
             )}
           </>
         )}
