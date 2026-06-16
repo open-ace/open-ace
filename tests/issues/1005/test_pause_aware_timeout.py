@@ -15,6 +15,7 @@ These tests exercise ``_wait_for_completion`` directly (driving real
 spawning real subprocesses while still validating the pause/resume timing.
 """
 
+import signal
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -89,10 +90,10 @@ class TestWaitForCompletionPauseFreezesBudget:
         # Let a little active time pass so the loop reaches the pause check,
         # then suspend.
         time.sleep(0.1)
-        session._paused = True
+        session._paused.set()
         # Hold the pause longer than the entire budget.
         time.sleep(0.5)
-        session._paused = False
+        session._paused.clear()
         # Now complete before the remaining active budget (~0.2s) runs out.
         session.completed.set()
         t.join(timeout=2.0)
@@ -106,9 +107,9 @@ class TestWaitForCompletionPauseFreezesBudget:
         t, holder = _run_waiter(session, timeout=0.3)
 
         time.sleep(0.05)
-        session._paused = True
+        session._paused.set()
         time.sleep(0.4)  # longer than the whole budget
-        session._paused = False
+        session._paused.clear()
         # Do NOT complete: the remaining active budget (~0.25s) should still
         # expire and return False, proving pause time was excluded.
         t.join(timeout=2.0)
@@ -125,9 +126,9 @@ class TestWaitForCompletionPauseFreezesBudget:
         t, holder = _run_waiter(session, timeout=budget)
 
         time.sleep(0.05)
-        session._paused = True
+        session._paused.set()
         time.sleep(pause)
-        session._paused = False
+        session._paused.clear()
         t.join(timeout=2.0)
         elapsed = time.monotonic() - start
 
@@ -145,10 +146,10 @@ class TestWaitForCompletionResumeTransition:
         """If the session is stopped (completed set) mid-pause, return True."""
         session = _make_session()
         t, holder = _run_waiter(session, timeout=10.0)
-        session._paused = True
+        session._paused.set()
         time.sleep(0.1)
-        # stop_session sets completed and (later) clears _paused; here just set
-        # completed — the inner pause loop checks completed too.
+        # stop_session clears the paused event and sets completed; here just
+        # set completed — the inner pause loop checks completed too.
         session.completed.set()
         t.join(timeout=2.0)
 
@@ -163,15 +164,75 @@ class TestWaitForCompletionResumeTransition:
 
         # Two short pauses with active gaps between them.
         for _ in range(2):
-            session._paused = True
+            session._paused.set()
             time.sleep(0.25)  # each pause alone is < budget but 2x approaches it
-            session._paused = False
+            session._paused.clear()
             time.sleep(0.02)
         session.completed.set()
         t.join(timeout=2.0)
 
         assert not t.is_alive()
         assert holder["result"] is True, "Pauses (not active time) must not consume the budget"
+
+
+class TestPausedEventToggleSession:
+    """pause/resume/stop mutate the _paused Event (was a bare bool, #1005 review).
+
+    These guard the cross-thread transitions the reviewer walked through: the
+    Event is written by request-handler threads (pause/resume/stop) and read by
+    the runner thread (_wait_for_completion). Using an Event keeps this consistent
+    with the existing ``_stopped`` Event.
+    """
+
+    def test_pause_sets_and_resume_clears_paused_event(self):
+        runner = AutonomousAgentRunner()
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.returncode = None
+        session = _LocalSession(session_id="s-1", process=mock_process)
+        runner._local_sessions["s-1"] = session
+        assert session._paused.is_set() is False  # default unset
+
+        with patch("os.getpgid", return_value=12345), patch("os.killpg"):
+            assert runner.pause_session("s-1") is True
+        assert session._paused.is_set() is True
+
+        with patch("os.getpgid", return_value=12345), patch("os.killpg"):
+            assert runner.resume_session("s-1") is True
+        assert session._paused.is_set() is False
+
+    def test_stop_session_resumes_then_completes_while_paused(self):
+        """Stopping a paused session clears the paused event (SIGCONT) and completes."""
+        runner = AutonomousAgentRunner()
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.returncode = None
+        session = _LocalSession(session_id="s-1", process=mock_process)
+        session._paused.set()  # currently paused
+        runner._local_sessions["s-1"] = session
+
+        with patch("os.getpgid", return_value=12345), patch("os.killpg"):
+            runner.stop_session("s-1")
+
+        assert session._paused.is_set() is False, "stop must resume (clear paused)"
+        assert session.completed.is_set()
+
+    def test_pause_then_pause_is_idempotent(self):
+        runner = AutonomousAgentRunner()
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.returncode = None
+        session = _LocalSession(session_id="s-1", process=mock_process)
+        runner._local_sessions["s-1"] = session
+
+        with patch("os.getpgid", return_value=12345), patch("os.killpg") as mock_killpg:
+            assert runner.pause_session("s-1") is True
+            # Second pause: no-op, returns True without re-SIGSTOP.
+            assert runner.pause_session("s-1") is True
+        assert session._paused.is_set()
+        # SIGSTOP sent exactly once (resume does not run here).
+        sigs = [c.args[-1] for c in mock_killpg.call_args_list]
+        assert sigs.count(signal.SIGSTOP) == 1
 
 
 class TestRunLocalUsesPauseAwareWait:

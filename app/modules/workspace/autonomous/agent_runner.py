@@ -115,7 +115,7 @@ class _LocalSession:
     sdk_initialized: threading.Event = field(default_factory=threading.Event)
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
-    _paused: bool = False  # True when process is suspended via SIGSTOP
+    _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
 class AutonomousAgentRunner:
@@ -320,11 +320,12 @@ class AutonomousAgentRunner:
         pausing a task for longer than the timeout (default 1h) would reap the
         in-flight agent even though no real work was being done (#1005).
 
-        This loop instead accounts for pause/resume: while ``session._paused`` is
-        set we do not consume the timeout budget, extending the deadline by the
-        duration of each pause. The budget resumes counting down only once the
-        process is unfrozen. Returns ``True`` if the session completed (or was
-        stopped) within the budget, ``False`` if the *active* time budget ran out.
+        This loop instead accounts for pause/resume: while ``session._paused``
+        is set we do not consume the timeout budget, extending the deadline by
+        the duration of each pause. The budget resumes counting down only once
+        the process is unfrozen. Returns ``True`` if the session completed (or
+        was stopped) within the budget, ``False`` if the *active* time budget
+        ran out.
         """
         deadline = time.monotonic() + max(timeout, 0.0)
         poll = COMPLETION_POLL_INTERVAL
@@ -335,9 +336,12 @@ class AutonomousAgentRunner:
             # While paused, freeze the deadline so the remaining budget is
             # preserved across the suspension. Resume stretches the deadline by
             # the full paused duration.
-            if session._paused:
+            if session._paused.is_set():
                 pause_started = now
-                while session._paused and not session.completed.is_set():
+                # Fixed `poll` here (not min(poll, remaining)) is deliberate:
+                # paused time is not budgeted, so there's no deadline to bound
+                # the wait against — we just need to notice resume/completion.
+                while session._paused.is_set() and not session.completed.is_set():
                     session.completed.wait(timeout=poll)
                 now = time.monotonic()
                 deadline += now - pause_started
@@ -1158,10 +1162,10 @@ class AutonomousAgentRunner:
             return
 
         # If paused, resume first so it can handle SIGTERM
-        if session._paused:
+        if session._paused.is_set():
             try:
                 os.killpg(pgid, signal.SIGCONT)
-                session._paused = False
+                session._paused.clear()
             except (ProcessLookupError, OSError):
                 pass
 
@@ -1200,12 +1204,12 @@ class AutonomousAgentRunner:
         session = self._local_sessions.get(session_id)
         if not session or not session.process or session.process.returncode is not None:
             return False
-        if session._paused:
+        if session._paused.is_set():
             return True
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGSTOP)
-            session._paused = True
+            session._paused.set()
             logger.info("Paused session %s (pid %d)", session_id[:8], session.process.pid)
             return True
         except (ProcessLookupError, OSError) as e:
@@ -1217,12 +1221,12 @@ class AutonomousAgentRunner:
         session = self._local_sessions.get(session_id)
         if not session or not session.process or session.process.returncode is not None:
             return False
-        if not session._paused:
+        if not session._paused.is_set():
             return True
         try:
             pgid = os.getpgid(session.process.pid)
             os.killpg(pgid, signal.SIGCONT)
-            session._paused = False
+            session._paused.clear()
             logger.info("Resumed session %s (pid %d)", session_id[:8], session.process.pid)
             return True
         except (ProcessLookupError, OSError) as e:
