@@ -1367,8 +1367,7 @@ class TestOrchestratorReport:
         assert report_ms_dict["milestone_type"] == "progress_reported"
         assert "Progress report" in report_ms_dict["title"]
         assert report_ms_dict["tldr"] == (
-            "Round 1 summary; 5 files changed (+100/-20); "
-            "Tests: All 5 tests passed; PR #99"
+            "Round 1 summary; 5 files changed (+100/-20); " "Tests: All 5 tests passed; PR #99"
         )
 
     def test_report_posts_to_issue(self):
