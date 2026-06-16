@@ -485,6 +485,40 @@ class AutonomousOrchestrator:
         match = _TLDR_RE.search(response)
         return match.group(1).strip()[:200] if match else ""
 
+    @staticmethod
+    def _build_progress_report_tldr(
+        dev_round: int,
+        diff_stats: dict,
+        test_summary: str,
+        review_rounds: int,
+        review_passed: bool,
+        pr_number: Optional[int],
+    ) -> str:
+        """Build a compact one-line summary for synthetic progress reports."""
+        parts = [f"Round {dev_round} summary"]
+
+        if diff_stats:
+            parts.append(
+                (
+                    f"{diff_stats.get('files', 0)} files changed "
+                    f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
+                )
+            )
+
+        cleaned_test_summary = re.sub(r"\s+", " ", test_summary or "").strip()
+        if cleaned_test_summary:
+            parts.append(f"Tests: {cleaned_test_summary[:60].rstrip(' ,.;:')}")
+
+        if review_rounds > 0:
+            parts.append(
+                f"Review: {'passed' if review_passed else 'issues found'} ({review_rounds} rounds)"
+            )
+
+        if pr_number:
+            parts.append(f"PR #{pr_number}")
+
+        return "; ".join(parts)[:200]
+
     def _post_github_comment(
         self,
         gh: GitHubOps,
@@ -2597,6 +2631,14 @@ class AutonomousOrchestrator:
             f"- Tokens: {wf.get('total_tokens', 0):,}\n"
             f"- API Requests: {wf.get('total_requests', 0)}\n"
         )
+        report_tldr = self._build_progress_report_tldr(
+            dev_round=dev_round,
+            diff_stats=diff_stats,
+            test_summary=test_summary,
+            review_rounds=review_rounds,
+            review_passed=review_passed,
+            pr_number=pr_number,
+        )
 
         self._create_milestone(
             phase="report",
@@ -2605,6 +2647,7 @@ class AutonomousOrchestrator:
             status="completed",
             title=f"Progress report for round {dev_round}",
             result_summary=report[:500],
+            tldr=report_tldr,
         )
 
         # Post report to issue

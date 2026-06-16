@@ -1364,6 +1364,10 @@ class TestOrchestratorReport:
         report_ms_dict = mock_repo.create_milestone.call_args_list[0][0][0]
         assert report_ms_dict["milestone_type"] == "progress_reported"
         assert "Progress report" in report_ms_dict["title"]
+        assert report_ms_dict["tldr"] == (
+            "Round 1 summary; 5 files changed (+100/-20); "
+            "Tests: All 5 tests passed; PR #99"
+        )
 
     def test_report_posts_to_issue(self):
         """Report is posted as a GitHub issue comment."""
