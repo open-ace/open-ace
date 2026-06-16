@@ -818,7 +818,8 @@ const translations: Record<Language, Translations> = {
     suggestionUsagePatternTitle: 'Optimize usage patterns',
     suggestionUsagePatternDesc: 'Adjust usage patterns for better efficiency',
     suggestionQuotaAdjustmentTitle: 'Adjust quota allocation',
-    suggestionQuotaAdjustmentDesc: 'Review and optimize quota limits for better resource utilization',
+    suggestionQuotaAdjustmentDesc:
+      'Review and optimize quota limits for better resource utilization',
     suggestionToolConsolidationTitle: 'Consolidate tool usage',
     suggestionToolConsolidationDesc: 'Reduce redundant tool usage to improve efficiency',
     suggestionTimeOptimizationTitle: 'Optimize timing',
