@@ -180,3 +180,57 @@ class TestRunAgentApiErrorRetry:
 
         assert result.success is True  # not synthesized away
         assert "## Plan" in result.response_text
+
+
+class TestRunAgentAbortOnFailedStatus:
+    """Regression: a workflow marked failed/cancelled mid-retry must abort
+    instead of spawning agents for the full 30-min window (#1036)."""
+
+    def test_aborts_retry_when_workflow_marked_failed(self, monkeypatch):
+        # time.sleep is a no-op so backoff is instant; retry window is large so
+        # the loop WOULD keep going if not for the status check.
+        monkeypatch.setattr("time.sleep", lambda *a, **k: None)
+        monkeypatch.setattr(orch_module, "API_RETRY_TOTAL_TIMEOUT", 1800)
+        wf_failed = _make_workflow(status="failed")
+        o = _make_orchestrator(wf_failed)
+        # First (and only) agent call returns a 529 transient-error body.
+        err = AgentTaskResult(
+            session_id="s1",
+            response_text="API Error: 529 [1305][The service may be temporarily overloaded]",
+            total_tokens=0,
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(return_value=err)
+
+        result = o._run_agent(wf=wf_failed, prompt="x")
+
+        # No re-spawn: run_agent_task called exactly once (the initial call).
+        assert o._runner.run_agent_task.call_count == 1
+        # Usage was still attributed to the milestone.
+        o._write_phase_usage.assert_called_once()
+        # No api_error_retry event emitted (status check bails before that).
+        emitted_types = [c.args[0] for c in o._emit.call_args_list]
+        assert "api_error_retry" not in emitted_types
+        # The 529 body was synthesized to a failure even on early exit (#1036).
+        assert result.success is False
+        assert result.response_text == ""
+        assert result.error and "529" in result.error
+
+    def test_aborts_retry_when_workflow_marked_cancelled(self, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda *a, **k: None)
+        monkeypatch.setattr(orch_module, "API_RETRY_TOTAL_TIMEOUT", 1800)
+        wf_cancelled = _make_workflow(status="cancelled")
+        o = _make_orchestrator(wf_cancelled)
+        err = AgentTaskResult(
+            session_id="s1",
+            response_text="API Error: 503 Service Unavailable",
+            total_tokens=0,
+            success=True,
+        )
+        o._runner.run_agent_task = MagicMock(return_value=err)
+
+        result = o._run_agent(wf=wf_cancelled, prompt="x")
+
+        assert o._runner.run_agent_task.call_count == 1  # no re-spawn
+        assert result.success is False  # synthesized on early exit
+        assert result.response_text == ""

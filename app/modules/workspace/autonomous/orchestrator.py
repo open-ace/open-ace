@@ -806,6 +806,7 @@ class AutonomousOrchestrator:
             _status = (self.workflow or {}).get("status")
             if _status in ("failed", "cancelled"):
                 logger.info("API error retry aborted (workflow status=%s)", _status)
+                self._synthesize_transient_failure(result)
                 self._write_phase_usage(milestone_id, result)
                 with self._session_lock:
                     self._current_session_id = result.session_id
@@ -845,6 +846,7 @@ class AutonomousOrchestrator:
                 slept += _CANCEL_POLL_INTERVAL
                 if self._cancel_requested.is_set():
                     logger.info("API error retry cancelled (cancel requested)")
+                    self._synthesize_transient_failure(result)
                     self._write_phase_usage(milestone_id, result)
                     with self._session_lock:
                         self._current_session_id = result.session_id
@@ -861,24 +863,13 @@ class AutonomousOrchestrator:
             if result.session_id:
                 self._link_session_to_current_milestone(result.session_id)
 
-        # If the runner reported success but the body is a transient API error
-        # that didn't resolve (e.g. a 529 "overloaded" body returned as
-        # assistant_text with no tokens generated), synthesize a failure so
-        # callers mark the milestone failed and don't store the error body as
-        # plan/review content. The tokens==0 gate avoids flagging a legitimate
-        # plan that merely mentions these phrases. #1001.
-        if result.success and self._is_transient_api_error(result.response_text or ""):
-            if (result.total_tokens or 0) == 0:
-                err_snippet = (result.response_text or "")[:200]
-                logger.warning(
-                    "API error response unresolved after retries, marking failed: %s",
-                    err_snippet,
-                )
-                result.success = False
-                result.error = (
-                    result.error or f"Transient API error not resolved after retries: {err_snippet}"
-                )
-                result.response_text = ""  # don't let callers store the error body
+        # A transient-error body (e.g. a 529 "overloaded" returned as
+        # assistant_text with no tokens generated) must not be handed back as a
+        # success — callers would store it as plan/review content. The tokens==0
+        # gate avoids flagging a legitimate plan that merely mentions these
+        # phrases. #1001. Centralized in a helper so the retry loop's early-exit
+        # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
+        self._synthesize_transient_failure(result)
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result)
@@ -886,6 +877,32 @@ class AutonomousOrchestrator:
         with self._session_lock:
             self._current_session_id = result.tracking_session_id or result.session_id
         return result
+
+    def _synthesize_transient_failure(self, result: AgentTaskResult) -> None:
+        """Synthesize a failure if the result body is an unresolved transient
+        API error (e.g. a 529 "overloaded" body returned as assistant_text with
+        no tokens generated).
+
+        Prevents callers from storing the error body as plan/review content.
+        The ``tokens==0`` gate avoids flagging a legitimate plan that merely
+        mentions these phrases. Centralized here so the retry loop's post-loop
+        path AND its early-exit paths (status failed/cancelled, cancel-requested)
+        all apply it consistently. #1001, #1036.
+        """
+        if not (result.success and self._is_transient_api_error(result.response_text or "")):
+            return
+        if (result.total_tokens or 0) != 0:
+            return
+        err_snippet = (result.response_text or "")[:200]
+        logger.warning(
+            "API error response unresolved after retries, marking failed: %s",
+            err_snippet,
+        )
+        result.success = False
+        result.error = (
+            result.error or f"Transient API error not resolved after retries: {err_snippet}"
+        )
+        result.response_text = ""  # don't let callers store the error body
 
     def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
         """Write this call's token/request increment to its milestone."""
