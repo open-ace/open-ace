@@ -111,7 +111,9 @@ const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
   preparing: 'autoActiveHintPreparing',
   planning: 'autoActiveHintPlanning',
   developing: 'autoActiveHintDeveloping',
+  pr_review: 'autoActiveHintPrReview',
   reporting: 'autoActiveHintReporting',
+  waiting: 'autoActiveHintWaiting',
   merging: 'autoActiveHintMerging',
 };
 
@@ -130,6 +132,26 @@ function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
+}
+
+function getActivityStableKey(activity: {
+  session_id: string;
+  type: 'assistant' | 'tool_use' | 'usage';
+  timestamp?: string;
+  text?: string;
+  tool_name?: string;
+  tool_input?: string;
+  total_tokens?: number;
+}): string {
+  return [
+    activity.session_id,
+    activity.type,
+    activity.timestamp ?? '',
+    activity.tool_name ?? '',
+    activity.text ?? '',
+    activity.tool_input ?? '',
+    String(activity.total_tokens ?? ''),
+  ].join(':');
 }
 
 // ── Branch data type for parallel view ──────────────────────────────
@@ -278,6 +300,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     definitionSnapshot?.resolved_issue_url,
     normalizeGithubRepoUrl,
     workflow.github_issue_number,
+    workflow.github_pr_url,
     workflow.project_repo_url,
     workflow.requirements_issue_url,
   ]);
@@ -296,7 +319,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const isForkChild = !!workflow.parent_workflow_id;
   const { data: forksData } = useWorkflowForks(workflow.workflow_id, !isForkChild);
-  const forks = forksData?.forks ?? [];
+  const forks = useMemo(() => forksData?.forks ?? [], [forksData?.forks]);
   const isForkParent = forks.length > 0;
 
   // Load fork timelines (for parent view)
@@ -317,7 +340,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     isForkChild
   );
   const parentWorkflow = parentData?.workflow;
-  const parentMilestones = parentTimelineData?.milestones ?? [];
+  const parentMilestones = useMemo(
+    () => parentTimelineData?.milestones ?? [],
+    [parentTimelineData?.milestones]
+  );
 
   // ── Compute Fork Visualization Data ───────────────────────────────
 
@@ -824,17 +850,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation',
     language
   );
-  const workflowStatusTone =
-    workflowStatusConfig.tone === 'danger'
-      ? 'danger'
-      : workflowStatusConfig.tone === 'success'
-        ? 'success'
-        : workflowStatusConfig.tone === 'warning'
-          ? 'warning'
-          : 'info';
-  const isLiveStatus = ['preparing', 'planning', 'developing', 'reporting', 'merging'].includes(
-    workflow.status
-  );
+  const isLiveStatus = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const activeStatusHintKey = ACTIVE_STATUS_HINT_KEYS[workflow.status];
   const activeStatusHint = activeStatusHintKey ? t(activeStatusHintKey, language) : '';
   const latestMilestoneWithSession = [...milestones]
@@ -942,7 +958,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     latestMilestoneSignature,
     activities.length,
     latestActivitySignature,
-    expandedMilestone,
   ]);
 
   useEffect(() => {
@@ -1375,11 +1390,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                         {t('autoAiActivity', language)}
                       </div>
                       <div className="timeline-milestone-activity-list">
-                        {visibleMilestoneActivities.map((activity, index) => {
+                        {visibleMilestoneActivities.map((activity) => {
                           const line = formatLiveActivityLine(activity);
                           return (
                             <div
-                              key={`${milestone.milestone_id}-live-${activity.session_id ?? 'session'}-${activity.timestamp ?? index}-${index}`}
+                              key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
                               className="timeline-milestone-activity-item"
                             >
                               <span className="timeline-milestone-activity-time">
@@ -1547,7 +1562,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             </div>
             <div className="timeline-header-badges">
               <span
-                className={`timeline-status-pill timeline-status-pill--${workflowStatusTone} ${
+                className={`timeline-status-pill timeline-status-pill--${workflowStatusConfig.tone} ${
                   isLiveStatus ? 'timeline-status-pill--live' : ''
                 }`}
               >
@@ -1729,7 +1744,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         </div>
 
         {activeStatusHint && !showStateBanner && (
-          <div className={`timeline-progress-note timeline-progress-note--${workflowStatusTone}`}>
+          <div
+            className={`timeline-progress-note timeline-progress-note--${workflowStatusConfig.tone}`}
+          >
             <span className="timeline-progress-note__indicator" aria-hidden="true"></span>
             <div className="timeline-progress-note__copy">
               <div className="timeline-progress-note__title">{workflowPhaseLabel}</div>
@@ -1742,7 +1759,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <div className="timeline-meta-item timeline-meta-item--phase">
             <span className="timeline-meta-item__label">{t('autoCurrentPhase', language)}</span>
             <span className="timeline-meta-item__value timeline-meta-item__value--phase">
-              <i className={`bi ${workflowStatusConfig.icon}`}></i>
               {workflowPhaseLabel}
             </span>
           </div>
@@ -2127,9 +2143,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <i
                   className={`bi ${contentFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
                 ></i>
-                {contentFullscreen
-                  ? t('exitFullscreen', language)
-                  : t('enterFullscreen', language)}
+                {contentFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
               </Button>
             </div>
             <div className="timeline-content-modal__document">

@@ -1200,7 +1200,8 @@ const translations: Record<Language, Translations> = {
     autoSessionTrace: 'Session / Trace',
     autoActionsSection: 'Actions',
     autoOpenLatestMilestone: 'Open latest milestone',
-    autoActiveHintQueued: 'This workflow is queued and will start automatically after the earlier run finishes.',
+    autoActiveHintQueued:
+      'This workflow is queued and will start automatically after the earlier run finishes.',
     autoActiveHintPending: 'The workflow has been created and is about to enter preparation.',
     autoActiveHintPreparing:
       'Preparing the repo, issue context, and runtime so the planning step can start cleanly.',
@@ -1208,10 +1209,13 @@ const translations: Record<Language, Translations> = {
       'Analyzing the requirement and drafting a plan. Development will start automatically after review.',
     autoActiveHintDeveloping:
       'Implementing code changes and validating results. You can pause or stop at any time.',
+    autoActiveHintPrReview:
+      'Reviewing the implementation and shaping the final changes before completion.',
     autoActiveHintReporting:
       'Summarizing this round’s outputs and conclusions before switching to the next state.',
-    autoActiveHintMerging:
-      'Merging the final changes and wrapping up this workflow.',
+    autoActiveHintWaiting:
+      'Waiting for your next instruction. Once you respond, the workflow can continue from here.',
+    autoActiveHintMerging: 'Merging the final changes and wrapping up this workflow.',
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
     autoBannerWaiting: 'This workflow is waiting for your next instruction before continuing.',
     autoBannerPlanningTimeout:
@@ -2442,7 +2446,9 @@ const translations: Record<Language, Translations> = {
     autoActiveHintPreparing: '正在准备仓库、Issue 上下文和运行环境，完成后会自动进入方案设计。',
     autoActiveHintPlanning: '正在整理需求并生成方案，审查完成后会自动进入开发。',
     autoActiveHintDeveloping: '正在实现代码并验证结果，如需中断可以随时暂停或停止。',
+    autoActiveHintPrReview: '正在审查实现结果并整理最终变更，完成后会进入收尾阶段。',
     autoActiveHintReporting: '正在整理本轮产出和结论，随后会切换到下一状态。',
+    autoActiveHintWaiting: '正在等待你的下一步指令，你回复后工作流会从这里继续。',
     autoActiveHintMerging: '正在合并最终变更并收尾当前工作流。',
     autoBannerPaused: '当前工作流已暂停，恢复后会继续执行剩余步骤。',
     autoBannerWaiting: '当前工作流正在等待你的下一步指令，然后再继续。',
@@ -3366,17 +3372,17 @@ const translations: Record<Language, Translations> = {
     autoSessionTrace: 'セッション / トレース',
     autoActionsSection: '操作',
     autoOpenLatestMilestone: '最新のマイルストーンを開く',
-    autoActiveHintQueued:
-      'このワークフローはキューに入り、前の実行が終わると自動で開始されます。',
+    autoActiveHintQueued: 'このワークフローはキューに入り、前の実行が終わると自動で開始されます。',
     autoActiveHintPending: 'ワークフローは作成済みで、まもなく準備フェーズに入ります。',
     autoActiveHintPreparing:
       'リポジトリ、Issue コンテキスト、実行環境を整えています。完了後は自動で計画に進みます。',
-    autoActiveHintPlanning:
-      '要件を整理して計画を作成中です。レビュー後に自動で実装へ進みます。',
+    autoActiveHintPlanning: '要件を整理して計画を作成中です。レビュー後に自動で実装へ進みます。',
     autoActiveHintDeveloping:
       'コード変更を実装して結果を確認中です。必要ならいつでも一時停止または停止できます。',
-    autoActiveHintReporting:
-      'このラウンドの成果と結論を整理してから次の状態へ進みます。',
+    autoActiveHintPrReview: '実装内容をレビューし、完了前の最終変更を整えています。',
+    autoActiveHintReporting: 'このラウンドの成果と結論を整理してから次の状態へ進みます。',
+    autoActiveHintWaiting:
+      '次の指示を待っています。返信後、この地点からワークフローを続行できます。',
     autoActiveHintMerging: '最終変更をマージして、このワークフローを締めくくっています。',
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
     autoBannerWaiting: 'このワークフローは続行前に次の指示を待っています。',
@@ -4309,8 +4315,10 @@ const translations: Record<Language, Translations> = {
       '요구사항을 정리하고 계획을 만드는 중이며, 검토가 끝나면 자동으로 개발 단계로 진행합니다.',
     autoActiveHintDeveloping:
       '코드 변경을 구현하고 결과를 검증하는 중입니다. 필요하면 언제든지 일시정지하거나 중지할 수 있습니다.',
-    autoActiveHintReporting:
-      '이번 라운드의 산출물과 결론을 정리한 뒤 다음 상태로 전환합니다.',
+    autoActiveHintPrReview: '구현 결과를 검토하고 완료 전에 최종 변경을 정리하는 중입니다.',
+    autoActiveHintReporting: '이번 라운드의 산출물과 결론을 정리한 뒤 다음 상태로 전환합니다.',
+    autoActiveHintWaiting:
+      '다음 지시를 기다리고 있으며, 답변이 오면 이 지점부터 워크플로를 계속 진행합니다.',
     autoActiveHintMerging: '최종 변경을 병합하고 이 워크플로를 마무리하는 중입니다.',
     autoBannerPaused: '이 워크플로는 일시정지 상태입니다. 재개하면 남은 단계를 계속 진행합니다.',
     autoBannerWaiting: '이 워크플로는 계속 진행하기 전에 다음 지시를 기다리고 있습니다.',
