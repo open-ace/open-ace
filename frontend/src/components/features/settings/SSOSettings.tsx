@@ -11,7 +11,7 @@
  * - Admin users can select tenant to manage
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { useAuth } from '@/hooks';
@@ -55,6 +55,7 @@ export const SSOSettings: React.FC = () => {
   const isAdmin = canManageAllTenants(user);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const selectedTenantIdRef = useRef<number | null>(null);
   const [isLoadingTenants, setIsLoadingTenants] = useState(false);
 
   // Compute effective tenant ID
@@ -96,8 +97,9 @@ export const SSOSettings: React.FC = () => {
       .listTenants({ status: 'active', limit: 100 })
       .then((result) => {
         setTenants(result.tenants);
-        // Default select first tenant if no selection
-        if (result.tenants.length > 0 && !selectedTenantId) {
+        // Use ref to check, avoid triggering useEffect again
+        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
+          selectedTenantIdRef.current = result.tenants[0].id;
           setSelectedTenantId(result.tenants[0].id);
         }
       })
@@ -108,7 +110,12 @@ export const SSOSettings: React.FC = () => {
       .finally(() => {
         setIsLoadingTenants(false);
       });
-  }, [isAdmin, language, toastError, selectedTenantId]);
+  }, [isAdmin, language, toastError]);
+
+  // Sync ref with state
+  useEffect(() => {
+    selectedTenantIdRef.current = selectedTenantId;
+  }, [selectedTenantId]);
 
   // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
@@ -359,7 +366,12 @@ export const SSOSettings: React.FC = () => {
             </div>
           </div>
           <div className="mt-3">
-            <Button variant="primary" type="submit" loading={isSaving}>
+            <Button
+              variant="primary"
+              type="submit"
+              loading={isSaving}
+              disabled={!effectiveTenantId}
+            >
               <i className="bi bi-check-lg me-1" />
               {t('save', language)}
             </Button>
