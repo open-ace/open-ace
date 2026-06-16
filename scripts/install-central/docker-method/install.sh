@@ -2062,19 +2062,29 @@ build_docker_image() {
 # ============================================================================
 
 # Detect existing Open ACE deployment
+# Supports two container names:
+#   - open-ace: current version (install.sh generated deployment)
+#   - open-ace-web: legacy version (source directory docker-compose.yml)
 # Returns: 0 if deployment exists, 1 if not
 detect_existing_deployment() {
-    local container_name="open-ace"
-
-    # Check if open-ace container exists
-    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
+    local found_container=""
+    
+    # Check for existing containers with either name
+    for container_name in "open-ace" "open-ace-web"; do
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
+            found_container="$container_name"
+            break
+        fi
+    done
+    
+    if [ -z "$found_container" ]; then
         return 1
     fi
 
     # Get deployment directory from container mount info
     # The container mounts config directory at /root/.open-ace (read-only)
     # We need to find the mount where Destination is /root/.open-ace
-    local deploy_config_dir=$(docker inspect ${container_name} --format \
+    local deploy_config_dir=$(docker inspect ${found_container} --format \
         '{{ range .Mounts }}{{ if eq .Destination "/root/.open-ace" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null)
 
     if [ -z "$deploy_config_dir" ]; then
@@ -2211,6 +2221,20 @@ show_upgrade_summary() {
 # Execute upgrade deployment
 upgrade_deployment() {
     print_header "执行升级"
+
+    # Stop and remove old containers before upgrade
+    # This handles both current (open-ace) and legacy (open-ace-web) container names
+    # to avoid port conflicts during upgrade
+    print_info "清理旧容器..."
+    for old_container in "open-ace" "open-ace-web"; do
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
+            print_info "停止容器: $old_container"
+            docker stop "$old_container" 2>/dev/null || true
+            print_info "删除容器: $old_container"
+            docker rm "$old_container" 2>/dev/null || true
+        fi
+    done
+    print_success "旧容器清理完成"
 
     # Get source directory from script location
     # Script is at scripts/install-central/docker-method/install.sh
