@@ -2659,7 +2659,7 @@ const translations: Record<Language, Translations> = {
     autoNoContent: '暂无内容',
     autoRoundBadge: '第 {n} 轮',
     autoTimelineOutputs: '输出',
-    autoCurrentPhase: '当前阶段',
+    autoCurrentPhase: '阶段',
     autoSummarySection: '摘要',
     autoOutputSection: '产出',
     autoReviewSection: '审查',

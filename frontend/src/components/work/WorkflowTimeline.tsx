@@ -126,50 +126,11 @@ const MILESTONE_ICON_COLORS: Record<string, string> = {
 };
 
 const TIMELINE_AUTO_SCROLL_THRESHOLD = 24;
-const MAX_DIFF_VIEW_CHARS = 50000;
 
 function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
-}
-
-function truncateDiffText(
-  text: string,
-  max = MAX_DIFF_VIEW_CHARS
-): {
-  content: string;
-  isTruncated: boolean;
-} {
-  if (text.length <= max) {
-    return { content: text, isTruncated: false };
-  }
-  return { content: text.slice(0, max), isTruncated: true };
-}
-
-function getDiffLineClass(line: string): string {
-  if (line.startsWith('+') && !line.startsWith('+++')) {
-    return 'workflow-timeline-diff-line-add';
-  }
-  if (line.startsWith('-') && !line.startsWith('---')) {
-    return 'workflow-timeline-diff-line-del';
-  }
-  if (line.startsWith('@@')) {
-    return 'workflow-timeline-diff-line-hunk';
-  }
-  if (
-    line.startsWith('diff --git') ||
-    line.startsWith('index ') ||
-    line.startsWith('--- ') ||
-    line.startsWith('+++ ') ||
-    line.startsWith('new file mode ') ||
-    line.startsWith('deleted file mode ') ||
-    line.startsWith('rename from ') ||
-    line.startsWith('rename to ')
-  ) {
-    return 'workflow-timeline-diff-line-meta';
-  }
-  return '';
 }
 
 function getActivityStableKey(activity: {
@@ -218,7 +179,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
   const [selectedDiffFileId, setSelectedDiffFileId] = useState<string | null>(null);
-  const [selectedPrDiffFileId, setSelectedPrDiffFileId] = useState<string | null>(null);
   const [diffSidebarWidth, setDiffSidebarWidth] = useState(320);
   const [diffFullscreen, setDiffFullscreen] = useState(false);
   const [showDefinitionSnapshot, setShowDefinitionSnapshot] = useState(false);
@@ -954,19 +914,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [isTimelineAtBottom]
   );
 
-  const truncatedDiff = useMemo(() => truncateDiffText(diffData?.diff ?? ''), [diffData?.diff]);
-  const truncatedPrDiff = useMemo(
-    () => truncateDiffText(prDiffData?.diff ?? ''),
-    [prDiffData?.diff]
-  );
-  const parsedDiffFiles = useMemo(
-    () => parseDiffFiles(truncatedDiff.content),
-    [truncatedDiff.content]
-  );
-  const parsedPrDiffFiles = useMemo(
-    () => parseDiffFiles(truncatedPrDiff.content),
-    [truncatedPrDiff.content]
-  );
+  const parsedDiffFiles = useMemo(() => parseDiffFiles(diffData?.diff ?? ''), [diffData?.diff]);
   const latestMilestoneSignature =
     milestones.length > 0
       ? [
@@ -1022,58 +970,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     );
   }, [viewingDiff, parsedDiffFiles]);
 
-  useEffect(() => {
-    if (!viewingPrDiff) {
-      setSelectedPrDiffFileId(null);
-      setDiffFullscreen(false);
-      return;
-    }
-    if (parsedPrDiffFiles.length === 0) {
-      setSelectedPrDiffFileId(null);
-      return;
-    }
-    setSelectedPrDiffFileId((prev) =>
-      prev && parsedPrDiffFiles.some((file) => file.id === prev) ? prev : parsedPrDiffFiles[0].id
-    );
-  }, [viewingPrDiff, parsedPrDiffFiles]);
-
   const selectedDiffFile = useMemo(
     () =>
       parsedDiffFiles.find((file) => file.id === selectedDiffFileId) ?? parsedDiffFiles[0] ?? null,
     [parsedDiffFiles, selectedDiffFileId]
-  );
-  const selectedPrDiffFile = useMemo(
-    () =>
-      parsedPrDiffFiles.find((file) => file.id === selectedPrDiffFileId) ??
-      parsedPrDiffFiles[0] ??
-      null,
-    [parsedPrDiffFiles, selectedPrDiffFileId]
-  );
-  const renderDiffLines = useCallback(
-    (content: string, keyPrefix: string, isTruncated = false) => {
-      const lines = content.split('\n');
-      return (
-        <>
-          {lines.map((line, index) => (
-            <div
-              key={`${keyPrefix}-line-${index}`}
-              className={`workflow-timeline-diff-line ${getDiffLineClass(line)}`}
-            >
-              {line || ' '}
-            </div>
-          ))}
-          {isTruncated && (
-            <div
-              key={`${keyPrefix}-truncated`}
-              className="workflow-timeline-diff-line workflow-timeline-diff-line-meta"
-            >
-              {t('autoDiffTruncated', language)}
-            </div>
-          )}
-        </>
-      );
-    },
-    [language]
   );
 
   const handleDiffResizeStart = useCallback(
@@ -1104,45 +1004,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [diffSidebarWidth]
   );
 
-  const sessionUsageMeta = useMemo(() => {
-    const allKnownMilestones = [
-      ...milestones,
-      ...parentMilestones,
-      ...forkTimelineQueries.flatMap((query) => query.data?.milestones ?? []),
-    ];
-    const counts = new Map<string, number>();
-    for (const milestone of allKnownMilestones) {
-      const sessionId =
-        milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id ?? '';
-      if (!sessionId) continue;
-      counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
-    }
-
-    const palette = [
-      { background: '#eef5ff', border: '#c9dcff', color: '#35588f' },
-      { background: '#eef8f2', border: '#cae7d4', color: '#346248' },
-      { background: '#fff7eb', border: '#ffe1b4', color: '#8b5d20' },
-      { background: '#f4f0ff', border: '#ddd0ff', color: '#65469a' },
-      { background: '#eef7f8', border: '#c7e3e4', color: '#33656a' },
-      { background: '#f8f2f6', border: '#e8cfdb', color: '#8c5670' },
-    ];
-
-    const repeatedSessionIds = [...counts.entries()]
-      .filter(([, count]) => count > 1)
-      .map(([sessionId]) => sessionId)
-      .sort();
-
-    const colorBySessionId = new Map<string, (typeof palette)[number]>();
-    repeatedSessionIds.forEach((sessionId, index) => {
-      colorBySessionId.set(sessionId, palette[index % palette.length]);
-    });
-
-    return {
-      counts,
-      colorBySessionId,
-    };
-  }, [milestones, parentMilestones, forkTimelineQueries]);
-
   // Extract typed session from query data
   const session = sessionData?.session as MilestoneSession | undefined;
 
@@ -1167,10 +1028,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const llmTotalTokens = milestone.llm_total_tokens ?? 0;
     const llmRequestCount = milestone.llm_request_count ?? 0;
     const showUsageMetrics = !!llmSessionId || llmTotalTokens > 0 || llmRequestCount > 0;
-    const reusedSessionCount = llmSessionId ? (sessionUsageMeta.counts.get(llmSessionId) ?? 0) : 0;
-    const reusedSessionColor = llmSessionId
-      ? sessionUsageMeta.colorBySessionId.get(llmSessionId)
-      : undefined;
     const milestoneSessionIds = new Set(
       [llmSessionId, milestone.session_id, milestone.review_session_id].filter(Boolean)
     );
@@ -1204,18 +1061,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       (milestone.status === 'completed' || milestone.status === 'in_progress');
     const canCancel =
       !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
-    const canExpand =
-      !!llmSessionId ||
-      canViewChanges ||
-      canViewPlanContent ||
-      canViewReviewContent ||
-      canFork ||
-      canCancel ||
-      hasLiveActivity ||
-      !!milestone.error_message ||
-      !!milestone.description?.trim() ||
-      !!milestone.result_summary?.trim() ||
-      !!milestone.tldr?.trim();
+    const canExpand = hasLiveActivity || !!milestone.error_message;
     const rawSummary = (
       milestone.tldr ||
       milestone.result_summary ||
@@ -1242,9 +1088,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           ? t('autoStatusFailed', language)
           : milestone.status === 'in_progress'
             ? t('autoStatusDeveloping', language)
-            : milestone.status === 'cancelled'
-              ? t('autoStatusCancelled', language)
-              : t('autoStatusPending', language);
+        : milestone.status === 'cancelled'
+          ? t('autoStatusCancelled', language)
+          : t('autoStatusPending', language);
     const milestoneDuration =
       milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
@@ -1252,15 +1098,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const showDetailSections = isExpanded && canExpand;
     const showLiveActivitySection = milestone.status === 'in_progress' && hasLiveActivity;
     const showInlinePreview = !compact && milestoneSummary;
-    const actionSectionLabelKey =
-      canFork || canCancel
-        ? 'autoActionsSection'
-        : canViewPlanContent && !canViewReviewContent
-          ? 'autoOutputSection'
-          : canViewReviewContent && !canViewPlanContent
-            ? 'autoReviewSection'
-            : 'autoActionsSection';
-
+    const showInlineSessionButton = !compact && !!llmSessionId;
+    const showInlineActionGroup =
+      showInlineSessionButton ||
+      canViewPlanContent ||
+      canViewReviewContent ||
+      canViewChanges ||
+      canFork ||
+      canCancel;
     return (
       <article
         key={milestone.milestone_id}
@@ -1268,11 +1113,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           compact ? 'timeline-milestone-card--compact' : ''
         } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusTone}`}
       >
-        <button
-          type="button"
-          className="timeline-milestone-summary"
-          onClick={() => canExpand && toggleExpandMilestone(milestone.milestone_id)}
-        >
+        <div className="timeline-milestone-summary">
           <div className="timeline-milestone-summary-main">
             <div className={`timeline-milestone-status timeline-milestone-status--${statusTone}`}>
               <i className={`bi ${statusIcon}`}></i>
@@ -1303,157 +1144,48 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {milestoneSummary}
                 </p>
               )}
-              <div className="timeline-milestone-badges">
-                <span className={`timeline-chip timeline-chip--${statusTone}`}>{statusLabel}</span>
-                {milestone.round_number > 0 && (
-                  <span className="timeline-chip timeline-chip--subtle">
-                    R{milestone.round_number}
-                  </span>
-                )}
-                {showUsageMetrics && (
-                  <>
-                    <span className="timeline-chip timeline-chip--neutral">
-                      {llmTotalTokens > 0 ? formatTokens(llmTotalTokens) : '--'}
+              <div className="timeline-milestone-meta-row">
+                <div className="timeline-milestone-badges">
+                  <span className={`timeline-chip timeline-chip--${statusTone}`}>{statusLabel}</span>
+                  {milestone.round_number > 0 && (
+                    <span className="timeline-chip timeline-chip--subtle">
+                      R{milestone.round_number}
                     </span>
-                    <span className="timeline-chip timeline-chip--neutral">
-                      {llmRequestCount > 0 ? llmRequestCount : '--'} {t('requests', language)}
-                    </span>
-                  </>
-                )}
-                {diffStats && !compact && (
-                  <span className="timeline-chip timeline-chip--neutral">
-                    +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-          {canExpand && (
-            <span className="timeline-milestone-chevron">
-              <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
-            </span>
-          )}
-        </button>
-
-        {showDetailSections && (
-          <div className="timeline-milestone-details">
-            {canViewChanges && (
-              <section className="timeline-milestone-section">
-                <div className="timeline-milestone-section-label">
-                  {t('autoCodeChanges', language)}
-                </div>
-                <div className="timeline-milestone-section-body">
-                  <div className="timeline-milestone-detail-grid">
-                    <div className="timeline-milestone-detail-chip">
-                      <span>{t('autoCommits', language)}</span>
-                      <code>{milestone.commit_shas}</code>
-                    </div>
-                    {diffStats && (
-                      <div className="timeline-milestone-detail-chip">
-                        <span>{t('autoViewChanges', language)}</span>
-                        <strong>
-                          +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files} files
-                        </strong>
-                      </div>
-                    )}
-                  </div>
-                  <div className="timeline-milestone-inline-actions">
-                    <Button
-                      size="sm"
-                      variant="outline-secondary"
-                      className="timeline-inline-btn timeline-inline-btn--primary"
-                      onClick={() => setViewingDiff(milestone.milestone_id)}
-                    >
-                      <i className="bi bi-file-diff me-1"></i>
-                      {t('autoViewChanges', language)}
-                    </Button>
-                  </div>
-                </div>
-              </section>
-            )}
-
-            {(llmSessionId || showLiveActivitySection) && (
-              <section className="timeline-milestone-section">
-                <div className="timeline-milestone-section-label">
-                  {t('autoSessionTrace', language)}
-                </div>
-                <div className="timeline-milestone-section-body">
-                  {llmSessionId && (
-                    <button
-                      type="button"
-                      className={`timeline-session-link ${
-                        reusedSessionCount > 1 ? 'timeline-session-link--reused' : ''
-                      }`}
-                      style={
-                        reusedSessionColor
-                          ? {
-                              backgroundColor: reusedSessionColor.background,
-                              borderColor: reusedSessionColor.border,
-                              color: reusedSessionColor.color,
-                            }
-                          : undefined
-                      }
-                      onClick={() =>
-                        setViewingSession({
-                          milestoneId: milestone.milestone_id,
-                          sessionId: llmSessionId ?? '',
-                        })
-                      }
-                    >
-                      <i className="bi bi-chat-square-text"></i>
-                      <span>
-                        {t('autoSessionIdLabel', language)} {llmSessionId.slice(0, 8)}
+                  )}
+                  {showUsageMetrics && (
+                    <>
+                      <span className="timeline-chip timeline-chip--neutral">
+                        {llmTotalTokens > 0 ? formatTokens(llmTotalTokens) : '--'}
                       </span>
-                    </button>
+                      <span className="timeline-chip timeline-chip--neutral">
+                        {llmRequestCount > 0 ? llmRequestCount : '--'} {t('requests', language)}
+                      </span>
+                    </>
                   )}
-
-                  {showLiveActivitySection && (
-                    <div className="timeline-milestone-activity">
-                      <div className="timeline-milestone-activity-title">
-                        <span className="timeline-live-dot"></span>
-                        {t('autoAiActivity', language)}
-                      </div>
-                      <div className="timeline-milestone-activity-list">
-                        {visibleMilestoneActivities.map((activity) => {
-                          const line = formatLiveActivityLine(activity);
-                          return (
-                            <div
-                              key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
-                              className="timeline-milestone-activity-item"
-                            >
-                              <span className="timeline-milestone-activity-time">
-                                {line.timestamp}
-                              </span>
-                              <i className={`bi ${line.icon}`}></i>
-                              <span className="timeline-milestone-activity-text">
-                                {line.content}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                  {diffStats && !compact && (
+                    <span className="timeline-chip timeline-chip--neutral">
+                      +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files}
+                    </span>
                   )}
                 </div>
-              </section>
-            )}
-
-            {milestone.error_message && (
-              <section className="timeline-milestone-section timeline-milestone-section--error">
-                <div className="timeline-milestone-section-label">{t('error', language)}</div>
-                <div className="timeline-milestone-section-body">
-                  <p className="timeline-milestone-error">{milestone.error_message}</p>
-                </div>
-              </section>
-            )}
-
-            {(canFork || canCancel || canViewPlanContent || canViewReviewContent) && (
-              <section className="timeline-milestone-section">
-                <div className="timeline-milestone-section-label">
-                  {t(actionSectionLabelKey, language)}
-                </div>
-                <div className="timeline-milestone-section-body">
-                  <div className="timeline-milestone-inline-actions">
+                {showInlineActionGroup && (
+                  <div className="timeline-milestone-actions">
+                    {showInlineSessionButton && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn timeline-inline-btn--neutral"
+                        onClick={() =>
+                          setViewingSession({
+                            milestoneId: milestone.milestone_id,
+                            sessionId: llmSessionId ?? '',
+                          })
+                        }
+                      >
+                        <i className="bi bi-chat-square-text me-1"></i>
+                        {t('autoSessionIdLabel', language)} {llmSessionId?.slice(0, 8)}
+                      </Button>
+                    )}
                     {canViewPlanContent && (
                       <Button
                         size="sm"
@@ -1486,6 +1218,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                         {t('autoViewReview', language)}
                       </Button>
                     )}
+                    {canViewChanges && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn timeline-inline-btn--primary"
+                        onClick={() => setViewingDiff(milestone.milestone_id)}
+                      >
+                        <i className="bi bi-file-diff me-1"></i>
+                        {t('autoViewChanges', language)}
+                      </Button>
+                    )}
                     {canFork && (
                       <Button
                         size="sm"
@@ -1509,6 +1252,64 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       </Button>
                     )}
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+          {canExpand && (
+            <button
+              type="button"
+              className="timeline-milestone-chevron"
+              onClick={() => toggleExpandMilestone(milestone.milestone_id)}
+              aria-label={isExpanded ? t('collapse', language) : t('expand', language)}
+            >
+              <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+            </button>
+          )}
+        </div>
+
+        {showDetailSections && (
+          <div className="timeline-milestone-details">
+            {showLiveActivitySection && (
+              <section className="timeline-milestone-section">
+                <div className="timeline-milestone-section-label">
+                  {t('autoAiActivity', language)}
+                </div>
+                <div className="timeline-milestone-section-body">
+                  <div className="timeline-milestone-activity">
+                    <div className="timeline-milestone-activity-title">
+                      <span className="timeline-live-dot"></span>
+                      {t('autoAiActivity', language)}
+                    </div>
+                    <div className="timeline-milestone-activity-list">
+                      {visibleMilestoneActivities.map((activity) => {
+                        const line = formatLiveActivityLine(activity);
+                        return (
+                          <div
+                            key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
+                            className="timeline-milestone-activity-item"
+                          >
+                            <span className="timeline-milestone-activity-time">
+                              {line.timestamp}
+                            </span>
+                            <i className={`bi ${line.icon}`}></i>
+                            <span className="timeline-milestone-activity-text">
+                              {line.content}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {milestone.error_message && (
+              <section className="timeline-milestone-section timeline-milestone-section--error">
+                <div className="timeline-milestone-section-label">{t('error', language)}</div>
+                <div className="timeline-milestone-section-body">
+                  <p className="timeline-milestone-error">{milestone.error_message}</p>
                 </div>
               </section>
             )}
@@ -1824,7 +1625,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <span className="timeline-meta-item__value">{workflow.model}</span>
             </div>
           )}
-          <div className="timeline-meta-item">
+          <div className="timeline-meta-item timeline-meta-item--start">
             <span className="timeline-meta-item__label">{t('autoStartTime', language)}</span>
             <span className="timeline-meta-item__value">
               {formatWorkflowDateTime(workflowStartTime)}
@@ -1869,7 +1670,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             >
               <i className="bi bi-clipboard-check me-1"></i>
               {t('autoFinalPlan', language)}
-              {latestPlanFinalized && (latestPlanFinalized.dev_round || 1) > 1 && (
+              {latestPlanFinalized && (
                 <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
                   {t('autoRoundBadge', language).replace(
                     '{n}',
@@ -1893,7 +1694,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             >
               <i className="bi bi-check2-circle me-1"></i>
               {t('autoPrReviewSummary', language)}
-              {latestPrReviewSummary && (latestPrReviewSummary.dev_round || 1) > 1 && (
+              {latestPrReviewSummary && (
                 <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
                   {t('autoRoundBadge', language).replace(
                     '{n}',
@@ -2228,109 +2029,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               : t('autoFinalCodeChanges', language)
           }
           size="xl"
-          className={`workflow-timeline-diff-modal ${
-            diffFullscreen ? 'workflow-timeline-diff-modal-fullscreen' : ''
-          }`}
-          scrollable={false}
         >
           {prDiffLoading ? (
             <div className="py-4">
               <Loading />
             </div>
-          ) : parsedPrDiffFiles.length > 0 && selectedPrDiffFile ? (
-            <div className="workflow-timeline-diff-shell">
-              <div
-                className="workflow-timeline-diff-sidebar"
-                style={{ width: `${diffSidebarWidth}px`, minWidth: `${diffSidebarWidth}px` }}
-              >
-                {parsedPrDiffFiles.map((file) => (
-                  <button
-                    key={file.id}
-                    type="button"
-                    className={`workflow-timeline-diff-file ${
-                      selectedPrDiffFile.id === file.id ? 'workflow-timeline-diff-file-active' : ''
-                    }`}
-                    onClick={() => setSelectedPrDiffFileId(file.id)}
-                  >
-                    <div className="d-flex align-items-center gap-2 min-width-0">
-                      <Badge
-                        variant={getDiffStatusClass(file.status)}
-                        className="workflow-timeline-diff-file-badge"
-                      >
-                        {file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : 'M'}
-                      </Badge>
-                      <span className="workflow-timeline-diff-file-path">{file.path}</span>
-                    </div>
-                    <span className="workflow-timeline-diff-file-stats">
-                      {file.additions > 0 && (
-                        <span className="text-success">+{file.additions}</span>
-                      )}
-                      {file.deletions > 0 && <span className="text-danger">-{file.deletions}</span>}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div
-                className="workflow-timeline-diff-resizer"
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Resize diff panels"
-                onPointerDown={handleDiffResizeStart}
-              />
-              <div className="workflow-timeline-diff-viewer">
-                <div className="workflow-timeline-diff-viewer-header">
-                  <div className="min-width-0">
-                    <div className="workflow-timeline-diff-viewer-path">
-                      {selectedPrDiffFile.path}
-                    </div>
-                    {selectedPrDiffFile.commitLabel && (
-                      <div className="workflow-timeline-diff-viewer-commit">
-                        {t('autoCommits', language)} {selectedPrDiffFile.commitLabel}
-                      </div>
-                    )}
-                  </div>
-                  <div className="workflow-timeline-diff-viewer-summary">
-                    {selectedPrDiffFile.additions > 0 && (
-                      <span className="text-success">+{selectedPrDiffFile.additions}</span>
-                    )}
-                    {selectedPrDiffFile.deletions > 0 && (
-                      <span className="text-danger">-{selectedPrDiffFile.deletions}</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary workflow-timeline-diff-fullscreen-btn"
-                    onClick={() => setDiffFullscreen((prev) => !prev)}
-                  >
-                    <i
-                      className={`bi ${diffFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
-                    />
-                    {diffFullscreen
-                      ? t('exitFullscreen', language)
-                      : t('enterFullscreen', language)}
-                  </button>
-                </div>
-                <div className="workflow-timeline-diff-code">
-                  {renderDiffLines(
-                    selectedPrDiffFile.patch,
-                    selectedPrDiffFile.id,
-                    truncatedPrDiff.isTruncated
-                  )}
-                </div>
-              </div>
-            </div>
           ) : prDiffData?.diff ? (
-            <div className="workflow-timeline-diff-shell">
-              <div className="workflow-timeline-diff-viewer">
-                <div className="workflow-timeline-diff-code">
-                  {renderDiffLines(
-                    truncatedPrDiff.content,
-                    'pr-diff-fallback',
-                    truncatedPrDiff.isTruncated
-                  )}
-                </div>
-              </div>
-            </div>
+            <pre
+              className="bg-dark text-light p-3 rounded mb-0"
+              style={{
+                fontSize: '0.75rem',
+                maxHeight: '70vh',
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {prDiffData.diff.length > 50000
+                ? prDiffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
+                : prDiffData.diff}
+            </pre>
           ) : (
             <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>
           )}
@@ -2562,11 +2279,34 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     </button>
                   </div>
                   <div className="workflow-timeline-diff-code">
-                    {renderDiffLines(
-                      selectedDiffFile.patch,
-                      selectedDiffFile.id,
-                      truncatedDiff.isTruncated
-                    )}
+                    {selectedDiffFile.patch.split('\n').map((line, index) => {
+                      const lineClass =
+                        line.startsWith('+') && !line.startsWith('+++')
+                          ? 'workflow-timeline-diff-line-add'
+                          : line.startsWith('-') && !line.startsWith('---')
+                            ? 'workflow-timeline-diff-line-del'
+                            : line.startsWith('@@')
+                              ? 'workflow-timeline-diff-line-hunk'
+                              : line.startsWith('diff --git') ||
+                                  line.startsWith('index ') ||
+                                  line.startsWith('--- ') ||
+                                  line.startsWith('+++ ') ||
+                                  line.startsWith('new file mode ') ||
+                                  line.startsWith('deleted file mode ') ||
+                                  line.startsWith('rename from ') ||
+                                  line.startsWith('rename to ')
+                                ? 'workflow-timeline-diff-line-meta'
+                                : '';
+
+                      return (
+                        <div
+                          key={`${selectedDiffFile.id}-line-${index}`}
+                          className={`workflow-timeline-diff-line ${lineClass}`}
+                        >
+                          {line || ' '}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -2580,9 +2320,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {truncatedDiff.isTruncated
-                  ? truncatedDiff.content + '\n\n' + t('autoDiffTruncated', language)
-                  : truncatedDiff.content}
+                {diffData.diff.length > 50000
+                  ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
+                  : diffData.diff}
               </pre>
             ) : (
               <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>
