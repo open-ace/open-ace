@@ -113,7 +113,6 @@ const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
   developing: 'autoActiveHintDeveloping',
   pr_review: 'autoActiveHintPrReview',
   reporting: 'autoActiveHintReporting',
-  waiting: 'autoActiveHintWaiting',
   merging: 'autoActiveHintMerging',
 };
 
@@ -140,17 +139,13 @@ function getActivityStableKey(activity: {
   timestamp?: string;
   text?: string;
   tool_name?: string;
-  tool_input?: string;
-  total_tokens?: number;
 }): string {
   return [
     activity.session_id,
     activity.type,
     activity.timestamp ?? '',
     activity.tool_name ?? '',
-    activity.text ?? '',
-    activity.tool_input ?? '',
-    String(activity.total_tokens ?? ''),
+    (activity.text ?? '').slice(0, 40),
   ].join(':');
 }
 
@@ -2125,7 +2120,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         isOpen={!!viewingContent}
         onClose={closeViewingContent}
         title={viewingContent?.title ?? ''}
-        size="xl"
+        size="md"
         className={`timeline-content-modal ${
           contentFullscreen ? 'timeline-content-modal--fullscreen' : ''
         }`}
