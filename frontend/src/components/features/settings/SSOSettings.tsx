@@ -108,7 +108,7 @@ export const SSOSettings: React.FC = () => {
       .finally(() => {
         setIsLoadingTenants(false);
       });
-  }, [isAdmin, language, toastError]);
+  }, [isAdmin, language, toastError, selectedTenantId]);
 
   // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
@@ -316,13 +316,11 @@ export const SSOSettings: React.FC = () => {
                 value: String(t.id),
                 label: t.name,
               }))}
-              value={String(selectedTenantId || '')}
+              value={String(selectedTenantId ?? '')}
               onChange={(value) => setSelectedTenantId(Number(value))}
               className="flex-grow-1"
             />
-            <small className="text-muted ms-2">
-              {t('tenantSelectionHint', language)}
-            </small>
+            <small className="text-muted ms-2">{t('tenantSelectionHint', language)}</small>
           </div>
         </Card>
       )}
