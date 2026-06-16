@@ -499,10 +499,8 @@ class AutonomousOrchestrator:
 
         if diff_stats:
             parts.append(
-                (
-                    f"{diff_stats.get('files', 0)} files changed "
-                    f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
-                )
+                f"{diff_stats.get('files', 0)} files changed "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
             )
 
         cleaned_test_summary = re.sub(r"\s+", " ", test_summary or "").strip()
