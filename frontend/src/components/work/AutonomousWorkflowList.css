@@ -94,23 +94,25 @@
 
 .auto-workflow-batch {
   border-bottom: 1px solid rgba(96, 165, 250, 0.22) !important;
-  background: #eef5ff;
+  background: #ffffff;
 }
 
 .auto-workflow-batch:hover {
   z-index: 2;
   transform: translateY(-1px);
-  background: #e8f1ff;
-  box-shadow: 0 12px 26px rgba(59, 130, 246, 0.12);
+  background: #f3f7fd;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 
 .auto-workflow-batch-selected {
+  background: #d2e6ff;
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 14px 30px rgba(59, 130, 246, 0.14);
 }
 
 .auto-workflow-batch-selected:hover {
+  background: #c6ddff;
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 14px 30px rgba(59, 130, 246, 0.14);
@@ -198,7 +200,7 @@
 
 .auto-workflow-batch-children {
   padding: 0.35rem 0;
-  background: #f8fbff;
+  background: #ffffff;
 }
 
 @media (max-width: 576px) {
