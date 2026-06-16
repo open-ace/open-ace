@@ -105,7 +105,16 @@ const PHASE_LABEL_KEYS: Record<string, string> = {
   merge: 'autoPhaseMerge',
 };
 
-function truncateText(text: string, max = 220): string {
+const MILESTONE_ICON_COLORS: Record<string, string> = {
+  dark: 'var(--text-primary)',
+  info: 'var(--color-info)',
+  success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
+  primary: 'var(--color-primary)',
+  secondary: 'var(--text-tertiary)',
+};
+
+function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
@@ -997,7 +1006,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       milestone.review_content ||
       ''
     ).trim();
-    const milestoneSummary = rawSummary ? truncateText(rawSummary, compact ? 120 : 220) : '';
+    const milestoneSummary = rawSummary ? truncateInlineText(rawSummary, compact ? 120 : 220) : '';
     const statusTone =
       milestone.status === 'completed'
         ? 'success'
@@ -1022,10 +1031,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
         : '';
-    const previewPlan = canViewPlanContent ? truncateText(milestone.plan_content.trim(), 260) : '';
-    const previewReview = canViewReviewContent
-      ? truncateText(milestone.review_content.trim(), 260)
-      : '';
+    const previewPlan = canViewPlanContent ? milestone.plan_content.trim() : '';
+    const previewReview = canViewReviewContent ? milestone.review_content.trim() : '';
     const showDetailSections = isExpanded && canExpand;
     const showLiveActivitySection = milestone.status === 'in_progress' && hasLiveActivity;
 
@@ -1048,7 +1055,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             <div className="timeline-milestone-copy">
               <div className="timeline-milestone-title-row">
                 <div className="timeline-milestone-title-group">
-                  <i className={`bi ${display.icon} text-${display.color}`}></i>
+                  <i
+                    className={`bi ${display.icon}`}
+                    style={{
+                      color: MILESTONE_ICON_COLORS[display.color] ?? 'var(--text-secondary)',
+                    }}
+                  ></i>
                   <span className="timeline-milestone-title">{formatMilestoneTitle(milestone)}</span>
                 </div>
                 <div className="timeline-milestone-time">
@@ -1126,7 +1138,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {t('autoOutputSection', language)}
                 </div>
                 <div className="timeline-milestone-section-body">
-                  <p className="timeline-milestone-detail-text">{previewPlan}</p>
+                  <div className="timeline-milestone-detail-text">{previewPlan}</div>
                   <div className="timeline-milestone-inline-actions">
                     <Button
                       size="sm"
@@ -1153,7 +1165,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {t('autoReviewSection', language)}
                 </div>
                 <div className="timeline-milestone-section-body">
-                  <p className="timeline-milestone-detail-text">{previewReview}</p>
+                  <div className="timeline-milestone-detail-text">{previewReview}</div>
                   <div className="timeline-milestone-inline-actions">
                     <Button
                       size="sm"
@@ -1337,7 +1349,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       .sort((a, b) => a - b);
 
     return rounds.map((round) => (
-      <section key={round} className="timeline-round timeline-round--shared">
+      <section key={round} className="timeline-round">
         <div className="timeline-round-title">
           <div className="timeline-round-heading">
             <i className="bi bi-arrow-repeat"></i>
@@ -1573,7 +1585,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </Button>
               </>
             )}
-            {isWaiting && (
+            {!showStateBanner && isWaiting && (
               <Button
                 size="sm"
                 variant="success"
@@ -1709,6 +1721,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
             </div>
             <div className="timeline-state-banner__actions">
+              {isWaiting && (
+                <Button
+                  size="sm"
+                  variant="success"
+                  onClick={handleMarkDone}
+                  disabled={markDoneMutation.isPending}
+                >
+                  <i className="bi bi-check-circle me-1"></i>
+                  {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
               {latestFailedMilestone && (
                 <button
                   type="button"
@@ -1750,7 +1773,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         )}
       </div>
 
-      <div className="timeline-body flex-grow-1 overflow-auto p-3">
+      <div className="timeline-body flex-grow-1 overflow-auto">
         {forkViz ? (
           /* ── Fork Parallel View ────────────────────────────────── */
           <div className="timeline-layout">
