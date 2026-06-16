@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
@@ -46,6 +46,17 @@ const PLAN_OPTIONS = [
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const [tenants, setTenants] = useState<Tenant[]>([]);
+
+  // 翻译后端错误信息
+  const translateTenantError = (error: string, lang: Language): string => {
+    const errorMap: Record<string, string> = {
+      'Failed to create tenant': t('failedToCreateTenant', lang),
+      'Tenant slug already exists': t('tenantSlugExists', lang),
+      'Failed to save tenant': t('failedToCreateTenant', lang),
+    };
+    return errorMap[error] || error;
+  };
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,7 +209,9 @@ export const TenantManagement: React.FC = () => {
       } else {
         errorMessage = 'Failed to save tenant';
       }
-      setFormError(errorMessage);
+      // 翻译后端返回的错误信息
+      const translatedError = translateTenantError(errorMessage, language);
+      setFormError(translatedError);
     }
   };
 
