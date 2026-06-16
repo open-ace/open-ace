@@ -123,6 +123,49 @@ export const ROIAnalysis: React.FC = () => {
     setStartDate(start.toISOString().split('T')[0]);
   }, []);
 
+  // Translate suggestion based on suggestion_type
+  const translateSuggestion = useCallback(
+    (s: OptimizationSuggestion) => {
+      const typeKeyMap: Record<string, { title: string; desc: string }> = {
+        model_switch: {
+          title: 'suggestionModelSwitchTitle',
+          desc: 'suggestionModelSwitchDesc',
+        },
+        usage_pattern: {
+          title: 'suggestionUsagePatternTitle',
+          desc: 'suggestionUsagePatternDesc',
+        },
+        quota_adjustment: {
+          title: 'suggestionQuotaAdjustmentTitle',
+          desc: 'suggestionQuotaAdjustmentDesc',
+        },
+        tool_consolidation: {
+          title: 'suggestionToolConsolidationTitle',
+          desc: 'suggestionToolConsolidationDesc',
+        },
+        time_optimization: {
+          title: 'suggestionTimeOptimizationTitle',
+          desc: 'suggestionTimeOptimizationDesc',
+        },
+        token_optimization: {
+          title: 'suggestionTokenOptimizationTitle',
+          desc: 'suggestionTokenOptimizationDesc',
+        },
+      };
+
+      const keys = typeKeyMap[s.suggestion_type];
+      if (keys) {
+        return {
+          ...s,
+          title: t(keys.title, language),
+          description: t(keys.desc, language),
+        };
+      }
+      return s; // Fallback to original if no mapping found
+    },
+    [language]
+  );
+
   // Fetch data with caching
   const fetchData = useCallback(
     async (forceRefresh = false) => {
@@ -507,25 +550,28 @@ export const ROIAnalysis: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {suggestions.map((s, index) => (
-                  <tr key={index}>
-                    <td>
-                      <strong>{s.title}</strong>
-                    </td>
-                    <td>{s.description}</td>
-                    <td>
-                      <span
-                        className={cn(
-                          'badge',
-                          `bg-${getImpactVariant(s.impact ?? s.priority ?? 'low')}`
-                        )}
-                      >
-                        {s.impact ?? s.priority ?? 'low'}
-                      </span>
-                    </td>
-                    <td>${(s.potential_savings ?? 0).toFixed(2)}</td>
-                  </tr>
-                ))}
+                {suggestions.map((s, index) => {
+                  const translated = translateSuggestion(s);
+                  return (
+                    <tr key={index}>
+                      <td>
+                        <strong>{translated.title}</strong>
+                      </td>
+                      <td>{translated.description}</td>
+                      <td>
+                        <span
+                          className={cn(
+                            'badge',
+                            `bg-${getImpactVariant(translated.impact ?? translated.priority ?? 'low')}`
+                          )}
+                        >
+                          {translated.impact ?? translated.priority ?? 'low'}
+                        </span>
+                      </td>
+                      <td>${(translated.potential_savings ?? 0).toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
