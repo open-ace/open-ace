@@ -26,6 +26,10 @@ def get_sender_filter_sql(column_name: str = "sender_name") -> str:
     Additional Python-side filtering via is_valid_sender() is still needed
     for edge cases.
 
+    **Security Note**: column_name is directly interpolated into SQL.
+    Callers MUST ensure column_name is a trusted identifier (e.g., from
+    code constants, NOT from user input).
+
     Args:
         column_name: The column name to filter (default: "sender_name").
 
@@ -35,11 +39,11 @@ def get_sender_filter_sql(column_name: str = "sender_name") -> str:
     # Build placeholder values IN clause
     placeholder_values = "', '".join(sorted(_INVALID_SENDER_PATTERNS))
 
-    return f"""
-        NOT ({column_name} LIKE 'ou_%' AND LENGTH({column_name}) > 10)
-        AND {column_name} NOT IN ('{placeholder_values}')
-        AND {column_name} NOT LIKE '<%>'
-    """.strip()
+    return (
+        f"NOT ({column_name} LIKE 'ou_%' AND LENGTH({column_name}) > 10) "
+        f"AND {column_name} NOT IN ('{placeholder_values}') "
+        f"AND {column_name} NOT LIKE '<%>'"
+    )
 
 
 def is_valid_sender(name: str) -> bool:
