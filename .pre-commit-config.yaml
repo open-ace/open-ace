@@ -77,7 +77,7 @@ repos:
         additional_dependencies:
           - types-requests
         pass_filenames: false
-        entry: mypy scripts/shared web.py cli.py
+        entry: mypy scripts/shared server.py cli.py
 
   # =============================================================================
   # Security Checks

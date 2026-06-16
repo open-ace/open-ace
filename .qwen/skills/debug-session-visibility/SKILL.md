@@ -68,7 +68,7 @@ The `DataFetchScheduler` runs `fetch_<tool>.py` periodically (default 5 min).
 2. Check scheduler status via API: `GET /api/fetch/status`
 3. **Read the output carefully** — the scheduler may be running but the script
    may be silently failing. Look for `"success": false` in the last_result.
-4. If service is down → restart it (`python3 web.py`)
+4. If service is down → restart it (`python3 server.py`)
 5. Manually trigger a fetch if needed: `POST /api/fetch/data`
    Or run the script directly:
    ```bash

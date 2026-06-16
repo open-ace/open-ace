@@ -17,7 +17,7 @@
 | scripts/init_db.py | 简化，只创建 admin 用户，移除 init_database() 调用 |
 | scripts/shared/db.py | init_database() 简化为：PostgreSQL 只验证，SQLite 保留创建逻辑 |
 | scripts/install-central/package-method/install.sh | 执行 schema.sql + alembic stamp head |
-| web.py | 移除 init_database() 调用 |
+| server.py | 移除 init_database() 调用 |
 
 ### 提交记录
 
