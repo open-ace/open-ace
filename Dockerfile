@@ -52,6 +52,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     sudo \
     ca-certificates \
     gnupg \
+    procps \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     # === Node.js Installation Verification (Issue #1006) ===
@@ -59,6 +60,9 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && node --version | grep -q '^v20\.' \
     # Create symlink backup for node (prevent accidental removal, skip if already same file)
     && sh -c 'test -e /bin/node || ln -sf /usr/bin/node /bin/node' \
+    # === Process Tools Verification (Issue #1050) ===
+    && test -x /usr/bin/ps \
+    && ps --version >/dev/null \
     # === npm and CLI Setup ===
     && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui @qwen-code/qwen-code \

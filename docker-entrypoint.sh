@@ -50,6 +50,25 @@ validate_node_environment() {
     fi
     echo "  WebUI: $WEBUI_PATH"
 
+    # === Process Tools Verification (Issue #1050) ===
+    echo "Validating process tools..."
+
+    if ! command -v ps &>/dev/null; then
+        echo "ERROR: ps command not found in PATH."
+        echo "       This indicates procps package was not installed during Docker build."
+        echo "       WebUI requires ps to find and abort CLI processes."
+        echo "       Please rebuild the image with procps package."
+        exit 1
+    fi
+
+    PS_PATH=$(which ps)
+    if [ ! -x "$PS_PATH" ]; then
+        echo "ERROR: ps at $PS_PATH is not executable."
+        echo "       Please check file permissions or rebuild the image."
+        exit 1
+    fi
+    echo "  ps: $PS_PATH"
+
     echo "Node.js environment validated successfully."
 }
 
