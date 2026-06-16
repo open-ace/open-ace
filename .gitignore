@@ -1,5 +1,4 @@
 package-lock.json
-!website/package-lock.json
 
 # Logs
 logs/
@@ -46,11 +45,6 @@ config.json
 
 # Node
 node_modules/
-website/.docusaurus/
-website/build/
-website/docs/reference/
-website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/reference/
-website/static/img/
 
 # Release
 dist/

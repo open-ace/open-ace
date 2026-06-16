@@ -172,6 +172,8 @@ Documentation is in the `docs/` directory:
 - `DEVELOPMENT.md` - Development guide
 - `CONCEPTS.md` - Core concepts
 
+The published Docusaurus docs site lives in the separate `open-ace/open-ace-docs` repository. Keep product docs changes in this repository under `docs/`.
+
 When adding new features, please update relevant documentation.
 
 ## 🏗️ Project Structure
@@ -179,7 +181,7 @@ When adding new features, please update relevant documentation.
 ```
 open-ace/
 ├── cli.py              # CLI entry point
-├── web.py              # Web server entry point
+├── server.py              # Web server entry point
 ├── scripts/
 │   ├── fetch_*.py      # Data collection scripts
 │   ├── shared/         # Shared modules (db, utils, config)

@@ -216,10 +216,10 @@ def deploy_local():
 
     # Step 4: Verify deployment
     print("\n4. Verifying deployment...")
-    if (DEPLOY_DIR / "web.py").exists():
+    if (DEPLOY_DIR / "server.py").exists():
         print_success("Deployment successful!")
     else:
-        print_error("Deployment failed - web.py not found")
+        print_error("Deployment failed - server.py not found")
         return
 
     print("\n" + "=" * 60)
@@ -248,7 +248,7 @@ def install_service():
         else:
             print_error("Plist file not found")
     else:  # Linux
-        service_file = DEV_DIR / "contrib" / "fetch-openclaw.service"
+        service_file = DEV_DIR / "scripts" / "systemd" / "fetch-openclaw.service"
         if service_file.exists():
             run_command(f"sudo cp {service_file} /etc/systemd/system/")
             run_command("sudo systemctl daemon-reload")
@@ -292,7 +292,7 @@ def start_service(dev_mode: bool = False):
 
     with open(log_file, "a") as log:
         subprocess.Popen(
-            [sys.executable, str(work_dir / "web.py")],
+            [sys.executable, str(work_dir / "server.py")],
             stdout=log,
             stderr=log,
             stdin=subprocess.DEVNULL,  # Disconnect stdin to avoid termios errors

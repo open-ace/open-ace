@@ -297,7 +297,7 @@ The default local account is documented in the README. For production, change th
 ### Day 1
 
 - Publish the GitHub early adopter discussion.
-- Link the website CTA to that discussion.
+- Link the docs/site CTA to that discussion.
 - Share the launch post on personal/company LinkedIn or X.
 
 ### Day 2
@@ -313,7 +313,7 @@ The default local account is documented in the README. For production, change th
 ### Day 4-5
 
 - Record and publish the 60-90 second demo.
-- Add the demo link to README, website, and the early adopter discussion.
+- Add the demo link to README, the docs site, and the early adopter discussion.
 
 ### Day 6-7
 

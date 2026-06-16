@@ -196,7 +196,7 @@ filterwarnings = [
 # Coverage Configuration
 # =============================================================================
 [tool.coverage.run]
-source = ["scripts/shared", "web.py", "cli.py"]
+source = ["scripts/shared", "server.py", "cli.py"]
 omit = [
     "tests/*",
     "*/__pycache__/*",

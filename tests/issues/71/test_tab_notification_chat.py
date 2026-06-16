@@ -40,7 +40,7 @@ def ensure_service_running():
     if not result.stdout.strip():
         print("启动服务...")
         subprocess.Popen(
-            ["python3", "web.py"],
+            ["python3", "server.py"],
             cwd=PROJECT_ROOT,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

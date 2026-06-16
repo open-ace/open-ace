@@ -37,7 +37,7 @@ python3 cli.py config init
 
 ```
 open-ace/
-├── web.py              # Web server entry point
+├── server.py              # Web server entry point
 ├── requirements.txt    # Python dependencies
 │
 ├── app/                # Flask application

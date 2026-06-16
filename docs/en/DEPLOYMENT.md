@@ -29,7 +29,7 @@ pip install -r requirements.txt
 python3 cli.py config init
 
 # Start web server
-python3 web.py
+python3 server.py
 
 # Visit http://localhost:5000
 ```
@@ -261,7 +261,7 @@ All components run on one machine:
 
 ```bash
 # Start web server
-python3 web.py
+python3 server.py
 
 # Set up cron for data collection
 crontab -e
@@ -313,7 +313,7 @@ After=network.target
 Type=simple
 User=youruser
 WorkingDirectory=/path/to/open-ace
-ExecStart=/usr/bin/python3 web.py
+ExecStart=/usr/bin/python3 server.py
 Restart=always
 
 [Install]
@@ -342,7 +342,7 @@ Create `~/Library/LaunchAgents/com.open-ace.web.plist`:
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/path/to/open-ace/web.py</string>
+        <string>/path/to/open-ace/server.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -567,7 +567,7 @@ Type=simple
 User=open-ace
 Group=open-ace
 WorkingDirectory=/home/open-ace/open-ace
-ExecStart=/usr/bin/python3 web.py
+ExecStart=/usr/bin/python3 server.py
 Restart=always
 
 # Required for multi-user mode

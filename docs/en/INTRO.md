@@ -243,7 +243,7 @@ Edit `~/.open-ace/config.json`:
 
 ```bash
 # Start web server
-python3 web.py
+python3 server.py
 
 # Visit http://localhost:5000
 # Default login: admin / admin123
@@ -307,7 +307,7 @@ python3 cli.py report --email user@example.com  # Email to specific address
 
 ```bash
 # All components on one machine
-python3 web.py          # Web server
+python3 server.py          # Web server
 python3 cli.py config init  # Configuration
 crontab -e              # Scheduled data collection
 ```
@@ -330,7 +330,7 @@ docker compose restart
 ┌───────────────────────┐       ┌───────────────────────┐
 │   Central Server      │       │    Remote Machine     │
 │  ┌─────────────────┐  │       │  ┌─────────────────┐  │
-│  │   web.py        │  │       │  │ fetch_openclaw  │  │
+│  │   server.py        │  │       │  │ fetch_openclaw  │  │
 │  │   (Dashboard)   │  │       │  │                 │  │
 │  └────────┬────────┘  │       │  └────────┬────────┘  │
 │           │           │       │           │           │

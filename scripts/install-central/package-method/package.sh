@@ -170,7 +170,7 @@ get_git_version() {
     echo "${commit_hash}-${commit_date}"
 }
 
-# Get version for VERSION file (same format as web.py displays)
+# Get version for VERSION file (same format as server.py displays)
 # Format: commit_hash (MM-DD HH:MM:SS)
 get_git_version_for_file() {
     local commit_hash commit_date
@@ -239,7 +239,7 @@ mkdir -p "$DIST_DIR"
 # Files and directories to include (VERSION is created dynamically during packaging)
 INCLUDE_ITEMS=(
     "cli.py"
-    "web.py"
+    "server.py"
     "README.md"
     "CHANGELOG.md"
     "requirements.txt"

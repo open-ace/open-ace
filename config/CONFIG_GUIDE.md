@@ -133,5 +133,5 @@
 
 3. 启动服务：
    ```bash
-   python3 web.py
+   python3 server.py
    ```
