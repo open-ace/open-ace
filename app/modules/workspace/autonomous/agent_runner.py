@@ -71,6 +71,11 @@ SESSION_DETECTION_GRACE_SECONDS = 5.0
 SESSION_DETECTION_WAIT_SECONDS = 5.0
 SESSION_DETECTION_POLL_INTERVAL = 0.25
 
+# How often the pause-aware completion loop re-checks the session state. The
+# underlying ``Event.wait`` returns immediately when ``completed`` is set, so
+# this only bounds how quickly we notice a pause/resume/stop transition.
+COMPLETION_POLL_INTERVAL = 5.0
+
 
 @dataclass
 class _LocalSession:
@@ -305,6 +310,39 @@ class AutonomousAgentRunner:
             self.session_manager.update_session_fields(persisted_id, updates)
         except Exception as e:
             logger.warning("Failed to sync sidebar session totals: %s", e)
+
+    @staticmethod
+    def _wait_for_completion(session: _LocalSession, timeout: float) -> bool:
+        """Wait for ``session.completed`` while excluding paused time from the budget.
+
+        ``threading.Event.wait(timeout=...)`` is a wall-clock countdown — it keeps
+        ticking even while the underlying process is frozen with SIGSTOP. That means
+        pausing a task for longer than the timeout (default 1h) would reap the
+        in-flight agent even though no real work was being done (#1005).
+
+        This loop instead accounts for pause/resume: while ``session._paused`` is
+        set we do not consume the timeout budget, extending the deadline by the
+        duration of each pause. The budget resumes counting down only once the
+        process is unfrozen. Returns ``True`` if the session completed (or was
+        stopped) within the budget, ``False`` if the *active* time budget ran out.
+        """
+        deadline = time.monotonic() + max(timeout, 0.0)
+        poll = COMPLETION_POLL_INTERVAL
+        while True:
+            if session.completed.wait(timeout=min(poll, max(deadline - time.monotonic(), 0.0))):
+                return True
+            now = time.monotonic()
+            # While paused, freeze the deadline so the remaining budget is
+            # preserved across the suspension. Resume stretches the deadline by
+            # the full paused duration.
+            if session._paused:
+                pause_started = now
+                while session._paused and not session.completed.is_set():
+                    session.completed.wait(timeout=poll)
+                now = time.monotonic()
+                deadline += now - pause_started
+            if now >= deadline:
+                return False
 
     def run_agent_task(
         self,
@@ -585,8 +623,9 @@ class AutonomousAgentRunner:
         # Send the prompt
         self._send_message(session, prompt)
 
-        # Wait for completion or timeout
-        completed = session.completed.wait(timeout=timeout)
+        # Wait for completion or timeout. Use the pause-aware wait so that
+        # time spent frozen via SIGSTOP does not consume the timeout budget (#1005).
+        completed = self._wait_for_completion(session, timeout)
 
         # Cleanup
         if process.returncode is None:
