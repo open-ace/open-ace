@@ -799,6 +799,18 @@ class AutonomousOrchestrator:
         retry_start = time.monotonic()
         delay = API_RETRY_INITIAL_DELAY
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
+            # Re-check workflow status each iteration: a failure/cancellation
+            # set on the row (by a concurrent path or a prior failure in this
+            # advance()) must abort retries, otherwise we keep spawning agent
+            # subprocesses on a dead workflow for the full 30-min window. #1029
+            _status = (self.workflow or {}).get("status")
+            if _status in ("failed", "cancelled"):
+                logger.info("API error retry aborted (workflow status=%s)", _status)
+                self._write_phase_usage(milestone_id, result)
+                with self._session_lock:
+                    self._current_session_id = result.session_id
+                return result
+
             response_text = result.response_text or ""
             error_text = result.error or ""
             if not (
@@ -989,7 +1001,7 @@ class AutonomousOrchestrator:
             logger.error("Workflow %s not found", self._workflow_id)
             return
 
-        if wf.get("status") == "paused":
+        if wf.get("status") in ("paused", "failed", "cancelled"):
             return
 
         phase = wf.get("current_phase", "preparation")
