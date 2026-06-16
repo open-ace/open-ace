@@ -60,9 +60,8 @@ VERSION
 *.key
 .env.*
 
-# Qwen local settings (except skills)
-.qwen/*
-!.qwen/skills/
+# Qwen local settings
+.qwen/
 
 # Qwen project memory (local only)
 QWEN.md

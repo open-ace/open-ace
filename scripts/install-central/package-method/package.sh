@@ -248,8 +248,6 @@ INCLUDE_ITEMS=(
     "Dockerfile"
     "docker-entrypoint.sh"
     "config"
-    "contrib"
-    "cron"
     "scripts"
     "static"
     "app"
