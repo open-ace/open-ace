@@ -1343,11 +1343,13 @@ class TestOrchestratorReport:
         )
         completed_milestones = [
             {
+                "milestone_type": "dev_completed",
                 "status": "completed",
                 "title": "Development round 1",
                 "result_summary": "Built hello world feature",
             },
             {
+                "milestone_type": "tests_run",
                 "status": "completed",
                 "title": "Tests run",
                 "result_summary": "All 5 tests passed",

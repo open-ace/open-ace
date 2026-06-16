@@ -126,11 +126,47 @@ const MILESTONE_ICON_COLORS: Record<string, string> = {
 };
 
 const TIMELINE_AUTO_SCROLL_THRESHOLD = 24;
+const MAX_DIFF_VIEW_CHARS = 50000;
 
 function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
+}
+
+function truncateDiffText(text: string, max = MAX_DIFF_VIEW_CHARS): {
+  content: string;
+  isTruncated: boolean;
+} {
+  if (text.length <= max) {
+    return { content: text, isTruncated: false };
+  }
+  return { content: text.slice(0, max), isTruncated: true };
+}
+
+function getDiffLineClass(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) {
+    return 'workflow-timeline-diff-line-add';
+  }
+  if (line.startsWith('-') && !line.startsWith('---')) {
+    return 'workflow-timeline-diff-line-del';
+  }
+  if (line.startsWith('@@')) {
+    return 'workflow-timeline-diff-line-hunk';
+  }
+  if (
+    line.startsWith('diff --git') ||
+    line.startsWith('index ') ||
+    line.startsWith('--- ') ||
+    line.startsWith('+++ ') ||
+    line.startsWith('new file mode ') ||
+    line.startsWith('deleted file mode ') ||
+    line.startsWith('rename from ') ||
+    line.startsWith('rename to ')
+  ) {
+    return 'workflow-timeline-diff-line-meta';
+  }
+  return '';
 }
 
 function getActivityStableKey(activity: {
@@ -915,10 +951,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [isTimelineAtBottom]
   );
 
-  const parsedDiffFiles = useMemo(() => parseDiffFiles(diffData?.diff ?? ''), [diffData?.diff]);
-  const parsedPrDiffFiles = useMemo(
-    () => parseDiffFiles(prDiffData?.diff ?? ''),
+  const truncatedDiff = useMemo(() => truncateDiffText(diffData?.diff ?? ''), [diffData?.diff]);
+  const truncatedPrDiff = useMemo(
+    () => truncateDiffText(prDiffData?.diff ?? ''),
     [prDiffData?.diff]
+  );
+  const parsedDiffFiles = useMemo(
+    () => parseDiffFiles(truncatedDiff.content),
+    [truncatedDiff.content]
+  );
+  const parsedPrDiffFiles = useMemo(
+    () => parseDiffFiles(truncatedPrDiff.content),
+    [truncatedPrDiff.content]
   );
   const latestMilestoneSignature =
     milestones.length > 0
@@ -1001,6 +1045,32 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       parsedPrDiffFiles[0] ??
       null,
     [parsedPrDiffFiles, selectedPrDiffFileId]
+  );
+  const renderDiffLines = useCallback(
+    (content: string, keyPrefix: string, isTruncated = false) => {
+      const lines = content.split('\n');
+      return (
+        <>
+          {lines.map((line, index) => (
+            <div
+              key={`${keyPrefix}-line-${index}`}
+              className={`workflow-timeline-diff-line ${getDiffLineClass(line)}`}
+            >
+              {line || ' '}
+            </div>
+          ))}
+          {isTruncated && (
+            <div
+              key={`${keyPrefix}-truncated`}
+              className="workflow-timeline-diff-line workflow-timeline-diff-line-meta"
+            >
+              {t('autoDiffTruncated', language)}
+            </div>
+          )}
+        </>
+      );
+    },
+    [language]
   );
 
   const handleDiffResizeStart = useCallback(
@@ -1179,6 +1249,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const showDetailSections = isExpanded && canExpand;
     const showLiveActivitySection = milestone.status === 'in_progress' && hasLiveActivity;
     const showInlinePreview = !compact && milestoneSummary;
+    const actionSectionLabelKey =
+      canFork || canCancel
+        ? 'autoActionsSection'
+        : canViewPlanContent && !canViewReviewContent
+          ? 'autoOutputSection'
+          : canViewReviewContent && !canViewPlanContent
+            ? 'autoReviewSection'
+            : 'autoActionsSection';
 
     return (
       <article
@@ -1369,7 +1447,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             {(canFork || canCancel || canViewPlanContent || canViewReviewContent) && (
               <section className="timeline-milestone-section">
                 <div className="timeline-milestone-section-label">
-                  {t('autoActionsSection', language)}
+                  {t(actionSectionLabelKey, language)}
                 </div>
                 <div className="timeline-milestone-section-body">
                   <div className="timeline-milestone-inline-actions">
@@ -2228,34 +2306,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </button>
                 </div>
                 <div className="workflow-timeline-diff-code">
-                  {selectedPrDiffFile.patch.split('\n').map((line, index) => {
-                    const lineClass =
-                      line.startsWith('+') && !line.startsWith('+++')
-                        ? 'workflow-timeline-diff-line-add'
-                        : line.startsWith('-') && !line.startsWith('---')
-                          ? 'workflow-timeline-diff-line-del'
-                          : line.startsWith('@@')
-                            ? 'workflow-timeline-diff-line-hunk'
-                            : line.startsWith('diff --git') ||
-                                line.startsWith('index ') ||
-                                line.startsWith('--- ') ||
-                                line.startsWith('+++ ') ||
-                                line.startsWith('new file mode ') ||
-                                line.startsWith('deleted file mode ') ||
-                                line.startsWith('rename from ') ||
-                                line.startsWith('rename to ')
-                              ? 'workflow-timeline-diff-line-meta'
-                              : '';
-
-                    return (
-                      <div
-                        key={`${selectedPrDiffFile.id}-line-${index}`}
-                        className={`workflow-timeline-diff-line ${lineClass}`}
-                      >
-                        {line || ' '}
-                      </div>
-                    );
-                  })}
+                  {renderDiffLines(
+                    selectedPrDiffFile.patch,
+                    selectedPrDiffFile.id,
+                    truncatedPrDiff.isTruncated
+                  )}
                 </div>
               </div>
             </div>
@@ -2263,34 +2318,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             <div className="workflow-timeline-diff-shell">
               <div className="workflow-timeline-diff-viewer">
                 <div className="workflow-timeline-diff-code">
-                  {prDiffData.diff.split('\n').map((line, index) => {
-                    const lineClass =
-                      line.startsWith('+') && !line.startsWith('+++')
-                        ? 'workflow-timeline-diff-line-add'
-                        : line.startsWith('-') && !line.startsWith('---')
-                          ? 'workflow-timeline-diff-line-del'
-                          : line.startsWith('@@')
-                            ? 'workflow-timeline-diff-line-hunk'
-                            : line.startsWith('diff --git') ||
-                                line.startsWith('index ') ||
-                                line.startsWith('--- ') ||
-                                line.startsWith('+++ ') ||
-                                line.startsWith('new file mode ') ||
-                                line.startsWith('deleted file mode ') ||
-                                line.startsWith('rename from ') ||
-                                line.startsWith('rename to ')
-                              ? 'workflow-timeline-diff-line-meta'
-                              : '';
-
-                    return (
-                      <div
-                        key={`pr-diff-line-${index}`}
-                        className={`workflow-timeline-diff-line ${lineClass}`}
-                      >
-                        {line || ' '}
-                      </div>
-                    );
-                  })}
+                  {renderDiffLines(
+                    truncatedPrDiff.content,
+                    'pr-diff-fallback',
+                    truncatedPrDiff.isTruncated
+                  )}
                 </div>
               </div>
             </div>
@@ -2525,34 +2557,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     </button>
                   </div>
                   <div className="workflow-timeline-diff-code">
-                    {selectedDiffFile.patch.split('\n').map((line, index) => {
-                      const lineClass =
-                        line.startsWith('+') && !line.startsWith('+++')
-                          ? 'workflow-timeline-diff-line-add'
-                          : line.startsWith('-') && !line.startsWith('---')
-                            ? 'workflow-timeline-diff-line-del'
-                            : line.startsWith('@@')
-                              ? 'workflow-timeline-diff-line-hunk'
-                              : line.startsWith('diff --git') ||
-                                  line.startsWith('index ') ||
-                                  line.startsWith('--- ') ||
-                                  line.startsWith('+++ ') ||
-                                  line.startsWith('new file mode ') ||
-                                  line.startsWith('deleted file mode ') ||
-                                  line.startsWith('rename from ') ||
-                                  line.startsWith('rename to ')
-                                ? 'workflow-timeline-diff-line-meta'
-                                : '';
-
-                      return (
-                        <div
-                          key={`${selectedDiffFile.id}-line-${index}`}
-                          className={`workflow-timeline-diff-line ${lineClass}`}
-                        >
-                          {line || ' '}
-                        </div>
-                      );
-                    })}
+                    {renderDiffLines(
+                      selectedDiffFile.patch,
+                      selectedDiffFile.id,
+                      truncatedDiff.isTruncated
+                    )}
                   </div>
                 </div>
               </>
@@ -2566,9 +2575,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {diffData.diff.length > 50000
-                  ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
-                  : diffData.diff}
+                {truncatedDiff.isTruncated
+                  ? truncatedDiff.content + '\n\n' + t('autoDiffTruncated', language)
+                  : truncatedDiff.content}
               </pre>
             ) : (
               <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>
