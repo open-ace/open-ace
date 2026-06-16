@@ -14,12 +14,43 @@ import type { AuditLogFilters } from '@/api';
 const ITEMS_PER_PAGE = 20;
 
 const ACTION_COLORS: Record<string, BadgeVariant> = {
+  // Authentication
   login: 'primary',
   logout: 'secondary',
-  create: 'success',
-  update: 'warning',
-  delete: 'danger',
-  view: 'info',
+  login_failed: 'danger',
+  session_expired: 'warning',
+  // User management
+  user_create: 'success',
+  user_update: 'warning',
+  user_delete: 'danger',
+  user_password_change: 'warning',
+  user_role_change: 'info',
+  user_status_change: 'warning',
+  // Permission
+  permission_grant: 'success',
+  permission_revoke: 'danger',
+  // Quota
+  quota_update: 'warning',
+  quota_alert: 'warning',
+  quota_exceeded: 'danger',
+  // Data access
+  data_view: 'info',
+  data_export: 'primary',
+  data_import: 'success',
+  data_delete: 'danger',
+  // System
+  system_config_change: 'warning',
+  system_start: 'success',
+  system_stop: 'secondary',
+  // Content filter
+  content_blocked: 'danger',
+  content_flagged: 'warning',
+  // Remote agent
+  agent_register: 'success',
+  agent_token_rotate: 'warning',
+  agent_token_revoke: 'danger',
+  agent_auth_failure: 'danger',
+  agent_reconnect: 'info',
 };
 
 export const AuditLog: React.FC = () => {
@@ -33,27 +64,68 @@ export const AuditLog: React.FC = () => {
     limit: ITEMS_PER_PAGE,
   });
 
+  // Action options matching backend AuditAction enum
   const actionOptions = useMemo(
     () => [
       { value: '', label: t('allActions', language) },
-      { value: 'login', label: 'Login' },
-      { value: 'logout', label: 'Logout' },
-      { value: 'create', label: 'Create' },
-      { value: 'update', label: 'Update' },
-      { value: 'delete', label: 'Delete' },
-      { value: 'view', label: 'View' },
+      // Authentication
+      { value: 'login', label: t('actionLogin', language) },
+      { value: 'logout', label: t('actionLogout', language) },
+      { value: 'login_failed', label: t('actionLoginFailed', language) },
+      { value: 'session_expired', label: t('actionSessionExpired', language) },
+      // User management
+      { value: 'user_create', label: t('actionUserCreate', language) },
+      { value: 'user_update', label: t('actionUserUpdate', language) },
+      { value: 'user_delete', label: t('actionUserDelete', language) },
+      { value: 'user_password_change', label: t('actionUserPasswordChange', language) },
+      { value: 'user_role_change', label: t('actionUserRoleChange', language) },
+      { value: 'user_status_change', label: t('actionUserStatusChange', language) },
+      // Permission
+      { value: 'permission_grant', label: t('actionPermissionGrant', language) },
+      { value: 'permission_revoke', label: t('actionPermissionRevoke', language) },
+      // Quota
+      { value: 'quota_update', label: t('actionQuotaUpdate', language) },
+      { value: 'quota_alert', label: t('actionQuotaAlert', language) },
+      { value: 'quota_exceeded', label: t('actionQuotaExceeded', language) },
+      // Data access
+      { value: 'data_view', label: t('actionDataView', language) },
+      { value: 'data_export', label: t('actionDataExport', language) },
+      { value: 'data_import', label: t('actionDataImport', language) },
+      { value: 'data_delete', label: t('actionDataDelete', language) },
+      // System
+      { value: 'system_config_change', label: t('actionSystemConfigChange', language) },
+      { value: 'system_start', label: t('actionSystemStart', language) },
+      { value: 'system_stop', label: t('actionSystemStop', language) },
+      // Content filter
+      { value: 'content_blocked', label: t('actionContentBlocked', language) },
+      { value: 'content_flagged', label: t('actionContentFlagged', language) },
+      // Remote agent
+      { value: 'agent_register', label: t('actionAgentRegister', language) },
+      { value: 'agent_token_rotate', label: t('actionAgentTokenRotate', language) },
+      { value: 'agent_token_revoke', label: t('actionAgentTokenRevoke', language) },
+      { value: 'agent_auth_failure', label: t('actionAgentAuthFailure', language) },
+      { value: 'agent_reconnect', label: t('actionAgentReconnect', language) },
     ],
     [language]
   );
 
+  // Resource type options matching backend actual usage
   const resourceTypeOptions = useMemo(
     () => [
       { value: '', label: t('allResourceTypes', language) },
-      { value: 'user', label: 'User' },
-      { value: 'session', label: 'Session' },
-      { value: 'message', label: 'Message' },
-      { value: 'quota', label: 'Quota' },
-      { value: 'settings', label: 'Settings' },
+      { value: 'audit_logs', label: t('resourceAuditLogs', language) },
+      { value: 'quota_alert', label: t('resourceQuotaAlert', language) },
+      { value: 'content', label: t('resourceContent', language) },
+      { value: 'content_filter', label: t('resourceContentFilter', language) },
+      { value: 'filter_rule', label: t('resourceFilterRule', language) },
+      { value: 'security_settings', label: t('resourceSecuritySettings', language) },
+      { value: 'analytics_report', label: t('resourceAnalyticsReport', language) },
+      { value: 'analytics', label: t('resourceAnalytics', language) },
+      { value: 'ai_agent_settings', label: t('resourceAiAgentSettings', language) },
+      { value: 'compliance_report', label: t('resourceComplianceReport', language) },
+      { value: 'agent_token', label: t('resourceAgentToken', language) },
+      { value: 'remote_machine', label: t('resourceRemoteMachine', language) },
+      { value: 'data', label: t('resourceData', language) },
     ],
     [language]
   );
