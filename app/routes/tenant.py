@@ -83,9 +83,11 @@ def create_tenant():
     if not name:
         return jsonify({"error": "Tenant name is required"}), 400
 
+    slug = data.get("slug")
+
     tenant = tenant_service.create_tenant(
         name=name,
-        slug=data.get("slug"),
+        slug=slug,
         plan=data.get("plan", "standard"),
         contact_email=data.get("contact_email", ""),
         contact_name=data.get("contact_name"),
@@ -93,6 +95,9 @@ def create_tenant():
     )
 
     if not tenant:
+        # Check if slug conflict is the cause
+        if slug and tenant_service.get_tenant_by_slug(slug):
+            return jsonify({"error": "Tenant slug already exists", "code": "SLUG_EXISTS"}), 409
         return jsonify({"error": "Failed to create tenant"}), 500
 
     return jsonify(tenant.to_dict()), 201

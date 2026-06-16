@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
@@ -43,9 +43,27 @@ const PLAN_OPTIONS = [
   { value: 'enterprise', label: 'Enterprise' },
 ];
 
+// Tenant API error translation map (moved outside component to avoid recreation)
+const TENANT_ERROR_MAP: Record<string, string> = {
+  'Failed to create tenant': 'failedToCreateTenant',
+  'Tenant slug already exists': 'tenantSlugExists',
+  'Failed to save tenant': 'failedToCreateTenant',
+  'Tenant not found': 'tenantNotFound',
+  'Failed to update tenant': 'failedToUpdateTenant',
+  'Failed to update tenant quota': 'failedToUpdateTenantQuota',
+  'Request body required': 'requestBodyRequired',
+  'No valid fields to update': 'noValidFieldsToUpdate',
+};
+
+const translateTenantError = (error: string, lang: Language): string => {
+  const key = TENANT_ERROR_MAP[error];
+  return key ? t(key, lang) : error;
+};
+
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const [tenants, setTenants] = useState<Tenant[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,7 +216,9 @@ export const TenantManagement: React.FC = () => {
       } else {
         errorMessage = 'Failed to save tenant';
       }
-      setFormError(errorMessage);
+      // 翻译后端返回的错误信息
+      const translatedError = translateTenantError(errorMessage, language);
+      setFormError(translatedError);
     }
   };
 
