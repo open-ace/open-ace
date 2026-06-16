@@ -243,7 +243,7 @@ python3 cli.py config init
 
 ```bash
 # 启动 Web 服务器
-python3 web.py
+python3 server.py
 
 # 访问 http://localhost:5000
 # 默认登录：admin / admin123
@@ -307,7 +307,7 @@ python3 cli.py report --email user@example.com  # 发送到特定地址
 
 ```bash
 # 所有组件在同一台机器上
-python3 web.py          # Web 服务器
+python3 server.py          # Web 服务器
 python3 cli.py config init  # 配置
 crontab -e              # 定时数据收集
 ```
@@ -330,7 +330,7 @@ docker compose restart
 ┌───────────────────────┐       ┌───────────────────────┐
 │   中心服务器           │       │    远程机器           │
 │  ┌─────────────────┐  │       │  ┌─────────────────┐  │
-│  │   web.py        │  │       │  │ fetch_openclaw  │  │
+│  │   server.py        │  │       │  │ fetch_openclaw  │  │
 │  │   (仪表板)      │  │       │  │                 │  │
 │  └────────┬────────┘  │       │  └────────┬────────┘  │
 │           │           │       │           │           │

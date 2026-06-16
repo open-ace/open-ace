@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/component: config
 data:
   # Application settings
-  FLASK_APP: "web.py"
+  FLASK_APP: "server.py"
   FLASK_ENV: "production"
   PYTHONUNBUFFERED: "1"
   LOG_LEVEL: "INFO"

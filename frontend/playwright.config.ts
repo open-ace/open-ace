@@ -74,7 +74,7 @@ export default defineConfig({
 
   // Run local dev server before starting tests
   webServer: {
-    command: 'cd .. && python3 web.py',
+    command: 'cd .. && python3 server.py',
     url: `http://localhost:${process.env.WEB_PORT || 5000}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120000,

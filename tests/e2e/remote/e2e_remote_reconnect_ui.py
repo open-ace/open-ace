@@ -307,7 +307,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
     time.sleep(2)
 
     subprocess.Popen(
-        [PYTHON_BIN, "web.py"],
+        [PYTHON_BIN, "server.py"],
         cwd=PROJECT_ROOT,
         stdout=open("/tmp/openace_e2e_reconnect_ui.log", "w"),
         stderr=subprocess.STDOUT,

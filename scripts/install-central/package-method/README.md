@@ -189,7 +189,7 @@ journalctl -u open-ace -f
 **注意：** 如果不设置 `INSTALL_SERVICE=yes`，需要手动启动服务：
 
 ```bash
-cd /home/openace && python3 web.py
+cd /home/openace && python3 server.py
 ```
 
 ### 选项

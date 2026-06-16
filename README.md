@@ -22,7 +22,8 @@
 
 <p align="center">
   <a href="https://www.open-ace.com">Website</a> ·
-  <a href="https://open-ace.github.io/open-ace/docs/intro">Docs</a> ·
+  <a href="https://open-ace.github.io/open-ace-docs/docs/intro">Docs</a> ·
+  <a href="https://github.com/open-ace/open-ace-docs">Docs Repo</a> ·
   <a href="ROADMAP.md">Roadmap</a> ·
   <a href="https://github.com/open-ace/open-ace/discussions">Discussions</a>
 </p>
@@ -151,7 +152,7 @@ alembic upgrade head
 python3 scripts/init_db.py
 
 # 5. 启动服务
-python3 web.py
+python3 server.py
 
 # 访问 http://localhost:5000
 ```
@@ -258,7 +259,7 @@ python3 web.py
 
 ```
 open-ace/
-├── web.py                 # Web 服务入口
+├── server.py                 # Web 服务入口
 ├── cli.py                 # CLI 工具入口
 ├── app/                   # 后端应用
 │   ├── routes/            # API 路由
@@ -274,9 +275,12 @@ open-ace/
 ├── k8s/                   # Kubernetes 部署清单
 ├── migrations/            # Alembic 数据库迁移
 ├── schema/                # 数据库 Schema 辅助文件
-├── scripts/               # 核心脚本
+├── scripts/               # 核心脚本与运维辅助文件
 │   ├── fetch_*.py         # 数据收集
+│   ├── cron/              # 定时任务脚本
+│   ├── systemd/           # systemd service/timer 示例
 │   └── shared/            # 共享模块
+├── static/                # 运行时静态资源与前端构建产物
 ├── docs/                  # 文档
 └── tests/                 # 测试
 ```
@@ -284,6 +288,8 @@ open-ace/
 ---
 
 ## 📚 文档
+
+`docs/` 目录保存产品文档源代码；对外发布的 Docusaurus 文档站在独立仓库 `open-ace/open-ace-docs` 中构建和部署。
 
 | 文档 | 说明 |
 |------|------|
@@ -449,7 +455,7 @@ alembic upgrade head
 python3 scripts/init_db.py
 
 # 5. Start the server
-python3 web.py
+python3 server.py
 
 # Visit http://localhost:5000
 ```
@@ -556,7 +562,7 @@ python3 web.py
 
 ```
 open-ace/
-├── web.py                 # Web server entry
+├── server.py                 # Web server entry
 ├── cli.py                 # CLI tool entry
 ├── app/                   # Backend application
 │   ├── routes/            # API routes
@@ -572,9 +578,12 @@ open-ace/
 ├── k8s/                   # Kubernetes manifests
 ├── migrations/            # Alembic database migrations
 ├── schema/                # Database schema helpers
-├── scripts/               # Core scripts
+├── scripts/               # Core scripts and operational helpers
 │   ├── fetch_*.py         # Data collection
+│   ├── cron/              # Scheduled task scripts
+│   ├── systemd/           # systemd service/timer examples
 │   └── shared/            # Shared modules
+├── static/                # Runtime static assets and frontend build output
 ├── docs/                  # Documentation
 └── tests/                 # Tests
 ```
@@ -582,6 +591,8 @@ open-ace/
 ---
 
 ## 📚 Documentation
+
+The `docs/` directory is the source of truth for product documentation. The published Docusaurus docs site is built and deployed from the separate `open-ace/open-ace-docs` repository.
 
 | Document | Description |
 |----------|-------------|

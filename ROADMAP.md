@@ -5,7 +5,7 @@ This roadmap describes the near-term work that will make Open ACE easier to try,
 ## Now
 
 - Make the first-run experience reliable with Docker Compose, SQLite/PostgreSQL setup, and clear default credential handling.
-- Keep README, website, and documentation links in sync across Chinese and English.
+- Keep README, docs site, and documentation links in sync across Chinese and English.
 - Publish focused starter issues for documentation, first-run bugs, UI polish, and connector examples.
 - Add GitHub repository topics: `ai-governance`, `ai-workspace`, `enterprise-ai`, `llmops`, `flask`, `react`, `self-hosted`, `claude-code`, `qwen-code`, `codex`.
 

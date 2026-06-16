@@ -1266,7 +1266,7 @@ def main():
     header("Phase 0: Prerequisites")
     if not check_server():
         print("\nFATAL: Server not running at", BASE_URL)
-        print("Start with: python web.py")
+        print("Start with: python server.py")
         sys.exit(1)
 
     # Phase 1: Authentication

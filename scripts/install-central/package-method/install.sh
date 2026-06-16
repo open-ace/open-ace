@@ -22,20 +22,20 @@ NC='\033[0m' # No Color
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# SOURCE_DIR should be the package root (where cli.py, web.py, etc. are located)
+# SOURCE_DIR should be the package root (where cli.py, server.py, etc. are located)
 # Package structure: package_root/scripts/install-central/package-method/install.sh
 # So we need to go up 3 levels from SCRIPT_DIR to reach package_root
 # SCRIPT_DIR = scripts/install-central/package-method
 # LEVEL 1 up = scripts/install-central
 # LEVEL 2 up = scripts
-# LEVEL 3 up = package_root (where web.py, cli.py are)
+# LEVEL 3 up = package_root (where server.py, cli.py are)
 SOURCE_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-# Validate SOURCE_DIR - must contain web.py or cli.py
+# Validate SOURCE_DIR - must contain server.py or cli.py
 validate_source_dir() {
-    if [ ! -f "$SOURCE_DIR/web.py" ] && [ ! -f "$SOURCE_DIR/cli.py" ]; then
+    if [ ! -f "$SOURCE_DIR/server.py" ] && [ ! -f "$SOURCE_DIR/cli.py" ]; then
         print_error "SOURCE_DIR is invalid: $SOURCE_DIR"
-        print_error "Expected to find web.py or cli.py in package root"
+        print_error "Expected to find server.py or cli.py in package root"
         print_info "Please ensure you're running install.sh from a valid Open ACE package"
         print_info "Current SCRIPT_DIR: $SCRIPT_DIR"
         exit 1
@@ -1836,7 +1836,7 @@ install_systemd_service() {
     # Check if systemd is available
     if ! command -v systemctl &>/dev/null; then
         print_warning "systemctl not found. Skipping systemd service installation."
-        print_info "You can manually run the web server with: cd $target_path && python3 web.py"
+        print_info "You can manually run the web server with: cd $target_path && python3 server.py"
         return 0
     fi
 
@@ -1954,7 +1954,7 @@ install_systemd_service_remote() {
     # Check if systemd is available on remote
     if ! ssh "$remote" "command -v systemctl &>/dev/null"; then
         print_warning "systemctl not found on remote machine. Skipping systemd service installation."
-        print_info "You can manually run the web server with: ssh $remote 'cd $target_path && python3 web.py'"
+        print_info "You can manually run the web server with: ssh $remote 'cd $target_path && python3 server.py'"
         return 0
     fi
 
@@ -2112,12 +2112,12 @@ detect_and_load_local_upgrade() {
             if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
                 local user_name=$(basename "$user_home")
                 # Check if there's an installation in this user's home
-                if [ -d "$user_home" ] && [ -f "$user_home/web.py" ]; then
+                if [ -d "$user_home" ] && [ -f "$user_home/server.py" ]; then
                     config_based_paths="$user_home"
                     break
                 fi
                 # Also check for open-ace subdirectory
-                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/web.py" ]; then
+                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/server.py" ]; then
                     config_based_paths="$user_home/open-ace"
                     break
                 fi
@@ -2129,12 +2129,12 @@ detect_and_load_local_upgrade() {
             if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
                 local user_name=$(basename "$user_home")
                 # Check if there's an installation in this user's home
-                if [ -d "$user_home" ] && [ -f "$user_home/web.py" ]; then
+                if [ -d "$user_home" ] && [ -f "$user_home/server.py" ]; then
                     config_based_paths="$user_home"
                     break
                 fi
                 # Also check for open-ace subdirectory
-                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/web.py" ]; then
+                if [ -d "$user_home/open-ace" ] && [ -f "$user_home/open-ace/server.py" ]; then
                     config_based_paths="$user_home/open-ace"
                     break
                 fi
@@ -2142,9 +2142,9 @@ detect_and_load_local_upgrade() {
         done
         # Also check root's config if running as root
         if [ -z "$config_based_paths" ] && [ -f "/root/.open-ace/config.json" ]; then
-            if [ -d "/root" ] && [ -f "/root/web.py" ]; then
+            if [ -d "/root" ] && [ -f "/root/server.py" ]; then
                 config_based_paths="/root"
-            elif [ -d "/root/open-ace" ] && [ -f "/root/open-ace/web.py" ]; then
+            elif [ -d "/root/open-ace" ] && [ -f "/root/open-ace/server.py" ]; then
                 config_based_paths="/root/open-ace"
             fi
         fi
@@ -2175,14 +2175,14 @@ detect_and_load_local_upgrade() {
     fi
 
     # Priority 4: Check root's open-ace (if running as root and has config)
-    if [ "$EUID" -eq 0 ] && [ -d "/root/open-ace" ] && [ -f "/root/open-ace/web.py" ]; then
+    if [ "$EUID" -eq 0 ] && [ -d "/root/open-ace" ] && [ -f "/root/open-ace/server.py" ]; then
         if [[ ! " ${candidate_paths[*]} " =~ " /root/open-ace " ]]; then
             candidate_paths+=("/root/open-ace")
         fi
     fi
 
     for target_path in "${candidate_paths[@]}"; do
-        if [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
+        if [ -d "$target_path" ] && [ -f "$target_path/server.py" ]; then
             print_info "Existing installation found at: $target_path"
 
             # Get owner of the directory
@@ -2301,7 +2301,7 @@ interactive_config() {
 
             # Check for existing remote installation
             local remote="$DEPLOY_USER@$DEPLOY_HOST"
-            if ssh -o ConnectTimeout=5 "$remote" "[ -d '$DEPLOY_PATH' ] && [ -f '$DEPLOY_PATH/web.py' ]" 2>/dev/null; then
+            if ssh -o ConnectTimeout=5 "$remote" "[ -d '$DEPLOY_PATH' ] && [ -f '$DEPLOY_PATH/server.py' ]" 2>/dev/null; then
                 print_warning "Existing installation found at: $DEPLOY_HOST:$DEPLOY_PATH"
                 prompt_yesno "Upgrade existing installation?" "y" DO_UPGRADE
                 if [ "$DO_UPGRADE" = "yes" ]; then
@@ -2583,7 +2583,7 @@ install_local() {
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
         do_upgrade "$target_path" "$config_dir" "$DEPLOY_USER"
-    elif [ -d "$target_path" ] && [ -f "$target_path/web.py" ]; then
+    elif [ -d "$target_path" ] && [ -f "$target_path/server.py" ]; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
@@ -2662,7 +2662,7 @@ install_local() {
         echo "  journalctl -u open-ace -f"
     else
         echo "To start the web server:"
-        echo "  cd $target_path && python3 web.py"
+        echo "  cd $target_path && python3 server.py"
     fi
     echo ""
 }
@@ -2697,7 +2697,7 @@ install_deploy() {
     # If upgrade was already confirmed in interactive_config, skip re-checking
     if [ "$DO_UPGRADE" = "yes" ]; then
         do_upgrade_remote "$remote" "$target_path"
-    elif ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/web.py' ]"; then
+    elif ssh "$remote" "[ -d '$target_path' ] && [ -f '$target_path/server.py' ]"; then
         print_warning "Existing installation found at: $target_path"
         prompt_yesno "Upgrade existing installation?" "y" upgrade
 
@@ -2737,7 +2737,7 @@ install_deploy() {
         echo "  ssh $remote 'sudo journalctl -u open-ace -f'"
     else
         echo "To start the web server on remote:"
-        echo "  ssh $remote 'cd $target_path && python3 web.py'"
+        echo "  ssh $remote 'cd $target_path && python3 server.py'"
     fi
     echo ""
 }

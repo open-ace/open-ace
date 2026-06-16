@@ -209,7 +209,7 @@ def test_2_stale_session_after_restart():
 
     # Start server again
     subprocess.Popen(
-        [PYTHON_BIN, "web.py"],
+        [PYTHON_BIN, "server.py"],
         cwd=PROJECT_ROOT,
         stdout=open("/tmp/openace_e2e_restart.log", "w"),
         stderr=subprocess.STDOUT,
@@ -468,7 +468,7 @@ def run_tests():
     if not wait_for_server(timeout=10):
         print("  ⚠ Server not running, starting...")
         subprocess.Popen(
-            [PYTHON_BIN, "web.py"],
+            [PYTHON_BIN, "server.py"],
             cwd=PROJECT_ROOT,
             stdout=open("/tmp/openace_e2e.log", "w"),
             stderr=subprocess.STDOUT,

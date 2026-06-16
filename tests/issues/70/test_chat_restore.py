@@ -44,7 +44,7 @@ def restart_service():
 
     # Kill 旧服务
     try:
-        result = subprocess.run(["pgrep", "-f", "web.py"], capture_output=True, text=True)
+        result = subprocess.run(["pgrep", "-f", "server.py"], capture_output=True, text=True)
         pids = result.stdout.strip().split("\n")
         for pid in pids:
             if pid:
@@ -56,7 +56,7 @@ def restart_service():
 
     # 启动新服务
     subprocess.Popen(
-        ["python3", "web.py"],
+        ["python3", "server.py"],
         cwd=project_root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -272,7 +272,9 @@ def test_chat_restore():
 
             # Kill 旧服务
             try:
-                result = subprocess.run(["pgrep", "-f", "web.py"], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["pgrep", "-f", "server.py"], capture_output=True, text=True
+                )
                 pids = result.stdout.strip().split("\n")
                 for pid in pids:
                     if pid:
@@ -283,7 +285,7 @@ def test_chat_restore():
 
             # 启动新服务
             subprocess.Popen(
-                ["python3", "web.py"],
+                ["python3", "server.py"],
                 cwd=project_root,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

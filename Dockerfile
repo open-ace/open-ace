@@ -117,7 +117,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    FLASK_APP=web.py \
+    FLASK_APP=server.py \
     FLASK_ENV=production
 
 # Expose port
@@ -150,7 +150,7 @@ ENV FLASK_ENV=development \
     FLASK_DEBUG=1
 
 # Run with auto-reload
-CMD ["python", "web.py"]
+CMD ["python", "server.py"]
 
 # =============================================================================
 # Migration Stage (for running database migrations)
@@ -173,6 +173,6 @@ if [ -n "$DATABASE_URL" ]; then\n\
 fi\n\
 \n\
 # Start the application\n\
-exec python web.py' > /entrypoint.sh && chmod +x /entrypoint.sh
+exec python server.py' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -32,7 +32,7 @@ python3 cli.py config init
 alembic upgrade head
 
 # 启动 Web 服务器
-python3 web.py
+python3 server.py
 
 # 访问 http://localhost:5000
 ```
@@ -264,7 +264,7 @@ cd /home/open-ace/open-ace
 
 ```bash
 # 启动 Web 服务器
-python3 web.py
+python3 server.py
 
 # 设置定时数据采集
 crontab -e
@@ -316,7 +316,7 @@ After=network.target
 Type=simple
 User=youruser
 WorkingDirectory=/path/to/open-ace
-ExecStart=/usr/bin/python3 web.py
+ExecStart=/usr/bin/python3 server.py
 Restart=always
 
 [Install]
@@ -345,7 +345,7 @@ sudo systemctl start open-ace
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/path/to/open-ace/web.py</string>
+        <string>/path/to/open-ace/server.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -570,7 +570,7 @@ Type=simple
 User=open-ace
 Group=open-ace
 WorkingDirectory=/home/open-ace/open-ace
-ExecStart=/usr/bin/python3 web.py
+ExecStart=/usr/bin/python3 server.py
 Restart=always
 
 # 多用户模式必需

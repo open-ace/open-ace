@@ -6,6 +6,8 @@ Use this checklist for GitHub settings that cannot be fully configured from file
 
 - Description: `Self-hosted enterprise AI workspace and governance platform`
 - Website: `https://www.open-ace.com`
+- Docs: `https://open-ace.github.io/open-ace-docs/docs/intro`
+- Docs repository: `https://github.com/open-ace/open-ace-docs`
 - Topics: `ai-governance`, `ai-workspace`, `enterprise-ai`, `llmops`, `flask`, `react`, `self-hosted`, `claude-code`, `qwen-code`, `codex`
 
 ## Community
