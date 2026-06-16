@@ -175,9 +175,11 @@ def get_hostname_filter_sql() -> str:
     # 2. Not placeholder format (<...>)
     # 3. Length between 1 and 253
     # 4. Not pure hexadecimal (simple check: not all lowercase hex chars)
+    # Note: In PostgreSQL, % must be escaped as %% in LIKE patterns when used with psycopg2
+    # to avoid being interpreted as a parameter placeholder.
     return """
         host_name IS NOT NULL
         AND host_name != ''
-        AND host_name NOT LIKE '<%>'
+        AND host_name NOT LIKE '<%%>'
         AND LENGTH(host_name) BETWEEN 1 AND 253
     """.strip()
