@@ -357,6 +357,7 @@ export const RequestDashboard: React.FC = () => {
                 height={300}
                 horizontal
                 usernames={userChartData.usernames}
+                language={language}
               />
             ) : (
               <EmptyState icon="bi-people" title={t('noData', language)} />
