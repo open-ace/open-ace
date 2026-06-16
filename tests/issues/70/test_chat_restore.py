@@ -272,7 +272,9 @@ def test_chat_restore():
 
             # Kill 旧服务
             try:
-                result = subprocess.run(["pgrep", "-f", "server.py"], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["pgrep", "-f", "server.py"], capture_output=True, text=True
+                )
                 pids = result.stdout.strip().split("\n")
                 for pid in pids:
                     if pid:
