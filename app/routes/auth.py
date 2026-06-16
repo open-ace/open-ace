@@ -122,7 +122,6 @@ def api_login():
             user_id=user["id"],
             username=user["username"],
             resource_type="session",
-            resource_id=token_or_error[:16],
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent", ""),
         )
@@ -164,7 +163,6 @@ def api_logout():
             user_id=session.get("user_id"),
             username=session.get("username"),
             resource_type="session",
-            resource_id=token[:16] if token else None,
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent", ""),
         )
