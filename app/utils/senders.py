@@ -13,9 +13,16 @@ SQL-layer equivalent condition (keep in sync with get_sender_filter_sql()):
 """
 
 # Invalid sender patterns - placeholder values that should be filtered out
-_INVALID_SENDER_PATTERNS = frozenset([
-    'null', 'None', 'undefined', 'N/A', 'Unknown', 'unknown',
-])
+_INVALID_SENDER_PATTERNS = frozenset(
+    [
+        "null",
+        "None",
+        "undefined",
+        "N/A",
+        "Unknown",
+        "unknown",
+    ]
+)
 
 
 def get_sender_filter_sql(column_name: str = "sender_name") -> str:
@@ -67,17 +74,17 @@ def is_valid_sender(name: str) -> bool:
     """
     if not name:
         return False
-    
+
     # Filter out placeholder values
     if name in _INVALID_SENDER_PATTERNS:
         return False
-    
+
     # Filter out placeholder format <...>
-    if name.startswith('<') and name.endswith('>'):
+    if name.startswith("<") and name.endswith(">"):
         return False
-    
+
     # Filter out Feishu user IDs (starts with "ou_" and longer than 10 chars)
     if name.startswith("ou_") and len(name) > 10:
         return False
-    
+
     return True
