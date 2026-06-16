@@ -43,19 +43,26 @@ const PLAN_OPTIONS = [
   { value: 'enterprise', label: 'Enterprise' },
 ];
 
+// Tenant API error translation map (moved outside component to avoid recreation)
+const TENANT_ERROR_MAP: Record<string, string> = {
+  'Failed to create tenant': 'failedToCreateTenant',
+  'Tenant slug already exists': 'tenantSlugExists',
+  'Failed to save tenant': 'failedToCreateTenant',
+  'Tenant not found': 'tenantNotFound',
+  'Failed to update tenant': 'failedToUpdateTenant',
+  'Failed to update tenant quota': 'failedToUpdateTenantQuota',
+  'Request body required': 'requestBodyRequired',
+  'No valid fields to update': 'noValidFieldsToUpdate',
+};
+
+const translateTenantError = (error: string, lang: Language): string => {
+  const key = TENANT_ERROR_MAP[error];
+  return key ? t(key, lang) : error;
+};
+
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const [tenants, setTenants] = useState<Tenant[]>([]);
-
-  // 翻译后端错误信息
-  const translateTenantError = (error: string, lang: Language): string => {
-    const errorMap: Record<string, string> = {
-      'Failed to create tenant': t('failedToCreateTenant', lang),
-      'Tenant slug already exists': t('tenantSlugExists', lang),
-      'Failed to save tenant': t('failedToCreateTenant', lang),
-    };
-    return errorMap[error] || error;
-  };
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
