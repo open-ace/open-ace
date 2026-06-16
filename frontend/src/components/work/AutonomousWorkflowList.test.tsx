@@ -291,8 +291,19 @@ describe('AutonomousWorkflowList', () => {
       <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
     );
 
+    // Let component state updates complete (debounce, useEffect, etc.)
+    act(() => {
+      vi.runAllTimers();
+    });
+
     const deleteButton = screen.getByTitle('Delete');
     fireEvent.click(deleteButton);
+
+    // Let confirmation state update complete
+    act(() => {
+      vi.runAllTimers();
+    });
+
     fireEvent.click(screen.getByText('Delete this workflow?'));
 
     expect(mockDeleteBatchMutate).toHaveBeenCalledWith('batch-33');
