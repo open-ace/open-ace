@@ -105,6 +105,17 @@ const PHASE_LABEL_KEYS: Record<string, string> = {
   merge: 'autoPhaseMerge',
 };
 
+const ACTIVE_STATUS_HINT_KEYS: Record<string, string> = {
+  queued: 'autoActiveHintQueued',
+  pending: 'autoActiveHintPending',
+  preparing: 'autoActiveHintPreparing',
+  planning: 'autoActiveHintPlanning',
+  developing: 'autoActiveHintDeveloping',
+  pr_review: 'autoActiveHintPrReview',
+  reporting: 'autoActiveHintReporting',
+  merging: 'autoActiveHintMerging',
+};
+
 const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
@@ -114,10 +125,28 @@ const MILESTONE_ICON_COLORS: Record<string, string> = {
   secondary: 'var(--text-tertiary)',
 };
 
+const TIMELINE_AUTO_SCROLL_THRESHOLD = 24;
+
 function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
+}
+
+function getActivityStableKey(activity: {
+  session_id: string;
+  type: 'assistant' | 'tool_use' | 'usage';
+  timestamp?: string;
+  text?: string;
+  tool_name?: string;
+}): string {
+  return [
+    activity.session_id,
+    activity.type,
+    activity.timestamp ?? '',
+    activity.tool_name ?? '',
+    (activity.text ?? '').slice(0, 40),
+  ].join(':');
 }
 
 // ── Branch data type for parallel view ──────────────────────────────
@@ -139,8 +168,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const language = useLanguage();
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen } = useAppStore();
+  const timelineBodyRef = useRef<HTMLDivElement>(null);
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [viewingSession, setViewingSession] = useState<{
     milestoneId: string;
     sessionId: string;
@@ -155,6 +186,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     title: string;
     content: string;
   } | null>(null);
+  const [contentFullscreen, setContentFullscreen] = useState(false);
   const [viewingPrDiff, setViewingPrDiff] = useState(false);
 
   const { data: timelineData, isLoading } = useWorkflowTimeline(workflow.workflow_id);
@@ -263,6 +295,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     definitionSnapshot?.resolved_issue_url,
     normalizeGithubRepoUrl,
     workflow.github_issue_number,
+    workflow.github_pr_url,
     workflow.project_repo_url,
     workflow.requirements_issue_url,
   ]);
@@ -281,7 +314,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const isForkChild = !!workflow.parent_workflow_id;
   const { data: forksData } = useWorkflowForks(workflow.workflow_id, !isForkChild);
-  const forks = forksData?.forks ?? [];
+  const forks = useMemo(() => forksData?.forks ?? [], [forksData?.forks]);
   const isForkParent = forks.length > 0;
 
   // Load fork timelines (for parent view)
@@ -302,7 +335,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     isForkChild
   );
   const parentWorkflow = parentData?.workflow;
-  const parentMilestones = parentTimelineData?.milestones ?? [];
+  const parentMilestones = useMemo(
+    () => parentTimelineData?.milestones ?? [],
+    [parentTimelineData?.milestones]
+  );
 
   // ── Compute Fork Visualization Data ───────────────────────────────
 
@@ -809,6 +845,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     PHASE_LABEL_KEYS[workflow.current_phase] ?? 'autoPhasePreparation',
     language
   );
+  const isLiveStatus = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
+  const activeStatusHintKey = ACTIVE_STATUS_HINT_KEYS[workflow.status];
+  const activeStatusHint = activeStatusHintKey ? t(activeStatusHintKey, language) : '';
   const latestMilestoneWithSession = [...milestones]
     .reverse()
     .find(
@@ -847,7 +886,74 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     setExpandedMilestone((current) => (current === milestoneId ? null : milestoneId));
   };
 
+  const closeViewingContent = () => {
+    setViewingContent(null);
+    setContentFullscreen(false);
+  };
+
+  const scrollTimelineToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const timelineBody = timelineBodyRef.current;
+    if (!timelineBody) return;
+
+    timelineBody.scrollTo({
+      top: timelineBody.scrollHeight,
+      behavior,
+    });
+    setShouldAutoScroll(true);
+  }, []);
+
+  const isTimelineAtBottom = useCallback((element: HTMLDivElement) => {
+    const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    return distanceToBottom <= TIMELINE_AUTO_SCROLL_THRESHOLD;
+  }, []);
+
+  const handleTimelineScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      setShouldAutoScroll(isTimelineAtBottom(event.currentTarget));
+    },
+    [isTimelineAtBottom]
+  );
+
   const parsedDiffFiles = useMemo(() => parseDiffFiles(diffData?.diff ?? ''), [diffData?.diff]);
+  const latestMilestoneSignature =
+    milestones.length > 0
+      ? [
+          milestones[milestones.length - 1].milestone_id,
+          milestones[milestones.length - 1].status,
+          milestones[milestones.length - 1].updated_at ?? '',
+        ].join(':')
+      : '';
+  const latestActivitySignature =
+    activities.length > 0
+      ? [
+          activities[activities.length - 1].session_id,
+          activities[activities.length - 1].type,
+          activities[activities.length - 1].timestamp ?? '',
+        ].join(':')
+      : '';
+
+  useEffect(() => {
+    setShouldAutoScroll(true);
+  }, [workflow.workflow_id]);
+
+  useEffect(() => {
+    const timelineBody = timelineBodyRef.current;
+    if (!timelineBody || !shouldAutoScroll) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      scrollTimelineToBottom('auto');
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [
+    scrollTimelineToBottom,
+    shouldAutoScroll,
+    workflow.workflow_id,
+    milestones.length,
+    latestMilestoneSignature,
+    activities.length,
+    latestActivitySignature,
+  ]);
 
   useEffect(() => {
     if (!viewingDiff) {
@@ -972,6 +1078,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       milestone.status === 'in_progress'
         ? activities.filter((activity) => milestoneSessionIds.has(activity.session_id))
         : [];
+    const visibleMilestoneActivities = [...milestoneActivities]
+      .sort((a, b) => {
+        const rawATime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const rawBTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        const aTime = Number.isFinite(rawATime) ? rawATime : 0;
+        const bTime = Number.isFinite(rawBTime) ? rawBTime : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 15);
     const hasLiveActivity = milestoneActivities.length > 0;
     const canViewChanges = !compact && !!milestone.commit_shas;
     const canViewPlanContent =
@@ -1149,8 +1264,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   <div className="timeline-milestone-inline-actions">
                     <Button
                       size="sm"
-                      variant="outline-success"
-                      className="timeline-inline-btn"
+                      variant="outline-secondary"
+                      className="timeline-inline-btn timeline-inline-btn--success"
                       onClick={() =>
                         setViewingContent({
                           title: t('autoViewPlanTitle', language),
@@ -1176,8 +1291,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   <div className="timeline-milestone-inline-actions">
                     <Button
                       size="sm"
-                      variant="outline-info"
-                      className="timeline-inline-btn"
+                      variant="outline-secondary"
+                      className="timeline-inline-btn timeline-inline-btn--info"
                       onClick={() =>
                         setViewingContent({
                           title: t('autoViewReviewTitle', language),
@@ -1216,8 +1331,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   <div className="timeline-milestone-inline-actions">
                     <Button
                       size="sm"
-                      variant="outline-primary"
-                      className="timeline-inline-btn"
+                      variant="outline-secondary"
+                      className="timeline-inline-btn timeline-inline-btn--primary"
                       onClick={() => setViewingDiff(milestone.milestone_id)}
                     >
                       <i className="bi bi-file-diff me-1"></i>
@@ -1270,11 +1385,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                         {t('autoAiActivity', language)}
                       </div>
                       <div className="timeline-milestone-activity-list">
-                        {milestoneActivities.slice(-15).map((activity, index) => {
+                        {visibleMilestoneActivities.map((activity) => {
                           const line = formatLiveActivityLine(activity);
                           return (
                             <div
-                              key={`${milestone.milestone_id}-live-${index}`}
+                              key={`${milestone.milestone_id}-live-${getActivityStableKey(activity)}`}
                               className="timeline-milestone-activity-item"
                             >
                               <span className="timeline-milestone-activity-time">
@@ -1313,8 +1428,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     {canFork && (
                       <Button
                         size="sm"
-                        variant="outline-info"
-                        className="timeline-inline-btn"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn timeline-inline-btn--primary"
                         onClick={() => setShowForkModal(milestone.milestone_id)}
                       >
                         <i className="bi bi-diagram-3 me-1"></i>
@@ -1325,7 +1440,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       <Button
                         size="sm"
                         variant="outline-secondary"
-                        className="timeline-inline-btn"
+                        className="timeline-inline-btn timeline-inline-btn--danger"
                         onClick={() => setShowCancelModal(milestone.milestone_id)}
                       >
                         <i className="bi bi-x-circle me-1"></i>
@@ -1431,7 +1546,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   return (
     <div className="timeline-shell d-flex flex-column h-100">
-      <div className="timeline-header">
+      <div className={`timeline-header ${activeStatusHint ? 'timeline-header--active' : ''}`}>
         <div className="timeline-header-top">
           <div className="timeline-header-main">
             <div className="timeline-header-title-row">
@@ -1441,15 +1556,31 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               </h5>
             </div>
             <div className="timeline-header-badges">
-              <Badge variant={workflowStatusConfig.variant}>
-                <i className={`bi ${workflowStatusConfig.icon} me-1`}></i>
+              <span
+                className={`timeline-status-pill timeline-status-pill--${workflowStatusConfig.tone} ${
+                  isLiveStatus ? 'timeline-status-pill--live' : ''
+                }`}
+              >
+                <span className="timeline-status-pill__icon">
+                  <i className={`bi ${workflowStatusConfig.icon}`}></i>
+                </span>
                 {workflowStatusLabel}
-              </Badge>
+              </span>
               {workflow.cli_tool && (
                 <span className="timeline-chip timeline-chip--neutral">
                   <i className="bi bi-tools me-1"></i>
                   {workflow.cli_tool}
                 </span>
+              )}
+              {definitionSnapshot && (
+                <button
+                  type="button"
+                  className="timeline-pill-button"
+                  onClick={() => setShowDefinitionSnapshot(true)}
+                >
+                  <i className="bi bi-file-earmark-text"></i>
+                  <span>{t('autoViewDefinition', language)}</span>
+                </button>
               )}
               {(resolvedIssueUrl || workflow.github_issue_number) &&
                 (resolvedIssueUrl ? (
@@ -1607,10 +1738,24 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
         </div>
 
+        {activeStatusHint && !showStateBanner && (
+          <div
+            className={`timeline-progress-note timeline-progress-note--${workflowStatusConfig.tone}`}
+          >
+            <span className="timeline-progress-note__indicator" aria-hidden="true"></span>
+            <div className="timeline-progress-note__copy">
+              <div className="timeline-progress-note__title">{workflowPhaseLabel}</div>
+              <div className="timeline-progress-note__message">{activeStatusHint}</div>
+            </div>
+          </div>
+        )}
+
         <div className="timeline-header-meta-grid">
-          <div className="timeline-meta-item">
+          <div className="timeline-meta-item timeline-meta-item--phase">
             <span className="timeline-meta-item__label">{t('autoCurrentPhase', language)}</span>
-            <span className="timeline-meta-item__value">{workflowPhaseLabel}</span>
+            <span className="timeline-meta-item__value timeline-meta-item__value--phase">
+              {workflowPhaseLabel}
+            </span>
           </div>
           {workflow.model && (
             <div className="timeline-meta-item">
@@ -1647,18 +1792,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         </div>
 
         <div className="timeline-output-rail">
-          <div className="timeline-output-rail__label">{t('autoTimelineOutputs', language)}</div>
           <div className="timeline-output-rail__buttons">
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              className="timeline-output-btn"
-              disabled={!definitionSnapshot}
-              onClick={() => definitionSnapshot && setShowDefinitionSnapshot(true)}
-            >
-              <i className="bi bi-file-earmark-text me-1"></i>
-              {t('autoViewDefinition', language)}
-            </Button>
             <Button
               size="sm"
               variant="outline-secondary"
@@ -1781,7 +1915,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         )}
       </div>
 
-      <div className="timeline-body flex-grow-1 overflow-auto">
+      <div
+        ref={timelineBodyRef}
+        className="timeline-body flex-grow-1 overflow-auto"
+        onScroll={handleTimelineScroll}
+      >
         {forkViz ? (
           /* ── Fork Parallel View ────────────────────────────────── */
           <div className="timeline-layout">
@@ -1887,6 +2025,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             )}
           </>
         )}
+
+        {!shouldAutoScroll && (
+          <div className="timeline-scroll-hint">
+            <Button
+              size="sm"
+              variant="primary"
+              className="timeline-scroll-hint__button"
+              onClick={() => scrollTimelineToBottom('smooth')}
+            >
+              <i className="bi bi-arrow-down-circle me-1"></i>
+              {t('autoJumpToLatest', language)}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── Modals ────────────────────────────────────────────────── */}
@@ -1966,12 +2118,36 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       {/* Markdown Content Modal (plan / review full text — Feature A & B share this) */}
       <Modal
         isOpen={!!viewingContent}
-        onClose={() => setViewingContent(null)}
+        onClose={closeViewingContent}
         title={viewingContent?.title ?? ''}
-        size="lg"
+        size="md"
+        className={`timeline-content-modal ${
+          contentFullscreen ? 'timeline-content-modal--fullscreen' : ''
+        }`}
+        scrollable={false}
       >
         {viewingContent?.content?.trim() ? (
-          <MarkdownContent content={viewingContent.content} />
+          <div className="timeline-content-modal__body">
+            <div className="timeline-content-modal__toolbar">
+              <Button
+                size="sm"
+                variant="outline-secondary"
+                className="timeline-content-modal__toggle"
+                onClick={() => setContentFullscreen((current) => !current)}
+              >
+                <i
+                  className={`bi ${contentFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
+                ></i>
+                {contentFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+              </Button>
+            </div>
+            <div className="timeline-content-modal__document">
+              <MarkdownContent
+                content={viewingContent.content}
+                className="timeline-content-markdown"
+              />
+            </div>
+          </div>
         ) : (
           <p className="text-muted mb-0">{t('autoNoContent', language)}</p>
         )}
