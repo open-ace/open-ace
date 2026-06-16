@@ -2312,6 +2312,44 @@ upgrade_deployment() {
 
     # 5. config.json is preserved (not overwritten)
 
+    # 5.5. Grant sequence permissions to DB_USER if needed
+    # PostgreSQL sequences have independent owners (pg_class.relowner).
+    # When DB_USER is not a superuser, permissions must be granted by a superuser.
+    # We query for actual superuser rather than assuming 'postgres' exists.
+    print_info "检查数据库序列权限..."
+
+    # Check if DB_USER is a superuser
+    local is_superuser=""
+    is_superuser=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+        "SELECT rolsuper FROM pg_roles WHERE rolname = '$DB_USER';" 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$is_superuser" = "t" ]; then
+        print_info "$DB_USER 是超级用户，无需额外授权"
+    else
+        # Find a superuser to grant permissions
+        local superuser=""
+        superuser=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+            "SELECT rolname FROM pg_roles WHERE rolsuper = 't' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')
+
+        if [ -n "$superuser" ]; then
+            print_info "授予序列权限给 $DB_USER（使用超级用户 $superuser）..."
+            local grant_output=""
+            grant_output=$(docker compose exec -T postgres psql -U "$superuser" -d "$DB_NAME" -c \
+                "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"$DB_USER\";" 2>&1)
+
+            if echo "$grant_output" | grep -q "GRANT"; then
+                print_success "序列权限授予成功"
+            else
+                print_warning "序列权限授予失败: $grant_output"
+                print_info "如登录失败请手动执行:"
+                print_info "  docker compose exec postgres psql -U $superuser -d $DB_NAME -c 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $DB_USER;'"
+            fi
+        else
+            print_warning "无法找到超级用户，跳过序列权限授权"
+            print_info "如登录失败请手动检查数据库权限配置"
+        fi
+    fi
+
     # 6. Recreate only open-ace container (PostgreSQL not restarted)
     print_info "重建 open-ace 容器..."
     docker compose up -d --force-recreate open-ace
