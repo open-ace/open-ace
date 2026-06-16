@@ -1088,11 +1088,6 @@ link[rel='dns-prefetch'] {
   outline: 0;
 }
 
-/* Remove margin from form-group in header controls for alignment */
-.page-header-controls .date-input-narrow.form-group {
-  margin-bottom: 0;
-}
-
 /* Dark theme date input calendar icon */
 [data-theme='dark']
   .page-header-controls
