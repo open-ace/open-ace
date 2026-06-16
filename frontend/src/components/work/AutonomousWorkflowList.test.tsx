@@ -274,6 +274,7 @@ describe('AutonomousWorkflowList', () => {
       workflow({
         workflow_id: 'wf-1',
         title: 'Task 1',
+        status: 'completed',
         batch_id: 'batch-33',
         batch_order: 1,
         batch_total: 2,
@@ -281,6 +282,7 @@ describe('AutonomousWorkflowList', () => {
       workflow({
         workflow_id: 'wf-2',
         title: 'Task 2',
+        status: 'completed',
         batch_id: 'batch-33',
         batch_order: 2,
         batch_total: 2,
