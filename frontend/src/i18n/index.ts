@@ -1198,8 +1198,7 @@ const translations: Record<Language, Translations> = {
     autoActionsSection: 'Actions',
     autoOpenLatestMilestone: 'Open latest milestone',
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
-    autoBannerWaiting:
-      'This workflow is waiting for your next instruction before continuing.',
+    autoBannerWaiting: 'This workflow is waiting for your next instruction before continuing.',
     autoBannerPlanningTimeout:
       'Planning has timed out. Extend the planning window or stop this workflow.',
     autoFilterAll: 'All',

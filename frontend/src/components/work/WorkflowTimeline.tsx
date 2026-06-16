@@ -812,16 +812,19 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const latestMilestoneWithSession = [...milestones]
     .reverse()
     .find(
-      (milestone) =>
-        milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id
+      (milestone) => milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id
     );
   const latestFailedMilestone = [...milestones]
     .reverse()
     .find((milestone) => milestone.error_message || milestone.status === 'failed');
-  const milestoneWithFinalChanges = [...milestones].reverse().find((milestone) => milestone.commit_shas);
+  const milestoneWithFinalChanges = [...milestones]
+    .reverse()
+    .find((milestone) => milestone.commit_shas);
   const stateBannerTone = workflow.error_message
     ? 'error'
-    : workflow.status === 'planning_timeout' || workflow.status === 'paused' || workflow.status === 'waiting'
+    : workflow.status === 'planning_timeout' ||
+        workflow.status === 'paused' ||
+        workflow.status === 'waiting'
       ? 'warning'
       : 'info';
   const stateBannerMessage = workflow.error_message
@@ -835,9 +838,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           : '';
   const showStateBanner = Boolean(
     workflow.error_message ||
-      workflow.status === 'planning_timeout' ||
-      workflow.status === 'paused' ||
-      workflow.status === 'waiting'
+    workflow.status === 'planning_timeout' ||
+    workflow.status === 'paused' ||
+    workflow.status === 'waiting'
   );
 
   const toggleExpandMilestone = (milestoneId: string) => {
@@ -1061,7 +1064,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       color: MILESTONE_ICON_COLORS[display.color] ?? 'var(--text-secondary)',
                     }}
                   ></i>
-                  <span className="timeline-milestone-title">{formatMilestoneTitle(milestone)}</span>
+                  <span className="timeline-milestone-title">
+                    {formatMilestoneTitle(milestone)}
+                  </span>
                 </div>
                 <div className="timeline-milestone-time">
                   <span>{milestoneTime || '--:--:--'}</span>
@@ -1079,7 +1084,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <div className="timeline-milestone-badges">
                 <span className={`timeline-chip timeline-chip--${statusTone}`}>{statusLabel}</span>
                 {milestone.round_number > 0 && (
-                  <span className="timeline-chip timeline-chip--subtle">R{milestone.round_number}</span>
+                  <span className="timeline-chip timeline-chip--subtle">
+                    R{milestone.round_number}
+                  </span>
                 )}
                 {showUsageMetrics && (
                   <>
@@ -1201,8 +1208,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       <div className="timeline-milestone-detail-chip">
                         <span>{t('autoViewChanges', language)}</span>
                         <strong>
-                          +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files}{' '}
-                          files
+                          +{diffStats.additions} / -{diffStats.deletions} / {diffStats.files} files
                         </strong>
                       </div>
                     )}
@@ -1275,7 +1281,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                                 {line.timestamp}
                               </span>
                               <i className={`bi ${line.icon}`}></i>
-                              <span className="timeline-milestone-activity-text">{line.content}</span>
+                              <span className="timeline-milestone-activity-text">
+                                {line.content}
+                              </span>
                             </div>
                           );
                         })}
@@ -1871,7 +1879,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     </div>
 
                     <div className="timeline-stack">
-                    {groupedMilestones[round].map((milestone) => renderMilestoneCard(milestone))}
+                      {groupedMilestones[round].map((milestone) => renderMilestoneCard(milestone))}
                     </div>
                   </section>
                 ))}
