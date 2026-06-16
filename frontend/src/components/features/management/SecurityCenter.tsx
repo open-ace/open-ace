@@ -245,6 +245,7 @@ export const SecurityCenter: React.FC = () => {
 
   const handleResetSettings = () => {
     setSettingsFormData({});
+    toast.success(t('resetSuccess', language));
   };
 
   // --- Audit Thresholds Handlers ---
@@ -327,6 +328,7 @@ export const SecurityCenter: React.FC = () => {
   const handleResetThresholds = () => {
     setThresholdsFormData({});
     setThresholdsErrors({});
+    toast.success(t('resetSuccess', language));
   };
 
   const currentThresholds: AuditThresholdsType = {
