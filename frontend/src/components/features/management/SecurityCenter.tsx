@@ -244,7 +244,11 @@ export const SecurityCenter: React.FC = () => {
   };
 
   const handleResetSettings = () => {
+    const hasChanges = Object.keys(settingsFormData).length > 0;
     setSettingsFormData({});
+    if (hasChanges) {
+      toast.success(t('resetSuccess', language));
+    }
   };
 
   // --- Audit Thresholds Handlers ---
@@ -325,8 +329,12 @@ export const SecurityCenter: React.FC = () => {
   };
 
   const handleResetThresholds = () => {
+    const hasChanges = Object.keys(thresholdsFormData).length > 0;
     setThresholdsFormData({});
     setThresholdsErrors({});
+    if (hasChanges) {
+      toast.success(t('resetSuccess', language));
+    }
   };
 
   const currentThresholds: AuditThresholdsType = {
