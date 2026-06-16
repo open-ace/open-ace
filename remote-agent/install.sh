@@ -212,18 +212,18 @@ NEW_URL="${SERVER_URL%/}"
 if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
     log_info "Found existing agent installation at: $EXISTING_DIR"
     log_info "Existing server: $EXISTING_SERVER"
-    
+
     if [[ "$EXISTING_SERVER" == "$NEW_URL" ]]; then
         # Same server: upgrade scenario
         log_info "Same server detected. Upgrading existing agent..."
-        
+
         # Stop systemd service if exists
         if systemctl is-active open-ace-agent >/dev/null 2>&1; then
             log_warn "Stopping systemd service..."
             sudo systemctl stop open-ace-agent 2>/dev/null || true
             log_success "Systemd service stopped"
         fi
-        
+
         # Kill processes by exact install directory match
         CURRENT_USER=$(whoami)
         pgrep -u "$CURRENT_USER" -f "python.*${EXISTING_DIR}/agent.py" 2>/dev/null | while read pid; do
@@ -231,13 +231,13 @@ if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
             kill "$pid" 2>/dev/null || true
         done
         sleep 2
-        
+
         # Force kill if still running
         pgrep -u "$CURRENT_USER" -f "python.*${EXISTING_DIR}/agent.py" 2>/dev/null | while read pid; do
             log_warn "Force killing stubborn process (PID: $pid)..."
             kill -9 "$pid" 2>/dev/null || true
         done
-        
+
         # Clean up orphan processes (user-limited, verify it's open-ace-agent)
         pgrep -u "$CURRENT_USER" -f "python.*agent.py" 2>/dev/null | while read pid; do
             if ps -p "$pid" -o args= 2>/dev/null | grep -q "open-ace-agent"; then
@@ -245,15 +245,15 @@ if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
                 kill "$pid" 2>/dev/null || true
             fi
         done
-        
+
         log_success "Existing agent stopped"
-        
+
         # Preserve machine_id
         if [[ -n "$EXISTING_MACHINE_ID" ]]; then
             log_info "Preserving machine_id: $EXISTING_MACHINE_ID"
             # Will be used when generating config
         fi
-        
+
     else
         # Different server: migration scenario - abort and prompt uninstall
         log_warn "Existing agent is configured for different server:"
@@ -262,7 +262,7 @@ if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
         log_error ""
         log_error "Cannot proceed. Please uninstall the existing agent first:"
         log_error ""
-        
+
         # Check if old server is available
         OLD_SERVER_AVAILABLE=false
         if curl -s -o /dev/null -w "%{http_code}" "${EXISTING_SERVER}/api/remote/agent/uninstall.sh" 2>/dev/null | grep -q "200"; then
@@ -271,12 +271,12 @@ if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
         else
             log_error "  # Old server is unavailable, use local uninstall:"
         fi
-        
+
         # Check if local uninstall.sh exists
         if [[ -f "${EXISTING_DIR}/uninstall.sh" ]]; then
             log_error "  bash ${EXISTING_DIR}/uninstall.sh"
         fi
-        
+
         # Manual uninstall instructions
         log_error ""
         log_error "  # Or manually:"
@@ -285,7 +285,7 @@ if [[ "$EXISTING_CONFIG_FOUND" == true ]]; then
         log_error "  rm -rf ${EXISTING_DIR}"
         log_error ""
         log_error "Then re-run the install command for the new server."
-        
+
         exit 1
     fi
 fi
