@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
+from app.utils.senders import get_sender_filter_sql
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -267,9 +268,9 @@ class DailyStatsRepository:
             conditions.append("ds.host_name = ?")
             params.append(host_name)
 
-        # Filter out Feishu Open IDs (ou_ prefix + length > 10)
+        # Filter out invalid sender names (Feishu IDs, placeholder values, etc.)
         # Keep in sync with app/utils/senders.py is_valid_sender()
-        conditions.append("NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)")
+        conditions.append(get_sender_filter_sql("ds.sender_name"))
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
@@ -508,9 +509,9 @@ class DailyStatsRepository:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-        # Feishu ID filter condition for unique_users (keep in sync with is_valid_sender)
-        # Exclude sender_name starting with "ou_" and longer than 10 chars
-        feishu_filter = "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)"
+        # Filter out invalid sender names for unique_users calculation
+        # Keep in sync with is_valid_sender
+        sender_filter = get_sender_filter_sql("sender_name")
 
         if is_postgresql():
             # PostgreSQL: use subquery for user_id resolution
@@ -523,7 +524,7 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {sender_filter} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username
@@ -544,7 +545,7 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {feishu_filter} THEN COALESCE(user_id,
+                    COUNT(DISTINCT CASE WHEN {sender_filter} THEN COALESCE(user_id,
                         (SELECT u.id FROM users u
                          WHERE sender_name LIKE (u.system_account || '-%%')
                             OR sender_name = u.username

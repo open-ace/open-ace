@@ -562,6 +562,28 @@ class TestDailyStatsRepository:
         # The filter uses NOT (...) so short ou_ names pass through
         assert "NOT (" in query
 
+    def test_get_user_totals_filters_placeholder_values(self):
+        """Verify get_user_totals() SQL filters placeholder values."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_totals()
+        query = self.db.fetch_all.call_args[0][0]
+        # Should filter placeholder values
+        assert "NOT IN" in query
+        assert "'null'" in query
+        assert "'None'" in query
+        assert "'undefined'" in query
+        assert "'N/A'" in query
+        assert "'Unknown'" in query
+        assert "'unknown'" in query
+
+    def test_get_user_totals_filters_placeholder_format(self):
+        """Verify get_user_totals() SQL filters <...> placeholder format."""
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_totals()
+        query = self.db.fetch_all.call_args[0][0]
+        # Should filter placeholder format <...>
+        assert "NOT LIKE '<%>'" in query
+
     # -------------------------------------------------------------------------
     # get_batch_aggregates - unique_users excludes Feishu IDs
     # -------------------------------------------------------------------------
