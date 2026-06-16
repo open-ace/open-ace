@@ -95,6 +95,7 @@ export type {
   DailyCost,
   OptimizationSuggestion,
   EfficiencyReport,
+  RecommendationItem,
 } from './roi';
 export { tenantApi } from './tenant';
 export type {

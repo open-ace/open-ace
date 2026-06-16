@@ -66,6 +66,66 @@ interface CachedData {
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+// Maps suggestion_type -> { title key, description key } for i18n interpolation.
+const SUGGESTION_KEY_MAP: Record<string, { title: string; desc: string }> = {
+  model_switch: { title: 'suggestionModelSwitchTitle', desc: 'suggestionModelSwitchDesc' },
+  usage_pattern: { title: 'suggestionUsagePatternTitle', desc: 'suggestionUsagePatternDesc' },
+  quota_adjustment: {
+    title: 'suggestionQuotaAdjustmentTitle',
+    desc: 'suggestionQuotaAdjustmentDesc',
+  },
+  tool_consolidation: {
+    title: 'suggestionToolConsolidationTitle',
+    desc: 'suggestionToolConsolidationDesc',
+  },
+  time_optimization: {
+    title: 'suggestionTimeOptimizationTitle',
+    desc: 'suggestionTimeOptimizationDesc',
+  },
+  token_optimization: {
+    title: 'suggestionTokenOptimizationTitle',
+    desc: 'suggestionTokenOptimizationDesc',
+  },
+};
+
+// Maps suggestion_type -> ordered action item i18n keys.
+const ACTION_KEY_MAP: Record<string, string[]> = {
+  model_switch: ['actionModelSwitch1', 'actionModelSwitch2', 'actionModelSwitch3'],
+  time_optimization: [
+    'actionTimeOptimization1',
+    'actionTimeOptimization2',
+    'actionTimeOptimization3',
+  ],
+  quota_adjustment: ['actionQuotaAdjustment1', 'actionQuotaAdjustment2', 'actionQuotaAdjustment3'],
+  tool_consolidation: [
+    'actionToolConsolidation1',
+    'actionToolConsolidation2',
+    'actionToolConsolidation3',
+  ],
+  token_optimization: [
+    'actionTokenOptimization1',
+    'actionTokenOptimization2',
+    'actionTokenOptimization3',
+  ],
+};
+
+// Maps priority/impact enum value -> i18n key.
+const PRIORITY_KEY_MAP: Record<string, string> = {
+  high: 'priorityHigh',
+  medium: 'priorityMedium',
+  low: 'priorityLow',
+};
+
+// Maps recommendation_type -> i18n key.
+const RECOMMENDATION_KEY_MAP: Record<string, string> = {
+  low_efficiency: 'recommendationLowEfficiency',
+  low_output_ratio: 'recommendationLowOutputRatio',
+  high_cost_per_request: 'recommendationHighCostPerRequest',
+  high_avg_tokens: 'recommendationHighAvgTokens',
+  high_model_concentration: 'recommendationHighModelConcentration',
+  healthy: 'recommendationHealthy',
+};
+
 // Skeleton components for ROI page
 const ROIMetricsSkeleton: React.FC = () => (
   <div className="row g-3 mb-4">
@@ -104,6 +164,9 @@ export const ROIAnalysis: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [selectedTool, setSelectedTool] = useState('');
 
+  // Expanded action-item rows (by suggestion_id)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
   // Track if this is the initial load
   const isInitialLoad = useRef(true);
 
@@ -123,48 +186,77 @@ export const ROIAnalysis: React.FC = () => {
     setStartDate(start.toISOString().split('T')[0]);
   }, []);
 
-  // Translate suggestion based on suggestion_type
+  // Translate suggestion title/description based on suggestion_type + dynamic params.
   const translateSuggestion = useCallback(
     (s: OptimizationSuggestion) => {
-      const typeKeyMap: Record<string, { title: string; desc: string }> = {
-        model_switch: {
-          title: 'suggestionModelSwitchTitle',
-          desc: 'suggestionModelSwitchDesc',
-        },
-        usage_pattern: {
-          title: 'suggestionUsagePatternTitle',
-          desc: 'suggestionUsagePatternDesc',
-        },
-        quota_adjustment: {
-          title: 'suggestionQuotaAdjustmentTitle',
-          desc: 'suggestionQuotaAdjustmentDesc',
-        },
-        tool_consolidation: {
-          title: 'suggestionToolConsolidationTitle',
-          desc: 'suggestionToolConsolidationDesc',
-        },
-        time_optimization: {
-          title: 'suggestionTimeOptimizationTitle',
-          desc: 'suggestionTimeOptimizationDesc',
-        },
-        token_optimization: {
-          title: 'suggestionTokenOptimizationTitle',
-          desc: 'suggestionTokenOptimizationDesc',
-        },
-      };
-
-      const keys = typeKeyMap[s.suggestion_type];
-      if (keys) {
-        return {
-          ...s,
-          title: t(keys.title, language),
-          description: t(keys.desc, language),
-        };
+      const keys = SUGGESTION_KEY_MAP[s.suggestion_type];
+      if (!keys) {
+        return s; // Unknown suggestion_type: keep backend strings
       }
-      return s; // Fallback to original if no mapping found
+      const params = s.params ?? {};
+      // Render the localized template, then fall back to the backend-supplied
+      // string if a {placeholder} could not be filled (e.g. older backend that
+      // does not emit params). This guarantees no literal {x} ever leaks.
+      const localize = (key: string, fallback: string) => {
+        const result = t(key, language, params);
+        return /\{[a-z_]+\}/.test(result) ? fallback : result;
+      };
+      return {
+        ...s,
+        title: localize(keys.title, s.title),
+        description: localize(keys.desc, s.description),
+      };
     },
     [language]
   );
+
+  // Localize a priority/impact enum value (e.g. 'high' -> 'High' / '高').
+  const translatePriority = useCallback(
+    (value: string) => {
+      const key = PRIORITY_KEY_MAP[value];
+      return key ? t(key, language) : value;
+    },
+    [language]
+  );
+
+  // Build localized action items for a suggestion type using its dynamic params.
+  const getActionItems = useCallback(
+    (suggestionType: string, params: Record<string, string | number>) => {
+      const actionKeys = ACTION_KEY_MAP[suggestionType];
+      if (!actionKeys) return [];
+      return actionKeys.map((key) => t(key, language, params));
+    },
+    [language]
+  );
+
+  // Localize structured efficiency recommendation items, falling back to the
+  // deprecated string list when structured items are unavailable.
+  const translateRecommendations = useCallback(
+    (eff: EfficiencyReport | null) => {
+      if (!eff) return [] as string[];
+      if (eff.recommendation_items && eff.recommendation_items.length > 0) {
+        return eff.recommendation_items.map((item) => {
+          const key = RECOMMENDATION_KEY_MAP[item.type];
+          return key ? t(key, language, item.params ?? {}) : item.type;
+        });
+      }
+      return eff.recommendations ?? [];
+    },
+    [language]
+  );
+
+  // Toggle an expanded action-item row.
+  const toggleExpand = useCallback((suggestionId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(suggestionId)) {
+        next.delete(suggestionId);
+      } else {
+        next.add(suggestionId);
+      }
+      return next;
+    });
+  }, []);
 
   // Fetch data with caching
   const fetchData = useCallback(
@@ -524,7 +616,7 @@ export const ROIAnalysis: React.FC = () => {
             <div className="col-md-6">
               <h6>{t('recommendations', language)}</h6>
               <ul className="list-unstyled">
-                {(efficiency.recommendations ?? []).map((rec, index) => (
+                {translateRecommendations(efficiency).map((rec, index) => (
                   <li key={index} className="mb-1">
                     <i className="bi bi-lightbulb text-warning me-2" />
                     {rec}
@@ -552,24 +644,61 @@ export const ROIAnalysis: React.FC = () => {
               <tbody>
                 {suggestions.map((s, index) => {
                   const translated = translateSuggestion(s);
+                  // Badge variant uses the RAW enum value (never the localized
+                  // label), so the color stays correct across languages.
+                  const priorityValue = translated.priority ?? translated.impact ?? 'low';
+                  const actions = getActionItems(
+                    translated.suggestion_type,
+                    translated.params ?? {}
+                  );
+                  const expanded = expandedIds.has(translated.suggestion_id);
                   return (
-                    <tr key={index}>
-                      <td>
-                        <strong>{translated.title}</strong>
-                      </td>
-                      <td>{translated.description}</td>
-                      <td>
-                        <span
-                          className={cn(
-                            'badge',
-                            `bg-${getImpactVariant(translated.impact ?? translated.priority ?? 'low')}`
-                          )}
-                        >
-                          {translated.impact ?? translated.priority ?? 'low'}
-                        </span>
-                      </td>
-                      <td>${(translated.potential_savings ?? 0).toFixed(2)}</td>
-                    </tr>
+                    <React.Fragment key={translated.suggestion_id || index}>
+                      <tr>
+                        <td>
+                          <div className="d-flex align-items-center gap-2">
+                            {actions.length > 0 && (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-link p-0 text-decoration-none"
+                                onClick={() => toggleExpand(translated.suggestion_id)}
+                                aria-expanded={expanded}
+                                aria-label={t(expanded ? 'hideActions' : 'showActions', language)}
+                              >
+                                <i
+                                  className={cn(
+                                    'bi',
+                                    expanded ? 'bi-chevron-down' : 'bi-chevron-right'
+                                  )}
+                                />
+                              </button>
+                            )}
+                            <strong>{translated.title}</strong>
+                          </div>
+                        </td>
+                        <td>{translated.description}</td>
+                        <td>
+                          <span className={cn('badge', `bg-${getImpactVariant(priorityValue)}`)}>
+                            {translatePriority(priorityValue)}
+                          </span>
+                        </td>
+                        <td>${(translated.potential_savings ?? 0).toFixed(2)}</td>
+                      </tr>
+                      {expanded && actions.length > 0 && (
+                        <tr className="table-light">
+                          <td colSpan={4}>
+                            <div className="small">
+                              <div className="fw-semibold mb-1">{t('actionItems', language)}</div>
+                              <ul className="mb-0 ps-3">
+                                {actions.map((a, i) => (
+                                  <li key={i}>{a}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

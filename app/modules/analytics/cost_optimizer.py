@@ -57,6 +57,9 @@ class OptimizationSuggestion:
     current_cost: float = 0.0
     optimized_cost: float = 0.0
     savings_percentage: float = 0.0
+    # Language-neutral interpolation params for frontend localization
+    # (e.g. {"model": "...", "cheaper_model": "...", "avg_tokens": "..."}).
+    params: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
@@ -70,6 +73,7 @@ class OptimizationSuggestion:
             "potential_savings": round(self.potential_savings, 2),
             "priority": self.priority,
             "action_items": self.action_items,
+            "params": self.params,
             "affected_users": self.affected_users,
             "affected_tools": self.affected_tools,
             "implementation_effort": self.implementation_effort,
@@ -282,6 +286,12 @@ class CostOptimizer:
                                     "Keep complex tasks on current model",
                                     "Implement automatic model selection based on task complexity",
                                 ],
+                                params={
+                                    "model": model,
+                                    "cheaper_model": cheaper_model,
+                                    "avg_tokens": f"{avg_tokens:.0f}",
+                                    "threshold": self.SHORT_REQUEST_THRESHOLD,
+                                },
                                 affected_tools=(
                                     [row.get("tool_name")] if row.get("tool_name") else []
                                 ),
@@ -318,7 +328,7 @@ class CostOptimizer:
                         suggestion_id="time_optimization_peak",
                         suggestion_type=OptimizationType.TIME_OPTIMIZATION.value,
                         title="Optimize usage time distribution",
-                        description=f"Peak hours ({', '.join(peak_hours_list)}:00) concentrate {peak_percentage:.1f}% of requests. "
+                        description=f"Peak hours ({', '.join(str(h) for h in peak_hours_list)}:00) concentrate {peak_percentage:.1f}% of requests. "
                         "Distributing usage more evenly can improve response times.",
                         potential_savings=0,  # Time optimization doesn't directly save money
                         priority=Priority.MEDIUM.value,
@@ -327,6 +337,10 @@ class CostOptimizer:
                             "Implement request queuing for non-urgent tasks",
                             "Monitor response times and adjust scheduling",
                         ],
+                        params={
+                            "peak_hours": ", ".join(str(h) for h in peak_hours_list),
+                            "peak_percentage": f"{peak_percentage:.1f}",
+                        },
                     )
                 )
 
@@ -363,6 +377,10 @@ class CostOptimizer:
                             "Consider quota pooling or reallocation",
                             "Implement quota expiration and recycling",
                         ],
+                        params={
+                            "low_usage_count": len(low_usage_users),
+                            "usage_threshold": int(self.LOW_USAGE_THRESHOLD * 100),
+                        },
                         affected_users=low_usage_users[:10],
                     )
                 )
@@ -390,6 +408,9 @@ class CostOptimizer:
                         "Negotiate volume discounts with providers",
                         "Consider standardizing on primary tools",
                     ],
+                    params={
+                        "tool_count": len(tools),
+                    },
                     affected_tools=list(tools),
                 )
             )
@@ -423,6 +444,9 @@ class CostOptimizer:
                             "Remove unnecessary context from prompts",
                             "Use prompt caching where available",
                         ],
+                        params={
+                            "output_ratio": f"{output_ratio*100:.1f}",
+                        },
                     )
                 )
 
@@ -633,9 +657,13 @@ class CostOptimizer:
         avg_cost_per_request: float,
         avg_tokens_per_request: float,
         model_distribution: dict,
-    ) -> list[str]:
+    ) -> list[dict[str, Any]]:
         """
         Generate efficiency optimization recommendations.
+
+        Produces language-neutral structured items ``{"type", "params"}`` so the
+        frontend can localize them. ``recommendation_type`` values are stable
+        identifiers consumed by the i18n layer (e.g. ``low_efficiency``).
 
         Args:
             efficiency_score: Overall efficiency score.
@@ -645,25 +673,42 @@ class CostOptimizer:
             model_distribution: Model usage distribution.
 
         Returns:
-            List of recommendation strings.
+            List of structured recommendation items.
         """
-        recommendations = []
+        recommendations: list[dict[str, Any]] = []
 
         # Low efficiency score
         if efficiency_score < 70:
-            recommendations.append("效率评分较低，建议检查使用模式优化成本")
+            recommendations.append(
+                {
+                    "type": "low_efficiency",
+                    "params": {"efficiency_score": f"{efficiency_score:.1f}"},
+                }
+            )
 
         # Low output ratio
         if output_ratio < 10:
-            recommendations.append("输出比例较低，建议优化提示词减少输入 token 使用")
+            recommendations.append(
+                {"type": "low_output_ratio", "params": {"output_ratio": f"{output_ratio:.1f}"}}
+            )
 
         # High cost per request
         if avg_cost_per_request > 0.10:
-            recommendations.append("单请求成本较高，考虑使用更经济的模型")
+            recommendations.append(
+                {
+                    "type": "high_cost_per_request",
+                    "params": {"avg_cost_per_request": f"{avg_cost_per_request:.4f}"},
+                }
+            )
 
         # High average tokens per request
         if avg_tokens_per_request > 5000:
-            recommendations.append("平均请求 token 较高，可考虑拆分任务或优化提示词")
+            recommendations.append(
+                {
+                    "type": "high_avg_tokens",
+                    "params": {"avg_tokens_per_request": f"{avg_tokens_per_request:.0f}"},
+                }
+            )
 
         # High model concentration
         if model_distribution:
@@ -673,12 +718,18 @@ class CostOptimizer:
                 top_share = model_distribution[top_model] / total_tokens
                 if top_share > 0.9:
                     recommendations.append(
-                        f"模型使用高度集中于 {top_model}，建议探索其他模型以降低风险"
+                        {
+                            "type": "high_model_concentration",
+                            "params": {
+                                "top_model": top_model,
+                                "top_share": f"{top_share*100:.1f}",
+                            },
+                        }
                     )
 
         # Default positive recommendation
         if not recommendations:
-            recommendations.append("使用模式健康，继续保持良好习惯")
+            recommendations.append({"type": "healthy", "params": {}})
 
         return recommendations
 
@@ -733,13 +784,17 @@ class CostOptimizer:
         waste_percentage = self._calculate_waste_percentage(total_input, total_output)
 
         # Generate recommendations
-        recommendations = self._generate_recommendations(
+        recommendation_items = self._generate_recommendations(
             efficiency_score,
             output_ratio,
             avg_cost_per_request,
             avg_tokens_per_request,
             model_distribution,
         )
+
+        # Deprecated: flat string list kept for backward compatibility with older
+        # clients. New clients should localize via "recommendation_items".
+        recommendations = [self._recommendation_fallback(item) for item in recommendation_items]
 
         return {
             "period_days": days,
@@ -757,5 +812,31 @@ class CostOptimizer:
             "overall_efficiency": round(efficiency_score, 1),
             "avg_cost_per_request": round(avg_cost_per_request, 6),
             "waste_percentage": round(waste_percentage, 1),
+            # Structured, language-neutral items for frontend localization
+            "recommendation_items": recommendation_items,
+            # Deprecated string list (language-neutral English baseline)
             "recommendations": recommendations,
         }
+
+    # English fallback renderers keyed by recommendation type. These mirror the
+    # i18n templates on the frontend and exist only to keep the deprecated
+    # "recommendations" string list populated and language-neutral.
+    _RECOMMENDATION_FALLBACKS = {
+        "low_efficiency": "Efficiency score is low ({efficiency_score}); review usage patterns to optimize cost.",
+        "low_output_ratio": "Output ratio is low ({output_ratio}%); optimize prompts to reduce input token usage.",
+        "high_cost_per_request": "Cost per request is high (${avg_cost_per_request}); consider a more economical model.",
+        "high_avg_tokens": "Average tokens per request is high ({avg_tokens_per_request}); split tasks or optimize prompts.",
+        "high_model_concentration": "Usage is highly concentrated on {top_model} ({top_share}%); explore other models to reduce risk.",
+        "healthy": "Usage patterns are healthy; keep up the good practices.",
+    }
+
+    def _recommendation_fallback(self, item: dict[str, Any]) -> str:
+        """Render a structured recommendation item into a language-neutral string."""
+        template = self._RECOMMENDATION_FALLBACKS.get(item.get("type", ""))
+        if template is None:
+            return str(item.get("type", ""))
+        params = item.get("params", {}) or {}
+        try:
+            return template.format(**params)
+        except (KeyError, IndexError):
+            return template

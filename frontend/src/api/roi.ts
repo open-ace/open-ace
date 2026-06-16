@@ -89,6 +89,8 @@ export interface OptimizationSuggestion {
   priority: 'high' | 'medium' | 'low';
   impact?: 'high' | 'medium' | 'low';
   action_items: string[];
+  /** Language-neutral interpolation params for localized title/description. */
+  params?: Record<string, string | number>;
   affected_users: number[];
   affected_tools: string[];
   implementation_effort: string;
@@ -98,6 +100,12 @@ export interface OptimizationSuggestion {
   created_at: string;
   type?: string;
   details?: Record<string, unknown>;
+}
+
+/** Structured, language-neutral efficiency recommendation for i18n. */
+export interface RecommendationItem {
+  type: string;
+  params?: Record<string, string | number>;
 }
 
 export interface EfficiencyReport {
@@ -113,6 +121,9 @@ export interface EfficiencyReport {
   overall_efficiency?: number;
   avg_cost_per_request?: number;
   waste_percentage?: number;
+  /** Structured recommendation items (preferred for localization). */
+  recommendation_items?: RecommendationItem[];
+  /** @deprecated Language-neutral fallback string list; use recommendation_items. */
   recommendations?: string[];
 }
 
