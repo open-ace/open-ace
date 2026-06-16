@@ -2068,7 +2068,7 @@ build_docker_image() {
 # Returns: 0 if deployment exists, 1 if not
 detect_existing_deployment() {
     local found_container=""
-    
+
     # Check for existing containers with either name
     for container_name in "open-ace" "open-ace-web"; do
         if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${container_name}$"; then
@@ -2076,7 +2076,7 @@ detect_existing_deployment() {
             break
         fi
     done
-    
+
     if [ -z "$found_container" ]; then
         return 1
     fi
