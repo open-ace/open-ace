@@ -72,6 +72,10 @@ def upgrade() -> None:
 
     conn = op.get_bind()
 
+    # 先扩展 alembic_version 列长度，避免版本号太长导致迁移失败
+    # 长格式版本号如 "20260615_063_fix_boolean_retroactive" 有 36 字符，超过默认 varchar(32)
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(64)")
+
     # ============================================
     # registration_tokens: is_consumed -> BOOLEAN
     # ============================================
