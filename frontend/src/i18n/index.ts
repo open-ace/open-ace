@@ -3367,6 +3367,10 @@ const translations: Record<Language, Translations> = {
     japanese: '日本語',
     korean: '韓国語',
 
+    // Request labels
+    requests: 'リクエスト',
+    requestsMessages: 'リクエスト / メッセージ',
+
     // ROI Analysis
     overallEfficiency: '全体効率',
     avgCostPerRequest: '平均コスト/リクエスト',
@@ -4406,6 +4410,10 @@ const translations: Record<Language, Translations> = {
     chinese: '중국어',
     japanese: '일본어',
     korean: '한국어',
+
+    // Request labels
+    requests: '요청',
+    requestsMessages: '요청 / 메시지',
 
     // ROI Analysis
     overallEfficiency: '전체 효율',

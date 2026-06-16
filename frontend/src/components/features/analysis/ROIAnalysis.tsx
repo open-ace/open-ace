@@ -126,6 +126,10 @@ const RECOMMENDATION_KEY_MAP: Record<string, string> = {
   healthy: 'recommendationHealthy',
 };
 
+// Detects an unfilled {placeholder} (incl. digits) so we can fall back to a
+// backend-supplied string and never leak a literal {x} to users.
+const PLACEHOLDER_LEAK = /\{[a-z0-9_]+\}/;
+
 // Skeleton components for ROI page
 const ROIMetricsSkeleton: React.FC = () => (
   <div className="row g-3 mb-4">
@@ -199,7 +203,7 @@ export const ROIAnalysis: React.FC = () => {
       // does not emit params). This guarantees no literal {x} ever leaks.
       const localize = (key: string, fallback: string) => {
         const result = t(key, language, params);
-        return /\{[a-z_]+\}/.test(result) ? fallback : result;
+        return PLACEHOLDER_LEAK.test(result) ? fallback : result;
       };
       return {
         ...s,
@@ -220,11 +224,20 @@ export const ROIAnalysis: React.FC = () => {
   );
 
   // Build localized action items for a suggestion type using its dynamic params.
+  // Falls back to the backend-supplied action_items[i] if a {placeholder} cannot
+  // be filled, mirroring translateSuggestion's leak protection.
   const getActionItems = useCallback(
-    (suggestionType: string, params: Record<string, string | number>) => {
+    (
+      suggestionType: string,
+      params: Record<string, string | number>,
+      fallbackItems: string[] = []
+    ) => {
       const actionKeys = ACTION_KEY_MAP[suggestionType];
       if (!actionKeys) return [];
-      return actionKeys.map((key) => t(key, language, params));
+      return actionKeys.map((key, i) => {
+        const result = t(key, language, params);
+        return PLACEHOLDER_LEAK.test(result) && fallbackItems[i] ? fallbackItems[i] : result;
+      });
     },
     [language]
   );
@@ -649,7 +662,8 @@ export const ROIAnalysis: React.FC = () => {
                   const priorityValue = translated.priority ?? translated.impact ?? 'low';
                   const actions = getActionItems(
                     translated.suggestion_type,
-                    translated.params ?? {}
+                    translated.params ?? {},
+                    translated.action_items
                   );
                   const expanded = expandedIds.has(translated.suggestion_id);
                   return (

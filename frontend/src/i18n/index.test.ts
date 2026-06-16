@@ -251,5 +251,15 @@ describe('i18n', () => {
         });
       });
     });
+
+    // Common request labels used across multiple dashboards/charts; must exist in
+    // all four languages or the raw key (e.g. "requests") leaks into the UI.
+    const commonLabelKeys = ['requests', 'requestsMessages'];
+    it.each(languages)('should have common request labels in %s', (lang) => {
+      commonLabelKeys.forEach((key) => {
+        const translation = t(key, lang);
+        expect(translation, `missing common label "${key}" in ${lang}`).not.toBe(key);
+      });
+    });
   });
 });
