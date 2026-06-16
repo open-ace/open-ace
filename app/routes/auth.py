@@ -14,6 +14,7 @@ import filetype
 from flask import Blueprint, jsonify, make_response, request
 
 from app.auth.decorators import public_endpoint
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__)
 auth_service = AuthService()
 user_repo = UserRepository()
+audit_logger = AuditLogger()
 
 
 def _validate_avatar_url(user_id: int, avatar_url: Optional[str]) -> Optional[str]:
@@ -114,7 +116,29 @@ def api_login():
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")
 
+        # Log successful login
+        audit_logger.log_action(
+            action=AuditAction.LOGIN,
+            user_id=user["id"],
+            username=user["username"],
+            resource_type="session",
+            resource_id=token_or_error[:16],
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+
         return response
+
+    # Log failed login attempt
+    audit_logger.log_action(
+        action=AuditAction.LOGIN_FAILED,
+        username=username,
+        resource_type="session",
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent", ""),
+        success=False,
+        error_message=token_or_error,
+    )
 
     return jsonify({"error": token_or_error}), 401
 
@@ -127,8 +151,23 @@ def api_logout():
         "Authorization", ""
     ).replace("Bearer ", "")
 
+    # Get session info before logout for audit logging
+    session = auth_service.get_session(token) if token else None
+
     if token:
         auth_service.logout(token)
+
+    # Log logout action
+    if session:
+        audit_logger.log_action(
+            action=AuditAction.LOGOUT,
+            user_id=session.get("user_id"),
+            username=session.get("username"),
+            resource_type="session",
+            resource_id=token[:16] if token else None,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", ""),
+        )
 
     response = make_response(jsonify({"success": True}))
     response.delete_cookie("session_token")
@@ -306,12 +345,23 @@ def api_change_password():
         return jsonify({"error": "Current password and new password required"}), 400
 
     user_id = int(session_or_error.get("user_id", 0))
+    username = session_or_error.get("username")
 
     success, error = auth_service.change_password(
         user_id, current_password, new_password, verify_password, hash_password
     )
 
     if success:
+        # Log password change
+        audit_logger.log_action(
+            action=AuditAction.USER_PASSWORD_CHANGE,
+            user_id=user_id,
+            username=username,
+            resource_type="user",
+            resource_id=str(user_id),
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", ""),
+        )
         return jsonify({"success": True, "message": "Password changed successfully"})
 
     return jsonify({"error": error}), 400
