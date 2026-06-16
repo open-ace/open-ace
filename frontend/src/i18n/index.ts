@@ -975,6 +975,11 @@ const translations: Record<Language, Translations> = {
     issuerUrl: 'Issuer URL',
     registerProvider: 'Register Provider',
     register: 'Register',
+    clientIdRequired: 'Client ID is required',
+    clientSecretRequired: 'Client secret is required',
+    providerNameRequired: 'Provider name is required',
+    registerFailed: 'Failed to register provider',
+    providerRegistered: 'Provider registered successfully',
     confirmDisableProvider: 'Are you sure you want to disable this provider?',
 
     // Insights
@@ -2333,6 +2338,11 @@ const translations: Record<Language, Translations> = {
     issuerUrl: 'Issuer URL',
     registerProvider: '注册提供者',
     register: '注册',
+    clientIdRequired: '客户端 ID 为必填项',
+    clientSecretRequired: '客户端密钥为必填项',
+    providerNameRequired: '提供者名称为必填项',
+    registerFailed: '注册提供者失败',
+    providerRegistered: '提供者注册成功',
     confirmDisableProvider: '确定要禁用此提供者吗？',
 
     // Insights

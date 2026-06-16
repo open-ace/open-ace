@@ -60,6 +60,8 @@ export const SSOSettings: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [isRegistering, setIsRegistering] = useState(false);
   const [formData, setFormData] = useState<RegisterProviderRequest>({
     name: '',
     provider_type: 'oauth2',
@@ -171,12 +173,36 @@ export const SSOSettings: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    setRegisterError(null);
+
+    // Validate required fields
+    if (!formData.client_id.trim()) {
+      setRegisterError(t('clientIdRequired', language));
+      return;
+    }
+
+    if (!formData.client_secret.trim()) {
+      setRegisterError(t('clientSecretRequired', language));
+      return;
+    }
+
+    // Custom provider requires name
+    if (!formData.predefined && !formData.name.trim()) {
+      setRegisterError(t('providerNameRequired', language));
+      return;
+    }
+
+    setIsRegistering(true);
     try {
       await ssoApi.registerProvider(formData);
       handleCloseModal();
       fetchProviders();
+      success(t('providerRegistered', language));
     } catch (err) {
-      console.error('Failed to register provider:', err);
+      const errorMsg = err instanceof Error ? err.message : t('registerFailed', language);
+      setRegisterError(errorMsg);
+    } finally {
+      setIsRegistering(false);
     }
   };
 
@@ -346,12 +372,19 @@ export const SSOSettings: React.FC = () => {
             <Button variant="secondary" onClick={handleCloseModal}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleSubmit}>
+            <Button variant="primary" onClick={handleSubmit} loading={isRegistering}>
               {t('register', language)}
             </Button>
           </>
         }
       >
+        {/* Error message */}
+        {registerError && (
+          <div className="alert alert-danger mb-3">
+            <i className="bi bi-exclamation-circle me-2" />
+            {registerError}
+          </div>
+        )}
         <div className="row g-3">
           {/* Predefined Provider Selection */}
           <div className="col-12">
