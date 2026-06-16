@@ -2288,6 +2288,31 @@ upgrade_deployment() {
 
     # 5. config.json is preserved (not overwritten)
 
+    # 5.5. Grant sequence permissions if database owner differs from current DB_USER
+    # This handles the case where database was created with a different user (e.g., ace)
+    # and later upgraded with a new DB_USER (e.g., ivyent)
+    print_info "检查数据库序列权限..."
+    local db_owner=""
+    db_owner=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+        "SELECT pg_catalog.pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$DB_NAME';" 2>/dev/null | tr -d '[:space:]')
+
+    if [ -n "$db_owner" ] && [ "$db_owner" != "$DB_USER" ]; then
+        print_info "数据库所有者为 $db_owner，授予序列权限给 $DB_USER"
+        # Try to grant using database owner first, then fallback to postgres superuser
+        if docker compose exec -T postgres psql -U "$db_owner" -d "$DB_NAME" -c \
+            "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"$DB_USER\";" 2>/dev/null; then
+            print_success "序列权限授予成功"
+        elif docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -c \
+            "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO \"$DB_USER\";" 2>/dev/null; then
+            print_success "序列权限授予成功（使用超级用户）"
+        else
+            print_warning "序列权限授予失败，如登录失败请手动执行:"
+            print_info "  docker compose exec postgres psql -U $db_owner -d $DB_NAME -c 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $DB_USER;'"
+        fi
+    else
+        print_info "数据库所有者与 DB_USER 一致，无需额外授权"
+    fi
+
     # 6. Recreate only open-ace container (PostgreSQL not restarted)
     print_info "重建 open-ace 容器..."
     docker compose up -d --force-recreate open-ace
