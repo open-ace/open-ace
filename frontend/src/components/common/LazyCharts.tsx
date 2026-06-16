@@ -12,6 +12,7 @@
 
 import React, { Suspense } from 'react';
 import { Skeleton } from './Loading';
+import type { Language } from '@/i18n';
 
 // Loading fallback component
 const ChartSkeleton: React.FC<{ height?: number }> = ({ height = 300 }) => (
@@ -57,6 +58,8 @@ export interface BarChartProps {
   className?: string;
   unit?: 'none' | 'K' | 'M' | 'B';
   usernames?: string[];
+  /** Language for tooltip translation */
+  language?: Language;
 }
 
 export interface PieChartProps {

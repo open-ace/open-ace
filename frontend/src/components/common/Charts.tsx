@@ -20,6 +20,7 @@ import {
 } from 'chart.js';
 import { Line, Bar, Pie, Doughnut } from 'react-chartjs-2';
 import { cn } from '@/utils';
+import { t, type Language } from '@/i18n';
 
 // Register Chart.js components
 ChartJS.register(
@@ -223,6 +224,8 @@ interface BarChartProps {
   unit?: 'none' | 'K' | 'M' | 'B';
   /** User names for tooltip display (used when labels are ranking numbers) */
   usernames?: string[];
+  /** Language for tooltip translation */
+  language?: Language;
 }
 
 export const BarChart: React.FC<BarChartProps> = ({
@@ -236,6 +239,7 @@ export const BarChart: React.FC<BarChartProps> = ({
   className,
   unit = 'none',
   usernames,
+  language,
 }) => {
   // Helper function to format values based on unit
   const formatValue = (value: number): number => {
@@ -293,10 +297,10 @@ export const BarChart: React.FC<BarChartProps> = ({
             return context[0]?.label ?? '';
           },
           label: (context: TooltipItem<'bar'>) => {
-            // For horizontal bar charts with usernames, show "请求数: value"
+            // For horizontal bar charts with usernames, show translated "Requests: value"
             if (horizontal && usernames) {
               const value = context.parsed?.x;
-              return `请求数: ${value?.toLocaleString() ?? 0}`;
+              return `${t('requests', language)}: ${value?.toLocaleString() ?? 0}`;
             }
             // Default format
             const label = context.dataset?.label ?? '';

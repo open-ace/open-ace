@@ -708,6 +708,7 @@ const translations: Record<Language, Translations> = {
 
     // Alert Management
     totalAlerts: 'Total Alerts',
+    alertRules: 'Alert Rules',
     unreadAlerts: 'Unread Alerts',
     criticalAlerts: 'Critical Alerts',
     unreadCount: 'Unread Count',
@@ -853,11 +854,27 @@ const translations: Record<Language, Translations> = {
     efficiencyReport: 'Efficiency Report',
     overallEfficiency: 'Overall Efficiency',
     avgCostPerRequest: 'Avg Cost/Request',
+    avgTokensPerRequest: 'Avg Tokens/Request',
     wastePercentage: 'Waste %',
     optimizationSuggestions: 'Optimization Suggestions',
     potentialSavings: 'Potential Savings',
     noSuggestions: 'No optimization suggestions available',
     impact: 'Impact',
+
+    // ROI Optimization Suggestions
+    suggestionModelSwitchTitle: 'Switch to cheaper model for simple tasks',
+    suggestionModelSwitchDesc: 'Consider using a more cost-effective model for shorter requests',
+    suggestionUsagePatternTitle: 'Optimize usage patterns',
+    suggestionUsagePatternDesc: 'Adjust usage patterns for better efficiency',
+    suggestionQuotaAdjustmentTitle: 'Adjust quota allocation',
+    suggestionQuotaAdjustmentDesc:
+      'Review and optimize quota limits for better resource utilization',
+    suggestionToolConsolidationTitle: 'Consolidate tool usage',
+    suggestionToolConsolidationDesc: 'Reduce redundant tool usage to improve efficiency',
+    suggestionTimeOptimizationTitle: 'Optimize timing',
+    suggestionTimeOptimizationDesc: 'Schedule tasks during off-peak hours for better performance',
+    suggestionTokenOptimizationTitle: 'Reduce token waste',
+    suggestionTokenOptimizationDesc: 'Minimize unnecessary token consumption',
 
     // Tenant Management
     totalTenants: 'Total Tenants',
@@ -1992,6 +2009,7 @@ const translations: Record<Language, Translations> = {
 
     // Alert Management
     totalAlerts: '总告警数',
+    alertRules: '告警规则',
     unreadAlerts: '未读告警',
     criticalAlerts: '严重告警',
     unreadCount: '未读数量',
@@ -2134,11 +2152,26 @@ const translations: Record<Language, Translations> = {
     efficiencyReport: '效率报告',
     overallEfficiency: '整体效率',
     avgCostPerRequest: '平均成本/请求',
+    avgTokensPerRequest: '平均 Tokens/请求',
     wastePercentage: '浪费百分比',
     optimizationSuggestions: '优化建议',
     potentialSavings: '潜在节省',
     noSuggestions: '暂无优化建议',
     impact: '影响',
+
+    // ROI Optimization Suggestions
+    suggestionModelSwitchTitle: '切换到更便宜的模型处理简单任务',
+    suggestionModelSwitchDesc: '考虑使用更经济的模型处理较短的请求',
+    suggestionUsagePatternTitle: '优化使用模式',
+    suggestionUsagePatternDesc: '调整使用模式以提高效率',
+    suggestionQuotaAdjustmentTitle: '调整配额分配',
+    suggestionQuotaAdjustmentDesc: '审查并优化配额限制以提高资源利用率',
+    suggestionToolConsolidationTitle: '整合工具使用',
+    suggestionToolConsolidationDesc: '减少冗余的工具使用以提高效率',
+    suggestionTimeOptimizationTitle: '优化时间安排',
+    suggestionTimeOptimizationDesc: '将任务安排在非高峰时段以获得更好的性能',
+    suggestionTokenOptimizationTitle: '减少 Token 浪费',
+    suggestionTokenOptimizationDesc: '最小化不必要的 Token 消耗',
 
     // Tenant Management
     totalTenants: '总租户数',
