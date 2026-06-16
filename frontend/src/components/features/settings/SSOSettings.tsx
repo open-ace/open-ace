@@ -8,13 +8,15 @@
  * - Enable/Disable providers
  * - Enable/Disable SSO globally
  * - Auto-provision users setting
+ * - Admin users can select tenant to manage
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
+import { canManageAllTenants } from '@/utils/permissions';
 import {
   Card,
   Button,
@@ -33,6 +35,7 @@ import {
   type SSOProvider,
   type PredefinedProvider,
   type RegisterProviderRequest,
+  type Tenant,
 } from '@/api';
 
 const PREDEFINED_PROVIDERS = [
@@ -46,8 +49,17 @@ const PREDEFINED_PROVIDERS = [
 export const SSOSettings: React.FC = () => {
   const language = useLanguage();
   const { user } = useAuth();
-  const tenantId = user?.tenant_id;
   const { success, error: toastError } = useToast();
+
+  // Admin tenant selection
+  const isAdmin = canManageAllTenants(user);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const selectedTenantIdRef = useRef<number | null>(null);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+
+  // Compute effective tenant ID
+  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
 
   const [registeredProviders, setRegisteredProviders] = useState<SSOProvider[]>([]);
   const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>([]);
@@ -76,9 +88,38 @@ export const SSOSettings: React.FC = () => {
     issuer_url: '',
   });
 
+  // Fetch tenants list for admin users
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    setIsLoadingTenants(true);
+    tenantApi
+      .listTenants({ status: 'active', limit: 100 })
+      .then((result) => {
+        setTenants(result.tenants);
+        // Use ref to check, avoid triggering useEffect again
+        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
+          selectedTenantIdRef.current = result.tenants[0].id;
+          setSelectedTenantId(result.tenants[0].id);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch tenants:', err);
+        toastError(t('failedToLoadTenants', language));
+      })
+      .finally(() => {
+        setIsLoadingTenants(false);
+      });
+  }, [isAdmin, language, toastError]);
+
+  // Sync ref with state
+  useEffect(() => {
+    selectedTenantIdRef.current = selectedTenantId;
+  }, [selectedTenantId]);
+
   // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
-    if (!tenantId) {
+    if (!effectiveTenantId) {
       setIsLoading(false);
       return;
     }
@@ -86,7 +127,7 @@ export const SSOSettings: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await ssoApi.getProviders(tenantId);
+      const result = await ssoApi.getProviders(effectiveTenantId);
       setRegisteredProviders(result.registered);
       setPredefinedProviders(result.predefined as PredefinedProvider[]);
     } catch (err) {
@@ -96,14 +137,14 @@ export const SSOSettings: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [tenantId]);
+  }, [effectiveTenantId]);
 
   // Fetch tenant settings
   useEffect(() => {
-    if (!tenantId) return;
+    if (!effectiveTenantId) return;
 
     tenantApi
-      .getTenant(tenantId)
+      .getTenant(effectiveTenantId)
       .then((tenant) => {
         const settings = tenant.settings as Record<string, unknown>;
         setSsoEnabled(Boolean(settings?.sso_enabled ?? false));
@@ -112,7 +153,7 @@ export const SSOSettings: React.FC = () => {
       .catch((err) => {
         console.error('Failed to fetch tenant settings:', err);
       });
-  }, [tenantId]);
+  }, [effectiveTenantId]);
 
   useEffect(() => {
     fetchProviders();
@@ -142,14 +183,14 @@ export const SSOSettings: React.FC = () => {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId) {
+    if (!effectiveTenantId) {
       toastError(t('tenantIdRequired', language));
       return;
     }
 
     setIsSaving(true);
     try {
-      await tenantApi.updateSettings(tenantId, {
+      await tenantApi.updateSettings(effectiveTenantId, {
         sso_enabled: ssoEnabled,
         auto_provision_users: autoProvision,
       });
@@ -216,21 +257,36 @@ export const SSOSettings: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  // Loading state for tenant list (admin only)
+  if (isAdmin && isLoadingTenants) {
     return <Loading size="lg" text={t('loading', language)} />;
   }
 
-  if (!tenantId) {
+  // No effective tenant - show appropriate message
+  if (!effectiveTenantId) {
     return (
       <div className="sso-settings">
         <h2>{t('ssoSettings', language)}</h2>
-        <EmptyState
-          icon="bi-building"
-          title={t('noTenantConfigured', language)}
-          description={t('ssoRequiresTenant', language)}
-        />
+        {isAdmin && tenants.length === 0 && (
+          <EmptyState
+            icon="bi-building"
+            title={t('noTenantsAvailable', language)}
+            description={t('ssoRequiresTenant', language)}
+          />
+        )}
+        {!isAdmin && (
+          <EmptyState
+            icon="bi-building"
+            title={t('noTenantConfigured', language)}
+            description={t('ssoRequiresTenant', language)}
+          />
+        )}
       </div>
     );
+  }
+
+  if (isLoading) {
+    return <Loading size="lg" text={t('loading', language)} />;
   }
 
   if (error) {
@@ -253,6 +309,28 @@ export const SSOSettings: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Tenant Selector (Admin only) */}
+      {isAdmin && tenants.length > 0 && (
+        <Card className="mb-3">
+          <div className="d-flex align-items-center gap-3">
+            <label className="form-label mb-0 fw-semibold">
+              <i className="bi bi-building me-2" />
+              {t('selectTenant', language)}
+            </label>
+            <Select
+              options={tenants.map((t) => ({
+                value: String(t.id),
+                label: t.name,
+              }))}
+              value={String(selectedTenantId ?? '')}
+              onChange={(value) => setSelectedTenantId(Number(value))}
+              className="flex-grow-1"
+            />
+            <small className="text-muted ms-2">{t('tenantSelectionHint', language)}</small>
+          </div>
+        </Card>
+      )}
 
       {/* SSO Configuration Form */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
@@ -288,7 +366,12 @@ export const SSOSettings: React.FC = () => {
             </div>
           </div>
           <div className="mt-3">
-            <Button variant="primary" type="submit" loading={isSaving} disabled={!tenantId}>
+            <Button
+              variant="primary"
+              type="submit"
+              loading={isSaving}
+              disabled={!effectiveTenantId}
+            >
               <i className="bi bi-check-lg me-1" />
               {t('save', language)}
             </Button>
