@@ -134,7 +134,10 @@ function truncateInlineText(text: string, max = 220): string {
   return `${normalized.slice(0, max).trimEnd()}...`;
 }
 
-function truncateDiffText(text: string, max = MAX_DIFF_VIEW_CHARS): {
+function truncateDiffText(
+  text: string,
+  max = MAX_DIFF_VIEW_CHARS
+): {
   content: string;
   isTruncated: boolean;
 } {
@@ -2245,9 +2248,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     key={file.id}
                     type="button"
                     className={`workflow-timeline-diff-file ${
-                      selectedPrDiffFile.id === file.id
-                        ? 'workflow-timeline-diff-file-active'
-                        : ''
+                      selectedPrDiffFile.id === file.id ? 'workflow-timeline-diff-file-active' : ''
                     }`}
                     onClick={() => setSelectedPrDiffFileId(file.id)}
                   >
@@ -2261,7 +2262,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       <span className="workflow-timeline-diff-file-path">{file.path}</span>
                     </div>
                     <span className="workflow-timeline-diff-file-stats">
-                      {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
+                      {file.additions > 0 && (
+                        <span className="text-success">+{file.additions}</span>
+                      )}
                       {file.deletions > 0 && <span className="text-danger">-{file.deletions}</span>}
                     </span>
                   </button>
@@ -2302,7 +2305,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     <i
                       className={`bi ${diffFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
                     />
-                    {diffFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)}
+                    {diffFullscreen
+                      ? t('exitFullscreen', language)
+                      : t('enterFullscreen', language)}
                   </button>
                 </div>
                 <div className="workflow-timeline-diff-code">
