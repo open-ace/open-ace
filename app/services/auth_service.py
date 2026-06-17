@@ -306,9 +306,13 @@ class AuthService:
         if not password_verify_func(current_password, user.get("password_hash", "")):
             return False, "Current password is incorrect"
 
-        # Validate new password
-        if len(new_password) < 8:
-            return False, "New password must be at least 8 characters"
+        # Validate new password with security policy
+        from app.utils.validators import validate_password
+
+        settings = _get_security_settings()
+        is_valid, error_msg = validate_password(new_password, policy_settings=settings)
+        if not is_valid:
+            return False, error_msg
 
         if new_password == current_password:
             return False, "New password must be different from current password"
@@ -428,3 +432,7 @@ class AuthService:
             return False, {"error": "Admin access required"}
 
         return True, session
+
+
+# Public export for security settings (with 60-second cache)
+get_security_settings_cached = _get_security_settings
