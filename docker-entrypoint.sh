@@ -275,8 +275,11 @@ openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *
 openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *
 
-# Preserve environment variables for sudo env_keep passing (Issue #1083: add NODE_PATH)
-Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH NODE_PATH"
+# Preserve environment variables for sudo env_keep passing.
+# NODE_PATH is intentionally NOT preserved: it is a Node module-resolution
+# directory, not a binary path, and the app does not set it (spawn ENOENT is
+# handled via PATH). Keeping it was dead config contradicting webui_manager.
+Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui
 

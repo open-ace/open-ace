@@ -694,9 +694,10 @@ class WebUIManager:
         # Ensure PATH is complete and includes all necessary directories
         # This fixes spawn ENOENT issues where node executable cannot be found (Issue #1083)
         child_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
-        # Add NODE_PATH to explicitly specify node executable location
-        # This helps qwen-code-webui spawn subprocesses correctly
-        child_env["NODE_PATH"] = "/usr/bin/node"
+        # NOTE: NODE_PATH is intentionally NOT set here. NODE_PATH is a
+        # module-resolution directory, not a node binary path; pointing it at
+        # "/usr/bin/node" does not help spawn ENOENT (that is PATH's job, handled
+        # above) and can interfere with Node module resolution. (Issue #1083)
 
         # Build command based on platform
         if webui_dir:

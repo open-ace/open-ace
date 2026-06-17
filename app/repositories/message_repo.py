@@ -892,39 +892,58 @@ class MessageRepository:
                 merged[tool] = {**row, "tool_name": tool}
 
         return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
-        """
-        Get conversation statistics summary without fetching full history.
 
-        This is a lightweight query for batch analysis that only returns
-        aggregate statistics, avoiding the expensive GROUP BY operation
-        with full conversation history retrieval.
+    def get_conversation_stats_summary(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+    ) -> dict:
+        """
+        Real conversation statistics summary — single source of truth for session stats.
+
+        Computes real distinct conversation count, total messages, multi-turn ratio and
+        per-conversation averages directly from ``daily_messages`` (grain: 1 row = 1
+        message). Supports date-range filtering so the batch and standalone analysis
+        endpoints share one consistent scope. This replaces the previous
+        ``unique_dates * unique_tools`` synthetic approximation.
 
         Args:
+            start_date: Optional start date filter (YYYY-MM-DD, inclusive).
+            end_date: Optional end date filter (YYYY-MM-DD, inclusive).
             host_name: Optional host name filter.
 
         Returns:
-            Dict: Conversation statistics summary.
+            Dict: Conversation statistics summary. ``avg_conversation_length`` is kept
+            as a backward-compatible alias of ``average_messages_per_conversation``
+            for existing consumers (calculateHealthScore, insights, exports).
         """
-        conditions = []
-        params = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
+        # Session identifier expression — defined once and reused by the filter,
+        # the distinct-count aggregate and the multi-turn sub-query so the three
+        # cannot drift apart.
+        session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
 
-        # Add condition to filter out records without any session ID
-        id_filter = (
-            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
-        )
-        if conditions:
-            where_clause = f"WHERE {' AND '.join(conditions)} AND {id_filter}"
-        else:
-            where_clause = f"WHERE {id_filter}"
+        # Only count records that carry a session identifier
+        conditions.append(f"{session_expr} IS NOT NULL")
+        where_clause = f"WHERE {' AND '.join(conditions)}"
 
-        # Use a single aggregate query instead of GROUP BY + LIMIT
+        # Aggregate query: real distinct conversations, total messages, total tokens
         query = f"""
             SELECT
-                COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id)) as total_conversations,
+                COUNT(DISTINCT {session_expr}) as total_conversations,
                 COUNT(*) as total_messages,
                 SUM(tokens_used) as total_tokens,
                 SUM(input_tokens) as total_input_tokens,
@@ -935,33 +954,54 @@ class MessageRepository:
 
         result = self.db.fetch_one(query, tuple(params))
 
-        if result:
-            total_conversations = result.get("total_conversations", 0) or 0
-            total_messages = result.get("total_messages", 0) or 0
-            total_tokens = result.get("total_tokens", 0) or 0
-
+        if not result:
             return {
-                "total_conversations": total_conversations,
-                "total_messages": total_messages,
-                "total_tokens": total_tokens,
-                "average_messages_per_conversation": (
-                    total_messages / total_conversations if total_conversations > 0 else 0
-                ),
-                "average_tokens_per_conversation": (
-                    total_tokens / total_conversations if total_conversations > 0 else 0
-                ),
-                "avg_conversation_length": (
-                    total_messages / total_conversations if total_conversations > 0 else 0
-                ),
+                "total_conversations": 0,
+                "total_messages": 0,
+                "total_tokens": 0,
+                "multi_turn_session_count": 0,
+                "multi_turn_ratio": 0,
+                "average_messages_per_conversation": 0,
+                "average_tokens_per_conversation": 0,
+                "avg_conversation_length": 0,
             }
 
+        total_conversations = result.get("total_conversations", 0) or 0
+        total_messages = result.get("total_messages", 0) or 0
+        total_tokens = result.get("total_tokens", 0) or 0
+
+        # Multi-turn conversations: those containing >= 2 messages
+        multi_turn_session_count = 0
+        if total_conversations > 0:
+            multi_query = f"""
+                SELECT COUNT(*) as multi_turn_count FROM (
+                    SELECT 1
+                    FROM daily_messages
+                    {where_clause}
+                    GROUP BY {session_expr}
+                    HAVING COUNT(*) >= 2
+                ) AS multi_turn_conversations
+            """
+            mt_result = self.db.fetch_one(multi_query, tuple(params))
+            multi_turn_session_count = mt_result.get("multi_turn_count", 0) or 0 if mt_result else 0
+
+        multi_turn_ratio = (
+            multi_turn_session_count / total_conversations if total_conversations > 0 else 0
+        )
+        average_messages = total_messages / total_conversations if total_conversations > 0 else 0
+
         return {
-            "total_conversations": 0,
-            "total_messages": 0,
-            "total_tokens": 0,
-            "average_messages_per_conversation": 0,
-            "average_tokens_per_conversation": 0,
-            "avg_conversation_length": 0,
+            "total_conversations": total_conversations,
+            "total_messages": total_messages,
+            "total_tokens": total_tokens,
+            "multi_turn_session_count": multi_turn_session_count,
+            "multi_turn_ratio": multi_turn_ratio,
+            "average_messages_per_conversation": average_messages,
+            "average_tokens_per_conversation": (
+                total_tokens / total_conversations if total_conversations > 0 else 0
+            ),
+            # Backward-compatible alias consumed by calculateHealthScore, insights, exports
+            "avg_conversation_length": average_messages,
         }
 
     def get_daily_range_lightweight(
