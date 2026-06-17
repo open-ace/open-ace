@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { cn, createMatcherConfig } from '@/utils';
+import { cn, createMatcherConfig, getDefaultDateRange } from '@/utils';
 import {
   useConversationHistory,
   useConversationTimeline,
@@ -97,13 +97,21 @@ const TableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
 
 export const ConversationHistory: React.FC = () => {
   const language = useLanguage();
+  // Default 30-day range (matches the other analysis pages). Computed once and
+  // shared between the initial state and handleReset so both paths use a single
+  // source of truth. Local dates avoid the UTC-offset pitfall around midnight
+  // in UTC+ timezones.
+  const defaultDateRange = useMemo(() => getDefaultDateRange(), []);
   const [filters, setFilters] = useState<{
     startDate?: string;
     endDate?: string;
     tool?: string;
     host?: string;
     sender?: string;
-  }>({});
+  }>({
+    startDate: defaultDateRange.start,
+    endDate: defaultDateRange.end,
+  });
   const [page, setPage] = useState(1);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -194,7 +202,14 @@ export const ConversationHistory: React.FC = () => {
   };
 
   const handleReset = () => {
-    setFilters({});
+    // Re-apply the default 30-day range instead of clearing to {}. Clearing
+    // would leave the date pickers blank while the backend silently falls back
+    // to its 90-day window — the same UI/query mismatch fixed for the initial
+    // load. See defaultDateRange above.
+    setFilters({
+      startDate: defaultDateRange.start,
+      endDate: defaultDateRange.end,
+    });
     setPage(1);
   };
 

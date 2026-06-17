@@ -16,6 +16,13 @@ export {
   formatChartDate,
 } from './format';
 export {
+  getDefaultDateRange,
+  toLocalDateString,
+  DEFAULT_DATE_RANGE_DAYS,
+  type DateRange,
+} from './dateRange';
+
+export {
   onMetric,
   getMetrics,
   clearMetrics,
