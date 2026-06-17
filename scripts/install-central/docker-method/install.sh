@@ -2077,8 +2077,41 @@ detect_existing_deployment() {
         fi
     done
 
+    # If no container found, try to detect deployment by config file
+    # This handles the case where containers were removed (docker compose down)
+    # but config files and data volumes still exist
     if [ -z "$found_container" ]; then
-        return 1
+        print_info "未检测到容器，检查是否存在配置文件..."
+
+        # Scan common deployment directories for config.json
+        local found_config=false
+        for scan_dir in \
+            "/home/open-ace/open-ace" \
+            "/home/ivyent/open-ace" \
+            "/opt/open-ace" \
+            "/root/open-ace" \
+            "/tools/open-ace" \
+            "$DEPLOY_DIR"; do
+            if [ -f "$scan_dir/config/config.json" ]; then
+                DEPLOY_DIR="$scan_dir"
+                print_success "检测到配置文件: $scan_dir/config/config.json"
+                found_config=true
+                break
+            fi
+        done
+
+        if [ "$found_config" = false ]; then
+            # No existing deployment found
+            return 1
+        fi
+
+        # Verify the deployment directory exists
+        if [ ! -d "$DEPLOY_DIR" ]; then
+            print_warning "部署目录不存在: $DEPLOY_DIR"
+            return 1
+        fi
+
+        return 0
     fi
 
     # Get deployment directory from container mount info
