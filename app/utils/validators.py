@@ -110,7 +110,8 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
     Args:
         password: Password to validate.
         policy_settings: Optional dict from security_settings for policy validation.
-                         If None, only basic length check is performed.
+                         If None, only a basic length check (default minimum 8)
+                         is performed.
 
     Returns:
         tuple: (is_valid, error_message)
@@ -118,23 +119,26 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
     if not password:
         return False, "Password is required"
 
-    # Basic checks (always applied)
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters"
     if len(password) > 128:
         return False, "Password must be less than 128 characters"
 
-    # Policy-based checks (if settings provided)
-    if policy_settings:
-        try:
-            min_length = int(policy_settings.get("password_min_length", 8))
-        except (TypeError, ValueError):
-            # Guard against malformed policy values (None / non-numeric) that
-            # would otherwise surface as a 500 from this helper.
-            min_length = 8
-        if len(password) < min_length:
-            return False, f"Password must be at least {min_length} characters"
+    # Minimum length is solely policy-driven so an admin-configured minimum
+    # fully governs the rule — there is no hardcoded floor that could contradict
+    # it. Defaults to 8 when no policy is supplied, preserving prior behavior.
+    try:
+        min_length = int((policy_settings or {}).get("password_min_length", 8))
+    except (TypeError, ValueError):
+        # Guard against malformed policy values (None / non-numeric) that
+        # would otherwise surface as a 500 from this helper.
+        min_length = 8
+    # Floor at 1 so an admin misconfiguration (0 / negative) cannot silently
+    # disable the minimum-length requirement entirely.
+    min_length = max(min_length, 1)
+    if len(password) < min_length:
+        return False, f"Password must be at least {min_length} characters"
 
+    # Complexity checks only apply when a policy is supplied.
+    if policy_settings:
         if policy_settings.get("password_require_uppercase") and not re.search(r"[A-Z]", password):
             return False, "Password must contain uppercase letters"
         if policy_settings.get("password_require_lowercase") and not re.search(r"[a-z]", password):
