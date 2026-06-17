@@ -397,7 +397,9 @@ export const Dashboard: React.FC = () => {
         {/* Global chart filter bar - controls both trend and distribution charts */}
         <div className="chart-filter-bar bg-light rounded p-2 mb-3">
           <div className="d-flex align-items-center page-header-controls">
-            <span className="text-muted small">{t('tool', language)}:</span>
+            <span className="text-muted small me-2" style={{ whiteSpace: 'nowrap' }}>
+              {t('tool', language)}:
+            </span>
             <Select
               options={toolOptions}
               value={selectedTool}
