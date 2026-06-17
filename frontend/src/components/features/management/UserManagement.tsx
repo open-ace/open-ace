@@ -66,8 +66,8 @@ export const UserManagement: React.FC = () => {
   ];
 
   const activeStatusOptions = [
-    { value: 'true', label: 'Active' },
-    { value: 'false', label: 'Inactive' },
+    { value: 'true', label: t('active', language) },
+    { value: 'false', label: t('inactive', language) },
   ];
 
   const handleOpenCreate = () => {
