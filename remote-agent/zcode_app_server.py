@@ -96,6 +96,7 @@ class ZCodeAppServerSession:
         self._turn_done = threading.Event()
         self._turn_done.set()
         self._worker: threading.Thread | None = None
+        self.last_send_error: str | None = None
 
         self._reader_thread = threading.Thread(
             target=self._read_loop,
