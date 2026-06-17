@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -239,9 +239,15 @@ class DataRetentionManager:
                 logger.error(error_msg)
                 report.errors.append(error_msg)
 
-        # Save report
+        # Persist the report. Surface persistence failures into report.errors so
+        # they are visible to the caller (and frontend) instead of being silent.
         if not dry_run:
-            self._save_report(report)
+            try:
+                self._save_report(report)
+            except Exception as e:
+                error_msg = f"Failed to save cleanup report: {e}"
+                logger.error(error_msg)
+                report.errors.append(error_msg)
 
         return report
 
@@ -292,7 +298,10 @@ class DataRetentionManager:
         # Delete records
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,))
+            cursor.execute(
+                adapt_sql(f"DELETE FROM {table_name} WHERE {time_col} < ?"),
+                (cutoff,),
+            )
             conn.commit()
             deleted = cursor.rowcount
 
@@ -335,12 +344,14 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    f"""
+                    adapt_sql(
+                        f"""
                     UPDATE daily_messages
                     SET sender = 'ANONYMIZED',
                         recipient = 'ANONYMIZED'
                     WHERE {time_col} < ?
-                """,
+                """
+                    ),
                     (cutoff,),
                 )
                 conn.commit()
@@ -350,13 +361,15 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    f"""
+                    adapt_sql(
+                        f"""
                     UPDATE audit_logs
                     SET username = 'ANONYMIZED',
                         ip_address = NULL,
                         user_agent = NULL
                     WHERE {time_col} < ?
-                """,
+                """
+                    ),
                     (cutoff,),
                 )
                 conn.commit()
@@ -369,23 +382,25 @@ class DataRetentionManager:
         return cast("int", anonymized)
 
     def _save_report(self, report: RetentionReport) -> None:
-        """Save retention report to database."""
+        """Save retention report to database.
+
+        Raises on failure so the caller (run_cleanup) can surface it into the
+        returned report's errors instead of silently dropping it.
+        """
         import json
 
-        try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
                     """
-                    INSERT INTO retention_history (timestamp, report_data)
-                    VALUES (?, ?)
-                """,
-                    (report.timestamp, json.dumps(report.to_dict())),
-                )
-                conn.commit()
-
-        except Exception as e:
-            logger.error(f"Failed to save retention report: {e}")
+                INSERT INTO retention_history (timestamp, report_data)
+                VALUES (?, ?)
+            """
+                ),
+                (report.timestamp, json.dumps(report.to_dict())),
+            )
+            conn.commit()
 
     def get_retention_history(self, limit: int = 30) -> list[dict[str, Any]]:
         """

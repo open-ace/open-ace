@@ -637,7 +637,7 @@ def _create_pg_tables(db):
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_daily_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 date TEXT NOT NULL,
                 requests INTEGER DEFAULT 0 NOT NULL,
