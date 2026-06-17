@@ -61,10 +61,13 @@ class TestSessionStatsConvergence:
             "avg_conversation_length": 2.0,
         }
         today = datetime.now().strftime("%Y-%m-%d")
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        result = svc.get_conversation_stats()  # no args -> default 7-day window
+        result = svc.get_conversation_stats()  # no args -> default 30-day window
 
         args, kwargs = msg.get_conversation_stats_summary.call_args
+        # Lock in that the default window aligns to 30 days (the PR's convergence goal).
+        assert kwargs["start_date"] == thirty_days_ago
         assert kwargs["end_date"] == today
         assert result["avg_conversation_length"] == 2.0
 

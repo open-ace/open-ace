@@ -926,9 +926,8 @@ class MessageRepository:
         conditions: list[str] = []
         params: list[Any] = []
 
-        # Session identifier expression — defined once and reused by the filter,
-        # the distinct-count aggregate and the multi-turn sub-query so the three
-        # cannot drift apart.
+        # Session identifier expression — defined once and reused by the WHERE
+        # filter and the GROUP BY so the two cannot drift apart.
         session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
 
         if start_date:
@@ -945,16 +944,24 @@ class MessageRepository:
         conditions.append(f"{session_expr} IS NOT NULL")
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
-        # Aggregate query: real distinct conversations, total messages, total tokens
+        # Single-pass aggregation: group once per session, then roll the
+        # per-session counts up into totals + multi-turn count in ONE query.
+        # This avoids a second full scan of daily_messages for the multi-turn
+        # figure (previously a separate GROUP BY ... HAVING sub-query).
         query = f"""
             SELECT
-                COUNT(DISTINCT {session_expr}) as total_conversations,
-                COUNT(*) as total_messages,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens
-            FROM daily_messages
-            {where_clause}
+                COUNT(*) AS total_conversations,
+                SUM(msg_cnt) AS total_messages,
+                SUM(tok) AS total_tokens,
+                SUM(CASE WHEN msg_cnt >= 2 THEN 1 ELSE 0 END) AS multi_turn_session_count
+            FROM (
+                SELECT {session_expr} AS sid,
+                       COUNT(*) AS msg_cnt,
+                       SUM(tokens_used) AS tok
+                FROM daily_messages
+                {where_clause}
+                GROUP BY {session_expr}
+            ) AS per_session
         """
 
         result = self.db.fetch_one(query, tuple(params))
@@ -974,21 +981,7 @@ class MessageRepository:
         total_conversations = result.get("total_conversations", 0) or 0
         total_messages = result.get("total_messages", 0) or 0
         total_tokens = result.get("total_tokens", 0) or 0
-
-        # Multi-turn conversations: those containing >= 2 messages
-        multi_turn_session_count = 0
-        if total_conversations > 0:
-            multi_query = f"""
-                SELECT COUNT(*) as multi_turn_count FROM (
-                    SELECT 1
-                    FROM daily_messages
-                    {where_clause}
-                    GROUP BY {session_expr}
-                    HAVING COUNT(*) >= 2
-                ) AS multi_turn_conversations
-            """
-            mt_result = self.db.fetch_one(multi_query, tuple(params))
-            multi_turn_session_count = mt_result.get("multi_turn_count", 0) or 0 if mt_result else 0
+        multi_turn_session_count = result.get("multi_turn_session_count", 0) or 0
 
         multi_turn_ratio = (
             multi_turn_session_count / total_conversations if total_conversations > 0 else 0

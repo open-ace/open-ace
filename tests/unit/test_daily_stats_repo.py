@@ -262,7 +262,8 @@ class TestDailyStatsRepository:
             {"unique_dates": 10},
             {"unique_tools": 5},
         ]
-        result = self.repo.get_conversation_stats()
+        with pytest.warns(DeprecationWarning):
+            result = self.repo.get_conversation_stats()
         assert result["total_messages"] == 100
         assert result["total_tokens"] == 5000
         assert result["total_conversations"] == 50  # 10 * 5
@@ -275,7 +276,8 @@ class TestDailyStatsRepository:
             {"unique_dates": 5},
             {"unique_tools": 2},
         ]
-        result = self.repo.get_conversation_stats(host_name="host1")
+        with pytest.warns(DeprecationWarning):
+            result = self.repo.get_conversation_stats(host_name="host1")
         assert result["total_conversations"] == 10  # 5 * 2
         assert result["total_messages"] == 50
         # Verify host_name filter is applied
@@ -285,7 +287,8 @@ class TestDailyStatsRepository:
 
     def test_get_conversation_stats_no_result(self):
         self.db.fetch_one.return_value = None
-        result = self.repo.get_conversation_stats()
+        with pytest.warns(DeprecationWarning):
+            result = self.repo.get_conversation_stats()
         assert result["total_conversations"] == 0
         assert result["total_messages"] == 0
         assert result["total_tokens"] == 0
@@ -299,7 +302,8 @@ class TestDailyStatsRepository:
             {"unique_dates": 0},
             {"unique_tools": 0},
         ]
-        result = self.repo.get_conversation_stats()
+        with pytest.warns(DeprecationWarning):
+            result = self.repo.get_conversation_stats()
         assert result["total_conversations"] == 0
         assert result["average_messages_per_conversation"] == 0
 
