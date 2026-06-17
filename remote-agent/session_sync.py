@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +35,11 @@ QWEN_PROJECTS_DIR = QWEN_DIR / "projects"
 
 CODEX_DIR = Path.home() / ".codex"
 CODEX_SESSIONS_DIR = CODEX_DIR / "sessions"
+
+# ZCode stores sessions in a SQLite database (not JSONL files like the other CLIs).
+ZCODE_DIR = Path.home() / ".zcode"
+ZCODE_DB_PATH = ZCODE_DIR / "cli" / "db" / "db.sqlite"
+ZCODE_SYNC_TOOL_NAME = "zcode"
 
 # File to track which sessions have already been synced
 SYNC_STATE_FILE = Path.home() / ".open-ace-agent" / "session_sync_state.json"
@@ -540,6 +547,209 @@ class CodexSession:
         }
 
 
+class ZcodeSession:
+    """Parsed ZCode session read from the ZCode SQLite database.
+
+    Unlike the Claude/Qwen/Codex parsers (which read JSONL files), ZCode stores
+    sessions relationally in ``~/.zcode/cli/db/db.sqlite``. This class queries
+    the ``session``, ``message``, ``part`` and ``turn_usage`` tables to reconstruct
+    a sync payload with the same shape the server expects.
+
+    Only ``interactive`` sessions are parsed; ``subagent_child`` rows are skipped
+    by the scanner.
+    """
+
+    def __init__(self, session_id: str, db_path: str | Path):
+        self.session_id = session_id
+        self.db_path = str(db_path)
+        self.messages: list[dict[str, Any]] = []
+        self.model: str | None = None
+        self.project_path: str | None = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.message_count = 0
+        self.first_timestamp: str | None = None
+        self.last_timestamp: str | None = None
+
+    def _connect(self) -> sqlite3.Connection:
+        """Open a read-only connection to avoid blocking ZCode's WAL writer."""
+        return sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+
+    def parse(self) -> bool:
+        """Query the DB and populate message/token metadata. Returns True if usable."""
+        try:
+            conn = self._connect()
+        except sqlite3.Error as e:
+            logger.debug("Cannot open ZCode DB %s: %s", self.db_path, e)
+            return False
+
+        try:
+            # 1. Session metadata (directory, timestamps).
+            row = conn.execute(
+                "SELECT directory, time_created, time_updated " "FROM session WHERE id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            self.project_path = row[0]
+            created_ms = row[1]
+            updated_ms = row[2]
+            if created_ms:
+                self.first_timestamp = _ms_to_iso(created_ms)
+            if updated_ms:
+                self.last_timestamp = _ms_to_iso(updated_ms)
+
+            # 2. Messages ordered by time, with their text parts aggregated.
+            msg_rows = conn.execute(
+                "SELECT m.id, m.time_created, m.data, "
+                "GROUP_CONCAT(p.data) AS parts_data "
+                "FROM message m LEFT JOIN part p ON p.message_id = m.id "
+                "WHERE m.session_id = ? "
+                "GROUP BY m.id ORDER BY m.time_created",
+                (self.session_id,),
+            ).fetchall()
+
+            for msg_id, time_created, data_json, parts_json in msg_rows:
+                self._process_message(msg_id, time_created, data_json, parts_json)
+
+            # 3. Authoritative token totals from turn_usage.
+            tu = conn.execute(
+                "SELECT COALESCE(SUM(input_tokens), 0), "
+                "COALESCE(SUM(output_tokens), 0) "
+                "FROM turn_usage WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if tu:
+                self.total_input_tokens = tu[0] or 0
+                self.total_output_tokens = tu[1] or 0
+
+            return self.message_count > 0
+        except sqlite3.DatabaseError as e:
+            logger.debug("Failed to parse ZCode session %s: %s", self.session_id[:8], e)
+            return False
+        finally:
+            conn.close()
+
+    def _process_message(
+        self,
+        msg_id: str,
+        time_created: int,
+        data_json: str | None,
+        parts_json: str | None,
+    ) -> None:
+        """Build one sync message from a message row + its aggregated parts."""
+        data: dict[str, Any] = {}
+        if data_json:
+            try:
+                data = json.loads(data_json)
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+
+        role = data.get("role")
+        if role not in ("user", "assistant"):
+            return
+
+        # Concatenate text content from the message's parts.
+        text_content = ""
+        if parts_json:
+            text_content = self._extract_parts_text(parts_json)
+
+        # Fallback: some user messages carry inline text.
+        if not text_content:
+            inline = data.get("text") or data.get("content")
+            if isinstance(inline, str):
+                text_content = inline
+
+        # Skip empty messages (server drops them anyway).
+        if not text_content.strip():
+            return
+
+        model = data.get("modelID") or data.get("model", {}).get("modelId")
+        timestamp = _ms_to_iso(time_created) if time_created else None
+
+        msg: dict[str, Any] = {
+            "role": role,
+            "content": text_content,
+            "content_blocks": None,
+            "timestamp": timestamp,
+            "model": model,
+            "uuid": msg_id,
+        }
+
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict) and role == "assistant":
+            input_t = tokens.get("input", 0)
+            output_t = tokens.get("output", 0)
+            msg["usage"] = {"input_tokens": input_t, "output_tokens": output_t}
+
+        self.messages.append(msg)
+        self.message_count += 1
+
+        if not self.model and model:
+            self.model = model
+
+        if timestamp:
+            if not self.first_timestamp:
+                self.first_timestamp = timestamp
+            self.last_timestamp = timestamp
+
+    @staticmethod
+    def _extract_parts_text(parts_json: str) -> str:
+        """Extract concatenated text from a GROUP_CONCAT blob of part.data rows.
+
+        Each part.data is a JSON object; GROUP_CONCAT joins them with commas.
+        We walk the blob and keep only parts where type == "text".
+        """
+        # Recover individual JSON objects from the concatenated blob. A robust
+        # approach: a comma at brace-depth 0 separates objects.
+        texts: list[str] = []
+        depth = 0
+        start = 0
+        for i, ch in enumerate(parts_json):
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    chunk = parts_json[start : i + 1]
+                    try:
+                        part = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    if part.get("type") == "text":
+                        t = part.get("text")
+                        if isinstance(t, str):
+                            texts.append(t)
+        return "".join(texts)
+
+    def to_sync_payload(self, machine_id: str, terminal_id: str) -> dict[str, Any]:
+        """Convert to the payload expected by the Open-ACE session-sync endpoint."""
+        return {
+            "session_id": self.session_id,
+            "machine_id": machine_id,
+            "terminal_id": terminal_id,
+            "tool_name": ZCODE_SYNC_TOOL_NAME,
+            "project_path": self.project_path,
+            "model": self.model,
+            "message_count": self.message_count,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "first_timestamp": self.first_timestamp,
+            "last_timestamp": self.last_timestamp,
+            "source": os.environ.get("OPEN_ACE_TERMINAL_SOURCE", "web_terminal"),
+            "messages": self.messages,
+        }
+
+
+def _ms_to_iso(ms: int | None) -> str | None:
+    """Convert epoch milliseconds to an ISO-8601 string."""
+    if not ms:
+        return None
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+
+
 class SessionSyncService:
     """
     Background service that scans for Claude Code session files and syncs
@@ -630,6 +840,7 @@ class SessionSyncService:
         while self._running:
             try:
                 self._scan_and_sync()
+                self._scan_and_sync_zcode_db()
                 self._cleanup_synced_files()
             except Exception as e:
                 logger.error("Session sync error: %s", e)
@@ -644,6 +855,75 @@ class SessionSyncService:
             for f in to_remove:
                 self._synced_files.discard(f)
             logger.info("Cleaned up %d stale synced file entries", excess)
+
+    def _scan_and_sync_zcode_db(self) -> None:
+        """Scan the ZCode SQLite DB for interactive sessions and sync new/changed ones.
+
+        ZCode stores sessions in a relational DB rather than JSONL files, so this
+        does not use the rglob scan. Dedup keys are ``zcode:<session_id>`` strings
+        stored in the same _synced_files / _last_sync_times state as JSONL syncs.
+        A session is re-synced when its ``time_updated`` column advances past the
+        last sync time.
+        """
+        if not ZCODE_DB_PATH.exists():
+            return
+
+        # Discover candidate sessions (interactive, not archived).
+        try:
+            conn = sqlite3.connect(f"file:{ZCODE_DB_PATH}?mode=ro", uri=True)
+        except sqlite3.Error as e:
+            logger.debug("Cannot open ZCode DB for scan: %s", e)
+            return
+
+        candidates: list[tuple[str, int]] = []
+        try:
+            rows = conn.execute(
+                "SELECT id, time_updated FROM session "
+                "WHERE task_type = 'interactive' AND time_archived IS NULL"
+            ).fetchall()
+            candidates = [(r[0], r[1] or 0) for r in rows]
+        except sqlite3.DatabaseError as e:
+            logger.debug("ZCode DB query failed: %s", e)
+            return
+        finally:
+            conn.close()
+
+        synced_count = 0
+        for session_id, time_updated_ms in candidates:
+            dedup_key = f"zcode:{session_id}"
+            last_sync = self._last_sync_times.get(dedup_key, 0)
+            # time_updated is epoch ms; compare against last sync (epoch s).
+            if dedup_key in self._synced_files and time_updated_ms / 1000 <= last_sync:
+                continue
+
+            session = ZcodeSession(session_id, ZCODE_DB_PATH)
+            if not session.parse() or session.message_count == 0:
+                continue
+
+            terminal_id, source = self._get_active_terminal_context()
+            payload = session.to_sync_payload(self._config.machine_id, terminal_id)
+            payload["source"] = source
+
+            try:
+                result = self._http_send(
+                    {
+                        "type": "session_sync",
+                        "machine_id": self._config.machine_id,
+                        **payload,
+                    }
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("ZCode session sync send failed for %s: %s", session_id[:8], e)
+                continue
+
+            if result:
+                self._synced_files.add(dedup_key)
+                self._last_sync_times[dedup_key] = time.time()
+                synced_count += 1
+
+        if synced_count > 0:
+            self._save_state()
+            logger.info("Synced %d ZCode sessions", synced_count)
 
     def _scan_and_sync(self) -> None:
         """Scan for session files and sync new/changed ones."""

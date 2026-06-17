@@ -9,6 +9,7 @@ pr_review -> report -> wait -> (loop or merge).
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -300,6 +301,85 @@ class AutonomousOrchestrator:
             project_path = wf.get("worktree_path") or wf.get("project_path", "")
             self._gh = GitHubOps(project_path)
         return self._gh
+
+    def _ensure_worktree(self, wf: dict) -> str:
+        """Guarantee the worktree dir + branch exist before a phase runs.
+
+        Retrying/resuming a ``worktree``-strategy workflow after its dir was
+        cleaned up (e.g. a previous failure removed it, or the machine
+        rebooted) used to silently launch the agent against an empty path and
+        fail with a JSONL-detection error (#814). Every downstream phase now
+        calls this at entry so the environment self-heals:
+
+        - normalizes a stale ``worktree_path`` still containing ``..`` so the
+          DB and the on-disk dir agree;
+        - recreates the worktree dir (reusing the branch if it still exists)
+          when it is gone.
+
+        Returns the canonical worktree path. For non-worktree strategies, or
+        when ``worktree_path`` is intentionally empty (merge cleanup / conflict
+        resolution clears it), this is a no-op returning ``project_path``.
+        """
+        strategy = wf.get("branch_strategy", "new-branch")
+        project_path = wf.get("project_path", "")
+        worktree_path = wf.get("worktree_path", "")
+
+        # An empty worktree_path is NOT the "dir gone, recreate it" case — it
+        # is set deliberately by merge cleanup (_resolve_merge_conflicts /
+        # _do_merge) when the worktree is removed to free the main repo for
+        # conflict resolution. Treating it as missing would fall back to
+        # project_path as canonical and try `git worktree add <main_repo>`,
+        # which fails and turns a retried merge into a hard failure. Only a
+        # non-empty path whose dir is gone represents external loss (#814).
+        if strategy != "worktree" or not project_path or not worktree_path:
+            return worktree_path or project_path
+
+        canonical = os.path.realpath(worktree_path)
+        # Valid worktree: a .git file/dir inside means git set it up. If the
+        # stored path was unnormalized (legacy ".."), persist the canonical
+        # form so JSONL session detection matches Claude's encoding.
+        if worktree_path and os.path.isfile(os.path.join(canonical, ".git")):
+            if canonical != worktree_path:
+                self._update_workflow({"worktree_path": canonical})
+            return canonical
+
+        # Worktree missing — recreate from the main repo.
+        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
+        main_gh = GitHubOps(project_path)
+        try:
+            main_gh._run_git(["fetch", "origin", "main"])
+            # Does the branch still exist locally or on origin?
+            branch_check = main_gh._run_git(
+                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                check=False,
+            )
+            remote_check = main_gh._run_git(
+                ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
+                check=False,
+            )
+            if branch_check.returncode == 0 or remote_check.returncode == 0:
+                # Branch survives (local or remote) — attach a worktree to it
+                # without recreating the branch. For a remote-only branch, git
+                # auto-creates a local tracking branch in this step.
+                main_gh._run_git(["worktree", "add", canonical, branch_name])
+            else:
+                # Neither worktree nor branch — start fresh from origin/main.
+                main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, "origin/main"])
+        except GitHubOpsError as e:
+            logger.error("Failed to recreate worktree at %s: %s", canonical, e)
+            raise
+
+        self._update_workflow({"worktree_path": canonical, "branch_name": branch_name})
+        self._create_milestone(
+            phase=wf.get("current_phase", "preparation"),
+            milestone_type="worktree_restored",
+            status="completed",
+            title=f"Worktree restored at {os.path.basename(canonical)}",
+        )
+        logger.info("Restored worktree at %s on branch %s", canonical, branch_name)
+        # Reset cached gh so it picks up the restored worktree path.
+        self._gh = None
+        return canonical
 
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
@@ -1061,6 +1141,16 @@ class AutonomousOrchestrator:
         logger.info("Advancing workflow %s phase=%s", self._workflow_id[:8], phase)
 
         try:
+            # Self-heal the worktree before any downstream phase runs. A
+            # retried/resumed workflow may find its worktree dir gone (cleaned
+            # up after a prior failure), which previously launched the agent
+            # against an empty path (#814). preparation creates it, so it's
+            # skipped here.
+            if phase != "preparation":
+                self._ensure_worktree(wf)
+                # Re-read so downstream phases see the healed worktree_path /
+                # branch_name in wf rather than the pre-heal snapshot.
+                wf = self.workflow
             if phase == "preparation":
                 self._do_preparation(wf)
             elif phase == "planning":
@@ -1121,7 +1211,10 @@ class AutonomousOrchestrator:
             # Force worktree for parallel execution
             try:
                 gh._run_git(["fetch", "origin", "main"])
-                wt_path = f"{project_path}/../{branch_name.replace('/', '-')}"
+                # normpath collapses the ".." so the stored path and the worktree
+                # dir on disk agree; an unnormalized path later breaks JSONL
+                # session detection (#814).
+                wt_path = os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}")
                 gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
                 self._update_workflow(
                     {
@@ -1272,8 +1365,10 @@ class AutonomousOrchestrator:
                 gh._run_git(["fetch", "origin", "main"])
 
                 if strategy == "worktree":
+                    # normpath collapses ".." so DB/JSONL encoding matches the
+                    # real worktree dir (#814).
                     wt_data = gh.create_worktree(
-                        path=f"{project_path}/../{branch_name.replace('/', '-')}",
+                        path=os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}"),
                         branch=branch_name,
                         base="origin/main",
                     )
