@@ -1229,6 +1229,18 @@ link[rel='dns-prefetch'] {
   font-size: var(--font-size-xs);
 }
 
+/* Chart filter bar - standardized container for chart filters */
+.chart-filter-bar {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+}
+
+.chart-filter-bar .text-muted {
+  font-weight: var(--font-weight-medium);
+}
+
 /* Chart cards alignment - equal height */
 .dashboard-section .row.g-3 > [class*='col-'] {
   display: flex;

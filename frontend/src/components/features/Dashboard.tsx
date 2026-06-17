@@ -394,16 +394,18 @@ export const Dashboard: React.FC = () => {
 
       {/* Trend Chart + Distribution Chart - Two columns with shared filter */}
       <section className="dashboard-section mb-4">
-        {/* Global tool filter for both charts */}
-        <div className="d-flex align-items-center mb-3">
-          <span className="me-2 text-muted">{t('tool', language)}:</span>
-          <Select
-            options={toolOptions}
-            value={selectedTool}
-            onChange={setSelectedTool}
-            size="sm"
-            className="select-narrow"
-          />
+        {/* Global chart filter bar - controls both trend and distribution charts */}
+        <div className="chart-filter-bar bg-light rounded p-2 mb-3">
+          <div className="d-flex align-items-center page-header-controls">
+            <span className="text-muted small">{t('tool', language)}:</span>
+            <Select
+              options={toolOptions}
+              value={selectedTool}
+              onChange={setSelectedTool}
+              size="sm"
+              className="select-narrow"
+            />
+          </div>
         </div>
         <div className="row g-3">
           {/* Trend Chart - Left */}
