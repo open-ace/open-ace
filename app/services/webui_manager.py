@@ -691,12 +691,14 @@ class WebUIManager:
             except OSError as e:
                 logger.warning(f"Failed to chown log dir: {e}")
 
-        # Ensure PATH is complete and includes all necessary directories
-        # This fixes spawn ENOENT issues where node executable cannot be found (Issue #1083)
+        # Ensure PATH is complete and includes all necessary directories.
+        # This fixes spawn ENOENT issues where the node executable cannot be
+        # found (Issue #1083). PATH is the correct mechanism for resolving the
+        # `node` binary. NODE_PATH is intentionally NOT set: it controls Node
+        # *module* resolution (a list of directories, not a binary path), so
+        # pointing it at an executable was semantically wrong and could only
+        # interfere with module lookup.
         child_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
-        # Add NODE_PATH to explicitly specify node executable location
-        # This helps qwen-code-webui spawn subprocesses correctly
-        child_env["NODE_PATH"] = "/usr/bin/node"
 
         # Build command based on platform
         if webui_dir:

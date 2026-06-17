@@ -862,8 +862,11 @@ function detectAnomalies(dailyTrend: Array<{ date: string; tokens: number }>): A
 
   dailyTrend.forEach((day) => {
     // stdDistance drives detection (matches the >2σ / >3σ rule); deviation is
-    // the percentage off the daily average, kept in parity with the backend so
-    // descriptions read identically across the dedicated page and this table.
+    // the percentage off the daily average. NOTE: only the `deviation` *field's*
+    // value is aligned with the backend here so descriptions read identically —
+    // the drop *detection rule* itself still differs (this client flags any day
+    // below the mean at >2σ as a drop; the backend requires <50% of the mean).
+    // That divergence predates this change and is out of scope.
     const stdDistance = stdDev > 0 ? Math.abs(day.tokens - avgTokens) / stdDev : 0;
     const deviationPct =
       avgTokens > 0 ? Math.round((Math.abs(day.tokens - avgTokens) / avgTokens) * 1000) / 10 : 0;

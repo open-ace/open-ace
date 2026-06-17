@@ -901,7 +901,9 @@ class AnalysisService:
             top = daily_tool_map.get(date_value)
             if not top or day_tokens <= 0:
                 return None
-            share_pct = round(top["tokens"] / day_tokens * 100, 1)
+            # Clamp to (0, 100]: guards against an aggregation mismatch between
+            # get_daily_tool_totals and get_daily_token_totals ever yielding >100%.
+            share_pct = min(round(top["tokens"] / day_tokens * 100, 1), 100)
             if share_pct <= 0:
                 return None
             return {"tool": top["tool"], "share_pct": share_pct}

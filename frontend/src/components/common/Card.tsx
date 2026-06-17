@@ -45,7 +45,7 @@ export const Card: React.FC<CardProps> = ({
           </div>
           {helpTooltip && (
             <Tooltip content={helpTooltip} placement="top">
-              <span className="ms-2" role="button" tabIndex={0} aria-label={helpTooltip}>
+              <span className="ms-2" role="img" tabIndex={0} aria-label={helpTooltip}>
                 <i className="bi bi-info-circle text-muted" style={{ cursor: 'pointer' }}></i>
               </span>
             </Tooltip>

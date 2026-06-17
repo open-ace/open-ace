@@ -6,7 +6,7 @@
  * derivation, baseline fallback, optional top_contributor — is covered here.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   getAnomalyDescription,
   getAnomalySuggestion,
@@ -16,7 +16,14 @@ import {
 describe('getAnomalyDescription', () => {
   it('describes a spike as above the daily average', () => {
     const desc = getAnomalyDescription(
-      { date: '2026-05-11', tokens: 5000, expected: 500, deviation: 900, type: 'spike', severity: 'high' },
+      {
+        date: '2026-05-11',
+        tokens: 5000,
+        expected: 500,
+        deviation: 900,
+        type: 'spike',
+        severity: 'high',
+      },
       'en'
     );
     // Direction comes from type (spike => "above"), never from the deviation sign
@@ -26,7 +33,14 @@ describe('getAnomalyDescription', () => {
 
   it('describes a drop as below the daily average', () => {
     const desc = getAnomalyDescription(
-      { date: '2026-05-11', tokens: 100, expected: 500, deviation: 80, type: 'drop', severity: 'low' },
+      {
+        date: '2026-05-11',
+        tokens: 100,
+        expected: 500,
+        deviation: 80,
+        type: 'drop',
+        severity: 'low',
+      },
       'en'
     );
     expect(desc).toContain('below the daily average');
@@ -35,7 +49,14 @@ describe('getAnomalyDescription', () => {
 
   it('localizes to Chinese', () => {
     const desc = getAnomalyDescription(
-      { date: '2026-05-11', tokens: 5000, expected: 500, deviation: 900, type: 'spike', severity: 'high' },
+      {
+        date: '2026-05-11',
+        tokens: 5000,
+        expected: 500,
+        deviation: 900,
+        type: 'spike',
+        severity: 'high',
+      },
       'zh'
     );
     expect(desc).toContain('高出');
@@ -52,7 +73,14 @@ describe('getAnomalyDescription', () => {
 
   it('degrades when expected is zero (division guard)', () => {
     const desc = getAnomalyDescription(
-      { date: '2026-05-11', tokens: 5000, expected: 0, deviation: 0, type: 'spike', severity: 'high' },
+      {
+        date: '2026-05-11',
+        tokens: 5000,
+        expected: 0,
+        deviation: 0,
+        type: 'spike',
+        severity: 'high',
+      },
       'en'
     );
     expect(desc).not.toContain('NaN');
@@ -76,7 +104,13 @@ describe('getAnomalySuggestion', () => {
 describe('getAnomalyTopContributor', () => {
   it('formats the tool and its share', () => {
     const line = getAnomalyTopContributor(
-      { date: '2026-05-11', tokens: 5000, type: 'spike', severity: 'high', top_contributor: { tool: 'qwen', share_pct: 80 } },
+      {
+        date: '2026-05-11',
+        tokens: 5000,
+        type: 'spike',
+        severity: 'high',
+        top_contributor: { tool: 'qwen', share_pct: 80 },
+      },
       'en'
     );
     expect(line).toContain('qwen');
@@ -93,7 +127,13 @@ describe('getAnomalyTopContributor', () => {
 
   it('returns empty string when share_pct is missing', () => {
     const line = getAnomalyTopContributor(
-      { date: '2026-05-11', tokens: 5000, type: 'spike', severity: 'high', top_contributor: { tool: 'qwen' } },
+      {
+        date: '2026-05-11',
+        tokens: 5000,
+        type: 'spike',
+        severity: 'high',
+        top_contributor: { tool: 'qwen' },
+      },
       'en'
     );
     expect(line).toBe('');

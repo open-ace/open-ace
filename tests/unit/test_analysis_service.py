@@ -237,6 +237,23 @@ class TestAnalysisService:
         assert spike["top_contributor"]["tool"] == "qwen"
         assert spike["top_contributor"]["share_pct"] == 80.0
 
+    def test_detect_anomalies_top_contributor_share_clamped(self):
+        """share_pct is clamped to 100 even if the per-tool drill-down total
+        exceeds the daily total (aggregation mismatch between the two queries)."""
+        svc, _, mock_msg, _ = self._make_service()
+        normal = [{"date": f"2026-05-{i:02d}", "total_tokens": 100} for i in range(1, 11)]
+        normal.append({"date": "2026-05-11", "total_tokens": 5000})
+        mock_msg.get_daily_token_totals.return_value = normal
+        # Drill-down reports 9000 for qwen on a day whose total is only 5000
+        # (180% — should be clamped to 100 rather than shown as >100%).
+        mock_msg.get_daily_tool_totals.return_value = [
+            {"date": "2026-05-11", "tool_name": "qwen", "total_tokens": 9000},
+        ]
+        result = svc.detect_anomalies("2026-05-01", "2026-05-11")
+
+        spike = next(a for a in result["anomalies"] if a["type"] == "spike")
+        assert spike["top_contributor"]["share_pct"] == 100
+
     def test_detect_anomalies_top_contributor_forward_compatible(self):
         """When the drill-down query fails/empty, core fields survive and the
         optional top_contributor is simply omitted (no contract break)."""

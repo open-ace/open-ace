@@ -118,7 +118,9 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
     if not password:
         return False, "Password is required"
 
-    # Basic checks (always applied)
+    # Basic checks (always applied). The 8-char minimum is an intentional floor:
+    # it takes precedence over any policy password_min_length configured below 8,
+    # so a policy may only raise the effective minimum, never lower it past 8.
     if len(password) < 8:
         return False, "Password must be at least 8 characters"
     if len(password) > 128:
