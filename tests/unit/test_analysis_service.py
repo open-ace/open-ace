@@ -47,19 +47,32 @@ class TestAnalysisService:
             }
         ]
         mock_msg.get_tool_token_totals.return_value = [{"tool_name": "qwen", "total_tokens": 1000}]
+        mock_msg.get_conversation_stats_summary.return_value = {
+            "total_conversations": 5,
+            "total_messages": 25,
+            "total_tokens": 1000,
+        }
         result = svc.get_key_metrics("2026-05-01", "2026-05-23")
         assert result["total_tokens"] == 1000
         assert result["total_requests"] == 5
         assert result["unique_tools"] == 1
+        # total_sessions now comes from method B (real distinct count)
+        assert result["total_sessions"] == 5
 
     def test_get_key_metrics_no_data(self):
         svc, mock_usage, mock_msg, _ = self._make_service()
         mock_usage.get_daily_range.return_value = []
         mock_msg.get_user_token_totals.return_value = []
         mock_msg.get_tool_token_totals.return_value = []
+        mock_msg.get_conversation_stats_summary.return_value = {
+            "total_conversations": 0,
+            "total_messages": 0,
+            "total_tokens": 0,
+        }
         result = svc.get_key_metrics("2026-05-01", "2026-05-23")
         assert result["total_tokens"] == 0
         assert result["unique_tools"] == 1
+        assert result["total_sessions"] == 0
 
     def test_get_peak_usage(self):
         svc, _, mock_msg, _ = self._make_service()
@@ -148,13 +161,24 @@ class TestAnalysisService:
 
     def test_get_conversation_stats(self):
         svc, _, mock_msg, _ = self._make_service()
-        mock_msg.get_conversation_history.return_value = [
-            {"message_count": 10, "total_tokens": 500},
-            {"message_count": 5, "total_tokens": 200},
-        ]
+        # get_conversation_stats now delegates to method B (single source of
+        # truth), removing the old get_conversation_history(limit=1000)/7d path.
+        mock_msg.get_conversation_stats_summary.return_value = {
+            "total_conversations": 2,
+            "total_messages": 15,
+            "total_tokens": 700,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "average_messages_per_conversation": 7.5,
+            "average_tokens_per_conversation": 350.0,
+            "avg_conversation_length": 7.5,
+        }
         result = svc.get_conversation_stats("2026-05-01", "2026-05-23")
         assert result["total_conversations"] == 2
         assert result["total_messages"] == 15
+        mock_msg.get_conversation_stats_summary.assert_called_once_with(
+            start_date="2026-05-01", end_date="2026-05-23", host_name=None
+        )
 
     def test_get_tool_comparison(self):
         svc, _, mock_msg, _ = self._make_service()

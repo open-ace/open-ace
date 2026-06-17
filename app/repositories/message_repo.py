@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.repositories.database import Database, escape_like
+from app.utils.cache import cached
 from app.utils.senders import is_valid_sender
 from app.utils.tool_names import normalize_tool_name
 
@@ -892,36 +893,72 @@ class MessageRepository:
                 merged[tool] = {**row, "tool_name": tool}
 
         return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
+
+    @cached(ttl=300, key_prefix="conv_summary", skip_args=[0])
+    def get_conversation_stats_summary(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+    ) -> dict:
         """
         Get conversation statistics summary without fetching full history.
 
-        This is a lightweight query for batch analysis that only returns
-        aggregate statistics, avoiding the expensive GROUP BY operation
-        with full conversation history retrieval.
+        Single aggregate query over the SAME ``id_filter`` set, so the
+        returned ``total_conversations`` (distinct sessions, the denominator)
+        and the ``total_messages`` / ``total_tokens`` sums (the numerators)
+        share one scope. This makes per-session averages scope-consistent and
+        is the single source of truth for ``get_batch_analysis``,
+        ``get_key_metrics`` and the standalone ``get_conversation_stats``.
+
+        Note: ``COUNT(DISTINCT COALESCE(...))`` cannot use
+        ``idx_messages_conversation`` (the COALESCE expression defeats the
+        btree); the query is cached at the repo layer (``@cached``) to bound
+        the cost of reintroducing a ``daily_messages`` aggregation into the
+        batch hot path.
 
         Args:
+            start_date: Optional start date filter (defaults to 30 days ago,
+                aligned with the analysis callers).
+            end_date: Optional end date filter (defaults to today).
             host_name: Optional host name filter.
 
         Returns:
             Dict: Conversation statistics summary.
         """
-        conditions = []
-        params = []
+        from datetime import datetime, timedelta, timezone
+
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if not start_date:
+            start_date = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            ).strftime("%Y-%m-%d")
+        if not end_date:
+            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
+
+        conditions.append("date >= ?")
+        params.append(start_date)
+        conditions.append("date <= ?")
+        params.append(end_date)
 
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
 
-        # Add condition to filter out records without any session ID
+        # Same id_filter set for numerator (SUM) and denominator (COUNT DISTINCT)
+        # so per-session averages stay scope-consistent. If a faster
+        # ``COUNT(DISTINCT agent_session_id)`` variant is ever adopted, this
+        # filter MUST switch to ``agent_session_id IS NOT NULL`` in tandem.
         id_filter = (
             "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
         )
-        if conditions:
-            where_clause = f"WHERE {' AND '.join(conditions)} AND {id_filter}"
-        else:
-            where_clause = f"WHERE {id_filter}"
+        conditions.append(id_filter)
 
-        # Use a single aggregate query instead of GROUP BY + LIMIT
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        # COALESCE / COUNT(DISTINCT) / SUM are standard SQL (PostgreSQL + SQLite).
         query = f"""
             SELECT
                 COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id)) as total_conversations,

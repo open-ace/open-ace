@@ -7,6 +7,7 @@ Supports both in-memory and Redis caching.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import os
@@ -434,6 +435,7 @@ def cached(ttl: int = 300, key_prefix: str = "", skip_args: list | None = None):
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         cache = CacheManager()
 
+        @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
             # Skip self/cls for methods
             effective_args = args

@@ -521,18 +521,6 @@ export const TrendAnalysis: React.FC = () => {
                       {keyMetrics?.total_sessions?.toLocaleString() ?? '0'}
                     </td>
                   </tr>
-                  <tr>
-                    <td>{t('totalConversations', language)}</td>
-                    <td className="text-end">
-                      {conversationStats?.total_conversations?.toLocaleString() ?? '0'}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>{t('multiTurnRatio', language)}</td>
-                    <td className="text-end">
-                      {conversationStats?.avg_conversation_length?.toFixed(1) ?? '0'}
-                    </td>
-                  </tr>
                 </tbody>
               </table>
             </div>

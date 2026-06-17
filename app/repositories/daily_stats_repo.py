@@ -393,6 +393,13 @@ class DailyStatsRepository:
         """
         Get conversation statistics from pre-aggregated data.
 
+        .. deprecated::
+            This method ESTIMATES conversations as ``unique_dates * unique_tools``
+            (an inflated small denominator) and is no longer called in
+            production. Prefer ``MessageRepository.get_conversation_stats_summary``
+            which returns the real distinct conversation count from a single
+            scope-consistent query. Retained only for backward compatibility.
+
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.
 
