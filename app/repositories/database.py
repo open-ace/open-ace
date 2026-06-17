@@ -109,6 +109,11 @@ def adapt_sql(query: str) -> str:
     Adapt SQL query for the current database.
     Converts SQLite-style placeholders (?) to PostgreSQL-style (%s) if needed.
 
+    Caveat: this is a naive str.replace, so a literal '?' inside a SQL string
+    literal (e.g. WHERE x = 'a?b') would be incorrectly rewritten to '%s'.
+    Callers must avoid literal '?' in SQL string literals; none of the current
+    call sites contain one. Use a bound parameter for any value that may hold '?'.
+
     Args:
         query: SQL query with ? placeholders.
 
@@ -116,8 +121,7 @@ def adapt_sql(query: str) -> str:
         str: Adapted SQL query.
     """
     if is_postgresql():
-        # Replace ? with %s, but be careful with string literals
-        # Simple approach: just replace all ? with %s
+        # Naive replace of all ? with %s (safe given the caveat in the docstring).
         return query.replace("?", "%s")
     return query
 

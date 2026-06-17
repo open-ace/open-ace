@@ -239,9 +239,15 @@ class DataRetentionManager:
                 logger.error(error_msg)
                 report.errors.append(error_msg)
 
-        # Save report
+        # Persist the report. Surface persistence failures into report.errors so
+        # they are visible to the caller (and frontend) instead of being silent.
         if not dry_run:
-            self._save_report(report)
+            try:
+                self._save_report(report)
+            except Exception as e:
+                error_msg = f"Failed to save cleanup report: {e}"
+                logger.error(error_msg)
+                report.errors.append(error_msg)
 
         return report
 
@@ -376,25 +382,25 @@ class DataRetentionManager:
         return cast("int", anonymized)
 
     def _save_report(self, report: RetentionReport) -> None:
-        """Save retention report to database."""
+        """Save retention report to database.
+
+        Raises on failure so the caller (run_cleanup) can surface it into the
+        returned report's errors instead of silently dropping it.
+        """
         import json
 
-        try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    adapt_sql(
-                        """
-                    INSERT INTO retention_history (timestamp, report_data)
-                    VALUES (?, ?)
-                """
-                    ),
-                    (report.timestamp, json.dumps(report.to_dict())),
-                )
-                conn.commit()
-
-        except Exception as e:
-            logger.error(f"Failed to save retention report: {e}")
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    """
+                INSERT INTO retention_history (timestamp, report_data)
+                VALUES (?, ?)
+            """
+                ),
+                (report.timestamp, json.dumps(report.to_dict())),
+            )
+            conn.commit()
 
     def get_retention_history(self, limit: int = 30) -> list[dict[str, Any]]:
         """

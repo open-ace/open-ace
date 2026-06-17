@@ -260,3 +260,26 @@ class TestPostgresPlaceholderAdaptation:
         assert len(delete_sqls) == 1
         assert "%s" in delete_sqls[0]
         assert "?" not in delete_sqls[0]
+
+    def test_run_cleanup_surfaces_save_report_failure(self, monkeypatch):
+        """A _save_report failure must surface into report.errors, not be silent.
+
+        Guards the follow-up to issue #860: persistence problems must be visible
+        to the caller (and frontend toast), never silently dropped.
+        """
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
+
+        manager, _mock_db, _captured = self._make_manager_with_spy()
+        manager.rules = {}  # skip per-rule processing; isolate the save path
+
+        def boom(_report):
+            raise RuntimeError("DB write failed")
+
+        monkeypatch.setattr(manager, "_save_report", boom)
+
+        report = manager.run_cleanup(dry_run=False)
+
+        assert any(
+            "Failed to save cleanup report" in msg and "DB write failed" in msg
+            for msg in report.errors
+        )

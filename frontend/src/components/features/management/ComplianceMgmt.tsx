@@ -441,10 +441,19 @@ export const ComplianceMgmt: React.FC = () => {
     if (!window.confirm(t('confirmCleanup', language))) return;
     setIsRunning(true);
     try {
-      await complianceApi.runCleanup(false);
+      const result = await complianceApi.runCleanup(false);
       setShowCleanupPreviewModal(false);
       fetchRetentionData();
-      toast.success(t('cleanupSuccess', language));
+      // HTTP 200 does not guarantee the cleanup fully succeeded: per-rule
+      // failures are collected in report.errors. Warn the user when present.
+      if (result?.errors?.length) {
+        toast.warning(
+          t('cleanupCompletedWithErrors', language),
+          t('cleanupErrorsDescription', language, { count: result.errors.length })
+        );
+      } else {
+        toast.success(t('cleanupSuccess', language));
+      }
     } catch (err) {
       console.error('Failed to execute cleanup:', err);
       toast.error(t('cleanupFailed', language));
