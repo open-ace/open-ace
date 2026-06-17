@@ -4060,7 +4060,8 @@ const translations: Record<Language, Translations> = {
     cleanupFailed: '정리 실행에 실패했습니다',
     cleanupPreviewFailed: '정리 미리보기에 실패했습니다',
     cleanupCompletedWithErrors: '정리가 완료되었으나 일부 오류가 발생했습니다',
-    cleanupErrorsDescription: '정리 중 {count}개의 오류가 발생했습니다. 자세한 내용은 보고서를 참조하세요.',
+    cleanupErrorsDescription:
+      '정리 중 {count}개의 오류가 발생했습니다. 자세한 내용은 보고서를 참조하세요.',
     storageEstimates: '저장소 추정',
     recordCount: '레코드 수',
     estimatedSize: '추정 크기',
