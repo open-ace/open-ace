@@ -292,6 +292,8 @@ export interface CardProps extends BaseComponentProps {
   footer?: React.ReactNode;
   /** Help tooltip text displayed next to title */
   helpTooltip?: string;
+  /** Actions to display in card header (right side) */
+  actions?: React.ReactNode;
 }
 
 // Button types
