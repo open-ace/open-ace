@@ -210,7 +210,7 @@
 
 .timeline-header-meta-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 8px;
   margin-top: 2px;
 }
@@ -224,6 +224,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary) 12%);
+  grid-column: span 2;
 }
 
 .timeline-meta-item__label {
@@ -245,6 +246,11 @@
 
 .timeline-meta-item--phase {
   background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
+  grid-column: span 2;
+}
+
+.timeline-meta-item--start {
+  grid-column: span 3;
 }
 
 .timeline-meta-item__value--phase {
@@ -616,13 +622,47 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.timeline-milestone-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 14px;
   margin-top: 10px;
+}
+
+.timeline-milestone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .timeline-milestone-chevron {
   color: var(--text-muted);
-  padding-top: 4px;
   flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.timeline-milestone-chevron:hover {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary) 28%);
 }
 
 .timeline-milestone-details {
@@ -679,56 +719,23 @@
   margin-top: 6px;
 }
 
-.timeline-milestone-detail-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.timeline-milestone-detail-chip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.timeline-milestone-detail-chip span {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.timeline-milestone-detail-chip code {
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.timeline-milestone-inline-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .timeline-inline-btn.btn {
   border-radius: 999px;
-  min-height: 34px;
-  padding-inline: 0.82rem;
+  min-height: 30px;
+  padding-inline: 0.72rem;
   border-color: var(--border-color);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 550;
   white-space: nowrap;
   box-shadow: none;
+}
+
+.timeline-inline-btn--neutral.btn {
+  color: var(--text-secondary);
+  border-color: color-mix(in srgb, var(--text-muted) 14%, var(--border-color) 86%);
+  background: color-mix(in srgb, var(--bg-secondary) 68%, var(--bg-primary) 32%);
 }
 
 .timeline-inline-btn.btn:hover {
@@ -738,44 +745,26 @@
 
 .timeline-inline-btn--primary.btn {
   color: var(--color-primary);
-  border-color: color-mix(in srgb, var(--color-primary) 20%, var(--border-color) 80%);
-  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
+  border-color: color-mix(in srgb, var(--color-primary) 15%, var(--border-color) 85%);
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--bg-primary) 96%);
 }
 
 .timeline-inline-btn--success.btn {
   color: var(--color-success-hover);
-  border-color: color-mix(in srgb, var(--color-success) 20%, var(--border-color) 80%);
-  background: color-mix(in srgb, var(--color-success) 6%, var(--bg-primary) 94%);
+  border-color: color-mix(in srgb, var(--color-success) 15%, var(--border-color) 85%);
+  background: color-mix(in srgb, var(--color-success) 4%, var(--bg-primary) 96%);
 }
 
 .timeline-inline-btn--info.btn {
   color: var(--color-info);
-  border-color: color-mix(in srgb, var(--color-info) 20%, var(--border-color) 80%);
-  background: color-mix(in srgb, var(--color-info) 7%, var(--bg-primary) 93%);
+  border-color: color-mix(in srgb, var(--color-info) 15%, var(--border-color) 85%);
+  background: color-mix(in srgb, var(--color-info) 4%, var(--bg-primary) 96%);
 }
 
 .timeline-inline-btn--danger.btn {
   color: var(--color-danger-hover);
-  border-color: color-mix(in srgb, var(--color-danger) 20%, var(--border-color) 80%);
-  background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-primary) 94%);
-}
-
-.timeline-session-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-color) 76%);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.timeline-session-link--reused {
-  font-weight: 700;
+  border-color: color-mix(in srgb, var(--color-danger) 16%, var(--border-color) 84%);
+  background: color-mix(in srgb, var(--color-danger) 4%, var(--bg-primary) 96%);
 }
 
 .timeline-milestone-activity {
@@ -1042,10 +1031,25 @@
     justify-content: flex-start;
   }
 
+  .timeline-header-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timeline-meta-item,
+  .timeline-meta-item--phase,
+  .timeline-meta-item--start {
+    grid-column: auto;
+  }
+
   .timeline-milestone-title-row,
   .timeline-milestone-section {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .timeline-milestone-meta-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .timeline-milestone-time {
@@ -1078,6 +1082,10 @@
   .timeline-output-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .timeline-header-meta-grid {
+    grid-template-columns: 1fr;
   }
 
   .timeline-fork-branches {
