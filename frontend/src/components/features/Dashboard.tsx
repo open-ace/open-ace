@@ -595,10 +595,27 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
             {(TOOL_DISPLAY_NAMES[item.tool_name] ?? item.tool_name).toUpperCase()}
           </h6>
           {item.tokens_used > 0 ? (
-            <h4 className="card-title mb-2">
-              {formatTokens(item.tokens_used)}{' '}
-              <small className="fs-6">{t('tokens', language)}</small>
-            </h4>
+            <>
+              <h4 className="card-title mb-2">
+                {formatTokens(item.tokens_used)}{' '}
+                <small className="fs-6">{t('tokens', language)}</small>
+              </h4>
+              {item.input_tokens > 0 && (
+                <p className="card-text mb-1">
+                  <small>
+                    <strong>{t('tableInput', language)}:</strong> {formatTokens(item.input_tokens)}
+                  </small>
+                </p>
+              )}
+              {item.output_tokens > 0 && (
+                <p className="card-text mb-1">
+                  <small>
+                    <strong>{t('tableOutput', language)}:</strong>{' '}
+                    {formatTokens(item.output_tokens)}
+                  </small>
+                </p>
+              )}
+            </>
           ) : item.request_count > 0 ? (
             <>
               <h4 className="card-title mb-2">
