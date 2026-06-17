@@ -87,9 +87,10 @@ $files = @(
     "websocket_proxy.py",
     "session_sync.py",
     "openace_cli.py",
-    "cli_settings.py"
+    "cli_settings.py",
+    "zcode_app_server.py"
 )
-$adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py")
+$adapterFiles = @("__init__.py", "base.py", "qwen_code.py", "claude_code.py", "codex_cli.py", "codex_jsonl_parser.py", "openclaw.py", "usage_parser.py", "zcode.py")
 
 foreach ($file in $files) {
     $downloaded = $false

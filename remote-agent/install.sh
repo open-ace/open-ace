@@ -316,6 +316,7 @@ AGENT_FILES=(
     session_sync.py
     openace_cli.py
     cli_settings.py
+    zcode_app_server.py
     __init__.py
 )
 
@@ -345,7 +346,7 @@ else
         done
         # Download CLI adapters
         mkdir -p "${INSTALL_DIR}/cli_adapters"
-        for file in __init__.py base.py qwen_code.py claude_code.py codex_cli.py codex_jsonl_parser.py openclaw.py usage_parser.py; do
+        for file in __init__.py base.py qwen_code.py claude_code.py codex_cli.py codex_jsonl_parser.py openclaw.py usage_parser.py zcode.py; do
             curl -fsSL "${AGENT_URL}/cli_adapters/${file}" -o "${INSTALL_DIR}/cli_adapters/${file}" 2>/dev/null || {
                 log_warn "Could not download cli_adapters/${file}"
             }

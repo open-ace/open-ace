@@ -88,12 +88,15 @@ def test_zcode_get_env_vars_routes_through_anthropic_proxy(cli_adapters_pkg):
 def test_zcode_build_single_shot_args(cli_adapters_pkg):
     adapter = cli_adapters_pkg.get_adapter("zcode")
     args = adapter.build_single_shot_args("do the task", "/tmp/proj", model="glm-5.2")
-    # Engine is invoked via `node <engine>` when bundled; single-shot uses --prompt.
-    assert args[0] == "node"
+    # The leading token(s) resolve the engine (either `node <engine.cjs>` when the
+    # bundled app is present, or a bare `zcode` binary). Don't assert the prefix
+    # since it depends on the host (macOS bundle vs Linux CI). The engine is
+    # always followed by the prompt/mode/json flags below.
     assert "--prompt" in args
     assert "do the task" in args
     assert "--mode" in args and "yolo" in args
     assert "--json" in args
+    assert "--no-color" in args
     # No --model flag: zcode has no headless model flag; model comes from config.
     assert "--model" not in args
 
