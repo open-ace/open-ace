@@ -691,9 +691,9 @@ class WebUIManager:
             except OSError as e:
                 logger.warning(f"Failed to chown log dir: {e}")
 
-        # Ensure PATH includes /usr/local/bin
-        if "PATH" not in child_env or "/usr/local/bin" not in child_env.get("PATH", ""):
-            child_env["PATH"] = "/usr/local/bin:" + child_env.get("PATH", "/usr/bin:/bin")
+        # Ensure PATH is complete and includes all necessary directories
+        # This fixes spawn ENOENT issues where node executable cannot be found (Issue #1083)
+        child_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
 
         # Build command based on platform
         if webui_dir:

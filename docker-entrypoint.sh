@@ -217,16 +217,47 @@ try:
     cur.execute('SELECT username, system_account FROM users WHERE is_active = true')
     rows = cur.fetchall()
 
+    # Build a mapping of username -> system_account for owner lookup
+    user_mapping = {}
     for username, system_account in rows:
-        # Use system_account if set, otherwise use username
         account = system_account or username
         if account:
+            user_mapping[username] = account
             create_system_user(account)
 
+    # Sync project directories from database (Issue #1083)
+    print('Syncing project directories...')
+    import pwd
+    cur.execute('SELECT path FROM projects WHERE is_active = true')
+    project_rows = cur.fetchall()
+
+    for project_path in project_rows:
+        path = project_path[0]
+        # Only process paths under workspace_base
+        if path.startswith(workspace_base):
+            if not os.path.exists(path):
+                # Infer owner from path: /workspace/<owner>/...
+                parts = path.split('/')
+                # workspace_base is '/workspace' by default, so parts[1] == 'workspace' covers both cases
+                if len(parts) >= 3 and parts[1] == 'workspace':
+                    # Get the user directory name (second or third component)
+                    owner_candidate = parts[2] if len(parts) > 2 else None
+                    # Try to find owner from user_mapping or directly
+                    owner = user_mapping.get(owner_candidate, owner_candidate)
+                    try:
+                        pw_info = pwd.getpwnam(owner)
+                        os.makedirs(path, exist_ok=True)
+                        subprocess.run(['chown', '-R', f'{owner}:{owner}', path], capture_output=True)
+                        print(f'  Created project directory: {path} (owner: {owner})')
+                    except KeyError:
+                        print(f'  Warning: User {owner} not found for path {path}, skipping')
+            else:
+                print(f'  Project directory exists: {path}')
+
     conn.close()
-    print('User sync completed.')
+    print('User and project sync completed.')
 except Exception as e:
-    print(f'Error syncing users: {e}')
+    print(f'Error syncing users and projects: {e}')
 " 2>&1 | tee /var/log/open-ace-user-sync.log || echo "WARNING: User sync failed - check /var/log/open-ace-user-sync.log for details"
     fi
 
