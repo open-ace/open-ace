@@ -3104,9 +3104,24 @@ do_upgrade() {
         # Remove old files except logs, data, and config directory
         local config_basename=$(basename "$config_dir")
 
+        # Check if SOURCE_DIR is inside target_path to prevent accidental deletion
+        # Use normalized paths (source_abs/target_abs) for consistency
+        local source_exclude=""
+        if [[ "$source_abs" == "$target_abs"/* ]]; then
+            local source_rel="${source_abs#$target_abs/}"
+            local source_top=$(echo "$source_rel" | cut -d'/' -f1)
+            source_exclude="$source_top"
+            print_warning "Source directory is inside target path: $source_abs"
+            print_info "Preserving '$source_top' directory during cleanup"
+        fi
+
         # List directories that will be deleted and ask for confirmation
         local delete_list
-        delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" 2>/dev/null)
+        if [ -n "$source_exclude" ]; then
+            delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" 2>/dev/null)
+        else
+            delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" 2>/dev/null)
+        fi
         if [ -n "$delete_list" ]; then
             echo ""
             echo -e "${YELLOW}The following items will be deleted:${NC}"
@@ -3121,11 +3136,19 @@ do_upgrade() {
                 skip_delete="yes"
             fi
             if [ "$skip_delete" = "no" ]; then
-                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+                if [ -n "$source_exclude" ]; then
+                    find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" -exec rm -rf {} +
+                else
+                    find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+                fi
             fi
         else
             # No files to delete (shouldn't normally happen during upgrade)
-            find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+            if [ -n "$source_exclude" ]; then
+                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" -exec rm -rf {} +
+            else
+                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+            fi
         fi
         # Copy new files
         cp -r "$SOURCE_DIR"/* "$target_path/"
@@ -3549,6 +3572,10 @@ do_upgrade_remote() {
 
     # Update files (preserve logs, data, and config)
     print_info "Updating remote files..."
+
+    # Note: For remote upgrade, SOURCE_DIR is local and target_path is remote.
+    # They are on different machines, so SOURCE_DIR cannot be inside target_path.
+    # No need to check for SOURCE_DIR containment - just proceed with normal cleanup.
 
     # List directories that will be deleted and ask for confirmation
     local remote_delete_list
