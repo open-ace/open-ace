@@ -1,10 +1,12 @@
 """Unit tests for DataRetentionManager.estimate_storage."""
 
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.modules.compliance.retention import DataRetentionManager
+import app.repositories.database as db_mod
+from app.modules.compliance.retention import DataRetentionManager, RetentionReport
 
 
 class TestEstimateStorage:
@@ -191,3 +193,70 @@ class TestEstimateStorage:
             avg_size = manager.ESTIMATED_RECORD_SIZES.get(estimate["data_type"], 100)
             expected = round((test_count * avg_size) / (1024 * 1024), 2)
             assert estimate["estimated_size_mb"] == expected
+
+
+class TestPostgresPlaceholderAdaptation:
+    """Guard against regression for issue #860.
+
+    The retention persistence SQL (INSERT/DELETE/UPDATE) must run its
+    placeholders through ``adapt_sql()`` so it works on PostgreSQL. On SQLite
+    ``?`` is valid; psycopg2 (PostgreSQL) only accepts ``%s``. These tests
+    monkeypatch ``is_postgresql()`` and spy on the SQL handed to the driver, so
+    they catch the regression in CI without a live PostgreSQL server.
+    """
+
+    def _make_manager_with_spy(self):
+        """Build a manager backed by a mock db whose ``cursor.execute`` is spied."""
+        mock_db = MagicMock()
+        manager = DataRetentionManager(db=mock_db)
+        captured = []
+        cursor = mock_db.connection.return_value.__enter__.return_value.cursor.return_value
+        cursor.execute.side_effect = lambda query, *args, **kwargs: captured.append(query)
+        return manager, mock_db, captured
+
+    def _sample_report(self) -> RetentionReport:
+        return RetentionReport(
+            timestamp=datetime(2026, 1, 1),
+            rules_applied=[],
+            records_deleted=0,
+            records_archived=0,
+            records_anonymized=0,
+        )
+
+    def test_save_report_adapts_placeholders_for_postgres(self, monkeypatch):
+        """INSERT into retention_history must use %s (not ?) under PostgreSQL."""
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: True)
+
+        manager, _mock_db, captured = self._make_manager_with_spy()
+        manager._save_report(self._sample_report())
+
+        insert_sqls = [q for q in captured if "INSERT" in q.upper()]
+        assert len(insert_sqls) == 1
+        assert "%s" in insert_sqls[0]
+        assert "?" not in insert_sqls[0]
+
+    def test_save_report_keeps_sqlite_placeholders(self, monkeypatch):
+        """Under SQLite the '?' placeholder is preserved (adapt_sql is a no-op)."""
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
+
+        manager, _mock_db, captured = self._make_manager_with_spy()
+        manager._save_report(self._sample_report())
+
+        insert_sqls = [q for q in captured if "INSERT" in q.upper()]
+        assert len(insert_sqls) == 1
+        assert "?" in insert_sqls[0]
+
+    def test_delete_old_data_adapts_placeholders_for_postgres(self, monkeypatch):
+        """DELETE must use %s (not ?) under PostgreSQL (issue #860 root cause)."""
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: True)
+
+        manager, mock_db, captured = self._make_manager_with_spy()
+        # The COUNT(*) pre-check goes through fetch_one (already auto-adapted).
+        mock_db.fetch_one.return_value = {"count": 5}
+
+        manager._delete_old_data("messages", datetime(2020, 1, 1), dry_run=False)
+
+        delete_sqls = [q for q in captured if "DELETE" in q.upper()]
+        assert len(delete_sqls) == 1
+        assert "%s" in delete_sqls[0]
+        assert "?" not in delete_sqls[0]

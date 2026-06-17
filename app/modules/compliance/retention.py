@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_sql
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,10 @@ class DataRetentionManager:
         # Delete records
         with self.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(f"DELETE FROM {table_name} WHERE {time_col} < ?", (cutoff,))
+            cursor.execute(
+                adapt_sql(f"DELETE FROM {table_name} WHERE {time_col} < ?"),
+                (cutoff,),
+            )
             conn.commit()
             deleted = cursor.rowcount
 
@@ -335,12 +338,14 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    f"""
+                    adapt_sql(
+                        f"""
                     UPDATE daily_messages
                     SET sender = 'ANONYMIZED',
                         recipient = 'ANONYMIZED'
                     WHERE {time_col} < ?
-                """,
+                """
+                    ),
                     (cutoff,),
                 )
                 conn.commit()
@@ -350,13 +355,15 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    f"""
+                    adapt_sql(
+                        f"""
                     UPDATE audit_logs
                     SET username = 'ANONYMIZED',
                         ip_address = NULL,
                         user_agent = NULL
                     WHERE {time_col} < ?
-                """,
+                """
+                    ),
                     (cutoff,),
                 )
                 conn.commit()
@@ -376,10 +383,12 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    """
+                    adapt_sql(
+                        """
                     INSERT INTO retention_history (timestamp, report_data)
                     VALUES (?, ?)
-                """,
+                """
+                    ),
                     (report.timestamp, json.dumps(report.to_dict())),
                 )
                 conn.commit()
