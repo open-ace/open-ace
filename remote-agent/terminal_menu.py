@@ -41,6 +41,15 @@ TOOLS = [
         "install_cmd": "npm install -g @openai/codex@latest",
         "env_key": "OPENAI_API_KEY",
     },
+    {
+        "name": "ZCode",
+        "cli": "zcode",
+        "cmd": "zcode",
+        # ZCode ships inside the macOS desktop app; symlink the bundled engine.
+        # On Linux, install/symlink the engine per ZCode's docs instead.
+        "install_cmd": "sudo ln -s /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs /usr/local/bin/zcode",
+        "env_key": "ANTHROPIC_API_KEY",
+    },
 ]
 
 MENU_PATH = os.path.abspath(__file__)

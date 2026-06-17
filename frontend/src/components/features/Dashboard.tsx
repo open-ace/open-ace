@@ -34,6 +34,16 @@ const TOOL_COLORS: Record<string, { border: string; background: string; card: st
     card: 'bg-success',
   },
   qwen: { border: 'rgba(54, 162, 235, 1)', background: 'rgba(54, 162, 235, 0.2)', card: 'bg-info' },
+  codex: {
+    border: 'rgba(153, 102, 255, 1)',
+    background: 'rgba(153, 102, 255, 0.2)',
+    card: 'bg-primary',
+  },
+  zcode: {
+    border: 'rgba(255, 159, 64, 1)',
+    background: 'rgba(255, 159, 64, 0.2)',
+    card: 'bg-warning',
+  },
 };
 
 // Date range preset values (labels will be internationalized)
