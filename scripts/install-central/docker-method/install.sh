@@ -2436,6 +2436,11 @@ create_directories() {
     # Create deployment config directory
     mkdir -p "$DEPLOY_DIR"/config
 
+    # Create workspace directory for Docker volume mount (Issue #1083)
+    # This ensures project files persist across container restarts
+    mkdir -p "$DEPLOY_DIR"/workspace
+    print_info "  - $DEPLOY_DIR/workspace"
+
     # Create workspace directory
     mkdir -p "$user_home/workspace"
     print_info "  - $user_home/workspace"
@@ -2683,6 +2688,12 @@ create_docker_compose() {
       - $user_home/.openclaw:/home/open-ace/.openclaw"
         print_info "  - 映射 .openclaw 目录"
     fi
+
+    # Add workspace volume mount (Issue #1083)
+    # This ensures project files persist across container restarts
+    volumes_section="$volumes_section
+      - ./workspace:/workspace"
+    print_info "  - 映射 workspace 目录"
 
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
