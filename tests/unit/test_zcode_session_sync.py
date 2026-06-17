@@ -238,7 +238,7 @@ def test_to_sync_payload_shape(sync_mod, tmp_path):
 
 
 def test_extract_parts_text_handles_nested_braces(sync_mod):
-    # A part whose text contains a brace should not break the brace-depth walker.
+    # A part whose text contains balanced braces must still parse correctly.
     blob = '{"type":"text","text":"code { x }"}{"type":"text","text":" more"}'
     result = sync_mod.ZcodeSession._extract_parts_text(blob)
     assert result == "code { x } more"
@@ -247,3 +247,67 @@ def test_extract_parts_text_handles_nested_braces(sync_mod):
 def test_extract_parts_text_ignores_non_text_parts(sync_mod):
     blob = '{"type":"tool","text":"ignored"}{"type":"text","text":"kept"}'
     assert sync_mod.ZcodeSession._extract_parts_text(blob) == "kept"
+
+
+def test_extract_parts_text_handles_unbalanced_braces_in_string(sync_mod):
+    # Regression: a brace-depth walker loses ALL text when a string value holds
+    # an unbalanced brace (common in code / regex / partial JSON output).
+    # raw_decode is string-aware, so the inner brace is not treated as structural.
+    blob = '{"type":"text","text":"open: {"}{"type":"text","text":"end"}'
+    assert sync_mod.ZcodeSession._extract_parts_text(blob) == "open: {end"
+
+
+def test_extract_parts_text_handles_unbalanced_close_brace_in_string(sync_mod):
+    blob = '{"type":"text","text":"close } here"}{"type":"text","text":" tail"}'
+    assert sync_mod.ZcodeSession._extract_parts_text(blob) == "close } here tail"
+
+
+def test_extract_parts_text_resyncs_after_malformed_part(sync_mod):
+    # One malformed object must not discard the subsequent valid parts.
+    blob = (
+        '{"type":"text","text":"first"}'
+        ",{bad malformed object}"  # noqa: E501
+        ',{"type":"text","text":"last"}'
+    )
+    assert sync_mod.ZcodeSession._extract_parts_text(blob) == "firstlast"
+
+
+def test_parse_model_falls_back_to_nested_dict(sync_mod, tmp_path):
+    """When modelID is absent, model is read from data["model"]["modelId"]."""
+    db = tmp_path / "db.sqlite"
+    _build_db(db)
+    sid = "sess_model_nested"
+    _insert_session(db, sid)
+    _insert_message(
+        db,
+        "msg_1",
+        sid,
+        1700000000100,
+        {"role": "assistant", "model": {"modelId": "GLM-5.2-Nested"}},
+        parts=[{"type": "text", "text": "hi"}],
+    )
+    session = sync_mod.ZcodeSession(sid, db)
+    assert session.parse() is True
+    assert session.model == "GLM-5.2-Nested"
+    assert session.messages[0]["model"] == "GLM-5.2-Nested"
+
+
+def test_parse_model_handles_non_dict_model_field(sync_mod, tmp_path):
+    """Regression: a non-dict ``model`` value must not raise AttributeError."""
+    db = tmp_path / "db.sqlite"
+    _build_db(db)
+    sid = "sess_model_str"
+    _insert_session(db, sid)
+    _insert_message(
+        db,
+        "msg_1",
+        sid,
+        1700000000100,
+        # model is a plain string, not {"modelId": ...}; must not crash.
+        {"role": "assistant", "model": "not-a-dict"},
+        parts=[{"type": "text", "text": "hi"}],
+    )
+    session = sync_mod.ZcodeSession(sid, db)
+    assert session.parse() is True  # no AttributeError
+    assert session.messages[0]["model"] is None
+    assert session.model is None
