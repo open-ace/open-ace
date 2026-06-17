@@ -28,6 +28,7 @@ import {
   EmptyState,
   Modal,
   Dropdown,
+  Pagination,
   LineChart,
   Skeleton,
   PageRefreshControl,
@@ -289,6 +290,8 @@ export const ConversationHistory: React.FC = () => {
     return <Error message={error?.message ?? t('error', language)} onRetry={() => refetch()} />;
   }
 
+  const totalPages = Math.ceil((data?.total ?? 0) / ITEMS_PER_PAGE);
+
   const tableContent = (
     <>
       {/* Filters */}
@@ -444,56 +447,14 @@ export const ConversationHistory: React.FC = () => {
           </div>
 
           {/* Pagination */}
-          {(() => {
-            const totalPages = Math.ceil((data?.total ?? 0) / ITEMS_PER_PAGE);
-            if (totalPages <= 1) return null;
-            const maxVisible = 5;
-            let start = Math.max(1, page - Math.floor(maxVisible / 2));
-            const end = Math.min(totalPages, start + maxVisible - 1);
-            if (end - start < maxVisible - 1) {
-              start = Math.max(1, end - maxVisible + 1);
-            }
-            const pageNumbers = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-            return (
-              <div className="d-flex justify-content-center mt-3">
-                <nav>
-                  <ul className="pagination pagination-sm mb-0">
-                    <li className={cn('page-item', page === 1 && 'disabled')}>
-                      <button
-                        type="button"
-                        className="page-link"
-                        onClick={() => setPage(page - 1)}
-                        disabled={page === 1}
-                      >
-                        {t('previous', language)}
-                      </button>
-                    </li>
-                    {pageNumbers.map((pageNum) => (
-                      <li key={pageNum} className={cn('page-item', page === pageNum && 'active')}>
-                        <button
-                          type="button"
-                          className="page-link"
-                          onClick={() => setPage(pageNum)}
-                        >
-                          {pageNum}
-                        </button>
-                      </li>
-                    ))}
-                    <li className={cn('page-item', page === totalPages && 'disabled')}>
-                      <button
-                        type="button"
-                        className="page-link"
-                        onClick={() => setPage(page + 1)}
-                        disabled={page === totalPages}
-                      >
-                        {t('next', language)}
-                      </button>
-                    </li>
-                  </ul>
-                </nav>
-              </div>
-            );
-          })()}
+          {totalPages > 1 && (
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              className="mt-3"
+            />
+          )}
         </Card>
       )}
     </>
