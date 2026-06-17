@@ -13,6 +13,7 @@ export {
   formatRelativeTime,
   formatBytes,
   formatDuration,
+  formatChartDate,
 } from './format';
 export {
   onMetric,
