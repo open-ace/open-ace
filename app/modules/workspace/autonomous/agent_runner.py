@@ -162,10 +162,18 @@ class AutonomousAgentRunner:
     def _encode_project_path(project_path: str) -> str:
         """Best-effort match for the encoded project path used by Claude session history.
 
-        Today Claude stores absolute paths by replacing "/" with "-". Keep this logic
-        isolated here because it is an implementation detail outside our control.
+        Claude stores session history under ``~/.claude/projects/<encoded>`` where
+        ``<encoded>`` is the *real* (symlink/``..``-resolved) absolute path with
+        ``/`` replaced by ``-``. Callers can pass any form — a worktree path
+        produced by ``f"{repo}/../branch"`` still contains ``..`` — so we must
+        normalize first or the encoded dir never matches what Claude actually
+        wrote (#814). ``realpath`` also resolves symlinks, matching Claude's
+        own ``getcwd``-based encoding.
         """
-        return project_path.replace("/", "-") if project_path.startswith("/") else project_path
+        if not project_path:
+            return ""
+        resolved = os.path.realpath(project_path)
+        return resolved.replace("/", "-")
 
     def _find_latest_claude_session_id(
         self,
