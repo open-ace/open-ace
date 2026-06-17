@@ -5,6 +5,7 @@ Input validation functions.
 """
 
 import re
+from typing import Optional
 
 
 def validate_date(date_str: str) -> bool:
@@ -102,20 +103,42 @@ def validate_email(email: str) -> bool:
     return bool(re.match(pattern, email))
 
 
-def validate_password(password: str) -> tuple:
+def validate_password(password: str, policy_settings: Optional[dict] = None) -> tuple:
     """
-    Validate a password.
+    Validate a password against security policy.
 
     Args:
         password: Password to validate.
+        policy_settings: Optional dict from security_settings for policy validation.
+                         If None, only basic length check is performed.
 
     Returns:
         tuple: (is_valid, error_message)
     """
     if not password:
         return False, "Password is required"
+
+    # Basic checks (always applied)
     if len(password) < 8:
         return False, "Password must be at least 8 characters"
     if len(password) > 128:
         return False, "Password must be less than 128 characters"
+
+    # Policy-based checks (if settings provided)
+    if policy_settings:
+        min_length = int(policy_settings.get("password_min_length", 8))
+        if len(password) < min_length:
+            return False, f"Password must be at least {min_length} characters"
+
+        if policy_settings.get("password_require_uppercase") and not re.search(r"[A-Z]", password):
+            return False, "Password must contain uppercase letters"
+        if policy_settings.get("password_require_lowercase") and not re.search(r"[a-z]", password):
+            return False, "Password must contain lowercase letters"
+        if policy_settings.get("password_require_number") and not re.search(r"[0-9]", password):
+            return False, "Password must contain numbers"
+        if policy_settings.get("password_require_special") and not re.search(
+            r"[!@#$%^&*(),.?\":{}|<>]", password
+        ):
+            return False, "Password must contain special characters"
+
     return True, None

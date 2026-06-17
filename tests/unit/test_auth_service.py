@@ -432,10 +432,11 @@ class TestAuthService:
         }
         mock_repo.update_password.return_value = True
 
+        # Use password that meets policy requirements (uppercase, lowercase, number)
         success, error = svc.change_password(
             user_id=1,
-            current_password="oldpass",
-            new_password="newpass123",
+            current_password="Oldpass123",
+            new_password="Newpass123",
             password_verify_func=lambda p, h: True,
             password_hash_func=lambda p: "new_hash",
         )
@@ -497,10 +498,11 @@ class TestAuthService:
             "password_hash": "old_hash",
         }
 
+        # Use password that meets policy requirements
         success, error = svc.change_password(
             user_id=1,
-            current_password="samepass",
-            new_password="samepass",
+            current_password="Samepass123",
+            new_password="Samepass123",
             password_verify_func=lambda p, h: True,
             password_hash_func=lambda p: "hash",
         )
@@ -515,10 +517,11 @@ class TestAuthService:
         }
         mock_repo.update_password.return_value = False
 
+        # Use password that meets policy requirements
         success, error = svc.change_password(
             user_id=1,
-            current_password="oldpass",
-            new_password="newpass123",
+            current_password="Oldpass123",
+            new_password="Newpass123",
             password_verify_func=lambda p, h: True,
             password_hash_func=lambda p: "new_hash",
         )

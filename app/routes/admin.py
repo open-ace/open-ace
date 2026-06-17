@@ -16,6 +16,7 @@ from app.auth.decorators import admin_required
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.quota import validate_quota_update
+from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,9 @@ def api_create_user():
     if not validate_email(email):
         return jsonify({"error": "Invalid email"}), 400
 
-    is_valid, error_msg = validate_password(password)
+    # Validate password with security policy
+    settings = get_security_settings_cached()
+    is_valid, error_msg = validate_password(password, policy_settings=settings)
     if not is_valid:
         return jsonify({"error": error_msg}), 400
 
@@ -221,7 +224,9 @@ def api_update_user_password(user_id):
     data = request.get_json() or {}
     password: str = data.get("password", "")
 
-    is_valid, error_msg = validate_password(password)
+    # Validate password with security policy
+    settings = get_security_settings_cached()
+    is_valid, error_msg = validate_password(password, policy_settings=settings)
     if not is_valid:
         return jsonify({"error": error_msg}), 400
 
