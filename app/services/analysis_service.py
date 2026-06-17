@@ -91,7 +91,7 @@ class AnalysisService:
                 self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name
             ): "hourly_data",
             _executor.submit(
-                self.daily_stats_repo.get_conversation_stats, host_name
+                self.get_session_stats, start_date, end_date, host_name
             ): "conversation_stats",
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
@@ -616,6 +616,32 @@ class AnalysisService:
 
         return {"users": users}
 
+    def get_session_stats(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+    ) -> dict:
+        """
+        Single source of truth for session/conversation statistics.
+
+        Delegates to ``message_repo.get_conversation_stats_summary`` (real distinct
+        counts, total messages, multi-turn ratio). Both the batch endpoint and the
+        standalone ``get_conversation_stats`` route through this method so the two
+        previously-divergent paths (synthetic ``unique_dates * unique_tools`` estimate
+        vs ``get_conversation_history(limit=1000)`` in-memory aggregation) now share
+        one consistent, date-scoped real calculation.
+
+        ``avg_conversation_length`` is preserved in the result for backward
+        compatibility with calculateHealthScore, insights and exports.
+
+        Returns:
+            Dict: Conversation statistics summary.
+        """
+        return self.message_repo.get_conversation_stats_summary(
+            start_date=start_date, end_date=end_date, host_name=host_name
+        )
+
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_conversation_stats(
         self,
@@ -624,7 +650,12 @@ class AnalysisService:
         host_name: Optional[str] = None,
     ) -> dict:
         """
-        Get conversation statistics.
+        Get conversation statistics (standalone endpoint).
+
+        Delegates to ``get_session_stats`` so the standalone endpoint shares the same
+        single source of truth as the batch endpoint. Removes the previous
+        ``get_conversation_history(limit=1000)`` in-memory aggregation that truncated
+        large datasets and diverged from batch values.
 
         Returns:
             Dict: Conversation statistics.
@@ -634,24 +665,7 @@ class AnalysisService:
         if not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        # Get conversation history
-        conversations = self.message_repo.get_conversation_history(host_name=host_name, limit=1000)
-
-        total_conversations = len(conversations)
-        total_messages = sum(c.get("message_count", 0) for c in conversations)
-        total_tokens = sum(c.get("total_tokens", 0) for c in conversations)
-
-        return {
-            "total_conversations": total_conversations,
-            "total_messages": total_messages,
-            "total_tokens": total_tokens,
-            "average_messages_per_conversation": (
-                total_messages / total_conversations if total_conversations > 0 else 0
-            ),
-            "average_tokens_per_conversation": (
-                total_tokens / total_conversations if total_conversations > 0 else 0
-            ),
-        }
+        return self.get_session_stats(start_date=start_date, end_date=end_date, host_name=host_name)
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_tool_comparison(
