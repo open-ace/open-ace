@@ -290,6 +290,20 @@ class AnalysisService:
             "data_range": data_range,
         }
 
+    @cached(ttl=300, key_prefix="analysis", skip_args=[0])
+    def get_data_range(self) -> Optional[dict]:
+        """
+        Get the global data range (min and max dates) from daily_stats.
+
+        Used by the frontend "All" quick-range button to reflect the system's
+        actual data span rather than a hardcoded window. The range is always
+        global (not host-filtered) by design.
+
+        Returns:
+            Optional[Dict]: {"min_date", "max_date"} or None when no data.
+        """
+        return self.daily_stats_repo.get_data_range()
+
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     @cached(ttl=120, key_prefix="analysis")
     def get_key_metrics(

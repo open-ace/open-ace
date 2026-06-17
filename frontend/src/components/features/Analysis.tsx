@@ -2,7 +2,7 @@
  * Analysis Component - Data analysis and visualization with tabs
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -31,6 +31,7 @@ import {
   useHosts,
   useUserSegmentation,
   useTools,
+  useDataRange,
 } from '@/hooks';
 import { ConversationHistory } from './ConversationHistory';
 
@@ -46,6 +47,22 @@ export const Analysis: React.FC = () => {
 
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
+
+  // Fetch the global data range so the "All" quick-range reflects the actual
+  // data span instead of a hardcoded window (only requested when relevant).
+  const { data: dataRangeData } = useDataRange(quickRange === 'all');
+
+  // Stable reference to data_range to avoid useMemo thrash when the API returns
+  // a new object with the same min/max values (mirrors TrendAnalysis).
+  const dataRangeRef = useRef<{ min_date: string; max_date: string } | null>(null);
+  if (
+    dataRangeData &&
+    (dataRangeRef.current?.min_date !== dataRangeData.min_date ||
+      dataRangeRef.current?.max_date !== dataRangeData.max_date)
+  ) {
+    dataRangeRef.current = dataRangeData;
+  }
+  const dataRange = dataRangeRef.current;
 
   // Date range based on quick range selection
   const dateRange = useMemo(() => {
@@ -64,7 +81,13 @@ export const Analysis: React.FC = () => {
         break;
       case 'all':
       default:
-        start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // Last year as "all"
+        // Use the actual data range when available; fall back to last year.
+        if (dataRange?.min_date && dataRange?.max_date) {
+          start = new Date(dataRange.min_date);
+          end.setTime(new Date(dataRange.max_date).getTime());
+        } else {
+          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000); // Last year as "all"
+        }
         break;
     }
 
@@ -72,7 +95,7 @@ export const Analysis: React.FC = () => {
       start: formatDate(start, 'iso'),
       end: formatDate(end, 'iso'),
     };
-  }, [quickRange]);
+  }, [quickRange, dataRange]);
 
   const [startDate, setStartDate] = useState(dateRange.start);
   const [endDate, setEndDate] = useState(dateRange.end);

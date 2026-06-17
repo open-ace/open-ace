@@ -139,6 +139,14 @@ export const analysisApi = {
     return apiClient.get<BatchAnalysisResponse>('/api/analysis/batch', params);
   },
 
+  /**
+   * Get the global data range (min/max dates) for the "All" quick-range button.
+   * Returns null when there is no data.
+   */
+  async getDataRange(): Promise<DataRange | null> {
+    return apiClient.get<DataRange | null>('/api/analysis/data-range');
+  },
+
   async getKeyMetrics(startDate?: string, endDate?: string, host?: string): Promise<KeyMetrics> {
     const params: Record<string, string> = {};
     if (startDate) params.start = startDate;

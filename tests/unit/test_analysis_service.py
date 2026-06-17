@@ -233,6 +233,24 @@ class TestAnalysisService:
             a["type"] == "spike" for a in result["anomalies"]
         ), "Spike anomaly should be detected"
 
+    def test_get_data_range(self):
+        """get_data_range passes through the daily_stats repo result."""
+        svc, _, _, mock_daily_stats = self._make_service()
+        mock_daily_stats.get_data_range.return_value = {
+            "min_date": "2024-01-01",
+            "max_date": "2026-06-17",
+        }
+        result = svc.get_data_range()
+        assert result == {"min_date": "2024-01-01", "max_date": "2026-06-17"}
+        mock_daily_stats.get_data_range.assert_called_once()
+
+    def test_get_data_range_none(self):
+        """When there is no data the repo returns None; service passes it through."""
+        svc, _, _, mock_daily_stats = self._make_service()
+        mock_daily_stats.get_data_range.return_value = None
+        result = svc.get_data_range()
+        assert result is None
+
     def test_get_recommendations_with_data(self):
         svc, mock_usage, _, _ = self._make_service()
         mock_usage.get_daily_range.return_value = [
