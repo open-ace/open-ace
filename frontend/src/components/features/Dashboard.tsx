@@ -262,9 +262,10 @@ export const Dashboard: React.FC = () => {
       <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
         <div className="page-header-controls d-flex gap-2 align-items-center flex-wrap">
-          {/* Page Refresh Control */}
+          {/* Page Refresh Control - compact mode for better layout */}
           <PageRefreshControl
             refresh={pageRefresh}
+            compact={true}
             showLastRefreshTime={true}
             showNextRefreshTime={false}
           />
