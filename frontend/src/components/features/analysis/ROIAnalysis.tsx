@@ -377,9 +377,20 @@ export const ROIAnalysis: React.FC = () => {
 
   const costBreakdownData = useMemo(() => {
     if (!costBreakdown.length) return { labels: [], data: [] };
+    // Defensive client-side aggregation: collapse any duplicate tool entries
+    // (same tool split across models/sources) so the pie never renders two
+    // slices for one tool, even if the backend regresses. Merge by the
+    // normalized tool_name, sort by cost desc, and render labels via
+    // formatToolName for consistent display + i18n casing.
+    const merged = costBreakdown.reduce<Record<string, number>>((acc, c) => {
+      const key = c.tool_name ?? c.category ?? c.model ?? 'unknown';
+      acc[key] = (acc[key] ?? 0) + (c.total_cost ?? 0);
+      return acc;
+    }, {});
+    const entries = Object.entries(merged).sort((a, b) => b[1] - a[1]);
     return {
-      labels: costBreakdown.map((c) => c.category ?? c.tool_name ?? c.model ?? 'Unknown'),
-      data: costBreakdown.map((c) => c.total_cost),
+      labels: entries.map(([key]) => formatToolName(key)),
+      data: entries.map(([, cost]) => cost),
     };
   }, [costBreakdown]);
 

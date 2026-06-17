@@ -167,6 +167,75 @@ class TestROICalculator:
         assert "glm-5" in models
         assert "qwen3.6-plus" in models
 
+    def test_get_cost_breakdown_case_drift_collapses(self):
+        """Pure case drift (qwen/Qwen/QWEN) — not known aliases — must still
+        collapse to a single qwen slice. This is the actual prod failure mode."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "qwen",
+                "model": json.dumps(["glm-5"]),
+                "requests": 10,
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            },
+            {
+                "tool_name": "Qwen",
+                "model": json.dumps(["qwen3.5-plus"]),
+                "requests": 20,
+                "input_tokens": 2000,
+                "output_tokens": 1000,
+            },
+            {
+                "tool_name": "QWEN",
+                "model": json.dumps(["kimi"]),
+                "requests": 5,
+                "input_tokens": 500,
+                "output_tokens": 250,
+            },
+        ]
+        breakdown = calc.get_cost_breakdown("2026-01-01", "2026-01-31")
+
+        # The three case-drift rows must collapse to ONE qwen slice.
+        assert len(breakdown) == 1
+        assert breakdown[0].tool_name == "qwen"
+        assert breakdown[0].requests == 35
+        assert breakdown[0].input_tokens == 3500
+        assert breakdown[0].output_tokens == 1750
+
+    def test_get_cost_breakdown_cache_key_includes_start_date(self):
+        """R1 verification: skip_args=[0] must skip `self`, NOT start_date.
+        Distinct date ranges must produce distinct cache keys — otherwise
+        different ranges collide and return stale/incorrect breakdowns."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "qwen",
+                "model": json.dumps(["glm-5"]),
+                "requests": 1,
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        first = calc.get_cost_breakdown("2026-01-01", "2026-01-31")
+
+        # Swap the underlying data and query a DIFFERENT start_date.
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "claude",
+                "model": json.dumps(["claude-3-opus"]),
+                "requests": 9,
+                "input_tokens": 9000,
+                "output_tokens": 9000,
+            }
+        ]
+        second = calc.get_cost_breakdown("2026-02-01", "2026-02-28")
+
+        # If start_date were dropped from the key, `second` would return the
+        # cached qwen result. Distinct keys => fresh, correct result.
+        assert first[0].tool_name == "qwen"
+        assert second[0].tool_name == "claude"
+
     def test_merge_models(self):
         """Test _merge_models helper method."""
         # Normal merge
