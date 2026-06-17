@@ -1003,6 +1003,7 @@ class ProcessExecutor:
         model: str | None = None,
         permission_mode: str | None = None,
         allowed_tools: list[str] | None = None,
+        resume_session_id: str | None = None,
     ) -> dict[str, Any]:
         """Start a persistent ZCode app-server session.
 
@@ -1078,7 +1079,11 @@ class ProcessExecutor:
             daemon=True,
         ).start()
 
-        if not session.start(model=model, permission_mode=permission_mode):
+        if not session.start(
+            model=model,
+            permission_mode=permission_mode,
+            resume_session_id=resume_session_id,
+        ):
             session.stop()
             return {"success": False, "error": "ZCode session/create failed"}
 
@@ -1641,6 +1646,7 @@ class ProcessExecutor:
                     model=info.get("model"),
                     permission_mode=info.get("permission_mode"),
                     allowed_tools=info.get("allowed_tools"),
+                    resume_session_id=info.get("cli_session_id"),
                 )
                 if result.get("success"):
                     restored.append(sid)

@@ -78,12 +78,18 @@ class ZCodeAdapter(BaseCLIAdapter):
         """
         Get environment variables for ZCode.
 
-        ZCode's ``anthropic`` provider reads ``ANTHROPIC_BASE_URL`` natively
-        (verified in the zcode.cjs provider factory). Credentials live in
-        ``~/.zcode/cli/config.json`` written by ``write_zcode_settings``; the
-        proxy base URL is injected here so requests route through Open ACE.
+        ZCode's ``anthropic`` provider factory reads both ``ANTHROPIC_BASE_URL``
+        and ``ANTHROPIC_API_KEY`` from the environment (verified in zcode.cjs's
+        ``wJ``/``sMe`` factories), mirroring the Claude adapter. We set both so
+        the per-session proxy token authenticates every request through the Open
+        ACE LLM proxy, and the base URL routes to it. This takes precedence over
+        any credential in ``~/.zcode/cli/config.json``.
         """
-        return {"ANTHROPIC_BASE_URL": proxy_url.rstrip("/")}
+        base = proxy_url.rstrip("/")
+        return {
+            "ANTHROPIC_API_KEY": proxy_token,
+            "ANTHROPIC_BASE_URL": base,
+        }
 
     def _uses_bundled_engine(self) -> bool:
         """Whether the engine is the bundled app script (needs ``node`` prefix)."""

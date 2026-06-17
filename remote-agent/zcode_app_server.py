@@ -91,7 +91,10 @@ class ZCodeAppServerSession:
 
         # Event polling state: last consumed event seq per session.
         self._last_event_seq = 0
+        # Set = no turn in progress (idle); cleared while a turn runs.
         self._turn_done = threading.Event()
+        self._turn_done.set()
+        self._worker: threading.Thread | None = None
 
         self._reader_thread = threading.Thread(
             target=self._read_loop,
@@ -111,28 +114,53 @@ class ZCodeAppServerSession:
     def is_running(self) -> bool:
         return self.process.returncode is None
 
-    def start(self, model: str | None = None, permission_mode: str | None = None) -> bool:
-        """Start the reader thread and create the ZCode session."""
+    def start(
+        self,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        resume_session_id: str | None = None,
+    ) -> bool:
+        """Start the reader thread and create/resume the ZCode session.
+
+        When *resume_session_id* is given (crash recovery), the prior ZCode
+        session is resumed via ``session/resume`` so conversation history is
+        preserved; otherwise a fresh session is created via ``session/create``.
+        """
         self._reader_thread.start()
         workspace = os.path.abspath(os.path.expanduser(self.project_path))
-        create_params: dict[str, Any] = {
-            "workspace": {"workspacePath": workspace, "workspaceKey": workspace},
-        }
-        # Build a fallback config so app-server can reach a model provider even
-        # without a pre-existing ~/.zcode/cli/config.json on the remote machine.
-        result = self._request("session/create", create_params, timeout=20.0)
-        if not result or "session" not in result:
-            logger.error("ZCode session/create failed for %s: %s", self.session_id[:8], result)
-            return False
-        self._cli_session_id = result["session"].get("sessionId")
+        workspace_param = {"workspacePath": workspace, "workspaceKey": workspace}
+
+        if resume_session_id:
+            result = self._request(
+                "session/resume",
+                {"sessionId": resume_session_id, "workspace": workspace_param},
+                timeout=20.0,
+            )
+            session_obj = result.get("session") if isinstance(result, dict) else None
+            if session_obj and session_obj.get("sessionId"):
+                self._cli_session_id = session_obj["sessionId"]
+            else:
+                logger.warning(
+                    "ZCode session/resume failed for %s, falling back to create",
+                    self.session_id[:8],
+                )
+
+        if not self._cli_session_id:
+            result = self._request("session/create", {"workspace": workspace_param}, timeout=20.0)
+            if not result or "session" not in result:
+                logger.error("ZCode session/create failed for %s: %s", self.session_id[:8], result)
+                return False
+            self._cli_session_id = result["session"].get("sessionId")
+
         if not self._cli_session_id:
             logger.error("ZCode session/create returned no sessionId for %s", self.session_id[:8])
             return False
         self._created.set()
         logger.info(
-            "ZCode session created for %s (cli session: %s)",
+            "ZCode session ready for %s (cli session: %s, resumed=%s)",
             self.session_id[:8],
             self._cli_session_id[:8],
+            bool(resume_session_id),
         )
         return True
 
@@ -148,44 +176,86 @@ class ZCodeAppServerSession:
     # ------------------------------------------------------------------ #
 
     def send_message(self, content: str) -> bool:
-        """Send a user message and block until the agent turn completes.
+        """Send a user message and return immediately (non-blocking).
 
-        ``session/send`` is asynchronous (returns ``accepted`` immediately), so we
-        poll ``session/events`` until the projection flips back to ``idle`` and
-        then fetch final usage. Assistant text/tool events are forwarded to the
-        output callback as they arrive so the frontend streams in real time.
+        ``session/send`` is asynchronous. We dispatch it on a dedicated worker
+        thread so the caller (the agent's single command-dispatch thread) is not
+        blocked - heartbeats and other commands (stop/pause/permission) keep
+        flowing while the turn runs. The worker streams assistant events through
+        the existing callbacks and signals completion via ``_turn_done``.
         """
         if not self._cli_session_id or not self.is_running:
             logger.warning("Cannot send to inactive ZCode session %s", self.session_id[:8])
             return False
 
-        self._turn_done.clear()
-        send_result = self._request(
-            "session/send",
-            {"sessionId": self._cli_session_id, "content": content},
-            timeout=30.0,
-        )
-        if not send_result or not send_result.get("accepted"):
-            logger.error("ZCode session/send rejected for %s: %s", self.session_id[:8], send_result)
+        if not self._turn_done.is_set():
+            logger.warning("ZCode session %s already has a turn in progress", self.session_id[:8])
             return False
 
-        # Poll events until the turn finishes (status returns to idle) or timeout.
-        self._drain_events_until_idle(_TURN_TIMEOUT)
-
-        # Report final token usage for this turn.
-        self._report_usage()
-        # Signal stdout EOF so the SSE stream flushes a turn boundary.
-        self.output_callback(self.session_id, "", "stdout", True)
+        self._turn_done.clear()
+        self._worker = threading.Thread(
+            target=self._run_turn,
+            args=(content,),
+            name=f"zcode-turn-{self.session_id[:8]}",
+            daemon=True,
+        )
+        self._worker.start()
         return True
+
+    def wait_turn(self, timeout: float = _TURN_TIMEOUT) -> bool:
+        """Block until the current turn finishes (used by tests)."""
+        return self._turn_done.wait(timeout=timeout)
+
+    def _run_turn(self, content: str) -> None:
+        """Worker-thread body: send the message and stream events until done."""
+        try:
+            send_result = self._request(
+                "session/send",
+                {"sessionId": self._cli_session_id, "content": content},
+                timeout=30.0,
+            )
+            if not send_result or not send_result.get("accepted"):
+                # Surface send failures (e.g. model unavailable) to the user via
+                # the error stream rather than failing silently.
+                err_msg = "ZCode rejected the message"
+                if isinstance(send_result, dict):
+                    err = send_result.get("error") or {}
+                    err_msg = err.get("message") or err_msg
+                logger.error(
+                    "ZCode session/send rejected for %s: %s",
+                    self.session_id[:8],
+                    send_result,
+                )
+                self.output_callback(
+                    self.session_id,
+                    json.dumps({"type": "error", "data": {"message": err_msg}}),
+                    "stderr",
+                    False,
+                )
+                return
+            self._drain_events_until_idle(_TURN_TIMEOUT)
+            self._report_usage()
+        except Exception:  # noqa: BLE001
+            logger.exception("ZCode turn failed for %s", self.session_id[:8])
+            self.output_callback(
+                self.session_id,
+                json.dumps({"type": "error", "data": {"message": "ZCode turn failed"}}),
+                "stderr",
+                False,
+            )
+        finally:
+            self.output_callback(self.session_id, "", "stdout", True)
+            self._turn_done.set()
 
     def _drain_events_until_idle(self, timeout: float) -> None:
         """Poll session/events, forwarding assistant content, until the turn ends.
 
         The reliable completion signal is a ``turn.completed`` event (emitted once
-        the agent finishes its response). We also accept a ``state.updated``
-        notification with ``status: idle`` as a fallback.
+        the agent finishes its response). Polling backs off from 0.4s up to 2s so
+        long turns don't hammer the app-server.
         """
         deadline = time.monotonic() + timeout
+        interval = _EVENTS_POLL_INTERVAL
         while time.monotonic() < deadline and not self._stopped.is_set():
             result = self._request(
                 "session/events",
@@ -197,21 +267,19 @@ class ZCodeAppServerSession:
             events = result.get("events", []) or []
             completed = self._forward_events(events)
             if completed:
-                # Drain any trailing events (e.g. final session.updated).
                 tail = self._request(
                     "session/events", {"sessionId": self._cli_session_id}, timeout=10.0
                 )
                 if tail:
                     self._forward_events(tail.get("events", []) or [])
-                self._turn_done.set()
                 return
-            time.sleep(_EVENTS_POLL_INTERVAL)
+            time.sleep(interval)
+            interval = min(interval * 1.5, 2.0)
         logger.warning(
             "ZCode turn did not complete within %.0fs for %s",
             timeout,
             self.session_id[:8],
         )
-        self._turn_done.set()
 
     def _forward_events(self, events: list[dict[str, Any]]) -> bool:
         """Forward new events to the output callback. Returns True if turn done."""
@@ -312,28 +380,6 @@ class ZCodeAppServerSession:
             return False
 
         # Generic fallback for any future event type.
-        self.output_callback(
-            self.session_id,
-            json.dumps({"type": etype or "zcode_event", "data": payload}),
-            "stdout",
-            False,
-        )
-        return False
-
-        # Tool call events -> permission or info lines.
-        if etype in {"tool.call", "tool.result", "permission.request"}:
-            if etype == "permission.request" and self.permission_callback:
-                self.permission_callback(self.session_id, payload)
-            else:
-                self.output_callback(
-                    self.session_id,
-                    json.dumps({"type": etype, "data": payload}),
-                    "stdout",
-                    False,
-                )
-            return False
-
-        # Generic fallback: forward raw event for completeness.
         self.output_callback(
             self.session_id,
             json.dumps({"type": etype or "zcode_event", "data": payload}),

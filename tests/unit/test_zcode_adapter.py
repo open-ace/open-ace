@@ -79,8 +79,10 @@ def test_zcode_get_settings_path(cli_adapters_pkg):
 def test_zcode_get_env_vars_routes_through_anthropic_proxy(cli_adapters_pkg):
     adapter = cli_adapters_pkg.get_adapter("zcode")
     env = adapter.get_env_vars("https://proxy.example/api/llm-proxy/", "tok")
-    # Trailing slash stripped; ZCode's anthropic provider reads ANTHROPIC_BASE_URL.
+    # Trailing slash stripped; ZCode's anthropic provider reads both env vars,
+    # mirroring Claude: ANTHROPIC_API_KEY authenticates, ANTHROPIC_BASE_URL routes.
     assert env["ANTHROPIC_BASE_URL"] == "https://proxy.example/api/llm-proxy"
+    assert env["ANTHROPIC_API_KEY"] == "tok"
 
 
 def test_zcode_build_single_shot_args(cli_adapters_pkg):
