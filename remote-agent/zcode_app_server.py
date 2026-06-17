@@ -22,7 +22,8 @@ Verified protocol surface (against zcode 0.14.5):
   session/send    {sessionId, content} -> {accepted, stateRevision}  (async)
   session/events  {sessionId} -> {events:[...]}                      (poll)
   session/usage   {sessionId} -> {totalTokens, inputTokens, ...}     (camelCase)
-  session/resume  {sessionId} -> {messages, projection, runtime}
+  session/resume  {sessionId} -> {messages, projection, runtime, session, settings, ...}
+#                  (session.sessionId confirms the resumed id; same shape as create)
   session/list    {} -> {sessions:[...]}
 """
 
@@ -125,10 +126,15 @@ class ZCodeAppServerSession:
         When *resume_session_id* is given (crash recovery), the prior ZCode
         session is resumed via ``session/resume`` so conversation history is
         preserved; otherwise a fresh session is created via ``session/create``.
+        Both methods return the same envelope, including a top-level
+        ``session`` object whose ``sessionId`` confirms the active id (verified
+        against zcode 0.14.5). If resume fails or the response lacks a session
+        id, we fall back to ``session/create``.
         """
         self._reader_thread.start()
         workspace = os.path.abspath(os.path.expanduser(self.project_path))
         workspace_param = {"workspacePath": workspace, "workspaceKey": workspace}
+        resumed = False
 
         if resume_session_id:
             result = self._request(
@@ -136,9 +142,12 @@ class ZCodeAppServerSession:
                 {"sessionId": resume_session_id, "workspace": workspace_param},
                 timeout=20.0,
             )
+            # Both create and resume return a `session` envelope; the resumed id
+            # is confirmed under session.sessionId.
             session_obj = result.get("session") if isinstance(result, dict) else None
             if session_obj and session_obj.get("sessionId"):
                 self._cli_session_id = session_obj["sessionId"]
+                resumed = True
             else:
                 logger.warning(
                     "ZCode session/resume failed for %s, falling back to create",
@@ -160,7 +169,7 @@ class ZCodeAppServerSession:
             "ZCode session ready for %s (cli session: %s, resumed=%s)",
             self.session_id[:8],
             self._cli_session_id[:8],
-            bool(resume_session_id),
+            resumed,
         )
         return True
 
@@ -185,13 +194,16 @@ class ZCodeAppServerSession:
         the existing callbacks and signals completion via ``_turn_done``.
         """
         if not self._cli_session_id or not self.is_running:
+            self.last_send_error = "ZCode session is not active"
             logger.warning("Cannot send to inactive ZCode session %s", self.session_id[:8])
             return False
 
         if not self._turn_done.is_set():
+            self.last_send_error = "A turn is already in progress for this session"
             logger.warning("ZCode session %s already has a turn in progress", self.session_id[:8])
             return False
 
+        self.last_send_error = None
         self._turn_done.clear()
         self._worker = threading.Thread(
             target=self._run_turn,

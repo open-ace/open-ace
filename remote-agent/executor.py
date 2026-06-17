@@ -1140,7 +1140,10 @@ class ProcessExecutor:
         if isinstance(session, ZCodeAppServerSession):
             if session.send_message(content):
                 return {"success": True}
-            return {"success": False, "error": "ZCode turn failed"}
+            return {
+                "success": False,
+                "error": session.last_send_error or "ZCode turn failed",
+            }
 
         # Check if the CLI tool supports stdin input
         adapter = get_adapter(session.cli_tool)

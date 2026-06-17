@@ -242,3 +242,160 @@ def test_usage_parser_no_regression_for_qwen(usage_parser_mod):
         "input": 8,
         "output": 5,
     }
+
+
+# --------------------------------------------------------------------------- #
+# ZCodeAppServerSession — worker/resume/guard (mocked)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def zcode_session_cls():
+    """Load the ZCodeAppServerSession class without spawning a real process."""
+    mod = _load_module("zcode_app_server", "remote-agent/zcode_app_server.py")
+    return mod.ZCodeAppServerSession
+
+
+class _FakeProcess:
+    """Minimal stand-in for subprocess.Popen."""
+
+    def __init__(self):
+        self.returncode = None
+        self.pid = 12345
+        self.stdin = None
+        self.stdout = None
+        self.stderr = None
+
+    def wait(self, timeout=None):  # noqa: D401
+        return 0
+
+    def terminate(self):
+        self.returncode = 0
+
+    def kill(self):
+        self.returncode = 0
+
+
+def _make_session(zcode_session_cls, requests):
+    """Build a session whose ``_request`` is replaced by *requests* lookup."""
+    import threading
+
+    sess = zcode_session_cls.__new__(zcode_session_cls)
+    sess.session_id = "sess_test"
+    sess.process = _FakeProcess()
+    sess.project_path = "/tmp"
+    sess.cli_tool = "zcode"
+    sess.output_callback = lambda *a, **k: None
+    sess.usage_callback = None
+    sess.permission_callback = None
+    sess.model = None
+    sess.permission_mode = None
+    sess.env = None
+    sess.allowed_tools = []
+    sess._paused = False
+    sess._restart_lock = threading.Lock()
+    sess._cli_session_id = None
+    sess._created = threading.Event()
+    sess._stopped = threading.Event()
+    sess._lock = threading.Lock()
+    sess._pending = {}
+    sess._last_event_seq = 0
+    sess._turn_done = threading.Event()
+    sess._turn_done.set()
+    sess._worker = None
+    sess.last_send_error = None
+    sess._reader_thread = threading.Thread(target=lambda: None, daemon=True)
+
+    def fake_request(method, params, timeout=30.0):
+        return requests.get(method, {}).get("result")
+
+    sess._request = fake_request
+    return sess
+
+
+def test_start_resumes_when_session_sessionid_present(zcode_session_cls):
+    """session/resume returns session.sessionId -> resume succeeds, no create."""
+    requests = {
+        "session/resume": {"result": {"session": {"sessionId": "sess_resumed_xyz"}}},
+    }
+    sess = _make_session(zcode_session_cls, requests)
+    ok = sess.start(resume_session_id="sess_resumed_xyz")
+    assert ok is True
+    assert sess._cli_session_id == "sess_resumed_xyz"
+
+
+def test_start_falls_back_to_create_when_resume_lacks_session(zcode_session_cls):
+    """If resume response lacks session.sessionId, fall back to session/create."""
+    requests = {
+        # Resume returns no session envelope (simulates shape mismatch).
+        "session/resume": {"result": {"messages": [], "projection": {}}},
+        "session/create": {"result": {"session": {"sessionId": "sess_fresh"}}},
+    }
+    sess = _make_session(zcode_session_cls, requests)
+    ok = sess.start(resume_session_id="sess_resumed_xyz")
+    assert ok is True
+    # Fresh id from create, not the resume id.
+    assert sess._cli_session_id == "sess_fresh"
+
+
+def test_start_creates_when_no_resume_id(zcode_session_cls):
+    requests = {"session/create": {"result": {"session": {"sessionId": "sess_new"}}}}
+    sess = _make_session(zcode_session_cls, requests)
+    ok = sess.start()
+    assert ok is True
+    assert sess._cli_session_id == "sess_new"
+
+
+def test_send_message_returns_immediately_and_runs_worker(zcode_session_cls):
+    """send_message returns True without blocking; the worker runs async."""
+    import time
+
+    # session/send accepted; events immediately report turn.completed.
+    requests = {
+        "session/send": {"result": {"accepted": True, "sessionId": "sess_x"}},
+        "session/events": {
+            "result": {
+                "events": [
+                    {"seq": 1, "type": "turn.completed", "payload": {"usage": {}}},
+                ]
+            }
+        },
+        "session/usage": {"result": {"inputTokens": 0, "outputTokens": 0}},
+    }
+    sess = _make_session(zcode_session_cls, requests)
+    sess._cli_session_id = "sess_x"
+    t0 = time.monotonic()
+    ok = sess.send_message("hello")
+    elapsed = time.monotonic() - t0
+    assert ok is True
+    assert elapsed < 1.0  # non-blocking: returns well under a second
+    # Worker completes the turn.
+    assert sess.wait_turn(timeout=5.0) is True
+
+
+def test_send_message_rejects_concurrent_send_as_busy(zcode_session_cls):
+    """A second send while a turn is in progress is rejected with a busy error."""
+    import threading
+
+    gate = threading.Event()
+
+    def slow_request(method, params, timeout=30.0):
+        if method == "session/send":
+            gate.wait(timeout=5.0)  # hold the turn open
+            return {"accepted": True, "sessionId": "sess_x"}
+        if method == "session/events":
+            gate.set()
+            return {"events": [{"seq": 1, "type": "turn.completed", "payload": {}}]}
+        return None
+
+    sess = _make_session(zcode_session_cls, {})
+    sess._cli_session_id = "sess_x"
+    sess._request = slow_request
+    assert sess.send_message("first") is True
+    # Second send while the first turn is still running.
+    second = sess.send_message("second")
+    assert second is False
+    assert sess.last_send_error is not None
+    assert "in progress" in sess.last_send_error
+    gate.set()
+    assert sess.wait_turn(timeout=5.0)
