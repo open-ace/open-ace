@@ -940,21 +940,34 @@ class MessageRepository:
         conditions.append(f"{session_expr} IS NOT NULL")
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
-        # Aggregate query: real distinct conversations, total messages, total tokens
+        # Single-pass aggregate: group once per session in a derived table, then
+        # roll up. One scan of daily_messages yields the distinct conversation
+        # count, the total message/token sums and the multi-turn count together
+        # (previously this required two separate queries).
         query = f"""
             SELECT
-                COUNT(DISTINCT {session_expr}) as total_conversations,
-                COUNT(*) as total_messages,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens
-            FROM daily_messages
-            {where_clause}
+                COUNT(*) AS total_conversations,
+                COALESCE(SUM(cnt), 0) AS total_messages,
+                COALESCE(SUM(session_tokens), 0) AS total_tokens,
+                SUM(CASE WHEN cnt >= 2 THEN 1 ELSE 0 END) AS multi_turn_session_count
+            FROM (
+                SELECT
+                    {session_expr} AS s,
+                    COUNT(*) AS cnt,
+                    SUM(tokens_used) AS session_tokens
+                FROM daily_messages
+                {where_clause}
+                GROUP BY {session_expr}
+            ) AS per_session
         """
 
         result = self.db.fetch_one(query, tuple(params))
 
-        if not result:
+        total_conversations = (result or {}).get("total_conversations", 0) or 0
+        if not result or total_conversations == 0:
+            # No matching rows (DB returns None) or a real empty set (the derived
+            # table has zero groups -> COUNT(*) = 0). SUM(CASE ...) is NULL in the
+            # latter, but the guard short-circuits before it is read.
             return {
                 "total_conversations": 0,
                 "total_messages": 0,
@@ -966,29 +979,12 @@ class MessageRepository:
                 "avg_conversation_length": 0,
             }
 
-        total_conversations = result.get("total_conversations", 0) or 0
         total_messages = result.get("total_messages", 0) or 0
         total_tokens = result.get("total_tokens", 0) or 0
+        multi_turn_session_count = result.get("multi_turn_session_count", 0) or 0
 
-        # Multi-turn conversations: those containing >= 2 messages
-        multi_turn_session_count = 0
-        if total_conversations > 0:
-            multi_query = f"""
-                SELECT COUNT(*) as multi_turn_count FROM (
-                    SELECT 1
-                    FROM daily_messages
-                    {where_clause}
-                    GROUP BY {session_expr}
-                    HAVING COUNT(*) >= 2
-                ) AS multi_turn_conversations
-            """
-            mt_result = self.db.fetch_one(multi_query, tuple(params))
-            multi_turn_session_count = mt_result.get("multi_turn_count", 0) or 0 if mt_result else 0
-
-        multi_turn_ratio = (
-            multi_turn_session_count / total_conversations if total_conversations > 0 else 0
-        )
-        average_messages = total_messages / total_conversations if total_conversations > 0 else 0
+        multi_turn_ratio = multi_turn_session_count / total_conversations
+        average_messages = total_messages / total_conversations
 
         return {
             "total_conversations": total_conversations,
@@ -997,9 +993,7 @@ class MessageRepository:
             "multi_turn_session_count": multi_turn_session_count,
             "multi_turn_ratio": multi_turn_ratio,
             "average_messages_per_conversation": average_messages,
-            "average_tokens_per_conversation": (
-                total_tokens / total_conversations if total_conversations > 0 else 0
-            ),
+            "average_tokens_per_conversation": total_tokens / total_conversations,
             # Backward-compatible alias consumed by calculateHealthScore, insights, exports
             "avg_conversation_length": average_messages,
         }

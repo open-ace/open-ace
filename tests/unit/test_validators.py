@@ -456,3 +456,24 @@ class TestValidatePassword:
         assert is_valid is expected_valid
         if not expected_valid:
             assert msg is not None
+
+    @pytest.mark.parametrize(
+        "min_length_value",
+        ["oops", None, "", [], {"nested": 1}],
+        ids=["non_numeric_string", "none", "empty_string", "list", "dict"],
+    )
+    def test_malformed_policy_min_length_falls_back_to_default(self, min_length_value):
+        """A malformed password_min_length must not raise; it falls back to 8.
+
+        Guards the try/except in validate_password so an admin misconfiguration
+        (None / non-numeric / wrong type) surfaces a clean validation result
+        instead of a 500.
+        """
+        policy = {"password_min_length": min_length_value}
+        # 8 chars satisfies the fallback minimum of 8.
+        is_valid, _ = validate_password("12345678", policy_settings=policy)
+        assert is_valid is True
+        # 7 chars fails the fallback minimum of 8.
+        is_valid, msg = validate_password("1234567", policy_settings=policy)
+        assert is_valid is False
+        assert "8" in msg

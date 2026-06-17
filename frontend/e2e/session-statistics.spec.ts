@@ -75,10 +75,12 @@ test.describe('Session Statistics card', () => {
     // Match the quick-range button whose label starts with "7" (e.g. "7 Days")
     // rather than any button containing the digit, which is brittle.
     const seven = page.getByRole('button', { name: /^7\b/ }).first();
-    if (await seven.isVisible().catch(() => false)) {
-      await seven.click();
-      await page.waitForLoadState('networkidle');
-      await expect(ratioCell()).toHaveText(RATIO_RE);
-    }
+    // The button is a hard requirement for this scenario: fail loudly if it is
+    // absent (wrong selector / language / layout) rather than silently passing
+    // without exercising the date-range switch.
+    await expect(seven).toBeVisible({ timeout: 10000 });
+    await seven.click();
+    await page.waitForLoadState('networkidle');
+    await expect(ratioCell()).toHaveText(RATIO_RE);
   });
 });
