@@ -38,11 +38,13 @@ target_metadata = None
 def get_url():
     """
     Get the database URL from environment or config.
-    Uses the centralized database configuration.
+    Uses scripts.shared.db._get_db_url which automatically handles
+    sudo environment by adding gssencmode=disable for PostgreSQL
+    to prevent GSSAPI/Kerberos crash (SIGSEGV).
     """
-    from app.repositories.database import get_database_url
+    from scripts.shared.db import _get_db_url
 
-    return get_database_url()
+    return _get_db_url()
 
 
 def run_migrations_offline() -> None:
