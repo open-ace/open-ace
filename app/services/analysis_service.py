@@ -152,7 +152,7 @@ class AnalysisService:
         )
 
         # Sanity log: surface order-of-magnitude divergence between the legacy
-        # approximation and the real count so口径 drift is visible post-deploy.
+        # approximation and the real count so any scope drift is visible post-deploy.
         if legacy_approx_sessions and total_sessions:
             ratio = legacy_approx_sessions / total_sessions
             if ratio > 10 or ratio < 0.1:
