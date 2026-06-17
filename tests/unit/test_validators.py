@@ -371,35 +371,55 @@ class TestValidatePassword:
             ("abcdefgh", {"password_require_special": True}, False),
             ("abcdefg!", {"password_require_special": True}, True),
             # Combined policy requirements
-            ("Abcdefg1", {
-                "password_require_uppercase": True,
-                "password_require_lowercase": True,
-                "password_require_number": True,
-            }, True),
-            ("Abcdefg!", {
-                "password_require_uppercase": True,
-                "password_require_lowercase": True,
-                "password_require_special": True,
-            }, True),
-            ("abcdefg1", {
-                "password_require_uppercase": True,
-                "password_require_number": True,
-            }, False),  # Missing uppercase
+            (
+                "Abcdefg1",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                },
+                True,
+            ),
+            (
+                "Abcdefg!",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_special": True,
+                },
+                True,
+            ),
+            (
+                "abcdefg1",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_number": True,
+                },
+                False,
+            ),  # Missing uppercase
             # Full policy requirements
-            ("Abcdefg1!", {
-                "password_min_length": 8,
-                "password_require_uppercase": True,
-                "password_require_lowercase": True,
-                "password_require_number": True,
-                "password_require_special": True,
-            }, True),
-            ("Abcdefg1", {
-                "password_min_length": 8,
-                "password_require_uppercase": True,
-                "password_require_lowercase": True,
-                "password_require_number": True,
-                "password_require_special": True,
-            }, False),  # Missing special
+            (
+                "Abcdefg1!",
+                {
+                    "password_min_length": 8,
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                    "password_require_special": True,
+                },
+                True,
+            ),
+            (
+                "Abcdefg1",
+                {
+                    "password_min_length": 8,
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                    "password_require_special": True,
+                },
+                False,
+            ),  # Missing special
         ],
         ids=[
             "no_policy_basic_valid",
