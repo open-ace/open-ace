@@ -392,23 +392,23 @@ export const Dashboard: React.FC = () => {
         </Card>
       </section>
 
-      {/* Trend Chart + Distribution Chart - Two columns */}
+      {/* Trend Chart + Distribution Chart - Two columns with shared filter */}
       <section className="dashboard-section mb-4">
+        {/* Global tool filter for both charts */}
+        <div className="d-flex align-items-center mb-3">
+          <span className="me-2 text-muted">{t('tool', language)}:</span>
+          <Select
+            options={toolOptions}
+            value={selectedTool}
+            onChange={setSelectedTool}
+            size="sm"
+            className="select-narrow"
+          />
+        </div>
         <div className="row g-3">
           {/* Trend Chart - Left */}
           <div className="col-lg-8">
-            <Card
-              title={t('trendChart', language)}
-              actions={
-                <Select
-                  options={toolOptions}
-                  value={selectedTool}
-                  onChange={setSelectedTool}
-                  size="sm"
-                  className="select-narrow"
-                />
-              }
-            >
+            <Card title={t('trendChart', language)}>
               {filteredTrendData && filteredTrendData.length > 0 ? (
                 <TokenTrendChart
                   data={filteredTrendData}
