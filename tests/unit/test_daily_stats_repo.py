@@ -433,6 +433,7 @@ class TestDailyStatsRepository:
             {"count": 100},  # daily_stats not empty
             {"max_date": "2024-01-15"},  # stats max date
             {"max_date": "2024-01-15"},  # messages max date (same)
+            {"count": 0},  # no NULL sender_name
         ]
         result = self.repo.needs_refresh()
         assert result is False
@@ -443,9 +444,21 @@ class TestDailyStatsRepository:
             {"count": 100},  # daily_stats not empty
             {"max_date": "2024-01-15"},  # stats max date
             None,  # no messages
+            {"count": 0},  # no NULL sender_name (no messages to sync)
         ]
         result = self.repo.needs_refresh()
         assert result is False
+
+    def test_needs_refresh_null_sender_name(self):
+        """Stats have NULL sender_name that should have data."""
+        self.db.fetch_one.side_effect = [
+            {"count": 100},  # daily_stats not empty
+            {"max_date": "2024-01-15"},  # stats max date
+            {"max_date": "2024-01-15"},  # messages max date (same)
+            {"count": 5},  # 5 rows with NULL sender_name that should have data
+        ]
+        result = self.repo.needs_refresh()
+        assert result is True
 
     # -------------------------------------------------------------------------
     # refresh_hourly_stats

@@ -725,6 +725,24 @@ class DailyStatsRepository:
                 )
                 return True
 
+        # Check if sender_name is missing (NULL values that should have data)
+        # Only check rows where sender_name should NOT be NULL (corresponding daily_messages has data)
+        null_sender_query = """
+            SELECT COUNT(*) as count FROM daily_stats ds
+            WHERE ds.sender_name IS NULL
+            AND EXISTS (
+                SELECT 1 FROM daily_messages dm
+                WHERE dm.date = ds.date
+                AND dm.tool_name = ds.tool_name
+                AND dm.host_name = ds.host_name
+                AND dm.sender_name IS NOT NULL
+            )
+        """
+        null_result = self.db.fetch_one(null_sender_query)
+        if null_result and null_result.get("count", 0) > 0:
+            logger.info(f"daily_stats has {null_result['count']} rows missing sender_name")
+            return True
+
         return False
 
     def get_data_range(self) -> Optional[dict]:
