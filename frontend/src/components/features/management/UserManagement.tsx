@@ -47,19 +47,27 @@ export const UserManagement: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [formData, setFormData] = useState<CreateUserRequest & { confirm_password?: string }>({
+  const [formData, setFormData] = useState<
+    CreateUserRequest & { confirm_password?: string; is_active: boolean }
+  >({
     username: '',
     email: '',
     password: '',
     confirm_password: '',
     role: 'user',
     system_account: '',
+    is_active: true,
   });
 
   const roleOptions = [
     { value: 'admin', label: 'Admin' },
     { value: 'user', label: 'User' },
     { value: 'viewer', label: 'Viewer' },
+  ];
+
+  const activeStatusOptions = [
+    { value: 'true', label: 'Active' },
+    { value: 'false', label: 'Inactive' },
   ];
 
   const handleOpenCreate = () => {
@@ -72,6 +80,7 @@ export const UserManagement: React.FC = () => {
       confirm_password: '',
       role: 'user',
       system_account: '',
+      is_active: true,
     });
     setShowModal(true);
   };
@@ -86,6 +95,7 @@ export const UserManagement: React.FC = () => {
       confirm_password: '',
       role: user.role,
       system_account: user.system_account ?? '',
+      is_active: user.is_active,
     });
     setShowModal(true);
   };
@@ -101,6 +111,7 @@ export const UserManagement: React.FC = () => {
       confirm_password: '',
       role: 'user',
       system_account: '',
+      is_active: true,
     });
   };
 
@@ -143,6 +154,7 @@ export const UserManagement: React.FC = () => {
           email: formData.email,
           role: formData.role,
           system_account: formData.system_account,
+          is_active: formData.is_active,
         };
         await updateUser.mutateAsync({ userId: editingUser.id, data: updateData });
 
@@ -357,6 +369,16 @@ export const UserManagement: React.FC = () => {
                 }
               />
             </div>
+            {editingUser && (
+              <div className="col-md-6">
+                <label className="form-label">{t('activationStatus', language)}</label>
+                <Select
+                  options={activeStatusOptions}
+                  value={formData.is_active ? 'true' : 'false'}
+                  onChange={(value) => setFormData({ ...formData, is_active: value === 'true' })}
+                />
+              </div>
+            )}
             {!editingUser && (
               <>
                 <div className="col-md-6">
