@@ -3104,9 +3104,23 @@ do_upgrade() {
         # Remove old files except logs, data, and config directory
         local config_basename=$(basename "$config_dir")
 
+        # Check if SOURCE_DIR is inside target_path to prevent accidental deletion
+        local source_exclude=""
+        if [[ "$SOURCE_DIR" == "$target_path"/* ]]; then
+            local source_rel="${SOURCE_DIR#$target_path/}"
+            local source_top=$(echo "$source_rel" | cut -d'/' -f1)
+            source_exclude="$source_top"
+            print_warning "Source directory is inside target path: $SOURCE_DIR"
+            print_info "Preserving '$source_top' directory during cleanup"
+        fi
+
         # List directories that will be deleted and ask for confirmation
         local delete_list
-        delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" 2>/dev/null)
+        if [ -n "$source_exclude" ]; then
+            delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" 2>/dev/null)
+        else
+            delete_list=$(find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" 2>/dev/null)
+        fi
         if [ -n "$delete_list" ]; then
             echo ""
             echo -e "${YELLOW}The following items will be deleted:${NC}"
@@ -3121,11 +3135,19 @@ do_upgrade() {
                 skip_delete="yes"
             fi
             if [ "$skip_delete" = "no" ]; then
-                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+                if [ -n "$source_exclude" ]; then
+                    find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" -exec rm -rf {} +
+                else
+                    find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+                fi
             fi
         else
             # No files to delete (shouldn't normally happen during upgrade)
-            find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+            if [ -n "$source_exclude" ]; then
+                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" ! -name "$source_exclude" -exec rm -rf {} +
+            else
+                find "$target_path" -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name "$config_basename" -exec rm -rf {} +
+            fi
         fi
         # Copy new files
         cp -r "$SOURCE_DIR"/* "$target_path/"
@@ -3550,9 +3572,24 @@ do_upgrade_remote() {
     # Update files (preserve logs, data, and config)
     print_info "Updating remote files..."
 
+    # Check if SOURCE_DIR path structure matches remote target_path pattern
+    # Note: SOURCE_DIR is local, target_path is remote - they are on different machines
+    # But we check for consistency and edge cases (e.g., shared filesystem)
+    local remote_source_exclude=""
+    if [[ "$SOURCE_DIR" == *"/dist/"* ]] || [[ "$SOURCE_DIR" == */dist/* ]]; then
+        # SOURCE_DIR is in a dist directory locally
+        # Check if remote target_path also has a dist directory that might cause confusion
+        remote_source_exclude="dist"
+        print_info "Source is from dist directory, will preserve 'dist' on remote if exists"
+    fi
+
     # List directories that will be deleted and ask for confirmation
     local remote_delete_list
-    remote_delete_list=$(ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' 2>/dev/null")
+    if [ -n "$remote_source_exclude" ]; then
+        remote_delete_list=$(ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' ! -name '$remote_source_exclude' 2>/dev/null")
+    else
+        remote_delete_list=$(ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' 2>/dev/null")
+    fi
     if [ -n "$remote_delete_list" ]; then
         echo ""
         echo -e "${YELLOW}The following items will be deleted on remote:${NC}"
@@ -3567,10 +3604,18 @@ do_upgrade_remote() {
             remote_skip_delete="yes"
         fi
         if [ "$remote_skip_delete" = "no" ]; then
-            ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+            if [ -n "$remote_source_exclude" ]; then
+                ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' ! -name '$remote_source_exclude' -exec rm -rf {} +"
+            else
+                ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+            fi
         fi
     else
-        ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+        if [ -n "$remote_source_exclude" ]; then
+            ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' ! -name '$remote_source_exclude' -exec rm -rf {} +"
+        else
+            ssh "$remote" "cd '$target_path' && find . -mindepth 1 -maxdepth 1 ! -name 'logs' ! -name 'data' ! -name '.open-ace' -exec rm -rf {} +"
+        fi
     fi
     scp -r "$SOURCE_DIR"/* "$remote:$target_path/"
 
