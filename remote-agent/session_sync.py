@@ -664,7 +664,10 @@ class ZcodeSession:
         if not text_content.strip():
             return
 
-        model = data.get("modelID") or data.get("model", {}).get("modelId")
+        model = data.get("modelID")
+        if not model:
+            model_obj = data.get("model")
+            model = model_obj.get("modelId") if isinstance(model_obj, dict) else None
         timestamp = _ms_to_iso(time_created) if time_created else None
 
         msg: dict[str, Any] = {
@@ -697,31 +700,32 @@ class ZcodeSession:
     def _extract_parts_text(parts_json: str) -> str:
         """Extract concatenated text from a GROUP_CONCAT blob of part.data rows.
 
-        Each part.data is a JSON object; GROUP_CONCAT joins them with commas.
-        We walk the blob and keep only parts where type == "text".
+        Each part.data is a standalone JSON object; GROUP_CONCAT joins them with
+        commas. We use json.JSONDecoder.raw_decode to iteratively consume one
+        object at a time, which correctly handles braces/quotes inside string
+        values (unbalanced braces in code text, nested JSON, regex, etc.) — the
+        earlier brace-depth walker broke on those.
         """
-        # Recover individual JSON objects from the concatenated blob. A robust
-        # approach: a comma at brace-depth 0 separates objects.
+        decoder = json.JSONDecoder()
         texts: list[str] = []
-        depth = 0
-        start = 0
-        for i, ch in enumerate(parts_json):
-            if ch == "{":
-                if depth == 0:
-                    start = i
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    chunk = parts_json[start : i + 1]
-                    try:
-                        part = json.loads(chunk)
-                    except json.JSONDecodeError:
-                        continue
-                    if part.get("type") == "text":
-                        t = part.get("text")
-                        if isinstance(t, str):
-                            texts.append(t)
+        idx = 0
+        length = len(parts_json)
+        while idx < length:
+            # Skip whitespace and the commas GROUP_CONCAT inserts between objects.
+            while idx < length and parts_json[idx] in " \t\n\r,":
+                idx += 1
+            if idx >= length:
+                break
+            try:
+                obj, end = decoder.raw_decode(parts_json, idx)
+            except json.JSONDecodeError:
+                # Malformed tail — stop; can't reliably recover offset.
+                break
+            idx = end
+            if isinstance(obj, dict) and obj.get("type") == "text":
+                t = obj.get("text")
+                if isinstance(t, str):
+                    texts.append(t)
         return "".join(texts)
 
     def to_sync_payload(self, machine_id: str, terminal_id: str) -> dict[str, Any]:
