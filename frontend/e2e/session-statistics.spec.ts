@@ -72,7 +72,9 @@ test.describe('Session Statistics card', () => {
 
     // Switch to the 7-day quick range, then back to 30 days. The card must keep
     // showing a valid percentage — confirming one consistent, date-scoped source.
-    const seven = page.locator('button.btn', { hasText: /7/ }).first();
+    // Match the quick-range button whose label starts with "7" (e.g. "7 Days")
+    // rather than any button containing the digit, which is brittle.
+    const seven = page.getByRole('button', { name: /^7\b/ }).first();
     if (await seven.isVisible().catch(() => false)) {
       await seven.click();
       await page.waitForLoadState('networkidle');

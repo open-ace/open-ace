@@ -100,3 +100,19 @@ class TestSessionStatsConvergence:
         assert result["conversation_stats"]["total_conversations"] == 12
         # Synthetic estimator is off the hot path
         assert not daily.get_conversation_stats.called
+
+    def test_deprecated_synthetic_estimator_not_wired_into_batch(self):
+        """Source-level guard: the deprecated estimator must stay off the batch path.
+
+        ``inspect.getsource`` on the method returns the ``@cached`` wrapper, so we
+        inspect the whole module instead. Combined with the runtime assertion
+        above, this makes it hard to accidentally reintroduce the synthetic
+        ``unique_dates * unique_tools`` estimator into ``get_batch_analysis``.
+        """
+        import inspect
+
+        from app.services import analysis_service as module
+
+        src = inspect.getsource(module)
+        assert "daily_stats_repo.get_conversation_stats" not in src
+        assert "get_session_stats" in src

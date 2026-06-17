@@ -107,3 +107,14 @@ class TestGetConversationStatsSummary:
         assert "date >= ?" not in query
         assert "date <= ?" not in query
         assert "IS NOT NULL" in query
+
+    def test_multi_turn_ratio_equals_count_over_total(self):
+        """multi_turn_ratio must equal multi_turn_session_count / total_conversations."""
+        self.db.fetch_one.side_effect = [
+            self._agg_row(total_conversations=5, total_messages=8),
+            {"multi_turn_count": 3},
+        ]
+        result = self.repo.get_conversation_stats_summary()
+        assert result["multi_turn_session_count"] == 3
+        assert result["total_conversations"] == 5
+        assert result["multi_turn_ratio"] == 3 / 5

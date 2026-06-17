@@ -921,6 +921,11 @@ class MessageRepository:
         conditions: list[str] = []
         params: list[Any] = []
 
+        # Session identifier expression — defined once and reused by the filter,
+        # the distinct-count aggregate and the multi-turn sub-query so the three
+        # cannot drift apart.
+        session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
+
         if start_date:
             conditions.append("date >= ?")
             params.append(start_date)
@@ -932,12 +937,8 @@ class MessageRepository:
             params.append(host_name)
 
         # Only count records that carry a session identifier
-        conditions.append(
-            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
-        )
+        conditions.append(f"{session_expr} IS NOT NULL")
         where_clause = f"WHERE {' AND '.join(conditions)}"
-
-        session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
 
         # Aggregate query: real distinct conversations, total messages, total tokens
         query = f"""

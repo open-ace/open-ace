@@ -47,7 +47,7 @@ export interface ConversationStats {
   /** Fraction of conversations with >= 2 messages, in [0, 1]. */
   multi_turn_ratio: number;
   average_messages_per_conversation: number;
-  avg_tokens_per_conversation: number;
+  average_tokens_per_conversation: number;
   /**
    * Backward-compatible alias of average_messages_per_conversation. Kept so
    * calculateHealthScore and other existing consumers keep working.

@@ -126,7 +126,12 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
 
     # Policy-based checks (if settings provided)
     if policy_settings:
-        min_length = int(policy_settings.get("password_min_length", 8))
+        try:
+            min_length = int(policy_settings.get("password_min_length", 8))
+        except (TypeError, ValueError):
+            # Guard against malformed policy values (None / non-numeric) that
+            # would otherwise surface as a 500 from this helper.
+            min_length = 8
         if len(password) < min_length:
             return False, f"Password must be at least {min_length} characters"
 
@@ -136,9 +141,11 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
             return False, "Password must contain lowercase letters"
         if policy_settings.get("password_require_number") and not re.search(r"[0-9]", password):
             return False, "Password must contain numbers"
-        if policy_settings.get("password_require_special") and not re.search(
-            r"[!@#$%^&*(),.?\":{}|<>]", password
-        ):
+        # Any non-word, non-space character counts as "special". This accepts
+        # the common punctuation set (- + = ; ' / \ etc.) the previous narrow
+        # class missed, so compliant passwords containing those are no longer
+        # wrongly rejected. Underscore is a word char and intentionally excluded.
+        if policy_settings.get("password_require_special") and not re.search(r"[^\w\s]", password):
             return False, "Password must contain special characters"
 
     return True, None

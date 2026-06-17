@@ -67,7 +67,7 @@ export const SessionStatisticsCard: React.FC<SessionStatisticsCardProps> = ({
   const totalConversations = conversationStats?.total_conversations ?? 0;
   const totalMessages = conversationStats?.total_messages ?? 0;
   const avgMessages = conversationStats?.average_messages_per_conversation ?? 0;
-  const avgTokens = conversationStats?.avg_tokens_per_conversation ?? 0;
+  const avgTokens = conversationStats?.average_tokens_per_conversation ?? 0;
   const multiTurnRatio = conversationStats?.multi_turn_ratio ?? 0;
 
   const rows: Array<{

@@ -45,7 +45,6 @@ class AnalysisService:
         self.daily_stats_repo = daily_stats_repo or DailyStatsRepository()
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
-    @cached(ttl=120, key_prefix="analysis")
     def get_batch_analysis(
         self,
         start_date: Optional[str] = None,
@@ -661,7 +660,10 @@ class AnalysisService:
             Dict: Conversation statistics.
         """
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            # Match the batch endpoint's default window (30 days) so both paths
+            # share not only the same source of truth but also the same default
+            # scope when the caller omits a range.
+            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         if not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
