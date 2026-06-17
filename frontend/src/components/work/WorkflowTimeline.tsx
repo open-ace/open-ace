@@ -1162,6 +1162,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const canCancel =
       !compact && allowMilestoneActions && showForkCancel && milestone.status !== 'cancelled';
     const canExpand = hasLiveActivity || !!milestone.error_message;
+    const isCurrentActiveMilestone =
+      milestone.status === 'in_progress' && (milestone.dev_round || 1) === workflow.dev_round;
     const rawSummary = (
       milestone.tldr ||
       milestone.result_summary ||
@@ -1176,21 +1178,25 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         ? 'success'
         : milestone.status === 'failed'
           ? 'danger'
-          : milestone.status === 'in_progress'
-            ? 'info'
-            : milestone.status === 'cancelled'
-              ? 'warning'
-              : 'muted';
+          : isCurrentActiveMilestone
+            ? workflowStatusConfig.tone
+            : milestone.status === 'in_progress'
+              ? 'info'
+              : milestone.status === 'cancelled'
+                ? 'warning'
+                : 'muted';
     const statusLabel =
       milestone.status === 'completed'
         ? t('autoStatusCompleted', language)
         : milestone.status === 'failed'
           ? t('autoStatusFailed', language)
-          : milestone.status === 'in_progress'
-            ? t('autoStatusDeveloping', language)
-            : milestone.status === 'cancelled'
-              ? t('autoStatusCancelled', language)
-              : t('autoStatusPending', language);
+          : isCurrentActiveMilestone
+            ? workflowStatusLabel
+            : milestone.status === 'in_progress'
+              ? t('autoStatusDeveloping', language)
+              : milestone.status === 'cancelled'
+                ? t('autoStatusCancelled', language)
+                : t('autoStatusPending', language);
     const milestoneDuration =
       milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
@@ -1972,11 +1978,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           {t('autoDevRoundLabel', language)} {round}
                         </span>
                       </div>
-                      {round === workflow.dev_round && isActive && (
-                        <span className="timeline-chip timeline-chip--info">
-                          {t('autoStatusDeveloping', language)}
-                        </span>
-                      )}
                     </div>
 
                     <div className="timeline-stack">
