@@ -113,3 +113,20 @@ export function useAnomalyTrend(
     staleTime: 60 * 1000, // 1 minute
   });
 }
+
+/**
+ * Hook for the global data range (min/max dates).
+ *
+ * Used by "All" quick-range buttons to reflect the system's actual data span
+ * instead of a hardcoded window. The data range is low-frequency, so it is
+ * cached longer. Pass `enabled` to request it lazily (e.g. only when the user
+ * selects the "All" range).
+ */
+export function useDataRange(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['analysis', 'data-range'],
+    queryFn: () => analysisApi.getDataRange(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled,
+  });
+}

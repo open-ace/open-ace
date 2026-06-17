@@ -178,6 +178,18 @@ def api_anomaly_trend():
     return jsonify(result)
 
 
+@analysis_bp.route("/analysis/data-range")
+def api_data_range():
+    """Get the global data range (min and max dates) for the "All" quick-range.
+
+    Returns the system's actual data span (from daily_stats) so the frontend
+    can populate the "All" date-range button with real bounds instead of a
+    hardcoded window. May return null when there is no data.
+    """
+    result = analysis_service.get_data_range()
+    return jsonify(result)
+
+
 @analysis_bp.route("/analysis/recommendations")
 def api_recommendations():
     """Get usage optimization recommendations."""

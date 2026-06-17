@@ -11,7 +11,7 @@
  * Performance optimized: Uses backend API for anomaly detection instead of client-side calculation.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
@@ -33,6 +33,7 @@ import {
   useRecommendations,
   useHosts,
   usePageRefresh,
+  useDataRange,
 } from '@/hooks';
 
 // Anomaly type options
@@ -71,6 +72,22 @@ export const AnomalyDetection: React.FC = () => {
   // Quick date range options
   const [quickRange, setQuickRange] = useState<'7' | '30' | '90' | 'all'>('30');
 
+  // Fetch the global data range so the "All" quick-range reflects the actual
+  // data span instead of a hardcoded window (only requested when relevant).
+  const { data: dataRangeData } = useDataRange(quickRange === 'all');
+
+  // Stable reference to data_range to avoid useMemo thrash when the API returns
+  // a new object with the same min/max values (mirrors TrendAnalysis).
+  const dataRangeRef = useRef<{ min_date: string; max_date: string } | null>(null);
+  if (
+    dataRangeData &&
+    (dataRangeRef.current?.min_date !== dataRangeData.min_date ||
+      dataRangeRef.current?.max_date !== dataRangeData.max_date)
+  ) {
+    dataRangeRef.current = dataRangeData;
+  }
+  const dataRange = dataRangeRef.current;
+
   // Date range based on quick range selection
   const dateRange = useMemo(() => {
     const end = new Date();
@@ -88,7 +105,13 @@ export const AnomalyDetection: React.FC = () => {
         break;
       case 'all':
       default:
-        start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        // Use the actual data range when available; fall back to 365 days.
+        if (dataRange?.min_date && dataRange?.max_date) {
+          start = new Date(dataRange.min_date);
+          end.setTime(new Date(dataRange.max_date).getTime());
+        } else {
+          start = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+        }
         break;
     }
 
@@ -96,7 +119,7 @@ export const AnomalyDetection: React.FC = () => {
       start: start.toISOString().split('T')[0],
       end: end.toISOString().split('T')[0],
     };
-  }, [quickRange]);
+  }, [quickRange, dataRange]);
 
   const [startDate, setStartDate] = useState(dateRange.start);
   const [endDate, setEndDate] = useState(dateRange.end);

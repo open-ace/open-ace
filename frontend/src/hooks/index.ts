@@ -54,6 +54,7 @@ export {
   useRecommendations,
   useAnomalyDetection,
   useAnomalyTrend,
+  useDataRange,
 } from './useAnalysis';
 export {
   useSessions,
