@@ -81,6 +81,7 @@ const cliToolOptions = [
   { value: 'claude-code', label: 'Claude Code (Anthropic)' },
   { value: 'qwen-code', label: 'Qwen Code (OpenAI)' },
   { value: 'codex-cli', label: 'Codex (OpenAI)' },
+  { value: 'zcode', label: 'ZCode (Anthropic)' },
 ];
 
 // Default settings templates

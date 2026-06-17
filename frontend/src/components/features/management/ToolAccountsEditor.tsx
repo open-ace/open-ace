@@ -13,6 +13,7 @@ const TOOL_TYPES = [
   { value: 'qwen', display: 'Qwen' },
   { value: 'claude', display: 'Claude' },
   { value: 'openclaw', display: 'Openclaw' },
+  { value: 'zcode', display: 'ZCode' },
   { value: 'feishu', display: '飞书' },
   { value: 'slack', display: 'Slack' },
   { value: 'other', display: '其他' },

@@ -3,6 +3,7 @@ TOOL_NAME_ALIASES = {
     "claude": ["claude", "claude-code"],
     "openclaw": ["openclaw"],
     "codex": ["codex", "codex-cli"],
+    "zcode": ["zcode", "zcode-code", "zcode-cli"],
 }
 
 CANONICAL_TOOL_NAMES = {
@@ -10,6 +11,8 @@ CANONICAL_TOOL_NAMES = {
     "qwen-code-cli": "qwen",
     "claude-code": "claude",
     "codex-cli": "codex",
+    "zcode-code": "zcode",
+    "zcode-cli": "zcode",
 }
 
 

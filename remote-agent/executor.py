@@ -24,11 +24,18 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from cli_adapters import get_adapter
 from cli_adapters.base import collect_custom_envkeys
+from cli_adapters.zcode import ZCodeAdapter
+from zcode_app_server import ZCodeAppServerSession
 
 if TYPE_CHECKING:
     from cli_adapters.base import BaseCLIAdapter
 
 logger = logging.getLogger(__name__)
+
+# CLI tools whose persistent session is driven through a bespoke stdio
+# protocol rather than Claude's stream-json stdin (and so bypass the generic
+# SessionProcess path).
+_APPSERVER_TOOLS = {"zcode", "zcode-code"}
 
 
 class SessionProcess:
@@ -814,6 +821,21 @@ class ProcessExecutor:
             if session_id in self._sessions and self._sessions[session_id].is_running:
                 return {"success": False, "error": "Session already running"}
 
+        # ZCode runs a persistent app-server process driven by its own stdio
+        # protocol (ZCode Protocol), not Claude's stream-json stdin. Route it
+        # through a dedicated session class that the rest of the pipeline talks
+        # to with the same callback interface.
+        if cli_tool in _APPSERVER_TOOLS:
+            return self._start_zcode_session(
+                session_id,
+                project_path,
+                cli_tool,
+                proxy_token,
+                model,
+                permission_mode,
+                allowed_tools,
+            )
+
         # Find the executable via the adapter
         executable = self._find_executable(cli_tool)
         if not executable:
@@ -972,6 +994,124 @@ class ProcessExecutor:
         self._save_sessions_meta()
         return {"success": True, "pid": process.pid}
 
+    def _start_zcode_session(
+        self,
+        session_id: str,
+        project_path: str,
+        cli_tool: str,
+        proxy_token: str,
+        model: str | None = None,
+        permission_mode: str | None = None,
+        allowed_tools: list[str] | None = None,
+        resume_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Start a persistent ZCode app-server session.
+
+        Unlike the generic path, ZCode's engine is a Node script bundled with the
+        desktop app (or a ``zcode`` symlink). We spawn ``node <engine> app-server``
+        directly and hand the process to ``ZCodeAppServerSession``, which drives the
+        ZCode Protocol over stdio and reuses the standard output/usage callbacks.
+        """
+        adapter = ZCodeAdapter()
+        if not adapter.check_installed():
+            msg = (
+                f"CLI tool '{cli_tool}' (ZCode) not found on this machine.\n"
+                f"Please install it first by running: {adapter.get_install_command()}"
+            )
+            logger.error(msg)
+            return {"success": False, "error": msg}
+
+        project_path = os.path.expanduser(project_path)
+        try:
+            Path(project_path).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            msg = f"Cannot create project path '{project_path}': {e}"
+            logger.error(msg)
+            return {"success": False, "error": msg}
+
+        env = self._build_env(cli_tool, proxy_token, model)
+        cmd = adapter.build_start_args(
+            session_id,
+            project_path,
+            model=model,
+            permission_mode=permission_mode or "default",
+            allowed_tools=allowed_tools,
+        )
+        logger.info(
+            "Starting ZCode app-server session %s: %s in %s",
+            session_id[:8],
+            " ".join(cmd),
+            project_path,
+        )
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=project_path,
+                env=env,
+                start_new_session=os.name != "nt",
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            msg = f"Failed to start ZCode process: {e}"
+            logger.error(msg)
+            return {"success": False, "error": msg}
+
+        session = ZCodeAppServerSession(
+            session_id=session_id,
+            process=process,
+            project_path=project_path,
+            output_callback=self._output_callback,
+            permission_callback=self._permission_callback,
+            usage_callback=self._usage_callback,
+            model=model,
+            permission_mode=permission_mode,
+            env=env,
+        )
+
+        # Spin up stderr reader so app-server diagnostics surface as errors.
+        threading.Thread(
+            target=self._read_zcode_stderr,
+            args=(session_id, process),
+            name=f"zcode-err-{session_id[:8]}",
+            daemon=True,
+        ).start()
+
+        if not session.start(
+            model=model,
+            permission_mode=permission_mode,
+            resume_session_id=resume_session_id,
+        ):
+            session.stop()
+            return {"success": False, "error": "ZCode session/create failed"}
+
+        with self._lock:
+            self._sessions[session_id] = session
+
+        logger.info(
+            "ZCode session %s started (pid %d)",
+            session_id[:8],
+            process.pid,
+        )
+        self._save_sessions_meta()
+        return {"success": True, "pid": process.pid}
+
+    def _read_zcode_stderr(self, session_id: str, process: subprocess.Popen) -> None:
+        """Forward ZCode app-server stderr lines as error output."""
+        stream = process.stderr
+        if stream is None:
+            return
+        try:
+            for raw in stream:
+                line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+                text = line.strip()
+                if text:
+                    self._output_callback(session_id, text, "stderr", False)
+        except (OSError, ValueError):
+            pass
+
     def send_message(self, session_id: str, content: str) -> dict[str, Any]:
         """
         Send a message to a running session.
@@ -994,6 +1134,16 @@ class ProcessExecutor:
 
         if not session:
             return {"success": False, "error": "Session not found"}
+
+        # ZCode app-server sessions are driven through the ZCode Protocol;
+        # their send_message blocks until the agent turn completes.
+        if isinstance(session, ZCodeAppServerSession):
+            if session.send_message(content):
+                return {"success": True}
+            return {
+                "success": False,
+                "error": session.last_send_error or "ZCode turn failed",
+            }
 
         # Check if the CLI tool supports stdin input
         adapter = get_adapter(session.cli_tool)
@@ -1488,6 +1638,22 @@ class ProcessExecutor:
             # Expand ~ in project path if present
             if info.get("project_path"):
                 info["project_path"] = os.path.expanduser(info["project_path"])
+
+            # ZCode sessions restore through the app-server path.
+            if info["cli_tool"] in _APPSERVER_TOOLS:
+                result = self._start_zcode_session(
+                    sid,
+                    info["project_path"],
+                    info["cli_tool"],
+                    proxy_token="",
+                    model=info.get("model"),
+                    permission_mode=info.get("permission_mode"),
+                    allowed_tools=info.get("allowed_tools"),
+                    resume_session_id=info.get("cli_session_id"),
+                )
+                if result.get("success"):
+                    restored.append(sid)
+                continue
 
             executable = self._find_executable(info["cli_tool"])
             if not executable:

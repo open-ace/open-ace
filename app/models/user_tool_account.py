@@ -41,6 +41,7 @@ TOOL_TYPES = {
     "claude": "Claude",
     "openclaw": "Openclaw",
     "codex": "Codex",
+    "zcode": "ZCode",
     "feishu": "飞书",
     "slack": "Slack",
     "other": "其他",

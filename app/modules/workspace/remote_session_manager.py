@@ -191,6 +191,7 @@ class RemoteSessionManager:
             "qwen": "qwen-code",
             "codex": "codex-cli",
             "openclaw": "openclaw",
+            "zcode": "zcode",
         }
         settings_tool = settings_tool_map.get(tool_name, cli_tool)
         tool_settings = (
@@ -898,6 +899,8 @@ class RemoteSessionManager:
             "openclaw": "openai",
             "codex": "openai",
             "codex-cli": "openai",
+            "zcode": "anthropic",
+            "zcode-code": "anthropic",
         }
         return mapping.get(cli_tool, "openai")
 

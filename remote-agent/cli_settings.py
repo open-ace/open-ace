@@ -253,6 +253,57 @@ def write_codex_settings(
     return config_path
 
 
+def write_zcode_settings(
+    settings: dict[str, Any],
+    proxy_base_url: str,
+    home_dir: Path | None = None,
+) -> Path:
+    """Merge and write ~/.zcode/cli/config.json.
+
+    ZCode uses a ``zcode.config.v1`` schema where each provider lives under a
+    top-level ``provider`` map with an ``options`` block (``baseURL``/``apiKey``)
+    and a ``model`` selector in ``provider/model`` format. We merge onto any
+    existing config, inject the proxy ``baseURL`` and ``apiKey`` into the
+    ``zai`` (Anthropic-compatible) provider, and default the model selector.
+    """
+    base_dir = home_dir or Path.home()
+    config_path = base_dir / ".zcode" / "cli" / "config.json"
+    merged = _load_json_file(config_path)
+
+    providers = merged.setdefault("provider", {})
+    zai = providers.setdefault(
+        "zai",
+        {
+            "id": "zai",
+            "kind": "anthropic",
+            "name": "Z.AI (Anthropic-compatible)",
+            "options": {},
+        },
+    )
+    if not isinstance(zai, dict):
+        zai = providers["zai"] = {
+            "id": "zai",
+            "kind": "anthropic",
+            "name": "Z.AI (Anthropic-compatible)",
+            "options": {},
+        }
+    options = zai.setdefault("options", {})
+    if not isinstance(options, dict):
+        options = zai["options"] = {}
+
+    # Route model traffic through the Open ACE proxy.
+    options["baseURL"] = proxy_base_url.rstrip("/")
+    api_key = settings.get("api_key") or settings.get("apiKey")
+    if api_key:
+        options["apiKey"] = api_key
+
+    # Default the model selector if the user hasn't configured one.
+    merged.setdefault("model", {"main": "zai/glm-5.2", "lite": "zai/glm-4.5-air"})
+
+    _atomic_write_json(config_path, merged)
+    return config_path
+
+
 def apply_cli_settings(
     cli_settings: dict[str, Any],
     proxy_base_url: str,
@@ -270,6 +321,8 @@ def apply_cli_settings(
                 write_qwen_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
             elif tool_name in {"codex", "codex-cli"}:
                 write_codex_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
+            elif tool_name in {"zcode", "zcode-code"} and isinstance(settings, dict):
+                write_zcode_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
             else:
                 logger.warning("Unknown tool name for settings: %s", tool_name)
         except Exception as exc:

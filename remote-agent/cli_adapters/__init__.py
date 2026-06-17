@@ -22,6 +22,7 @@ from .claude_code import ClaudeCodeAdapter
 from .codex_cli import CodexCLIAdapter
 from .openclaw import OpenClawAdapter
 from .qwen_code import QwenCodeAdapter
+from .zcode import ZCodeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ ADAPTERS = {
     "claude-code": ClaudeCodeAdapter,
     "codex": CodexCLIAdapter,
     "openclaw": OpenClawAdapter,
+    "zcode": ZCodeAdapter,
+    "zcode-code": ZCodeAdapter,
 }
 
 
