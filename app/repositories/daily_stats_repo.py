@@ -740,9 +740,7 @@ class DailyStatsRepository:
         """
         null_result = self.db.fetch_one(null_sender_query)
         if null_result and null_result.get("count", 0) > 0:
-            logger.info(
-                f"daily_stats has {null_result['count']} rows missing sender_name"
-            )
+            logger.info(f"daily_stats has {null_result['count']} rows missing sender_name")
             return True
 
         return False
