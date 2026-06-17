@@ -47,6 +47,7 @@ validate_source_dir() {
 CONFIG_FILE=""
 INSTALL_MODE=""  # "local" or "deploy"
 DO_UPGRADE="no"  # Set to "yes" when upgrade is detected and confirmed in interactive_config
+EXISTING_CONFIG_PATH=""  # Path to existing installation's config.json (for database config reuse)
 
 # Deployment settings (for both local and deploy modes)
 DEPLOY_HOST=""        # Empty for local mode, required for deploy mode
@@ -735,6 +736,38 @@ get_postgresql_port() {
     echo "5432"
 }
 
+# Find existing installation's config.json dynamically
+# Scans all user home directories and root's config
+# Returns: config.json path if found, empty string otherwise
+find_existing_config_file() {
+    local config_file=""
+    
+    # Linux: scan /home/* for .open-ace/config.json
+    for user_home in /home/*; do
+        if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
+            config_file="$user_home/.open-ace/config.json"
+            break
+        fi
+    done
+    
+    # macOS: scan /Users/* for .open-ace/config.json
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        for user_home in /Users/*; do
+            if [ -d "$user_home/.open-ace" ] && [ -f "$user_home/.open-ace/config.json" ]; then
+                config_file="$user_home/.open-ace/config.json"
+                break
+            fi
+        done
+    fi
+    
+    # Check root's config
+    if [ -z "$config_file" ] && [ -f "/root/.open-ace/config.json" ]; then
+        config_file="/root/.open-ace/config.json"
+    fi
+    
+    echo "$config_file"
+}
+
 # Install PostgreSQL as binary service
 # Configure pg_hba.conf for password authentication
 # Changes peer/ident authentication to md5 for local connections
@@ -1009,7 +1042,40 @@ setup_postgresql() {
         print_success "PostgreSQL is already running"
         DB_INSTALL_METHOD="existing"
 
-        # Ask for connection details
+        # Try to reuse existing database configuration
+        local config_file="$EXISTING_CONFIG_PATH"
+        
+        # If no preserved path, dynamically find existing config
+        if [ -z "$config_file" ]; then
+            config_file=$(find_existing_config_file)
+        fi
+        
+        if [ -n "$config_file" ] && [ -f "$config_file" ]; then
+            local existing_db_url=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('database', {}).get('url', ''))" 2>/dev/null)
+            
+            if [ -n "$existing_db_url" ]; then
+                print_info "Found existing database configuration in: $config_file"
+                prompt_yesno "Use existing database configuration?" "y" use_existing_db
+                
+                if [ "$use_existing_db" = "yes" ]; then
+                    # Parse URL and fill database parameters
+                    DB_HOST=$(echo "$existing_db_url" | python3 -c "import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(u.hostname or 'localhost')")
+                    DB_PORT=$(echo "$existing_db_url" | python3 -c "import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(u.port or 5432)")
+                    DB_NAME=$(echo "$existing_db_url" | python3 -c "import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(u.path.lstrip('/') or 'openace')")
+                    DB_USER=$(echo "$existing_db_url" | python3 -c "import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(u.username or 'openace')")
+                    DB_PASSWORD=$(echo "$existing_db_url" | python3 -c "import sys, urllib.parse; u=urllib.parse.urlparse(sys.stdin.read().strip()); print(u.password or '')")
+                    
+                    print_success "Using existing database configuration"
+                    print_info "  Host: $DB_HOST"
+                    print_info "  Port: $DB_PORT"
+                    print_info "  Name: $DB_NAME"
+                    print_info "  User: $DB_USER"
+                    return 0
+                fi
+            fi
+        fi
+        
+        # No existing config found or user chose not to use it, proceed with manual input
         local detected_port=$(get_postgresql_port)
         prompt_input "Database host" "$DB_HOST" DB_HOST
         prompt_input "Database port" "$detected_port" DB_PORT
@@ -2226,6 +2292,8 @@ detect_and_load_local_upgrade() {
                 if [ -n "$port" ]; then
                     SERVICE_PORT="$port"
                 fi
+                # Preserve config path for database configuration reuse
+                EXISTING_CONFIG_PATH="$config_file"
             fi
 
             return 0
