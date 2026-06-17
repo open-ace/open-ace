@@ -2,14 +2,13 @@
  * Dashboard Component - Main dashboard with usage statistics
  *
  * Layout structure:
- * 1. Header - Title + PageRefreshControl
+ * 1. Header - Title
  * 2. Today's Usage - Real-time tool usage cards
- * 3. Time Range Statistics - Summary cards + Date filter
- * 4. Trend Chart - Full-width line chart
- * 5. Tools Info Table - Collapsible data table
+ * 3. Time Range Statistics - Summary stats + Tool summary cards + Date filter
+ * 4. Trend Chart + Distribution Chart - Shared tool filter
  */
 
-import React, { useState, useMemo, startTransition } from 'react';
+import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useDashboard } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -26,7 +25,7 @@ import {
   StatCard,
 } from '@/components/common';
 import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
-import type { ToolUsage } from '@/types';
+import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
 const TOOL_COLORS: Record<string, { border: string; background: string; card: string }> = {
@@ -84,23 +83,8 @@ const getToday = (): string => {
 // Date validation error type
 type DateErrorType = 'invalid_range' | 'future_date' | null;
 
-// Sort configuration type
-type SortKey =
-  | 'total_tokens'
-  | 'total_requests'
-  | 'avg_tokens'
-  | 'total_input_tokens'
-  | 'total_output_tokens'
-  | 'days_count';
-type SortDirection = 'asc' | 'desc';
-
 export const Dashboard: React.FC = () => {
   const language = useLanguage();
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Table expand/collapse state
-  const [isTableExpanded, setIsTableExpanded] = useState(true);
 
   // Tool filter for trend chart
   const [selectedTool, setSelectedTool] = useState('all');
@@ -215,30 +199,6 @@ export const Dashboard: React.FC = () => {
       totalOutputTokens,
     };
   }, [summaryData]);
-
-  // Sort handler
-  const handleSort = (key: SortKey) => {
-    startTransition(() => {
-      if (sortKey === key) {
-        setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-      } else {
-        setSortKey(key);
-        setSortDirection('desc');
-      }
-    });
-  };
-
-  // Sorted summary data
-  const sortedSummaryData = useMemo(() => {
-    if (!sortKey) return summaryData;
-    const entries = Object.entries(summaryData);
-    entries.sort(([, a], [, b]) => {
-      const aVal = a[sortKey] ?? 0;
-      const bVal = b[sortKey] ?? 0;
-      return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-    });
-    return Object.fromEntries(entries);
-  }, [summaryData, sortKey, sortDirection]);
 
   // Date range preset options
   const dateRangeOptions = useMemo(
@@ -363,7 +323,7 @@ export const Dashboard: React.FC = () => {
           }
         >
           {/* Summary Stat Cards */}
-          <div className="row g-3">
+          <div className="row g-3 mb-4">
             <div className="col-md-4">
               <StatCard
                 label={t('totalTokens', language) || '总 Token'}
@@ -389,6 +349,16 @@ export const Dashboard: React.FC = () => {
               />
             </div>
           </div>
+          {/* Tool Summary Cards */}
+          {Object.keys(summaryData).length === 0 ? (
+            <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
+          ) : (
+            <div className="row g-3">
+              {Object.entries(summaryData).map(([tool, stats]) => (
+                <SummaryCard key={tool} tool={tool} stats={stats} language={language} />
+              ))}
+            </div>
+          )}
         </Card>
       </section>
 
@@ -436,177 +406,6 @@ export const Dashboard: React.FC = () => {
             </Card>
           </div>
         </div>
-      </section>
-
-      {/* Tools Info Table - Collapsible */}
-      <section className="dashboard-section">
-        <Card
-          title={t('toolsInfo', language)}
-          actions={
-            <button
-              className="btn btn-outline-secondary btn-sm"
-              onClick={() => setIsTableExpanded(!isTableExpanded)}
-            >
-              <i className={cn('bi', isTableExpanded ? 'bi-chevron-up' : 'bi-chevron-down')} />
-              {isTableExpanded
-                ? t('collapse', language) || '收起'
-                : t('expand', language) || '展开'}
-            </button>
-          }
-        >
-          {isTableExpanded && (
-            <>
-              {Object.keys(summaryData).length === 0 ? (
-                <EmptyState icon="bi-tools" title={t('noData', language)} />
-              ) : (
-                <div className="table-responsive">
-                  <table className="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>{t('tableTool', language)}</th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('total_tokens')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('tableTokens', language)}
-                          {sortKey === 'total_tokens' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('total_requests')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('tableRequests', language)}
-                          {sortKey === 'total_requests' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('avg_tokens')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('tableAverage', language)}
-                          {sortKey === 'avg_tokens' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('total_input_tokens')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('tableInput', language)}
-                          {sortKey === 'total_input_tokens' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('total_output_tokens')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('tableOutput', language)}
-                          {sortKey === 'total_output_tokens' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th className="text-end">{t('tableRatio', language) || 'Ratio'}</th>
-                        <th
-                          className="text-end sortable"
-                          onClick={() => handleSort('days_count')}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          {t('days_tracked', language)}
-                          {sortKey === 'days_count' && (
-                            <i
-                              className={cn(
-                                'bi',
-                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
-                                'ms-1'
-                              )}
-                            />
-                          )}
-                        </th>
-                        <th>{t('date_range', language)}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Object.entries(sortedSummaryData).map(([tool, stats]) => (
-                        <tr key={tool}>
-                          <td>
-                            <span
-                              className={cn('badge', TOOL_COLORS[tool]?.card || 'bg-secondary')}
-                            >
-                              {tool.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="text-end">{formatTokens(stats.total_tokens)}</td>
-                          <td className="text-end">{stats.total_requests ?? '-'}</td>
-                          <td className="text-end">
-                            {(stats.avg_tokens / 1000000).toFixed(2)} M/day
-                          </td>
-                          <td className="text-end">
-                            {formatTokens(stats.total_input_tokens ?? 0)}
-                          </td>
-                          <td className="text-end">
-                            {formatTokens(stats.total_output_tokens ?? 0)}
-                          </td>
-                          <td className="text-end">
-                            {(stats.total_output_tokens ?? 0) > 0
-                              ? (
-                                  (stats.total_input_tokens ?? 0) / (stats.total_output_tokens ?? 1)
-                                ).toFixed(1)
-                              : '-'}
-                          </td>
-                          <td className="text-end">{stats.days_count}</td>
-                          <td>
-                            <small className="text-muted">
-                              {stats.first_date} ~ {stats.last_date}
-                            </small>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </Card>
       </section>
     </div>
   );
@@ -674,6 +473,44 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
               </small>
             </p>
           )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Summary Card - Shows tool statistics for selected time range
+ */
+interface SummaryCardProps {
+  tool: string;
+  stats: ToolSummary;
+  language: Language;
+}
+
+const SummaryCard = React.memo<SummaryCardProps>(({ tool, stats, language }) => {
+  const colors = TOOL_COLORS[tool] || { card: 'bg-secondary' };
+
+  return (
+    <div className="col-md-4">
+      <div className={cn('card usage-card text-white', colors.card)}>
+        <div className="card-body">
+          <h5 className="card-title">
+            {(TOOL_DISPLAY_NAMES[tool] ?? tool).toUpperCase()}
+          </h5>
+          <p className="card-text">
+            <strong>{formatTokens(stats.total_tokens)}</strong> {t('tokens', language)}
+            <br />
+            {stats.days_count} {t('days_tracked', language)}
+            <br />
+            {t('avg', language)}: {formatTokens(stats.avg_tokens)}/day
+            <br />
+            <strong>{t('tableRequests', language)}:</strong>{' '}
+            {stats.total_requests > 0 ? stats.total_requests : t('noDataAvailable', language)}
+          </p>
+          <small>
+            {t('date_range', language)}: {stats.first_date} - {stats.last_date}
+          </small>
         </div>
       </div>
     </div>
