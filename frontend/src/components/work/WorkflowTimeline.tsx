@@ -59,12 +59,12 @@ interface WorkflowTimelineProps {
 
 // Status icon map
 const STATUS_ICONS: Record<string, string> = {
-  completed: 'bi-check-circle-fill text-success',
-  in_progress: 'bi-arrow-repeat text-primary',
-  failed: 'bi-x-circle-fill text-danger',
-  cancelled: 'bi-slash-circle-fill text-secondary',
-  forked: 'bi-diagram-3-fill text-info',
-  pending: 'bi-circle text-muted',
+  completed: 'bi-check-circle-fill',
+  in_progress: 'bi-arrow-repeat',
+  failed: 'bi-x-circle-fill',
+  cancelled: 'bi-slash-circle-fill',
+  forked: 'bi-diagram-3-fill',
+  pending: 'bi-circle',
 };
 
 // Milestone type display config
