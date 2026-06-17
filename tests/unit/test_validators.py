@@ -358,6 +358,10 @@ class TestValidatePassword:
             # Policy with min_length
             ("12345678", {"password_min_length": 10}, False),
             ("1234567890", {"password_min_length": 10}, True),
+            # An admin-configured minimum below the default 8 is respected
+            # (no hardcoded floor overrides the policy).
+            ("123456", {"password_min_length": 6}, True),
+            ("12345", {"password_min_length": 6}, False),
             # Policy requiring uppercase
             ("abcdefgh", {"password_require_uppercase": True}, False),
             ("Abcdefgh", {"password_require_uppercase": True}, True),
@@ -426,6 +430,8 @@ class TestValidatePassword:
             "no_policy_basic_valid_2",
             "min_length_10_fail",
             "min_length_10_pass",
+            "min_length_below_default_pass",
+            "min_length_below_default_fail",
             "require_uppercase_fail",
             "require_uppercase_pass",
             "require_lowercase_fail",

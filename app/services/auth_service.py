@@ -309,7 +309,7 @@ class AuthService:
         # Validate new password with security policy
         from app.utils.validators import validate_password
 
-        settings = _get_security_settings()
+        settings = get_security_settings_cached()
         is_valid, error_msg = validate_password(new_password, policy_settings=settings)
         if not is_valid:
             return False, error_msg
