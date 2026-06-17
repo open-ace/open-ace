@@ -200,6 +200,59 @@ class TestAnalysisService:
         assert len(result["anomalies"]) >= 1
         assert result["summary"]["total"] >= 1
 
+    def test_detect_anomalies_returns_description_fields(self):
+        """Each anomaly carries expected/deviation; statistics exposes baseline."""
+        svc, _, mock_msg, _ = self._make_service()
+        normal = [{"date": f"2026-05-{i:02d}", "total_tokens": 100} for i in range(1, 11)]
+        normal.append({"date": "2026-05-11", "total_tokens": 5000})
+        mock_msg.get_daily_token_totals.return_value = normal
+        mock_msg.get_daily_tool_totals.return_value = []
+        result = svc.detect_anomalies("2026-05-01", "2026-05-11")
+
+        spike = next(a for a in result["anomalies"] if a["type"] == "spike")
+        # expected == rounded daily average; deviation == pct off average (>=0)
+        assert "expected" in spike and spike["expected"] > 0
+        assert "deviation" in spike and spike["deviation"] >= 0
+        # deviation is an absolute percentage regardless of direction
+        assert spike["deviation"] == abs(spike["deviation"])
+
+        stats = result["statistics"]
+        assert {"average", "std_deviation", "data_points"} <= set(stats.keys())
+        assert stats["data_points"] == len(normal)
+
+    def test_detect_anomalies_top_contributor(self):
+        """top_contributor explains which tool drove an anomalous day."""
+        svc, _, mock_msg, _ = self._make_service()
+        normal = [{"date": f"2026-05-{i:02d}", "total_tokens": 100} for i in range(1, 11)]
+        normal.append({"date": "2026-05-11", "total_tokens": 5000})
+        mock_msg.get_daily_token_totals.return_value = normal
+        # On the spike day, 'qwen' accounts for 4000 of 5000 tokens (80%)
+        mock_msg.get_daily_tool_totals.return_value = [
+            {"date": "2026-05-11", "tool_name": "qwen", "total_tokens": 4000},
+            {"date": "2026-05-11", "tool_name": "claude", "total_tokens": 1000},
+        ]
+        result = svc.detect_anomalies("2026-05-01", "2026-05-11")
+
+        spike = next(a for a in result["anomalies"] if a["type"] == "spike")
+        assert spike["top_contributor"]["tool"] == "qwen"
+        assert spike["top_contributor"]["share_pct"] == 80.0
+
+    def test_detect_anomalies_top_contributor_forward_compatible(self):
+        """When the drill-down query fails/empty, core fields survive and the
+        optional top_contributor is simply omitted (no contract break)."""
+        svc, _, mock_msg, _ = self._make_service()
+        normal = [{"date": f"2026-05-{i:02d}", "total_tokens": 100} for i in range(1, 11)]
+        normal.append({"date": "2026-05-11", "total_tokens": 5000})
+        mock_msg.get_daily_token_totals.return_value = normal
+        # Simulate backend without the new drill-down: method raises
+        mock_msg.get_daily_tool_totals.side_effect = AttributeError("not deployed")
+        result = svc.detect_anomalies("2026-05-01", "2026-05-11")
+
+        spike = next(a for a in result["anomalies"] if a["type"] == "spike")
+        # Core description fields intact, optional field gracefully absent
+        assert "expected" in spike and "deviation" in spike
+        assert "top_contributor" not in spike
+
     def test_detect_anomalies_insufficient_data(self):
         svc, _, mock_msg, _ = self._make_service()
         mock_msg.get_daily_token_totals.return_value = [{"date": "2026-05-01", "total_tokens": 100}]

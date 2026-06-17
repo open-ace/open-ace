@@ -76,6 +76,13 @@ export interface Anomaly {
   deviation: number;
   type: 'spike' | 'drop';
   severity: 'high' | 'medium' | 'low';
+  // Forward-compatible: the day's top contributing tool + its share of that
+  // day's tokens. Omitted when backend drill-down is unavailable (legacy cache
+  // or older deployments) — consumers must degrade gracefully.
+  top_contributor?: {
+    tool: string;
+    share_pct: number;
+  };
 }
 
 export interface AnomalyDetectionResponse {
