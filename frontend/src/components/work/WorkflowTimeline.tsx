@@ -126,11 +126,50 @@ const MILESTONE_ICON_COLORS: Record<string, string> = {
 };
 
 const TIMELINE_AUTO_SCROLL_THRESHOLD = 24;
+const MAX_DIFF_VIEW_CHARS = 50000;
 
 function truncateInlineText(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max).trimEnd()}...`;
+}
+
+function truncateDiffText(
+  text: string,
+  max = MAX_DIFF_VIEW_CHARS
+): {
+  content: string;
+  isTruncated: boolean;
+} {
+  if (text.length <= max) {
+    return { content: text, isTruncated: false };
+  }
+  return { content: text.slice(0, max), isTruncated: true };
+}
+
+function getDiffLineClass(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) {
+    return 'workflow-timeline-diff-line-add';
+  }
+  if (line.startsWith('-') && !line.startsWith('---')) {
+    return 'workflow-timeline-diff-line-del';
+  }
+  if (line.startsWith('@@')) {
+    return 'workflow-timeline-diff-line-hunk';
+  }
+  if (
+    line.startsWith('diff --git') ||
+    line.startsWith('index ') ||
+    line.startsWith('--- ') ||
+    line.startsWith('+++ ') ||
+    line.startsWith('new file mode ') ||
+    line.startsWith('deleted file mode ') ||
+    line.startsWith('rename from ') ||
+    line.startsWith('rename to ')
+  ) {
+    return 'workflow-timeline-diff-line-meta';
+  }
+  return '';
 }
 
 function getActivityStableKey(activity: {
@@ -179,6 +218,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
   const [selectedDiffFileId, setSelectedDiffFileId] = useState<string | null>(null);
+  const [selectedPrDiffFileId, setSelectedPrDiffFileId] = useState<string | null>(null);
   const [diffSidebarWidth, setDiffSidebarWidth] = useState(320);
   const [diffFullscreen, setDiffFullscreen] = useState(false);
   const [showDefinitionSnapshot, setShowDefinitionSnapshot] = useState(false);
@@ -914,7 +954,19 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [isTimelineAtBottom]
   );
 
-  const parsedDiffFiles = useMemo(() => parseDiffFiles(diffData?.diff ?? ''), [diffData?.diff]);
+  const truncatedDiff = useMemo(() => truncateDiffText(diffData?.diff ?? ''), [diffData?.diff]);
+  const truncatedPrDiff = useMemo(
+    () => truncateDiffText(prDiffData?.diff ?? ''),
+    [prDiffData?.diff]
+  );
+  const parsedDiffFiles = useMemo(
+    () => parseDiffFiles(truncatedDiff.content),
+    [truncatedDiff.content]
+  );
+  const parsedPrDiffFiles = useMemo(
+    () => parseDiffFiles(truncatedPrDiff.content),
+    [truncatedPrDiff.content]
+  );
   const latestMilestoneSignature =
     milestones.length > 0
       ? [
@@ -970,10 +1022,58 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     );
   }, [viewingDiff, parsedDiffFiles]);
 
+  useEffect(() => {
+    if (!viewingPrDiff) {
+      setSelectedPrDiffFileId(null);
+      setDiffFullscreen(false);
+      return;
+    }
+    if (parsedPrDiffFiles.length === 0) {
+      setSelectedPrDiffFileId(null);
+      return;
+    }
+    setSelectedPrDiffFileId((prev) =>
+      prev && parsedPrDiffFiles.some((file) => file.id === prev) ? prev : parsedPrDiffFiles[0].id
+    );
+  }, [viewingPrDiff, parsedPrDiffFiles]);
+
   const selectedDiffFile = useMemo(
     () =>
       parsedDiffFiles.find((file) => file.id === selectedDiffFileId) ?? parsedDiffFiles[0] ?? null,
     [parsedDiffFiles, selectedDiffFileId]
+  );
+  const selectedPrDiffFile = useMemo(
+    () =>
+      parsedPrDiffFiles.find((file) => file.id === selectedPrDiffFileId) ??
+      parsedPrDiffFiles[0] ??
+      null,
+    [parsedPrDiffFiles, selectedPrDiffFileId]
+  );
+  const renderDiffLines = useCallback(
+    (content: string, keyPrefix: string, isTruncated = false) => {
+      const lines = content.split('\n');
+      return (
+        <>
+          {lines.map((line, index) => (
+            <div
+              key={`${keyPrefix}-line-${index}`}
+              className={`workflow-timeline-diff-line ${getDiffLineClass(line)}`}
+            >
+              {line || ' '}
+            </div>
+          ))}
+          {isTruncated && (
+            <div
+              key={`${keyPrefix}-truncated`}
+              className="workflow-timeline-diff-line workflow-timeline-diff-line-meta"
+            >
+              {t('autoDiffTruncated', language)}
+            </div>
+          )}
+        </>
+      );
+    },
+    [language]
   );
 
   const handleDiffResizeStart = useCallback(
@@ -1088,9 +1188,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           ? t('autoStatusFailed', language)
           : milestone.status === 'in_progress'
             ? t('autoStatusDeveloping', language)
-        : milestone.status === 'cancelled'
-          ? t('autoStatusCancelled', language)
-          : t('autoStatusPending', language);
+            : milestone.status === 'cancelled'
+              ? t('autoStatusCancelled', language)
+              : t('autoStatusPending', language);
     const milestoneDuration =
       milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
@@ -1106,6 +1206,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       canViewChanges ||
       canFork ||
       canCancel;
+
     return (
       <article
         key={milestone.milestone_id}
@@ -1146,7 +1247,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
               <div className="timeline-milestone-meta-row">
                 <div className="timeline-milestone-badges">
-                  <span className={`timeline-chip timeline-chip--${statusTone}`}>{statusLabel}</span>
+                  <span className={`timeline-chip timeline-chip--${statusTone}`}>
+                    {statusLabel}
+                  </span>
                   {milestone.round_number > 0 && (
                     <span className="timeline-chip timeline-chip--subtle">
                       R{milestone.round_number}
@@ -1293,9 +1396,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                               {line.timestamp}
                             </span>
                             <i className={`bi ${line.icon}`}></i>
-                            <span className="timeline-milestone-activity-text">
-                              {line.content}
-                            </span>
+                            <span className="timeline-milestone-activity-text">{line.content}</span>
                           </div>
                         );
                       })}
@@ -1670,7 +1771,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             >
               <i className="bi bi-clipboard-check me-1"></i>
               {t('autoFinalPlan', language)}
-              {latestPlanFinalized && (
+              {latestPlanFinalized && (latestPlanFinalized.dev_round || 1) > 1 && (
                 <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
                   {t('autoRoundBadge', language).replace(
                     '{n}',
@@ -1694,7 +1795,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             >
               <i className="bi bi-check2-circle me-1"></i>
               {t('autoPrReviewSummary', language)}
-              {latestPrReviewSummary && (
+              {latestPrReviewSummary && (latestPrReviewSummary.dev_round || 1) > 1 && (
                 <Badge variant="light" className="ms-1" style={{ fontSize: '0.65rem' }}>
                   {t('autoRoundBadge', language).replace(
                     '{n}',
@@ -2029,25 +2130,109 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               : t('autoFinalCodeChanges', language)
           }
           size="xl"
+          className={`workflow-timeline-diff-modal ${
+            diffFullscreen ? 'workflow-timeline-diff-modal-fullscreen' : ''
+          }`}
+          scrollable={false}
         >
           {prDiffLoading ? (
             <div className="py-4">
               <Loading />
             </div>
+          ) : parsedPrDiffFiles.length > 0 && selectedPrDiffFile ? (
+            <div className="workflow-timeline-diff-shell">
+              <div
+                className="workflow-timeline-diff-sidebar"
+                style={{ width: `${diffSidebarWidth}px`, minWidth: `${diffSidebarWidth}px` }}
+              >
+                {parsedPrDiffFiles.map((file) => (
+                  <button
+                    key={file.id}
+                    type="button"
+                    className={`workflow-timeline-diff-file ${
+                      selectedPrDiffFile.id === file.id ? 'workflow-timeline-diff-file-active' : ''
+                    }`}
+                    onClick={() => setSelectedPrDiffFileId(file.id)}
+                  >
+                    <div className="d-flex align-items-center gap-2 min-width-0">
+                      <Badge
+                        variant={getDiffStatusClass(file.status)}
+                        className="workflow-timeline-diff-file-badge"
+                      >
+                        {file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : 'M'}
+                      </Badge>
+                      <span className="workflow-timeline-diff-file-path">{file.path}</span>
+                    </div>
+                    <span className="workflow-timeline-diff-file-stats">
+                      {file.additions > 0 && (
+                        <span className="text-success">+{file.additions}</span>
+                      )}
+                      {file.deletions > 0 && <span className="text-danger">-{file.deletions}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div
+                className="workflow-timeline-diff-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize diff panels"
+                onPointerDown={handleDiffResizeStart}
+              />
+              <div className="workflow-timeline-diff-viewer">
+                <div className="workflow-timeline-diff-viewer-header">
+                  <div className="min-width-0">
+                    <div className="workflow-timeline-diff-viewer-path">
+                      {selectedPrDiffFile.path}
+                    </div>
+                    {selectedPrDiffFile.commitLabel && (
+                      <div className="workflow-timeline-diff-viewer-commit">
+                        {t('autoCommits', language)} {selectedPrDiffFile.commitLabel}
+                      </div>
+                    )}
+                  </div>
+                  <div className="workflow-timeline-diff-viewer-summary">
+                    {selectedPrDiffFile.additions > 0 && (
+                      <span className="text-success">+{selectedPrDiffFile.additions}</span>
+                    )}
+                    {selectedPrDiffFile.deletions > 0 && (
+                      <span className="text-danger">-{selectedPrDiffFile.deletions}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary workflow-timeline-diff-fullscreen-btn"
+                    onClick={() => setDiffFullscreen((prev) => !prev)}
+                  >
+                    <i
+                      className={`bi ${diffFullscreen ? 'bi-fullscreen-exit' : 'bi-fullscreen'} me-1`}
+                    />
+                    {diffFullscreen
+                      ? t('exitFullscreen', language)
+                      : t('enterFullscreen', language)}
+                  </button>
+                </div>
+                <div className="workflow-timeline-diff-code">
+                  {renderDiffLines(
+                    selectedPrDiffFile.patch,
+                    selectedPrDiffFile.id,
+                    truncatedPrDiff.isTruncated
+                  )}
+                </div>
+              </div>
+            </div>
           ) : prDiffData?.diff ? (
-            <pre
-              className="bg-dark text-light p-3 rounded mb-0"
-              style={{
-                fontSize: '0.75rem',
-                maxHeight: '70vh',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {prDiffData.diff.length > 50000
-                ? prDiffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
-                : prDiffData.diff}
-            </pre>
+            <div className="workflow-timeline-diff-shell">
+              <div className="workflow-timeline-diff-viewer">
+                <div className="workflow-timeline-diff-code">
+                  {renderDiffLines(
+                    truncatedPrDiff.content,
+                    'pr-diff-fallback',
+                    truncatedPrDiff.isTruncated
+                  )}
+                </div>
+              </div>
+            </div>
           ) : (
             <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>
           )}
@@ -2279,34 +2464,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     </button>
                   </div>
                   <div className="workflow-timeline-diff-code">
-                    {selectedDiffFile.patch.split('\n').map((line, index) => {
-                      const lineClass =
-                        line.startsWith('+') && !line.startsWith('+++')
-                          ? 'workflow-timeline-diff-line-add'
-                          : line.startsWith('-') && !line.startsWith('---')
-                            ? 'workflow-timeline-diff-line-del'
-                            : line.startsWith('@@')
-                              ? 'workflow-timeline-diff-line-hunk'
-                              : line.startsWith('diff --git') ||
-                                  line.startsWith('index ') ||
-                                  line.startsWith('--- ') ||
-                                  line.startsWith('+++ ') ||
-                                  line.startsWith('new file mode ') ||
-                                  line.startsWith('deleted file mode ') ||
-                                  line.startsWith('rename from ') ||
-                                  line.startsWith('rename to ')
-                                ? 'workflow-timeline-diff-line-meta'
-                                : '';
-
-                      return (
-                        <div
-                          key={`${selectedDiffFile.id}-line-${index}`}
-                          className={`workflow-timeline-diff-line ${lineClass}`}
-                        >
-                          {line || ' '}
-                        </div>
-                      );
-                    })}
+                    {renderDiffLines(
+                      selectedDiffFile.patch,
+                      selectedDiffFile.id,
+                      truncatedDiff.isTruncated
+                    )}
                   </div>
                 </div>
               </>
@@ -2320,9 +2482,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {diffData.diff.length > 50000
-                  ? diffData.diff.slice(0, 50000) + '\n\n' + t('autoDiffTruncated', language)
-                  : diffData.diff}
+                {truncatedDiff.isTruncated
+                  ? truncatedDiff.content + '\n\n' + t('autoDiffTruncated', language)
+                  : truncatedDiff.content}
               </pre>
             ) : (
               <p className="text-muted mb-0">{t('autoNoDiff', language)}</p>

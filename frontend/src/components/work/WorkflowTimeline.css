@@ -515,11 +515,15 @@
 }
 
 .timeline-milestone-summary {
+  width: 100%;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
   padding: 16px 18px;
+  border: none;
+  background: transparent;
+  text-align: left;
 }
 
 .timeline-milestone-card--compact .timeline-milestone-summary {
@@ -610,7 +614,7 @@
 .timeline-milestone-preview {
   margin: 8px 0 0;
   color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+  font-size: 0.82rem;
   line-height: 1.55;
 }
 
@@ -715,45 +719,6 @@
   margin-top: 6px;
 }
 
-.timeline-milestone-detail-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.timeline-milestone-detail-chip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.timeline-milestone-detail-chip span {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.timeline-milestone-detail-chip code {
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.timeline-milestone-inline-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .timeline-inline-btn.btn {
   border-radius: 999px;
   min-height: 30px;
@@ -800,24 +765,6 @@
   color: var(--color-danger-hover);
   border-color: color-mix(in srgb, var(--color-danger) 16%, var(--border-color) 84%);
   background: color-mix(in srgb, var(--color-danger) 4%, var(--bg-primary) 96%);
-}
-
-.timeline-session-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-color) 76%);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-primary) 6%, var(--bg-primary) 94%);
-  color: var(--text-secondary);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.timeline-session-link--reused {
-  font-weight: 700;
 }
 
 .timeline-milestone-activity {
