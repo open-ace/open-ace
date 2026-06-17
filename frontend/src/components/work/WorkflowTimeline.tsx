@@ -1120,7 +1120,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       icon: 'bi-circle',
       color: 'secondary',
     };
-    const statusIcon = STATUS_ICONS[milestone.status] || STATUS_ICONS.pending;
     const diffStats = parseDiffStats(milestone.diff_stats);
     const milestoneTime = formatMilestoneTime(getMilestoneAnchorTime(milestone));
     const llmSessionId =
@@ -1173,30 +1172,48 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       ''
     ).trim();
     const milestoneSummary = rawSummary ? truncateInlineText(rawSummary, compact ? 120 : 220) : '';
-    const statusTone =
-      milestone.status === 'completed'
-        ? 'success'
-        : milestone.status === 'failed'
-          ? 'danger'
-          : isCurrentActiveMilestone
-            ? workflowStatusConfig.tone
-            : milestone.status === 'in_progress'
-              ? 'info'
-              : milestone.status === 'cancelled'
-                ? 'warning'
-                : 'muted';
-    const statusLabel =
-      milestone.status === 'completed'
-        ? t('autoStatusCompleted', language)
-        : milestone.status === 'failed'
-          ? t('autoStatusFailed', language)
-          : isCurrentActiveMilestone
-            ? workflowStatusLabel
-            : milestone.status === 'in_progress'
-              ? t('autoStatusDeveloping', language)
-              : milestone.status === 'cancelled'
-                ? t('autoStatusCancelled', language)
-                : t('autoStatusPending', language);
+    const statusDisplay = (() => {
+      if (milestone.status === 'completed') {
+        return {
+          icon: STATUS_ICONS.completed,
+          label: t('autoStatusCompleted', language),
+          tone: 'success' as const,
+        };
+      }
+      if (milestone.status === 'failed') {
+        return {
+          icon: STATUS_ICONS.failed,
+          label: t('autoStatusFailed', language),
+          tone: 'danger' as const,
+        };
+      }
+      if (isCurrentActiveMilestone) {
+        return {
+          icon: workflowStatusConfig.icon,
+          label: workflowStatusLabel,
+          tone: workflowStatusConfig.tone,
+        };
+      }
+      if (milestone.status === 'in_progress') {
+        return {
+          icon: STATUS_ICONS.in_progress,
+          label: t('autoStatusDeveloping', language),
+          tone: 'info' as const,
+        };
+      }
+      if (milestone.status === 'cancelled') {
+        return {
+          icon: STATUS_ICONS.cancelled,
+          label: t('autoStatusCancelled', language),
+          tone: 'warning' as const,
+        };
+      }
+      return {
+        icon: STATUS_ICONS.pending,
+        label: t('autoStatusPending', language),
+        tone: 'muted' as const,
+      };
+    })();
     const milestoneDuration =
       milestone.started_at && (milestone.completed_at || milestone.status === 'in_progress')
         ? formatDuration(milestone.started_at, milestone.completed_at ?? milestone.updated_at)
@@ -1218,12 +1235,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         key={milestone.milestone_id}
         className={`timeline-milestone-card ${
           compact ? 'timeline-milestone-card--compact' : ''
-        } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusTone}`}
+        } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusDisplay.tone}`}
       >
         <div className="timeline-milestone-summary">
           <div className="timeline-milestone-summary-main">
-            <div className={`timeline-milestone-status timeline-milestone-status--${statusTone}`}>
-              <i className={`bi ${statusIcon}`}></i>
+            <div
+              className={`timeline-milestone-status timeline-milestone-status--${statusDisplay.tone}`}
+            >
+              <i className={`bi ${statusDisplay.icon}`}></i>
             </div>
             <div className="timeline-milestone-copy">
               <div className="timeline-milestone-title-row">
@@ -1253,8 +1272,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
               <div className="timeline-milestone-meta-row">
                 <div className="timeline-milestone-badges">
-                  <span className={`timeline-chip timeline-chip--${statusTone}`}>
-                    {statusLabel}
+                  <span className={`timeline-chip timeline-chip--${statusDisplay.tone}`}>
+                    {statusDisplay.label}
                   </span>
                   {milestone.round_number > 0 && (
                     <span className="timeline-chip timeline-chip--subtle">
