@@ -162,6 +162,10 @@ class ZCodeAdapter(BaseCLIAdapter):
         """
         Build args to resume a ZCode session in single-shot mode.
 
+        This is the single-shot resume entry point used by the autonomous runner
+        (one process per resumed turn); the persistent app-server path resumes
+        via session/resume in ZCodeAppServerSession.start instead.
+
         ``--resume <sess_id>`` restores full conversation context; ``--prompt``
         is required (it drives the resumed turn).
         """
