@@ -442,16 +442,20 @@ export const ComplianceMgmt: React.FC = () => {
     setIsRunning(true);
     try {
       const result = await complianceApi.runCleanup(false);
-      setShowCleanupPreviewModal(false);
       fetchRetentionData();
       // HTTP 200 does not guarantee the cleanup fully succeeded: per-rule
-      // failures are collected in report.errors. Warn the user when present.
+      // failures are collected in report.errors. When present, keep the preview
+      // modal open and show the actual execute report so the user can inspect
+      // the error details in CleanupPreviewContent (the report was not
+      // persisted on save failure, so it won't appear in the history table).
       if (result?.errors?.length) {
+        setPreviewResult(result);
         toast.warning(
           t('cleanupCompletedWithErrors', language),
           t('cleanupErrorsDescription', language, { count: result.errors.length })
         );
       } else {
+        setShowCleanupPreviewModal(false);
         toast.success(t('cleanupSuccess', language));
       }
     } catch (err) {
