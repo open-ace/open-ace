@@ -312,17 +312,25 @@ class AutonomousOrchestrator:
         - recreates the worktree dir (reusing the branch if it still exists)
           when it is gone.
 
-        Returns the canonical worktree path. For non-worktree strategies this
-        is a no-op that returns the configured ``project_path``.
+        Returns the canonical worktree path. For non-worktree strategies, or
+        when ``worktree_path`` is intentionally empty (merge cleanup / conflict
+        resolution clears it), this is a no-op returning ``project_path``.
         """
         strategy = wf.get("branch_strategy", "new-branch")
         project_path = wf.get("project_path", "")
         worktree_path = wf.get("worktree_path", "")
 
-        if strategy != "worktree" or not project_path:
+        # An empty worktree_path is NOT the "dir gone, recreate it" case — it
+        # is set deliberately by merge cleanup (_resolve_merge_conflicts /
+        # _do_merge) when the worktree is removed to free the main repo for
+        # conflict resolution. Treating it as missing would fall back to
+        # project_path as canonical and try `git worktree add <main_repo>`,
+        # which fails and turns a retried merge into a hard failure. Only a
+        # non-empty path whose dir is gone represents external loss (#814).
+        if strategy != "worktree" or not project_path or not worktree_path:
             return worktree_path or project_path
 
-        canonical = os.path.realpath(worktree_path or project_path)
+        canonical = os.path.realpath(worktree_path)
         # Valid worktree: a .git file/dir inside means git set it up. If the
         # stored path was unnormalized (legacy ".."), persist the canonical
         # form so JSONL session detection matches Claude's encoding.
@@ -347,7 +355,8 @@ class AutonomousOrchestrator:
             )
             if branch_check.returncode == 0 or remote_check.returncode == 0:
                 # Branch survives (local or remote) — attach a worktree to it
-                # without recreating the branch.
+                # without recreating the branch. For a remote-only branch, git
+                # auto-creates a local tracking branch in this step.
                 main_gh._run_git(["worktree", "add", canonical, branch_name])
             else:
                 # Neither worktree nor branch — start fresh from origin/main.
@@ -1135,6 +1144,9 @@ class AutonomousOrchestrator:
             # skipped here.
             if phase != "preparation":
                 self._ensure_worktree(wf)
+                # Re-read so downstream phases see the healed worktree_path /
+                # branch_name in wf rather than the pre-heal snapshot.
+                wf = self.workflow
             if phase == "preparation":
                 self._do_preparation(wf)
             elif phase == "planning":

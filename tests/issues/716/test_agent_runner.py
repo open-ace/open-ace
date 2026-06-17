@@ -1,6 +1,7 @@
 """Unit tests for AutonomousAgentRunner."""
 
 import json
+import os
 import queue
 import threading
 from io import BytesIO
@@ -283,7 +284,10 @@ class TestAgentRunnerRunTask:
         assert create_calls[0].kwargs["session_id"] == "real-claude-session"
         assert create_calls[0].kwargs["tool_name"] == "claude"
         assert create_calls[0].kwargs["title"] == "claude - real-cla"
-        assert create_calls[0].kwargs["project_path"] == "-tmp-test"
+        # realpath-resolved: /tmp is a symlink to /private/tmp on macOS
+        assert create_calls[0].kwargs["project_path"] == os.path.realpath("/tmp/test").replace(
+            "/", "-"
+        )
         assert create_calls[0].kwargs["user_id"] == 42
 
         persisted_updates = [
@@ -356,7 +360,7 @@ class TestAgentRunnerRunTask:
             title="claude - late-cla",
             tool_name="claude",
             user_id=42,
-            project_path="-tmp-test",
+            project_path=os.path.realpath("/tmp/test").replace("/", "-"),
             workspace_type="local",
             remote_machine_id=None,
             context={"workflow_id": "wf-1"},
@@ -370,7 +374,7 @@ class TestAgentRunnerRunTask:
             process=MagicMock(),
             cli_tool="claude-code",
             project_path="/tmp/test",
-            encoded_project_path="-tmp-test",
+            encoded_project_path=os.path.realpath("/tmp/test").replace("/", "-"),
             workflow_id="wf-1",
             user_id=42,
         )

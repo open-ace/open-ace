@@ -208,17 +208,38 @@ class TestEnsureWorktreeSelfHeal:
         assert result == wf["project_path"]
         o._update_workflow.assert_not_called()
 
+    def test_empty_worktree_path_is_noop_not_recreate(self, monkeypatch):
+        # Regression: a merge-phase retry has worktree_path="" (cleared
+        # deliberately by merge cleanup). Self-heal must NOT treat that as
+        # "dir gone, recreate" — that would try `git worktree add <main_repo>`
+        # and turn a retried merge into a hard failure (#1088 review).
+        wf = _make_workflow(
+            worktree_path="",
+            branch_name="auto-dev/1390d553",
+            current_phase="merge",
+            status="merging",
+        )
+        o = _make_orchestrator(wf)
+
+        # GitHubOps must never be constructed (no recreation attempt).
+        with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps") as mock_gh_cls:
+            result = o._ensure_worktree(wf)
+            mock_gh_cls.assert_not_called()
+
+        # Returns project_path (main repo), no DB write, no milestone.
+        assert result == wf["project_path"]
+        o._update_workflow.assert_not_called()
+        o._create_milestone.assert_not_called()
+
 
 class TestAdvanceCallsSelfHeal:
     """``advance()`` must self-heal the worktree before downstream phases."""
 
-    def test_advance_calls_ensure_worktree_before_planning(self, monkeypatch):
+    def test_advance_calls_ensure_worktree_before_planning(self):
         wf = _make_workflow(current_phase="planning", status="planning")
         o = _make_orchestrator(wf)
         o._ensure_worktree = MagicMock(return_value=os.path.realpath(wf["worktree_path"]))
         o._do_planning = MagicMock()
-        # Force preparation-skipping branch.
-        monkeypatch.setattr(os.path, "isfile", lambda p: True)
 
         o.advance()
 
