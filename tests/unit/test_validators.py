@@ -362,6 +362,9 @@ class TestValidatePassword:
             # (no hardcoded floor overrides the policy).
             ("123456", {"password_min_length": 6}, True),
             ("12345", {"password_min_length": 6}, False),
+            # A negative / zero misconfiguration is floored to 1 rather than
+            # disabling the check or breaking validation.
+            ("ValidPass1", {"password_min_length": -100}, True),
             # Policy requiring uppercase
             ("abcdefgh", {"password_require_uppercase": True}, False),
             ("Abcdefgh", {"password_require_uppercase": True}, True),
@@ -432,6 +435,7 @@ class TestValidatePassword:
             "min_length_10_pass",
             "min_length_below_default_pass",
             "min_length_below_default_fail",
+            "negative_min_length_floored",
             "require_uppercase_fail",
             "require_uppercase_pass",
             "require_lowercase_fail",

@@ -131,6 +131,9 @@ def validate_password(password: str, policy_settings: Optional[dict] = None) -> 
         # Guard against malformed policy values (None / non-numeric) that
         # would otherwise surface as a 500 from this helper.
         min_length = 8
+    # Floor at 1 so an admin misconfiguration (0 / negative) cannot silently
+    # disable the minimum-length requirement entirely.
+    min_length = max(min_length, 1)
     if len(password) < min_length:
         return False, f"Password must be at least {min_length} characters"
 
