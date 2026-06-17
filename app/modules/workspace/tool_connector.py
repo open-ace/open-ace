@@ -257,6 +257,19 @@ class ToolConnector:
                 supports_tools=True,
                 capabilities=["chat", "agent", "coding", "analysis"],
             ),
+            ToolInfo(
+                name="zcode",
+                display_name="ZCode (Z.AI)",
+                tool_type=ToolType.AGENT.value,
+                description="Z.AI's ZCode coding agent (Anthropic-compatible)",
+                models=["glm-5.2", "glm-4.5-air"],
+                default_model="glm-5.2",
+                max_tokens=1048576,
+                supports_streaming=True,
+                supports_vision=True,
+                supports_tools=True,
+                capabilities=["chat", "agent", "coding", "analysis"],
+            ),
         ]
 
         for tool in default_tools:

@@ -1297,6 +1297,7 @@ def get_available_tools():
         {"id": "qwen-code-cli", "name": "Qwen Code", "executable": "qwen"},
         {"id": "codex", "name": "Codex CLI", "executable": "codex"},
         {"id": "openclaw", "name": "OpenClaw", "executable": "openclaw"},
+        {"id": "zcode", "name": "ZCode", "executable": "zcode"},
     ]
     return jsonify({"success": True, "tools": tools})
 
@@ -1358,7 +1359,9 @@ def _pid_matches_expected(pid: int) -> bool:
         if result.returncode != 0:
             return False  # process doesn't exist
         comm = result.stdout.strip().lower()
-        return any(name in comm for name in ("claude", "qwen", "codex", "openclaw", "node"))
+        return any(
+            name in comm for name in ("claude", "qwen", "codex", "openclaw", "zcode", "node")
+        )
     except Exception:
         # If we can't check, assume it matches (conservative: try to stop it)
         return True

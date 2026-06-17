@@ -58,7 +58,9 @@ class QuotaConfig:
 class TenantSettings:
     """Tenant-specific settings."""
 
-    allowed_tools: list[str] = field(default_factory=lambda: ["claude", "qwen", "openclaw"])
+    allowed_tools: list[str] = field(
+        default_factory=lambda: ["claude", "qwen", "openclaw", "codex", "zcode"]
+    )
     content_filter_enabled: bool = True
     audit_log_enabled: bool = True
     audit_log_retention_days: int = 90
@@ -90,7 +92,9 @@ class TenantSettings:
     def from_dict(cls, data: dict) -> "TenantSettings":
         """Create from dictionary."""
         return cls(
-            allowed_tools=data.get("allowed_tools", ["claude", "qwen", "openclaw"]),
+            allowed_tools=data.get(
+                "allowed_tools", ["claude", "qwen", "openclaw", "codex", "zcode"]
+            ),
             content_filter_enabled=data.get("content_filter_enabled", True),
             audit_log_enabled=data.get("audit_log_enabled", True),
             audit_log_retention_days=data.get("audit_log_retention_days", 90),

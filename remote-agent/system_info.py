@@ -22,6 +22,7 @@ KNOWN_CLI_TOOLS = [
     "openclaw",
     "aider",
     "cursor-cli",
+    "zcode",
 ]
 
 

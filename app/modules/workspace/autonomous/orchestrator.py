@@ -97,6 +97,9 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     ],
     "codex": [],
     "openclaw": [],
+    # zcode uses its own built-in tool set (Read/Write/Edit/Bash/WebFetch/...),
+    # exposed via the ZCode Protocol; no MCP-subtool allowlist is needed.
+    "zcode": [],
 }
 
 # Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
@@ -134,6 +137,7 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
     ],
     "codex": [],
     "openclaw": [],
+    "zcode": [],
 }
 
 # Maximum time (seconds) for a single planning agent call.

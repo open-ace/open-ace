@@ -104,7 +104,7 @@ class TestTenantSettings:
 
     def test_create_with_defaults(self):
         ts = TenantSettings()
-        assert ts.allowed_tools == ["claude", "qwen", "openclaw"]
+        assert ts.allowed_tools == ["claude", "qwen", "openclaw", "codex", "zcode"]
         assert ts.content_filter_enabled is True
         assert ts.audit_log_enabled is True
         assert ts.audit_log_retention_days == 90
@@ -136,7 +136,7 @@ class TestTenantSettings:
     def test_to_dict(self):
         ts = TenantSettings(sso_enabled=True, sso_provider="azure")
         d = ts.to_dict()
-        assert d["allowed_tools"] == ["claude", "qwen", "openclaw"]
+        assert d["allowed_tools"] == ["claude", "qwen", "openclaw", "codex", "zcode"]
         assert d["content_filter_enabled"] is True
         assert d["audit_log_enabled"] is True
         assert d["audit_log_retention_days"] == 90
@@ -166,7 +166,7 @@ class TestTenantSettings:
 
     def test_from_dict_empty_uses_defaults(self):
         ts = TenantSettings.from_dict({})
-        assert ts.allowed_tools == ["claude", "qwen", "openclaw"]
+        assert ts.allowed_tools == ["claude", "qwen", "openclaw", "codex", "zcode"]
         assert ts.content_filter_enabled is True
         assert ts.audit_log_enabled is True
         assert ts.sso_enabled is False
