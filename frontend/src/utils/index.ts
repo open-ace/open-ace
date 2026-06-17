@@ -32,6 +32,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   openclaw: 'OpenClaw',
   openai: 'OpenAI',
   codex: 'Codex',
+  zcode: 'ZCode',
   run_shell_command: 'Shell',
 };
 

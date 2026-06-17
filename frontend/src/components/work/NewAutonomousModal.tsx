@@ -251,6 +251,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                 <option value="qwen-code-cli">Qwen Code</option>
                 <option value="codex">Codex CLI</option>
                 <option value="openclaw">OpenClaw</option>
+                <option value="zcode">ZCode</option>
               </>
             )}
           </select>

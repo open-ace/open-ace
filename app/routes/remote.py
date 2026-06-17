@@ -46,7 +46,7 @@ _auth_failure_lock = threading.Lock()
 _auth_failure_last_audit: dict[str, float] = {}
 _AUTH_FAILURE_RATE_LIMIT_SECONDS = 300  # 5 minutes
 
-_CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli"]
+_CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli", "zcode"]
 
 remote_bp = Blueprint("remote", __name__)
 

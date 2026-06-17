@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Unit tests for the ZCode CLI adapter, settings writer, and usage parser."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+# --------------------------------------------------------------------------- #
+# Module loading helpers (mirrors test_cli_settings_apply.py)
+# --------------------------------------------------------------------------- #
+
+_AGENT_DIR = str(Path(__file__).resolve().parents[2] / "remote-agent")
+
+
+def _load_module(name: str, rel_path: str):
+    module_path = Path(__file__).resolve().parents[2] / rel_path
+    if _AGENT_DIR not in sys.path:
+        sys.path.insert(0, _AGENT_DIR)
+    spec = importlib.util.spec_from_file_location(name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def cli_adapters_pkg():
+    # Import as a proper package (relative imports `.base`, `.zcode` require
+    # the parent dir on sys.path with the package name intact).
+    import importlib
+
+    if _AGENT_DIR not in sys.path:
+        sys.path.insert(0, _AGENT_DIR)
+    return importlib.import_module("cli_adapters")
+
+
+@pytest.fixture(scope="module")
+def cli_settings_mod():
+    return _load_module("cli_settings", "remote-agent/cli_settings.py")
+
+
+@pytest.fixture(scope="module")
+def usage_parser_mod():
+    return _load_module("usage_parser", "remote-agent/cli_adapters/usage_parser.py")
+
+
+# --------------------------------------------------------------------------- #
+# Adapter registry & basic contract
+# --------------------------------------------------------------------------- #
+
+
+def test_zcode_registered_in_adapter_registry(cli_adapters_pkg):
+    assert "zcode" in cli_adapters_pkg.ADAPTERS
+    assert "zcode-code" in cli_adapters_pkg.ADAPTERS
+
+
+def test_zcode_get_adapter_returns_zcode_instance(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    assert adapter.get_display_name() == "ZCode"
+    assert adapter.get_executable_name() == "zcode"
+
+
+def test_zcode_supports_stdin_input_is_false(cli_adapters_pkg):
+    """ZCode does NOT use Claude's stream-json stdin protocol."""
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    assert adapter.supports_stdin_input() is False
+
+
+def test_zcode_get_settings_path(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    assert adapter.get_settings_path().endswith(".zcode/cli/config.json")
+
+
+def test_zcode_get_env_vars_routes_through_anthropic_proxy(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    env = adapter.get_env_vars("https://proxy.example/api/llm-proxy/", "tok")
+    # Trailing slash stripped; ZCode's anthropic provider reads ANTHROPIC_BASE_URL.
+    assert env["ANTHROPIC_BASE_URL"] == "https://proxy.example/api/llm-proxy"
+
+
+def test_zcode_build_single_shot_args(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    args = adapter.build_single_shot_args("do the task", "/tmp/proj", model="glm-5.2")
+    # Engine is invoked via `node <engine>` when bundled; single-shot uses --prompt.
+    assert args[0] == "node"
+    assert "--prompt" in args
+    assert "do the task" in args
+    assert "--mode" in args and "yolo" in args
+    assert "--json" in args
+    # No --model flag: zcode has no headless model flag; model comes from config.
+    assert "--model" not in args
+
+
+def test_zcode_build_start_args_uses_app_server(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    args = adapter.build_start_args("sess_x", "/tmp/proj", permission_mode="bypass")
+    assert "app-server" in args
+    assert "yolo" in args  # bypass -> yolo (fully autonomous)
+
+
+def test_zcode_build_resume_args(cli_adapters_pkg):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    args = adapter.build_resume_args("sess_resume", "/tmp/proj", "continue now")
+    assert "--resume" in args
+    assert "sess_resume" in args
+    assert "--prompt" in args and "continue now" in args
+
+
+@pytest.mark.parametrize(
+    "mode,expected",
+    [
+        ("bypass", "yolo"),
+        ("full-auto", "yolo"),
+        ("auto", "build"),
+        ("auto-edit", "edit"),
+        ("plan", "plan"),
+        (None, "yolo"),
+    ],
+)
+def test_zcode_permission_mode_mapping(cli_adapters_pkg, mode, expected):
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    assert adapter._map_permission_mode(mode) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Settings writer
+# --------------------------------------------------------------------------- #
+
+
+def test_write_zcode_settings_creates_config(cli_settings_mod, tmp_path):
+    path = cli_settings_mod.write_zcode_settings(
+        {"api_key": "key-123"},
+        proxy_base_url="https://proxy.example/api/llm-proxy",
+        home_dir=tmp_path,
+    )
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    assert cfg["provider"]["zai"]["kind"] == "anthropic"
+    assert cfg["provider"]["zai"]["options"]["baseURL"] == "https://proxy.example/api/llm-proxy"
+    assert cfg["provider"]["zai"]["options"]["apiKey"] == "key-123"
+    assert cfg["model"]["main"] == "zai/glm-5.2"
+    assert cfg["model"]["lite"] == "zai/glm-4.5-air"
+
+
+def test_write_zcode_settings_merges_existing(cli_settings_mod, tmp_path):
+    config_path = tmp_path / ".zcode" / "cli" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "openai": {"id": "openai", "kind": "openai", "options": {}},
+                    "zai": {"id": "zai", "kind": "anthropic", "options": {"apiKey": "old"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cli_settings_mod.write_zcode_settings(
+        {"api_key": "new-key"},
+        proxy_base_url="https://px/v1",
+        home_dir=tmp_path,
+    )
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    # Existing non-zcode provider preserved.
+    assert "openai" in cfg["provider"]
+    # zai merged: baseURL injected, apiKey updated.
+    assert cfg["provider"]["zai"]["options"]["baseURL"] == "https://px/v1"
+    assert cfg["provider"]["zai"]["options"]["apiKey"] == "new-key"
+
+
+def test_apply_cli_settings_dispatches_zcode(cli_settings_mod, tmp_path):
+    cli_settings_mod.apply_cli_settings(
+        {"zcode": {"api_key": "dispatch-key"}},
+        proxy_base_url="https://px/v1",
+        home_dir=tmp_path,
+    )
+    config_path = tmp_path / ".zcode" / "cli" / "config.json"
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    assert cfg["provider"]["zai"]["options"]["apiKey"] == "dispatch-key"
+
+
+# --------------------------------------------------------------------------- #
+# Usage parser
+# --------------------------------------------------------------------------- #
+
+
+def test_usage_parser_zcode_single_shot_shape(usage_parser_mod):
+    # Shape from `zcode --prompt ... --json` (verified against running CLI).
+    parsed = {
+        "usage": {
+            "inputTokens": 8358,
+            "outputTokens": 4,
+            "cacheReadTokens": 7040,
+            "reasoningTokens": 0,
+            "modelRequestCount": 1,
+        }
+    }
+    r = usage_parser_mod.extract_stream_usage("zcode", parsed)
+    assert r == {
+        "input": 8358,
+        "output": 4,
+        "cache_read": 7040,
+        "reasoning": 0,
+        "model_requests": 1,
+    }
+
+
+def test_usage_parser_zcode_session_usage_shape(usage_parser_mod):
+    # Shape from app-server session/usage (top-level camelCase, no wrapper).
+    parsed = {
+        "totalTokens": 8362,
+        "inputTokens": 8358,
+        "outputTokens": 4,
+        "cacheReadTokens": 0,
+        "modelRequestCount": 1,
+    }
+    r = usage_parser_mod.extract_stream_usage("zcode", parsed)
+    assert r["input"] == 8358
+    assert r["output"] == 4
+    assert r["cache_read"] == 0
+    assert r["model_requests"] == 1
+
+
+def test_usage_parser_no_regression_for_claude(usage_parser_mod):
+    parsed = {"type": "result", "usage": {"input_tokens": 100, "output_tokens": 50}}
+    assert usage_parser_mod.extract_stream_usage("claude-code", parsed) == {
+        "input": 100,
+        "output": 50,
+    }
+
+
+def test_usage_parser_no_regression_for_qwen(usage_parser_mod):
+    parsed = {"usage": {"input_tokens": 10, "output_tokens": 5, "cachedContentTokenCount": 2}}
+    assert usage_parser_mod.extract_stream_usage("qwen-code-cli", parsed) == {
+        "input": 8,
+        "output": 5,
+    }
