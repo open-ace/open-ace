@@ -448,12 +448,15 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: 'Avg Tokens/Session',
     multiTurnRatio: 'Multi-turn Ratio',
     sessionStatistics: 'Session Statistics',
-    sessionStatisticsHelp: 'Conversation-level statistics for the selected date range. A "conversation" is a single session containing one or more messages.',
+    sessionStatisticsHelp:
+      'Conversation-level statistics for the selected date range. A "conversation" is a single session containing one or more messages.',
     avgMessagesPerConversation: 'Avg Messages/Conversation',
-    avgMessagesPerConversationHelp: 'Total messages divided by total conversations (distinct sessions).',
+    avgMessagesPerConversationHelp:
+      'Total messages divided by total conversations (distinct sessions).',
     avgTokensPerConversation: 'Avg Tokens/Conversation',
     avgTokensPerConversationHelp: 'Total tokens divided by total conversations.',
-    totalConversationsHelp: 'Distinct conversations (sessions) recorded in the selected date range.',
+    totalConversationsHelp:
+      'Distinct conversations (sessions) recorded in the selected date range.',
     totalMessagesHelp: 'Total individual messages recorded in the selected date range.',
     multiTurnRatioHelp: 'Percentage of conversations containing 2 or more messages.',
     tokenTrend: 'Token Trend',
@@ -3319,7 +3322,8 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: '平均トークン/セッション',
     multiTurnRatio: 'マルチターン比率',
     sessionStatistics: 'セッション統計',
-    sessionStatisticsHelp: '選択した期間の会話単位の統計。「会話」は1件以上のメッセージを含む1つのセッションです。',
+    sessionStatisticsHelp:
+      '選択した期間の会話単位の統計。「会話」は1件以上のメッセージを含む1つのセッションです。',
     avgMessagesPerConversation: '平均メッセージ/会話',
     avgMessagesPerConversationHelp: '総メッセージ数 ÷ 総会話数（重複排除）。',
     avgTokensPerConversation: '平均トークン/会話',
@@ -4386,7 +4390,8 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: '평균 토큰/세션',
     multiTurnRatio: '멀티턴 비율',
     sessionStatistics: '세션 통계',
-    sessionStatisticsHelp: '선택한 기간의 대화 단위 통계입니다. "대화"는 하나 이상의 메시지를 포함하는 단일 세션입니다.',
+    sessionStatisticsHelp:
+      '선택한 기간의 대화 단위 통계입니다. "대화"는 하나 이상의 메시지를 포함하는 단일 세션입니다.',
     avgMessagesPerConversation: '평균 메시지/대화',
     avgMessagesPerConversationHelp: '총 메시지 수 ÷ 총 대화 수(중복 제거).',
     avgTokensPerConversation: '평균 토큰/대화',
