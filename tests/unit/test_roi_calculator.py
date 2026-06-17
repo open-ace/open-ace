@@ -1,5 +1,6 @@
 """Unit tests for ROICalculator module."""
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -124,6 +125,72 @@ class TestROICalculator:
         assert len(breakdown) == 1
         assert breakdown[0].total_cost > 0
         assert isinstance(breakdown[0], CostBreakdown)
+
+    def test_get_cost_breakdown_aggregates_same_tool(self):
+        """Same tool_name with different models_used should be aggregated."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "qwen-code",
+                "model": json.dumps(["glm-5"]),
+                "requests": 50,
+                "input_tokens": 10000,
+                "output_tokens": 5000,
+            },
+            {
+                "tool_name": "qwen-code-cli",
+                "model": json.dumps(["qwen3.6-plus"]),
+                "requests": 30,
+                "input_tokens": 5000,
+                "output_tokens": 2000,
+            },
+            {
+                "tool_name": "claude-code",
+                "model": json.dumps(["claude-3-sonnet"]),
+                "requests": 10,
+                "input_tokens": 2000,
+                "output_tokens": 1000,
+            },
+        ]
+        breakdown = calc.get_cost_breakdown("2026-01-01", "2026-01-31")
+
+        # Should aggregate to 2 items: qwen and claude
+        assert len(breakdown) == 2
+
+        qwen_item = next(b for b in breakdown if b.tool_name == "qwen")
+        assert qwen_item.requests == 80
+        assert qwen_item.input_tokens == 15000
+        assert qwen_item.output_tokens == 7000
+
+        # Verify model merge
+        models = json.loads(qwen_item.model)
+        assert "glm-5" in models
+        assert "qwen3.6-plus" in models
+
+    def test_merge_models(self):
+        """Test _merge_models helper method."""
+        # Normal merge
+        result = ROICalculator._merge_models(json.dumps(["glm-5"]), json.dumps(["qwen3.6-plus"]))
+        models = json.loads(result)
+        assert "glm-5" in models
+        assert "qwen3.6-plus" in models
+        assert len(models) == 2
+
+        # Deduplication
+        result = ROICalculator._merge_models(
+            json.dumps(["glm-5", "qwen3.6-plus"]), json.dumps(["glm-5"])
+        )
+        models = json.loads(result)
+        assert len(models) == 2  # Should not duplicate glm-5
+
+        # Empty values
+        result = ROICalculator._merge_models("unknown", json.dumps(["glm-5"]))
+        models = json.loads(result)
+        assert "glm-5" in models
+
+        # Both empty
+        result = ROICalculator._merge_models("", "")
+        assert result == "unknown"
 
     def test_get_daily_costs(self):
         calc, mock_db = self._make_calculator()

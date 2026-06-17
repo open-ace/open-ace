@@ -5,6 +5,7 @@ Calculates Return on Investment for AI usage.
 Provides cost analysis, savings estimation, and productivity metrics.
 """
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -802,6 +803,27 @@ class ROICalculator:
 
         return result
 
+    @staticmethod
+    def _merge_models(model1: str, model2: str) -> str:
+        """
+        Merge two model JSON array strings, deduplicate and sort.
+
+        Args:
+            model1: First model JSON string (e.g., '["glm-5"]').
+            model2: Second model JSON string.
+
+        Returns:
+            Merged and sorted JSON array string.
+        """
+        try:
+            m1 = json.loads(model1) if model1 and model1 != "unknown" else []
+            m2 = json.loads(model2) if model2 and model2 != "unknown" else []
+            merged = sorted(set(m1 + m2))
+            return json.dumps(merged, ensure_ascii=False) if merged else "unknown"
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: return non-empty value or "unknown"
+            return model1 or model2 or "unknown"
+
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_cost_breakdown(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
@@ -858,7 +880,24 @@ class ROICalculator:
                 )
             )
 
-        return breakdown
+        # Aggregate by tool_name (multiple rows may have same tool_name with different models)
+        aggregated: dict[str, CostBreakdown] = {}
+        for item in breakdown:
+            tool = item.tool_name
+            if tool in aggregated:
+                agg = aggregated[tool]
+                agg.requests += item.requests
+                agg.input_tokens += item.input_tokens
+                agg.output_tokens += item.output_tokens
+                agg.input_cost += item.input_cost
+                agg.output_cost += item.output_cost
+                agg.total_cost += item.total_cost
+                # Merge model lists
+                agg.model = self._merge_models(agg.model, item.model)
+            else:
+                aggregated[tool] = item
+
+        return list(aggregated.values())
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_daily_costs(
