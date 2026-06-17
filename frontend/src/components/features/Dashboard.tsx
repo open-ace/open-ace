@@ -20,6 +20,7 @@ import {
   Error,
   EmptyState,
   TokenTrendChart,
+  TokenDistributionChart,
   DashboardSkeleton,
   TextInput,
   StatCard,
@@ -271,6 +272,22 @@ export const Dashboard: React.FC = () => {
     return trendData.filter((point) => point.tool === selectedTool);
   }, [trendData, selectedTool]);
 
+  // Distribution data for chart - filtered by selected tool
+  const distributionData = useMemo(() => {
+    const tools = Object.keys(summaryData);
+    if (selectedTool === 'all') {
+      return tools.map((tool) => ({
+        tool,
+        tokens: summaryData[tool]?.total_tokens ?? 0,
+      }));
+    }
+    // Filter for selected tool only
+    if (tools.includes(selectedTool)) {
+      return [{ tool: selectedTool, tokens: summaryData[selectedTool]?.total_tokens ?? 0 }];
+    }
+    return [];
+  }, [summaryData, selectedTool]);
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -375,31 +392,46 @@ export const Dashboard: React.FC = () => {
         </Card>
       </section>
 
-      {/* Trend Chart - Full width */}
+      {/* Trend Chart + Distribution Chart - Two columns */}
       <section className="dashboard-section mb-4">
-        <Card
-          title={t('trendChart', language)}
-          actions={
-            <Select
-              options={toolOptions}
-              value={selectedTool}
-              onChange={setSelectedTool}
-              size="sm"
-              className="select-narrow"
-            />
-          }
-        >
-          {filteredTrendData && filteredTrendData.length > 0 ? (
-            <TokenTrendChart
-              data={filteredTrendData}
-              startDate={startDate}
-              endDate={endDate}
-              height={300}
-            />
-          ) : (
-            <EmptyState icon="bi-graph-up" title={t('noData', language)} />
-          )}
-        </Card>
+        <div className="row g-3">
+          {/* Trend Chart - Left */}
+          <div className="col-lg-8">
+            <Card
+              title={t('trendChart', language)}
+              actions={
+                <Select
+                  options={toolOptions}
+                  value={selectedTool}
+                  onChange={setSelectedTool}
+                  size="sm"
+                  className="select-narrow"
+                />
+              }
+            >
+              {filteredTrendData && filteredTrendData.length > 0 ? (
+                <TokenTrendChart
+                  data={filteredTrendData}
+                  startDate={startDate}
+                  endDate={endDate}
+                  height={300}
+                />
+              ) : (
+                <EmptyState icon="bi-graph-up" title={t('noData', language)} />
+              )}
+            </Card>
+          </div>
+          {/* Distribution Chart - Right */}
+          <div className="col-lg-4">
+            <Card title={t('tokenDistribution', language)}>
+              {distributionData.length > 0 ? (
+                <TokenDistributionChart data={distributionData} height={300} />
+              ) : (
+                <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
+              )}
+            </Card>
+          </div>
+        </div>
       </section>
 
       {/* Tools Info Table - Collapsible */}
