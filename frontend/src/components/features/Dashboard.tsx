@@ -179,17 +179,19 @@ export const Dashboard: React.FC = () => {
   };
 
   // Use combined dashboard hook
-  const { todayData, summaryData, trendData, isLoading, isError, error, refetch } =
-    useDashboard({
-      startDate,
-      endDate,
-      autoRefresh: false,
-    });
+  const { todayData, summaryData, trendData, isLoading, isError, error, refetch } = useDashboard({
+    startDate,
+    endDate,
+    autoRefresh: false,
+  });
 
   // Compute summary statistics for the selected time range
   const summaryStats = useMemo(() => {
     const tools = Object.keys(summaryData);
-    const totalTokens = tools.reduce((sum, tool) => sum + (summaryData[tool]?.total_tokens ?? 0), 0);
+    const totalTokens = tools.reduce(
+      (sum, tool) => sum + (summaryData[tool]?.total_tokens ?? 0),
+      0
+    );
     const totalRequests = tools.reduce(
       (sum, tool) => sum + (summaryData[tool]?.total_requests ?? 0),
       0
@@ -319,16 +321,20 @@ export const Dashboard: React.FC = () => {
                     value={customStartDate}
                     onChange={handleStartDateChange}
                     className="date-input-narrow"
+                    aria-label={t('startDate', language)}
                   />
-                  <span className="text-muted">~</span>
+                  <span className="text-muted" aria-hidden="true">
+                    {t('dateRangeSeparator', language)}
+                  </span>
                   <TextInput
                     type="date"
                     value={customEndDate}
                     onChange={handleEndDateChange}
                     className="date-input-narrow"
+                    aria-label={t('endDate', language)}
                   />
                   {dateError && (
-                    <small className="text-danger">
+                    <small className="text-danger" role="alert">
                       {dateError === 'invalid_range'
                         ? t('dateRangeErrorInvalid', language)
                         : t('dateRangeErrorFuture', language)}
@@ -406,7 +412,9 @@ export const Dashboard: React.FC = () => {
               onClick={() => setIsTableExpanded(!isTableExpanded)}
             >
               <i className={cn('bi', isTableExpanded ? 'bi-chevron-up' : 'bi-chevron-down')} />
-              {isTableExpanded ? t('collapse', language) || '收起' : t('expand', language) || '展开'}
+              {isTableExpanded
+                ? t('collapse', language) || '收起'
+                : t('expand', language) || '展开'}
             </button>
           }
         >
@@ -430,9 +438,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -448,9 +454,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -466,9 +470,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -484,9 +486,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -502,9 +502,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -521,9 +519,7 @@ export const Dashboard: React.FC = () => {
                             <i
                               className={cn(
                                 'bi',
-                                sortDirection === 'asc'
-                                  ? 'bi-caret-up-fill'
-                                  : 'bi-caret-down-fill',
+                                sortDirection === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill',
                                 'ms-1'
                               )}
                             />
@@ -547,7 +543,9 @@ export const Dashboard: React.FC = () => {
                           <td className="text-end">
                             {(stats.avg_tokens / 1000000).toFixed(2)} M/day
                           </td>
-                          <td className="text-end">{formatTokens(stats.total_input_tokens ?? 0)}</td>
+                          <td className="text-end">
+                            {formatTokens(stats.total_input_tokens ?? 0)}
+                          </td>
                           <td className="text-end">
                             {formatTokens(stats.total_output_tokens ?? 0)}
                           </td>
@@ -604,8 +602,7 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
           ) : item.request_count > 0 ? (
             <>
               <h4 className="card-title mb-2">
-                {item.request_count}{' '}
-                <small className="fs-6">{t('tableRequests', language)}</small>
+                {item.request_count} <small className="fs-6">{t('tableRequests', language)}</small>
               </h4>
               <p className="card-text mb-1 text-warning">
                 <small>
@@ -619,7 +616,9 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
           )}
           {item.tokens_used > 0 && item.request_count > 0 && (
             <p className="card-text mb-0">
-              <small>{t('tableRequests', language)}: {item.request_count}</small>
+              <small>
+                {t('tableRequests', language)}: {item.request_count}
+              </small>
             </p>
           )}
         </div>
