@@ -949,7 +949,7 @@ class MessageRepository:
                 COUNT(*) AS total_conversations,
                 COALESCE(SUM(cnt), 0) AS total_messages,
                 COALESCE(SUM(session_tokens), 0) AS total_tokens,
-                SUM(CASE WHEN cnt >= 2 THEN 1 ELSE 0 END) AS multi_turn_session_count
+                COALESCE(SUM(CASE WHEN cnt >= 2 THEN 1 ELSE 0 END), 0) AS multi_turn_session_count
             FROM (
                 SELECT
                     {session_expr} AS s,
