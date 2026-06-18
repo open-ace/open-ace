@@ -355,6 +355,39 @@ class TestResolveMergeConflictsWorktreeIsolation:
             not main_gh._run_git.called
         ), f"main repo received git calls: {main_gh._run_git.call_args_list}"
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_removes_existing_worktree_before_adding_temp(self, mock_gh_cls):
+        """Git forbids the same branch in two worktrees, so the workflow's own
+        worktree must be removed first to free the branch for the temp worktree.
+        """
+        # worktree_path is non-empty — simulates a worktree-strategy workflow
+        # entering merge resolution with its dev worktree still attached.
+        wf = _make_workflow(worktree_path="/srv/repo/../auto-dev-fc82f22a")
+        o, _ = _make_orchestrator(wf)
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(returncode=0, stdout="", stderr=""),  # merge clean
+        ]
+        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+
+        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        # The existing worktree was removed BEFORE the temp one was added.
+        remove_calls = main_gh.remove_worktree.call_args_list
+        assert len(remove_calls) == 2  # original + temp
+        # First removal is the original worktree_path.
+        assert remove_calls[0].args[0] == wf["worktree_path"]
+        # worktree_path was cleared in DB.
+        o._update_workflow.assert_any_call({"worktree_path": ""})
+        # Then the temp worktree was added (branch now free).
+        main_gh.add_worktree.assert_called_once()
+        # Second removal is the temp worktree (finally cleanup).
+        temp_path = main_gh.add_worktree.call_args.args[0]
+        assert remove_calls[1].args[0] == temp_path
+
 
 # ── github_ops.add_worktree (no -b) ──────────────────────────────────────
 

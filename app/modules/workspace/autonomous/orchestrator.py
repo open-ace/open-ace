@@ -3062,10 +3062,21 @@ class AutonomousOrchestrator:
         """
         wf = self.workflow
         project_path = wf.get("project_path", "")
+        worktree_path = wf.get("worktree_path", "")
+
+        # Git forbids checking out the same branch in two worktrees, so the
+        # workflow's own worktree (if still present) must be removed first to
+        # free the branch for the temp worktree below.
+        main_gh = GitHubOps(project_path)
+        if worktree_path:
+            try:
+                main_gh.remove_worktree(worktree_path)
+            except GitHubOpsError as e:
+                logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
+            self._update_workflow({"worktree_path": ""})
 
         # Create an isolated worktree for the existing PR branch. Use the main
         # repo's gh so the worktree is registered against the real .git.
-        main_gh = GitHubOps(project_path)
         temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
         main_gh.add_worktree(temp_wt_path, branch_name)
         logger.info("Created temporary merge worktree at %s", temp_wt_path)
