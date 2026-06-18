@@ -63,7 +63,9 @@ def _normalize_sqlite_daily_stats() -> None:
             """
         )
     )
-    op.execute(sa.text(f"DELETE FROM daily_stats WHERE tool_name = 'qwen' OR tool_name IN ({ALIASES_IN})"))
+    op.execute(
+        sa.text(f"DELETE FROM daily_stats WHERE tool_name = 'qwen' OR tool_name IN ({ALIASES_IN})")
+    )
     op.execute(
         sa.text(
             """
@@ -125,8 +127,7 @@ def _rebuild_sqlite_qwen_usage_summary() -> None:
     """Recalculate qwen usage_summary rows from normalized daily_messages."""
     op.execute(
         sa.text(
-            "DELETE FROM usage_summary WHERE tool_name = 'qwen' OR tool_name IN "
-            f"({ALIASES_IN})"
+            "DELETE FROM usage_summary WHERE tool_name = 'qwen' OR tool_name IN " f"({ALIASES_IN})"
         )
     )
     op.execute(
@@ -181,11 +182,7 @@ def _rebuild_sqlite_qwen_usage_summary() -> None:
 
 def _rebuild_sqlite_claude_usage_summary() -> None:
     """Recalculate claude usage_summary rows from daily_messages."""
-    op.execute(
-        sa.text(
-            "DELETE FROM usage_summary WHERE tool_name IN ('claude', 'claude-code')"
-        )
-    )
+    op.execute(sa.text("DELETE FROM usage_summary WHERE tool_name IN ('claude', 'claude-code')"))
     op.execute(
         sa.text(
             """
@@ -253,14 +250,15 @@ def upgrade() -> None:
         if _table_exists(conn, table):
             op.execute(
                 sa.text(
-                    f"UPDATE {table} SET tool_name = 'qwen' "
-                    f"WHERE tool_name IN ({ALIASES_IN})"
+                    f"UPDATE {table} SET tool_name = 'qwen' " f"WHERE tool_name IN ({ALIASES_IN})"
                 )
             )
     # Also normalize claude-code in all derived tables
     if _table_exists(conn, "usage_summary"):
         op.execute(
-            sa.text("UPDATE usage_summary SET tool_name = 'claude' " "WHERE tool_name = 'claude-code'")
+            sa.text(
+                "UPDATE usage_summary SET tool_name = 'claude' " "WHERE tool_name = 'claude-code'"
+            )
         )
 
 

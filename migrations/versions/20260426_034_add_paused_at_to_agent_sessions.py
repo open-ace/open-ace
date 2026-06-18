@@ -25,10 +25,7 @@ def _table_exists(bind, table_name: str) -> bool:
     """Check if a table exists."""
     if bind.dialect.name == "postgresql":
         result = bind.execute(
-            sa.text(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_name = :table_name"
-            ),
+            sa.text("SELECT 1 FROM information_schema.tables " "WHERE table_name = :table_name"),
             {"table_name": table_name},
         )
         return result.fetchone() is not None

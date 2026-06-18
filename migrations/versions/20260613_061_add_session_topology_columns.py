@@ -94,7 +94,9 @@ def downgrade() -> None:
     """Remove session topology and per-phase usage columns."""
     conn = op.get_bind()
 
-    if _table_exists(conn, "session_messages") and _column_exists(conn, "session_messages", "milestone_id"):
+    if _table_exists(conn, "session_messages") and _column_exists(
+        conn, "session_messages", "milestone_id"
+    ):
         op.drop_column("session_messages", "milestone_id")
 
     for column in (
@@ -103,9 +105,13 @@ def downgrade() -> None:
         "phase_input_tokens",
         "phase_total_tokens",
     ):
-        if _table_exists(conn, "workflow_milestones") and _column_exists(conn, "workflow_milestones", column):
+        if _table_exists(conn, "workflow_milestones") and _column_exists(
+            conn, "workflow_milestones", column
+        ):
             op.drop_column("workflow_milestones", column)
 
     for column in ("test_session_id", "review_session_id", "main_session_id"):
-        if _table_exists(conn, "autonomous_workflows") and _column_exists(conn, "autonomous_workflows", column):
+        if _table_exists(conn, "autonomous_workflows") and _column_exists(
+            conn, "autonomous_workflows", column
+        ):
             op.drop_column("autonomous_workflows", column)

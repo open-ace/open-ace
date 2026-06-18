@@ -72,7 +72,9 @@ def upgrade() -> None:
 
     index_name = "idx_agent_sessions_session_type"
 
-    if _table_exists(conn, "agent_sessions") and not _index_exists(conn, "agent_sessions", index_name):
+    if _table_exists(conn, "agent_sessions") and not _index_exists(
+        conn, "agent_sessions", index_name
+    ):
         if conn.dialect.name == "postgresql" or conn.dialect.name == "sqlite":
             op.execute(sa.text(f"CREATE INDEX {index_name} ON agent_sessions(session_type)"))
 
