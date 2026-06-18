@@ -3021,6 +3021,12 @@ class AutonomousOrchestrator:
                     # Merge conflict — resolve locally and retry
                     logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
                     self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                    # Conflicts resolved + pushed, but NOT merged yet — the push
+                    # triggered a fresh CI run. Return here (staying in 'merging')
+                    # so _do_merge's CI-pending deferral handles the wait on the
+                    # next cycle. Falling through to cleanup would delete the
+                    # branch before the PR is merged (#1112 P1).
+                    return
                 except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
