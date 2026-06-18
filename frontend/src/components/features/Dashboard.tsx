@@ -496,7 +496,7 @@ const SummaryCard = React.memo<SummaryCardProps>(({ tool, stats, language }) => 
       <div className={cn('card usage-card text-white', colors.card)}>
         <div className="card-body">
           <h5 className="card-title">
-            {(TOOL_DISPLAY_NAMES[tool] ?? tool).toUpperCase()}
+            {(TOOL_DISPLAY_NAMES[tool] || tool).toUpperCase()}
           </h5>
           <p className="card-text">
             <strong>{formatTokens(stats.total_tokens)}</strong> {t('tokens', language)}
