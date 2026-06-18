@@ -288,9 +288,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         {/* Jump input */}
         {showPageInput && (
           <div className="d-flex align-items-center gap-1">
-            <span className="text-muted small">
-              {t('goToPage', language).replace('{page}', '')}:
-            </span>
+            <span className="text-muted small">{t('goToPageLabel', language)}:</span>
             <input
               type="number"
               className="form-control form-control-sm"
@@ -300,7 +298,7 @@ export const Pagination: React.FC<PaginationProps> = ({
               onKeyDown={handleInputKeyDown}
               min={1}
               max={totalPages}
-              aria-label={t('goToPage', language).replace('{page}', '')}
+              aria-label={t('goToPageLabel', language)}
             />
           </div>
         )}
@@ -359,7 +357,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         {/* Mobile jump input */}
         {showPageInput && (
           <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('goToPage', language).replace('{page}', '')}:</small>
+            <small className="text-muted">{t('goToPageLabel', language)}:</small>
             <input
               type="number"
               className="form-control form-control-sm"
@@ -369,7 +367,7 @@ export const Pagination: React.FC<PaginationProps> = ({
               onKeyDown={handleInputKeyDown}
               min={1}
               max={totalPages}
-              aria-label={t('goToPage', language).replace('{page}', '')}
+              aria-label={t('goToPageLabel', language)}
             />
             {error && (
               <span className="text-danger small" role="alert" aria-live="polite">
