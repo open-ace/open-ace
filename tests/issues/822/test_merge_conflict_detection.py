@@ -202,6 +202,40 @@ class TestDoMergeBranchPolicyAuto:
         assert mock_gh.merge_pr.call_args.kwargs.get("auto") is not True
         o._resolve_merge_conflicts.assert_called_once()
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_cleanup_after_resolve_still_deletes_branch(self, mock_gh_cls):
+        """After _resolve_merge_conflicts clears worktree_path, the cleanup
+        block must NOT retry worktree removal but MUST still delete the branch.
+
+        Regression (#1107 P2): the cleanup block used the stale pre-resolution
+        wf snapshot, so it tried removing the already-removed worktree a second
+        time, raised GitHubOpsError, and skipped delete_branch entirely.
+        """
+        # worktree-backed workflow entering merge with its worktree attached.
+        wf = _make_workflow(worktree_path="/srv/repo/../auto-dev-fc82f22a")
+        o, mock_repo = _make_orchestrator(wf)
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        # merge_pr fails (conflict) → _resolve_merge_conflicts is called.
+        mock_gh.merge_pr.side_effect = [
+            GitHubOpsError("the merge commit cannot be cleanly created"),
+        ]
+        o._gh = mock_gh
+
+        # Simulate _resolve_merge_conflicts' side effect: it removes the
+        # original worktree and clears worktree_path in the DB. We make the
+        # mock mutate the wf dict that self.workflow (get_workflow) returns.
+        def fake_resolve(gh, branch_name, pr_number):
+            wf["worktree_path"] = ""
+
+        o._resolve_merge_conflicts = MagicMock(side_effect=fake_resolve)
+
+        o._do_merge(wf)
+
+        # After resolve, worktree_path is "" → cleanup must NOT retry removal.
+        # The rebound gh (now pointing at project_path) must still delete_branch.
+        mock_gh.delete_branch.assert_called_once_with("auto-dev/fc82f22a")
+
 
 # ── github_ops.merge_pr --auto flag ──────────────────────────────────────
 

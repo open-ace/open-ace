@@ -3016,7 +3016,11 @@ class AutonomousOrchestrator:
                     )
                     raise
 
-        # Clean up branch/worktree
+        # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
+        # may have cleared worktree_path (removed the original worktree to free
+        # the branch for the temp merge worktree); using the stale snapshot
+        # would retry the removal and fail, skipping branch deletion (#1107).
+        wf = self.workflow
         branch_name = wf.get("branch_name", "")
         worktree_path = wf.get("worktree_path", "")
         project_path = wf.get("project_path", "")
