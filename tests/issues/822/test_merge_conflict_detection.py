@@ -139,57 +139,85 @@ class TestResolveMergeConflictsStdoutConflict:
 # ── Bug 2: branch-policy rejection uses --auto ───────────────────────────
 
 
-class TestDoMergeBranchPolicyPoll:
-    """ "base branch policy prohibits" should poll CI then retry merge (#820)."""
+class TestDoMergeDeferredRetry:
+    """Merge defers to the next scheduler cycle when CI is pending, instead of
+    blocking on a synchronous poll or failing."""
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_policy_rejection_polls_ci_then_merges(self, mock_gh_cls):
+    def test_ci_pending_defers_merge(self, mock_gh_cls):
+        """When CI checks are still pending, return without attempting merge."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
-        # First merge_pr → policy rejection. Second merge_pr (after CI poll) → success.
-        mock_gh.merge_pr.side_effect = [
-            GitHubOpsError(
-                "gh pr merge 1103 --merge failed (exit 1): "
-                "Pull request #1103 is not mergeable: "
-                "the base branch policy prohibits the merge."
-            ),
-            {"merged": True, "number": 1103},
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test", "bucket": "pending"},
         ]
-        o._poll_ci_status = MagicMock()
 
         o._do_merge(_make_workflow())
 
-        # CI was polled between the two merge attempts.
-        o._poll_ci_status.assert_called_once()
-        assert mock_gh.merge_pr.call_count == 2
+        mock_gh.merge_pr.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_policy_then_still_rejected_falls_to_resolve(self, mock_gh_cls):
-        """If merge is still rejected after CI poll, fall through to resolution."""
+    def test_ci_pass_merges_successfully(self, mock_gh_cls):
+        """When CI passes, merge proceeds immediately."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
-        mock_gh.merge_pr.side_effect = [
-            GitHubOpsError("base branch policy prohibits the merge"),
-            GitHubOpsError("still not mergeable after CI"),
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test", "bucket": "pass"},
         ]
-        o._poll_ci_status = MagicMock()
+        mock_gh.merge_pr.return_value = {"merged": True}
+
+        o._do_merge(_make_workflow())
+
+        mock_gh.merge_pr.assert_called_once_with(1103, strategy="merge")
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_policy_rejection_no_ci_fail_defers(self, mock_gh_cls):
+        """Policy rejection with no CI failures defers to next cycle."""
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test", "bucket": "pass"},
+        ]
+        mock_gh.merge_pr.side_effect = GitHubOpsError("base branch policy prohibits the merge")
+
+        o._do_merge(_make_workflow())
+
+        # Did not fail, did not resolve — deferred.
+        mock_gh.merge_pr.assert_called_once()
         o._resolve_merge_conflicts = MagicMock()
+        # The merge was not re-attempted (returned early).
 
-        o._do_merge(_make_workflow())
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_policy_rejection_with_ci_fail_raises(self, mock_gh_cls):
+        """Policy rejection WITH CI failures is a hard error, not a deferral."""
+        import pytest
 
-        o._resolve_merge_conflicts.assert_called_once()
+        o, _ = _make_orchestrator(_make_workflow())
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [
+            {"name": "test (3.9)", "bucket": "fail"},
+        ]
+        mock_gh.merge_pr.side_effect = GitHubOpsError("base branch policy prohibits the merge")
+
+        with pytest.raises(GitHubOpsError, match="CI failed"):
+            o._do_merge(_make_workflow())
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_clean_conflict_goes_straight_to_resolve(self, mock_gh_cls):
-        """A conflict error (not policy) skips CI poll and resolves directly."""
+        """A conflict error (not policy) goes straight to resolution."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
+        mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("gh pr merge 1103 failed: the merge commit cannot be cleanly created"),
         ]
@@ -197,9 +225,7 @@ class TestDoMergeBranchPolicyPoll:
 
         o._do_merge(_make_workflow())
 
-        # Only one merge_pr call (no --auto attempt); went straight to resolve.
         mock_gh.merge_pr.assert_called_once()
-        assert mock_gh.merge_pr.call_args.kwargs.get("auto") is not True
         o._resolve_merge_conflicts.assert_called_once()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
@@ -223,6 +249,7 @@ class TestDoMergeBranchPolicyPoll:
 
         # merge_pr fails (conflict) → _resolve_merge_conflicts is called.
         caller_gh = MagicMock()
+        caller_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         caller_gh.merge_pr.side_effect = [
             GitHubOpsError("the merge commit cannot be cleanly created"),
         ]
@@ -316,8 +343,9 @@ class TestResolveMergeConflictsWorktreeIsolation:
         assert wt_path.endswith("merge-wf-822")  # merge-<workflow_id[:8]>
         # Cleaned up in finally.
         main_gh.remove_worktree.assert_called_once_with(wt_path)
-        # merge_pr called on the caller gh (not wt_gh or main_gh).
-        caller_gh.merge_pr.assert_called_once_with(1103, strategy="merge")
+        # _resolve_merge_conflicts only pushes now — merge is deferred to
+        # _do_merge's next cycle (after CI passes).
+        caller_gh.merge_pr.assert_not_called()
         # git_push runs inside the temp worktree (wt_gh), not the caller gh.
         wt_gh.git_push.assert_called_once_with(branch="auto-dev/fc82f22a")
 
@@ -484,9 +512,9 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # Second removal is the temp worktree (finally cleanup).
         temp_path = main_gh.add_worktree.call_args.args[0]
         assert remove_calls[1].args[0] == temp_path
-        # merge_pr ran on the REBOUND gh (project_path), NOT the stale handle
-        # whose cwd pointed at the deleted worktree.
-        rebound_gh.merge_pr.assert_called_once_with(1103, strategy="merge")
+        # _resolve_merge_conflicts only pushes now — merge is deferred to
+        # _do_merge's next cycle. No merge_pr call on either gh.
+        rebound_gh.merge_pr.assert_not_called()
         stale_gh.merge_pr.assert_not_called()
 
 

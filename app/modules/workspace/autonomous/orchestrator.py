@@ -2963,12 +2963,35 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically."""
+        """Merge PR and clean up. Resolves merge conflicts automatically.
+
+        Merge is retried across scheduler cycles instead of blocking on CI:
+        if CI is still running we return (staying in 'merging') and the
+        scheduler retries in ~10s. This avoids hogging a workflow thread for
+        the full CI duration (10+ min for Python 3.9) and naturally adapts
+        to variable CI times without --admin bypass or long polls.
+        """
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
+            # If CI is still running, defer this merge to the next scheduler
+            # cycle instead of blocking (synchronous poll) or failing. The
+            # scheduler re-enters _do_merge every ~10s.
+            try:
+                checks = gh.get_pr_checks(pr_number)
+            except Exception:
+                checks = []
+            pending = [c for c in checks if c.get("bucket") == "pending"]
+            if pending:
+                logger.info(
+                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
+                    pr_number,
+                    len(pending),
+                )
+                return
+
             try:
                 gh.merge_pr(pr_number, strategy="merge")
                 self._create_milestone(
@@ -2979,30 +3002,25 @@ class AutonomousOrchestrator:
                 )
             except GitHubOpsError as e:
                 err_msg = str(e)
+                if "base branch policy prohibits" in err_msg:
+                    # CI reports done but GitHub hasn't reconciled yet, or a
+                    # late check started. Check whether CI actually failed —
+                    # if so, this is a real failure, not a transient deferral.
+                    failed = [c for c in checks if c.get("bucket") == "fail"]
+                    if failed:
+                        failed_names = ", ".join(c.get("name", "?") for c in failed)
+                        raise GitHubOpsError(
+                            f"PR #{pr_number} CI failed ({failed_names}), cannot merge"
+                        )
+                    # No failures, just policy lag — defer to next cycle.
+                    logger.info(
+                        "PR #%s: policy prohibits (CI not failed), deferring merge", pr_number
+                    )
+                    return
                 try:
-                    if "base branch policy prohibits" in err_msg:
-                        # Not a conflict — branch protection (CI still running).
-                        # Poll CI until it finishes, then retry the merge.
-                        logger.info("PR #%s blocked by policy, waiting for CI", pr_number)
-                        self._poll_ci_status(gh, pr_number)
-                        try:
-                            gh.merge_pr(pr_number, strategy="merge")
-                            self._create_milestone(
-                                phase="merge",
-                                milestone_type="merged",
-                                status="completed",
-                                title=f"PR #{pr_number} merged",
-                            )
-                            logger.info("PR #%s merged after CI", pr_number)
-                        except GitHubOpsError:
-                            # Still rejected after CI — fall through to conflict
-                            # resolution (may have conflicts after all).
-                            logger.info("PR #%s still not mergeable after CI, resolving", pr_number)
-                            self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                    else:
-                        # Merge conflict — resolve locally and retry
-                        logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
-                        self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                    # Merge conflict — resolve locally and retry
+                    logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+                    self._resolve_merge_conflicts(gh, branch_name, pr_number)
                 except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
@@ -3156,20 +3174,16 @@ class AutonomousOrchestrator:
                 if not result.success:
                     raise RuntimeError(f"Conflict resolution failed: {result.error}")
 
-            # Push the merged branch, wait for CI, then merge. The freshly
-            # pushed merge commit triggers a new CI run; merging before it
-            # finishes would be rejected by branch protection. Poll CI first
-            # (same mechanism as pr_review) so the merge succeeds without
-            # bypassing checks.
+            # Push the resolved branch. The new merge commit triggers a fresh
+            # CI run, so we do NOT merge here — _do_merge will retry on the
+            # next scheduler cycle once CI passes (it checks for pending CI
+            # at the top and defers until checks are green).
             wt_gh.git_push(branch=branch_name)
-            self._poll_ci_status(gh, pr_number)
-            gh.merge_pr(pr_number, strategy="merge")
-
             self._create_milestone(
                 phase="merge",
-                milestone_type="merged",
+                milestone_type="conflicts_pushed",
                 status="completed",
-                title=f"PR #{pr_number} merged (conflicts resolved)",
+                title=f"PR #{pr_number} conflicts resolved, waiting for CI to merge",
             )
         finally:
             # Always tear down the temp worktree, even on failure, so it does
