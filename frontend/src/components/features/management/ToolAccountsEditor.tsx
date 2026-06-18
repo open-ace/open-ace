@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Button, TextInput, Modal, Badge } from '@/components/common';
+import { Button, TextInput, Modal, Badge, useToast } from '@/components/common';
 import { toolAccountsApi, type ToolAccount, type UnmappedAccount } from '@/api/toolAccounts';
 
 // Hardcoded tool types (matches backend TOOL_TYPES)
@@ -37,6 +37,9 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   });
   const [showUnmappedModal, setShowUnmappedModal] = useState(false);
   const [selectedUnmapped, setSelectedUnmapped] = useState<string[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const toast = useToast();
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -59,8 +62,15 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   }, [loadData]);
 
   const handleAddAccount = async () => {
-    if (!newAccount.tool_account.trim()) return;
+    setAddError(null);
 
+    // 验证必填字段
+    if (!newAccount.tool_account.trim()) {
+      setAddError(t('toolAccountRequired', language));
+      return;
+    }
+
+    setIsAdding(true);
     try {
       await toolAccountsApi.create({
         user_id: userId,
@@ -72,8 +82,14 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
       setShowAddModal(false);
       loadData();
       onChange?.();
+      toast.success(t('addToolAccountSuccess', language));
     } catch (err) {
       console.error('Failed to add tool account:', err);
+      const errorMsg = err instanceof Error ? err.message : t('addToolAccountFailed', language);
+      setAddError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -153,7 +169,14 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
 
       {/* Action buttons */}
       <div className="d-flex gap-2">
-        <Button variant="outline-primary" size="sm" onClick={() => setShowAddModal(true)}>
+        <Button
+          variant="outline-primary"
+          size="sm"
+          onClick={() => {
+            setAddError(null);
+            setShowAddModal(true);
+          }}
+        >
           <i className="bi bi-plus-lg me-1" />
           {t('addToolAccount', language)}
         </Button>
@@ -179,7 +202,12 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
             <Button variant="secondary" onClick={() => setShowAddModal(false)}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleAddAccount}>
+            <Button
+              variant="primary"
+              onClick={handleAddAccount}
+              loading={isAdding}
+              disabled={isAdding}
+            >
               {t('save', language)}
             </Button>
           </>
@@ -191,6 +219,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
             handleAddAccount();
           }}
         >
+          {addError && <div className="alert alert-danger mb-3">{addError}</div>}
           <div className="mb-3">
             <label className="form-label">{t('toolAccount', language)}</label>
             <TextInput
