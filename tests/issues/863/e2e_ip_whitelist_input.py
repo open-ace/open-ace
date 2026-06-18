@@ -18,10 +18,10 @@ Run:
   HEADLESS=false python tests/issues/863/e2e_ip_whitelist_input.py   # 演示模式
 """
 
+import json
 import os
 import sys
 import time
-import json
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -144,7 +144,7 @@ def test_ui_ip_whitelist_newline(page, session):
     # Get initial value
     initial_value = textarea.input_value()
     print(f"    Initial textarea value: '{initial_value}'")
-    check(initial_value == "192.168.1.1", f"Initial textarea shows '192.168.1.1'")
+    check(initial_value == "192.168.1.1", "Initial textarea shows '192.168.1.1'")
 
     # Focus on textarea and press Enter to create new line
     textarea.click()
@@ -166,8 +166,8 @@ def test_ui_ip_whitelist_newline(page, session):
 
     # The value should have newline (Enter was not swallowed)
     lines = current_value.split("\n")
-    check(len(lines) >= 2, f"Textarea has at least 2 lines after Enter (Issue #863 fix)")
-    check("10.0.0.0/24" in current_value, f"New IP '10.0.0.0/24' is in textarea")
+    check(len(lines) >= 2, "Textarea has at least 2 lines after Enter (Issue #863 fix)")
+    check("10.0.0.0/24" in current_value, "New IP '10.0.0.0/24' is in textarea")
 
     shot(page, "03_after_newline_input")
 
