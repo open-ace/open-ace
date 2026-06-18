@@ -743,6 +743,15 @@ const translations: Record<Language, Translations> = {
     noAlerts: 'No alerts found',
     new: 'New',
     preferences: 'Preferences',
+
+    // Alert filter options
+    allSeverities: 'All Severities',
+    critical: 'Critical',
+    warning: 'Warning',
+    info: 'Info',
+    system: 'System',
+    unread: 'Unread',
+    read: 'Read',
     title: 'Title',
     message: 'Message',
     time: 'Time',
@@ -2135,6 +2144,15 @@ const translations: Record<Language, Translations> = {
     noAlerts: '暂无告警',
     new: '新',
     preferences: '偏好设置',
+
+    // 告警筛选选项
+    allSeverities: '所有严重程度',
+    critical: '严重',
+    warning: '警告',
+    info: '信息',
+    system: '系统',
+    unread: '未读',
+    read: '已读',
     title: '标题',
 
     // SMTP Configuration (Chinese)
@@ -3356,6 +3374,16 @@ const translations: Record<Language, Translations> = {
     allStatus: 'すべてのステータス',
     allTypes: 'すべてのタイプ',
     status: 'ステータス',
+
+    // アラートフィルタオプション
+    allSeverities: 'すべての重要度',
+    critical: '重大',
+    warning: '警告',
+    info: '情報',
+    system: 'システム',
+    quota: 'クォータ',
+    unread: '未読',
+    read: '既読',
     statusActive: 'アクティブ',
     statusPaused: '一時停止',
     statusCompleted: '完了',
@@ -4423,6 +4451,16 @@ const translations: Record<Language, Translations> = {
     allStatus: '모든 상태',
     allTypes: '모든 유형',
     status: '상태',
+
+    // 알림 필터 옵션
+    allSeverities: '모든 심각도',
+    critical: '심각',
+    warning: '경고',
+    info: '정보',
+    system: '시스템',
+    quota: '할당량',
+    unread: '읽지 않음',
+    read: '읽음',
     statusActive: '활성',
     statusPaused: '일시 중지',
     statusCompleted: '완료',
