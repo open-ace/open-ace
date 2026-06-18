@@ -31,6 +31,12 @@ __pycache__/
 env/
 venv/
 
+# Test / coverage artifacts (coverage.py, pytest, html reports)
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # Config (local) - contains sensitive credentials
 remote_config.json
 config.json

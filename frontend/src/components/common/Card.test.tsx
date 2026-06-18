@@ -51,6 +51,38 @@ describe('Card', () => {
     });
   });
 
+  describe('actions', () => {
+    it('should render actions in header', () => {
+      render(
+        <Card title="Card Title" actions={<button data-testid="card-action">Action</button>}>
+          Content
+        </Card>
+      );
+      expect(screen.getByTestId('card-action')).toBeInTheDocument();
+    });
+
+    it('should render actions container', () => {
+      render(
+        <Card title="Card Title" actions={<span>Action content</span>}>
+          Content
+        </Card>
+      );
+      const header = screen.getByText('Card Title').closest('.card-header');
+      expect(header?.querySelector('.card-actions')).toBeInTheDocument();
+    });
+
+    it('should not render actions container if no actions provided', () => {
+      render(<Card title="Card Title">Content</Card>);
+      const header = screen.getByText('Card Title').closest('.card-header');
+      expect(header?.querySelector('.card-actions')).not.toBeInTheDocument();
+    });
+
+    it('should render header with actions even without title', () => {
+      render(<Card actions={<button data-testid="only-action">Only Action</button>}>Content</Card>);
+      expect(screen.getByTestId('only-action')).toBeInTheDocument();
+    });
+  });
+
   describe('footer', () => {
     it('should render footer', () => {
       render(<Card footer={<span>Footer content</span>}>Content</Card>);

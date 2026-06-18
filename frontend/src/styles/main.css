@@ -1050,13 +1050,14 @@ link[rel='dns-prefetch'] {
 /* Header z-index is 310 (z-fixed + 10), need higher z-index to be above header's backdrop-filter layer */
 /* Override position-absolute and top/end offsets from positionStyles to prevent covering header */
 /* Issue #1068: Extend selector to cover PageRefreshControl in all flex containers (manage mode pages) */
+/* Issue #1081: Add !important to override Bootstrap's !important rules (top-0, end-0) */
 .page-header-controls .page-refresh-control,
 .page-header-controls .page-refresh-control-compact,
 .d-flex .page-refresh-control,
 .d-flex .page-refresh-control-compact {
-  position: relative;
-  top: auto;
-  right: auto;
+  position: relative !important;
+  top: auto !important;
+  right: auto !important;
   z-index: 320;
 }
 
@@ -1226,6 +1227,33 @@ link[rel='dns-prefetch'] {
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
   font-size: var(--font-size-xs);
+}
+
+/* Chart filter bar - standardized container for chart filters */
+.chart-filter-bar {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+}
+
+.chart-filter-bar .text-muted {
+  font-weight: var(--font-weight-medium);
+}
+
+/* Chart cards alignment - equal height */
+.dashboard-section .row.g-3 > [class*='col-'] {
+  display: flex;
+}
+
+.dashboard-section .row.g-3 > [class*='col-'] > .card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-section .row.g-3 > [class*='col-'] > .card > .card-body {
+  flex: 1;
 }
 
 /* Messages Styles */

@@ -148,11 +148,16 @@ class TestAnalysisService:
 
     def test_get_conversation_stats(self):
         svc, _, mock_msg, _ = self._make_service()
-        mock_msg.get_conversation_history.return_value = [
-            {"message_count": 10, "total_tokens": 500},
-            {"message_count": 5, "total_tokens": 200},
-        ]
+        mock_msg.get_conversation_stats_summary.return_value = {
+            "total_conversations": 2,
+            "total_messages": 15,
+            "multi_turn_ratio": 0.5,
+            "avg_conversation_length": 7.5,
+        }
         result = svc.get_conversation_stats("2026-05-01", "2026-05-23")
+        # Delegates to the real repo query (single source of truth), no longer
+        # to the previous get_conversation_history(limit=1000) in-memory path.
+        mock_msg.get_conversation_stats_summary.assert_called_once()
         assert result["total_conversations"] == 2
         assert result["total_messages"] == 15
 

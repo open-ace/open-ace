@@ -26,28 +26,30 @@ import {
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import { formatDateTime } from '@/utils';
 
-const TYPE_OPTIONS = [
-  { value: '', label: 'All Types' },
-  { value: 'quota', label: 'Quota' },
-  { value: 'system', label: 'System' },
-  { value: 'security', label: 'Security' },
-];
-
-const SEVERITY_OPTIONS = [
-  { value: '', label: 'All Severities' },
-  { value: 'critical', label: 'Critical' },
-  { value: 'warning', label: 'Warning' },
-  { value: 'info', label: 'Info' },
-];
-
-const READ_OPTIONS = [
-  { value: '', label: 'All' },
-  { value: 'unread', label: 'Unread' },
-  { value: 'read', label: 'Read' },
-];
-
 export const AlertManagement: React.FC = () => {
   const language = useLanguage();
+
+  // Generate filter options with i18n support
+  const TYPE_OPTIONS = [
+    { value: '', label: t('allTypes', language) },
+    { value: 'quota', label: t('quota', language) },
+    { value: 'system', label: t('system', language) },
+    { value: 'security', label: t('security', language) },
+  ];
+
+  const SEVERITY_OPTIONS = [
+    { value: '', label: t('allSeverities', language) },
+    { value: 'critical', label: t('critical', language) },
+    { value: 'warning', label: t('warning', language) },
+    { value: 'info', label: t('info', language) },
+  ];
+
+  const READ_OPTIONS = [
+    { value: '', label: t('all', language) },
+    { value: 'unread', label: t('unread', language) },
+    { value: 'read', label: t('read', language) },
+  ];
+
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);

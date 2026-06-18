@@ -28,6 +28,7 @@ export const Card: React.FC<CardProps> = ({
   style,
   'data-testid': testId,
   helpTooltip,
+  actions,
 }) => {
   return (
     <div
@@ -36,20 +37,23 @@ export const Card: React.FC<CardProps> = ({
       style={style}
       className={cn('card', variantClasses[variant], className)}
     >
-      {(title ?? subtitle ?? icon ?? helpTooltip) && (
-        <div className="card-header d-flex align-items-center">
-          {icon && <span className="me-2">{icon}</span>}
-          <div>
-            {title && <h5 className="card-title mb-0">{title}</h5>}
-            {subtitle && <small className="text-muted">{subtitle}</small>}
+      {(title ?? subtitle ?? icon ?? helpTooltip ?? actions) && (
+        <div className="card-header d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center">
+            {icon && <span className="me-2">{icon}</span>}
+            <div>
+              {title && <h4 className="card-title mb-0">{title}</h4>}
+              {subtitle && <small className="text-muted">{subtitle}</small>}
+            </div>
+            {helpTooltip && (
+              <Tooltip content={helpTooltip} placement="top">
+                <span className="ms-2" role="img" tabIndex={0} aria-label={helpTooltip}>
+                  <i className="bi bi-info-circle text-muted" style={{ cursor: 'pointer' }}></i>
+                </span>
+              </Tooltip>
+            )}
           </div>
-          {helpTooltip && (
-            <Tooltip content={helpTooltip} placement="top">
-              <span className="ms-2" role="img" tabIndex={0} aria-label={helpTooltip}>
-                <i className="bi bi-info-circle text-muted" style={{ cursor: 'pointer' }}></i>
-              </span>
-            </Tooltip>
-          )}
+          {actions && <div className="card-actions">{actions}</div>}
         </div>
       )}
       <div className="card-body">{children}</div>

@@ -5,6 +5,8 @@
  * - formatTokens uses module-level Map cache (js-cache-function-results)
  */
 
+import type { Language } from '@/types';
+
 // Module-level cache for formatTokens (js-cache-function-results optimization)
 const tokenFormatCache = new Map<number, string>();
 const MAX_CACHE_SIZE = 1000; // Limit cache size to prevent memory issues
@@ -14,27 +16,30 @@ const MAX_CACHE_SIZE = 1000; // Limit cache size to prevent memory issues
  * Cached for performance - same values return cached results
  */
 export function formatTokens(tokens: number): string {
+  // Ensure numeric type - API may return strings in some cases
+  const numTokens = Number(tokens) || 0;
+
   // Check cache first
-  const cached = tokenFormatCache.get(tokens);
+  const cached = tokenFormatCache.get(numTokens);
   if (cached !== undefined) {
     return cached;
   }
 
   // Calculate result
   let result: string;
-  if (tokens >= 1_000_000_000) {
-    result = (tokens / 1_000_000_000).toFixed(2) + 'B';
-  } else if (tokens >= 1_000_000) {
-    result = (tokens / 1_000_000).toFixed(2) + 'M';
-  } else if (tokens >= 1_000) {
-    result = (tokens / 1_000).toFixed(2) + 'K';
+  if (numTokens >= 1_000_000_000) {
+    result = (numTokens / 1_000_000_000).toFixed(2) + 'B';
+  } else if (numTokens >= 1_000_000) {
+    result = (numTokens / 1_000_000).toFixed(2) + 'M';
+  } else if (numTokens >= 1_000) {
+    result = (numTokens / 1_000).toFixed(2) + 'K';
   } else {
-    result = tokens.toString();
+    result = numTokens.toString();
   }
 
   // Cache result with size limit
   if (tokenFormatCache.size < MAX_CACHE_SIZE) {
-    tokenFormatCache.set(tokens, result);
+    tokenFormatCache.set(numTokens, result);
   }
 
   return result;
@@ -168,4 +173,65 @@ export function formatDuration(seconds: number): string {
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${hours}h ${minutes}m`;
   }
+}
+
+// Locale tag per supported UI language, for chart date rendering.
+const CHART_DATE_LOCALE: Record<Language, string> = {
+  en: 'en-US',
+  zh: 'zh-CN',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
+};
+
+// Anchored YYYY-MM-DD. Deliberately matched only at the start so trailing
+// time components (e.g. "2026-06-01 00:00:00") are ignored, and non-matching
+// formats (e.g. RFC822 "Mon, 01 Jun 2026 ...") fall through to the '-' guard.
+const ISO_DATE_PREFIX_RE = /^(\d{4})-(\d{2})-(\d{2})/;
+
+/**
+ * Parse a YYYY-MM-DD prefix into local-time Date parts.
+ *
+ * The parts are extracted manually and fed to `new Date(y, m-1, d)` (local
+ * time) rather than `new Date("2026-06-01")`, because the latter is treated
+ * as UTC per the spec and would render as the previous day in UTC+ zones.
+ */
+function parseLocalDateParts(raw: string): { year: number; month: number; day: number } | null {
+  const m = ISO_DATE_PREFIX_RE.exec(raw);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+/**
+ * Format a chart axis date label.
+ *
+ * Input is expected to be a (backend-normalized) YYYY-MM-DD string. Renders a
+ * compact, locale-aware label:
+ *  - default: short month + day (e.g. "Jun 1" / "6月1日")
+ *  - `{ dayOnly: true }`: day only (e.g. "1") — use when every label on the
+ *    axis shares the same month/year, so the month prefix is not repeated on
+ *    each tick.
+ *
+ * Unparseable / null input returns '-'. Does NOT reuse `formatDate`, whose
+ * 'short' branch builds the Date from the raw string and hits the UTC offset
+ * pitfall described above.
+ */
+export function formatChartDate(
+  raw: string | null | undefined,
+  language: Language,
+  options: { dayOnly?: boolean } = {}
+): string {
+  if (!raw) return '-';
+  const parts = parseLocalDateParts(raw);
+  if (!parts) return '-';
+  const d = new Date(parts.year, parts.month - 1, parts.day);
+  if (isNaN(d.getTime())) return '-';
+  const locale = CHART_DATE_LOCALE[language] ?? 'en-US';
+  return d.toLocaleDateString(locale, {
+    day: 'numeric',
+    ...(options.dayOnly ? {} : { month: 'short' }),
+  });
 }

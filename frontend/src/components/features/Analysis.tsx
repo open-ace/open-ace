@@ -39,6 +39,7 @@ import {
   getAnomalySuggestion,
   getAnomalyTopContributor,
 } from './analysis/AnomalyDetection';
+import { SessionStatisticsCard, calculateHealthScore } from './analysis/SessionStatisticsCard';
 
 export const Analysis: React.FC = () => {
   const language = useLanguage();
@@ -491,42 +492,7 @@ export const Analysis: React.FC = () => {
           {/* Detailed Stats */}
           <div className="row mb-4">
             <div className="col-md-6">
-              <Card title={t('sessionStatistics', language)}>
-                <table className="table table-sm">
-                  <tbody>
-                    <tr>
-                      <td>{t('avgMessagesPerSession', language)}</td>
-                      <td className="text-end">
-                        {keyMetrics?.avg_messages_per_session?.toFixed(1) ?? '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('avgTokensPerSession', language)}</td>
-                      <td className="text-end">
-                        {formatTokens(keyMetrics?.avg_tokens_per_session ?? 0)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('totalSessions', language)}</td>
-                      <td className="text-end">
-                        {keyMetrics?.total_sessions?.toLocaleString() ?? '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('totalConversations', language)}</td>
-                      <td className="text-end">
-                        {conversationStats?.total_conversations?.toLocaleString() ?? '0'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>{t('multiTurnRatio', language)}</td>
-                      <td className="text-end">
-                        {conversationStats?.avg_conversation_length?.toFixed(1) ?? '0'}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </Card>
+              <SessionStatisticsCard conversationStats={conversationStats} />
             </div>
             <div className="col-md-6">
               <Card title={t('userSegmentation', language)}>
@@ -816,26 +782,11 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
 
 /**
  * Helper Functions
+ *
+ * `calculateHealthScore` and the session-statistics card are shared from
+ * `./analysis/SessionStatisticsCard` so the Analysis overview and Token Trend
+ * pages stay in sync.
  */
-function calculateHealthScore(
-  keyMetrics: { total_sessions?: number; avg_tokens_per_session?: number } | undefined,
-  conversationStats: { avg_conversation_length?: number } | undefined
-): number {
-  // Simple health score calculation
-  let score = 100;
-
-  // Deduct points for low engagement
-  if (keyMetrics?.avg_tokens_per_session && keyMetrics.avg_tokens_per_session < 1000) {
-    score -= 20;
-  }
-
-  // Deduct points for short conversations
-  if (conversationStats?.avg_conversation_length && conversationStats.avg_conversation_length < 2) {
-    score -= 15;
-  }
-
-  return Math.max(0, Math.min(100, score));
-}
 
 function detectAnomalies(dailyTrend: Array<{ date: string; tokens: number }>): Array<{
   date: string;

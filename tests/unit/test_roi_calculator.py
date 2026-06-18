@@ -1,6 +1,7 @@
 """Unit tests for ROICalculator module."""
 
 import json
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -167,6 +168,75 @@ class TestROICalculator:
         assert "glm-5" in models
         assert "qwen3.6-plus" in models
 
+    def test_get_cost_breakdown_case_drift_collapses(self):
+        """Pure case drift (qwen/Qwen/QWEN) — not known aliases — must still
+        collapse to a single qwen slice. This is the actual prod failure mode."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "qwen",
+                "model": json.dumps(["glm-5"]),
+                "requests": 10,
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            },
+            {
+                "tool_name": "Qwen",
+                "model": json.dumps(["qwen3.5-plus"]),
+                "requests": 20,
+                "input_tokens": 2000,
+                "output_tokens": 1000,
+            },
+            {
+                "tool_name": "QWEN",
+                "model": json.dumps(["kimi"]),
+                "requests": 5,
+                "input_tokens": 500,
+                "output_tokens": 250,
+            },
+        ]
+        breakdown = calc.get_cost_breakdown("2026-01-01", "2026-01-31")
+
+        # The three case-drift rows must collapse to ONE qwen slice.
+        assert len(breakdown) == 1
+        assert breakdown[0].tool_name == "qwen"
+        assert breakdown[0].requests == 35
+        assert breakdown[0].input_tokens == 3500
+        assert breakdown[0].output_tokens == 1750
+
+    def test_get_cost_breakdown_cache_key_includes_start_date(self):
+        """R1 verification: skip_args=[0] must skip `self`, NOT start_date.
+        Distinct date ranges must produce distinct cache keys — otherwise
+        different ranges collide and return stale/incorrect breakdowns."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "qwen",
+                "model": json.dumps(["glm-5"]),
+                "requests": 1,
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        first = calc.get_cost_breakdown("2026-01-01", "2026-01-31")
+
+        # Swap the underlying data and query a DIFFERENT start_date.
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "claude",
+                "model": json.dumps(["claude-3-opus"]),
+                "requests": 9,
+                "input_tokens": 9000,
+                "output_tokens": 9000,
+            }
+        ]
+        second = calc.get_cost_breakdown("2026-02-01", "2026-02-28")
+
+        # If start_date were dropped from the key, `second` would return the
+        # cached qwen result. Distinct keys => fresh, correct result.
+        assert first[0].tool_name == "qwen"
+        assert second[0].tool_name == "claude"
+
     def test_merge_models(self):
         """Test _merge_models helper method."""
         # Normal merge
@@ -202,6 +272,26 @@ class TestROICalculator:
         assert len(costs) == 2
         assert costs[0]["date"] == "2026-01-01"
         assert costs[0]["total_cost"] > 0
+
+    def test_get_daily_costs_normalizes_date_object(self):
+        """PostgreSQL returns `daily_usage.date` as a datetime.date object; the
+        output must be normalized to a YYYY-MM-DD string so Flask jsonify does
+        not serialize it as an RFC822 HTTP-date onto the chart axis. The plain
+        string mock above only covers the SQLite path and would miss this."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {"date": date(2026, 6, 1), "input_tokens": 1000, "output_tokens": 500},
+            {"date": date(2026, 6, 2), "input_tokens": 2000, "output_tokens": 1000},
+            {"date": None, "input_tokens": 300, "output_tokens": 100},
+        ]
+        costs = calc.get_daily_costs("2026-06-01", "2026-06-30")
+        assert len(costs) == 3
+        assert costs[0]["date"] == "2026-06-01"
+        assert costs[1]["date"] == "2026-06-02"
+        # None date is preserved (not coerced to "None" string)
+        assert costs[2]["date"] is None
+        # No date object should leak through
+        assert all(not hasattr(c["date"], "strftime") for c in costs if c["date"])
 
     def test_get_summary_stats(self):
         calc, mock_db = self._make_calculator()

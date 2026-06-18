@@ -10,7 +10,9 @@ export type Language = LanguageType;
 type TranslationKey = string;
 type Translations = Record<TranslationKey, string>;
 
-const translations: Record<Language, Translations> = {
+// Exported so the completeness test can assert four-language key-set symmetry
+// (see index.test.ts). Treat the dictionary as the source of truth for keys.
+export const translations: Record<Language, Translations> = {
   en: {
     // Common
     loading: 'Loading...',
@@ -102,6 +104,7 @@ const translations: Record<Language, Translations> = {
     dashboardTitle: 'Dashboard',
     todayUsage: "Today's Usage",
     totalOverview: 'Total Overview',
+    timeRangeStatistics: 'Time Range Statistics',
     trendChart: 'Trend Chart',
     dashboardTotalTokens: 'Total Tokens',
     tokenDistribution: 'Token Distribution',
@@ -460,6 +463,17 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: 'Avg Tokens/Session',
     multiTurnRatio: 'Multi-turn Ratio',
     sessionStatistics: 'Session Statistics',
+    sessionStatisticsHelp:
+      'Conversation-level statistics for the selected date range. A "conversation" is a single session containing one or more messages.',
+    avgMessagesPerConversation: 'Avg Messages/Conversation',
+    avgMessagesPerConversationHelp:
+      'Total messages divided by total conversations (distinct sessions).',
+    avgTokensPerConversation: 'Avg Tokens/Conversation',
+    avgTokensPerConversationHelp: 'Total tokens divided by total conversations.',
+    totalConversationsHelp:
+      'Distinct conversations (sessions) recorded in the selected date range.',
+    totalMessagesHelp: 'Total individual messages recorded in the selected date range.',
+    multiTurnRatioHelp: 'Percentage of conversations containing 2 or more messages.',
     tokenTrend: 'Token Trend',
     topTools: 'Top Tools',
     userSegmentation: 'User Segmentation',
@@ -525,7 +539,9 @@ const translations: Record<Language, Translations> = {
     created: 'Created',
     previous: 'Previous',
     next: 'Next',
-    goToPage: 'Go to page',
+    goToPage: 'Go to page {page}',
+    goToPageLabel: 'Go to page',
+    totalPages: 'Total {total} pages',
     pageInfo: 'Page {current} of {total}',
     invalidPageNumber: 'Please enter a valid page number (1-{total})',
     previousPage: 'Previous page',
@@ -743,6 +759,15 @@ const translations: Record<Language, Translations> = {
     noAlerts: 'No alerts found',
     new: 'New',
     preferences: 'Preferences',
+
+    // Alert filter options
+    allSeverities: 'All Severities',
+    critical: 'Critical',
+    warning: 'Warning',
+    info: 'Info',
+    system: 'System',
+    unread: 'Unread',
+    read: 'Read',
     title: 'Title',
     message: 'Message',
     time: 'Time',
@@ -864,6 +889,7 @@ const translations: Record<Language, Translations> = {
     totalCost: 'Total Cost',
     totalSavings: 'Total Savings',
     roiPercentage: 'ROI %',
+    roiNegativeHint: 'Investment cost exceeds estimated savings; consider optimizing usage.',
     roiDataAnomaly: 'Data anomaly detected',
     dataAnomalyDetected: 'Data Anomaly Detected',
     tokenAccumulationWarning:
@@ -1507,6 +1533,7 @@ const translations: Record<Language, Translations> = {
     dashboardTitle: '仪表盘',
     todayUsage: '今日使用量',
     totalOverview: '总览',
+    timeRangeStatistics: '时间范围统计',
     trendChart: '趋势图',
     dashboardTotalTokens: '总 Token 数',
     tokenDistribution: 'Token 分布',
@@ -1859,6 +1886,14 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: '平均 Tokens/会话',
     multiTurnRatio: '多轮对话比例',
     sessionStatistics: '会话统计',
+    sessionStatisticsHelp: '所选时间范围内的对话级统计。"对话"指包含一条或多条消息的单个会话。',
+    avgMessagesPerConversation: '平均消息/对话',
+    avgMessagesPerConversationHelp: '总消息数 ÷ 总对话数（去重会话）。',
+    avgTokensPerConversation: '平均 Tokens/对话',
+    avgTokensPerConversationHelp: '总 Token 数 ÷ 总对话数。',
+    totalConversationsHelp: '所选时间范围内记录的去重对话（会话）数量。',
+    totalMessagesHelp: '所选时间范围内记录的消息总数。',
+    multiTurnRatioHelp: '包含 2 条及以上消息的对话所占百分比。',
     tokenTrend: 'Token 趋势',
     topTools: '热门工具',
     userSegmentation: '用户分层',
@@ -1921,7 +1956,9 @@ const translations: Record<Language, Translations> = {
     created: '创建时间',
     previous: '上一页',
     next: '下一页',
-    goToPage: '跳转到页',
+    goToPage: '跳转到第 {page} 页',
+    goToPageLabel: '跳转到页',
+    totalPages: '总共 {total} 页',
     pageInfo: '第 {current} 页 / 共 {total} 页',
     invalidPageNumber: '请输入有效的页码 (1-{total})',
     previousPage: '上一页',
@@ -2136,6 +2173,15 @@ const translations: Record<Language, Translations> = {
     noAlerts: '暂无告警',
     new: '新',
     preferences: '偏好设置',
+
+    // 告警筛选选项
+    allSeverities: '所有严重程度',
+    critical: '严重',
+    warning: '警告',
+    info: '信息',
+    system: '系统',
+    unread: '未读',
+    read: '已读',
     title: '标题',
 
     // SMTP Configuration (Chinese)
@@ -2254,6 +2300,7 @@ const translations: Record<Language, Translations> = {
     totalCost: '总成本',
     totalSavings: '总节省',
     roiPercentage: 'ROI 百分比',
+    roiNegativeHint: '投入成本高于估算节约，可能需要优化使用策略',
     roiDataAnomaly: '数据异常',
     dataAnomalyDetected: '检测到数据异常',
     tokenAccumulationWarning: 'Token 计数可能存在累计膨胀，成本和 ROI 计算可能不准确。',
@@ -3336,6 +3383,15 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: '平均トークン/セッション',
     multiTurnRatio: 'マルチターン比率',
     sessionStatistics: 'セッション統計',
+    sessionStatisticsHelp:
+      '選択した期間の会話単位の統計。「会話」は1件以上のメッセージを含む1つのセッションです。',
+    avgMessagesPerConversation: '平均メッセージ/会話',
+    avgMessagesPerConversationHelp: '総メッセージ数 ÷ 総会話数（重複排除）。',
+    avgTokensPerConversation: '平均トークン/会話',
+    avgTokensPerConversationHelp: '総トークン数 ÷ 総会話数。',
+    totalConversationsHelp: '選択した期間に記録された重複除外の会話（セッション）数。',
+    totalMessagesHelp: '選択した期間に記録されたメッセージ総数。',
+    multiTurnRatioHelp: '2件以上のメッセージを含む会話の割合。',
     tokenTrend: 'トークントレンド',
     topTools: 'トップツール',
     userSegmentation: 'ユーザーセグメンテーション',
@@ -3359,6 +3415,16 @@ const translations: Record<Language, Translations> = {
     allStatus: 'すべてのステータス',
     allTypes: 'すべてのタイプ',
     status: 'ステータス',
+
+    // アラートフィルタオプション
+    allSeverities: 'すべての重要度',
+    critical: '重大',
+    warning: '警告',
+    info: '情報',
+    system: 'システム',
+    quota: 'クォータ',
+    unread: '未読',
+    read: '既読',
     statusActive: 'アクティブ',
     statusPaused: '一時停止',
     statusCompleted: '完了',
@@ -3368,7 +3434,9 @@ const translations: Record<Language, Translations> = {
     created: '作成日時',
     previous: '前へ',
     next: '次へ',
-    goToPage: 'ページへ移動',
+    goToPage: '{page}ページへ移動',
+    goToPageLabel: 'ページへ移動',
+    totalPages: '合計 {total} ページ',
     pageInfo: '{current}ページ / {total}ページ',
     invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
     previousPage: '前のページ',
@@ -3480,6 +3548,25 @@ const translations: Record<Language, Translations> = {
     requestsMessages: 'リクエスト / メッセージ',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 分析',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint: '投入コストが節約見込みを上回っています。使用戦略の最適化を検討してください。',
+    roiDataAnomaly: 'データ異常',
+    roiTrend: 'ROI トレンド',
+    totalCost: '合計コスト',
+    totalSavings: '合計節約額',
+    costBreakdown: 'コスト内訳',
+    dailyCosts: '日次コスト',
+    cost: 'コスト',
+    efficiencyReport: '効率レポート',
+    efficiencyScore: '効率スコア',
+    dataAnomalyDetected: 'データ異常を検出しました',
+    tokenAccumulationWarning:
+      'Token 数が累積的にカウントされているため膨張している可能性があります。コストと ROI の計算が不正確になる場合があります。',
+    title: 'タイトル',
+    // alertRules は ROI 以外のアラート管理ページでも共有使用されるキーです。
+    alertRules: 'アラートルール',
     overallEfficiency: '全体効率',
     avgCostPerRequest: '平均コスト/リクエスト',
     avgTokensPerRequest: '平均 Token/リクエスト',
@@ -4406,6 +4493,15 @@ const translations: Record<Language, Translations> = {
     avgTokensPerSession: '평균 토큰/세션',
     multiTurnRatio: '멀티턴 비율',
     sessionStatistics: '세션 통계',
+    sessionStatisticsHelp:
+      '선택한 기간의 대화 단위 통계입니다. "대화"는 하나 이상의 메시지를 포함하는 단일 세션입니다.',
+    avgMessagesPerConversation: '평균 메시지/대화',
+    avgMessagesPerConversationHelp: '총 메시지 수 ÷ 총 대화 수(중복 제거).',
+    avgTokensPerConversation: '평균 토큰/대화',
+    avgTokensPerConversationHelp: '총 토큰 수 ÷ 총 대화 수.',
+    totalConversationsHelp: '선택한 기간에 기록된 중복 제거 대화(세션) 수입니다.',
+    totalMessagesHelp: '선택한 기간에 기록된 총 메시지 수입니다.',
+    multiTurnRatioHelp: '2건 이상의 메시지를 포함하는 대화의 비율입니다.',
     tokenTrend: '토큰 트렌드',
     topTools: '상위 도구',
     userSegmentation: '사용자 세그먼테이션',
@@ -4428,6 +4524,16 @@ const translations: Record<Language, Translations> = {
     allStatus: '모든 상태',
     allTypes: '모든 유형',
     status: '상태',
+
+    // 알림 필터 옵션
+    allSeverities: '모든 심각도',
+    critical: '심각',
+    warning: '경고',
+    info: '정보',
+    system: '시스템',
+    quota: '할당량',
+    unread: '읽지 않음',
+    read: '읽음',
     statusActive: '활성',
     statusPaused: '일시 중지',
     statusCompleted: '완료',
@@ -4439,7 +4545,9 @@ const translations: Record<Language, Translations> = {
     next: '다음',
 
     // Pagination
-    goToPage: '페이지 이동',
+    goToPage: '{page} 페이지 이동',
+    goToPageLabel: '페이지 이동',
+    totalPages: '총 {total} 페이지',
     pageInfo: '{current}페이지 / {total}페이지',
     invalidPageNumber: '올바른 페이지 번호를 입력하세요 (1-{total})',
     firstPage: '첫 페이지',
@@ -4553,6 +4661,26 @@ const translations: Record<Language, Translations> = {
     requestsMessages: '요청 / 메시지',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 분석',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint:
+      '투입 비용이 예상 절감액을 초과합니다. 사용 전략을 최적화하는 것을 권장합니다.',
+    roiDataAnomaly: '데이터 이상',
+    roiTrend: 'ROI 추세',
+    totalCost: '총 비용',
+    totalSavings: '총 절감액',
+    costBreakdown: '비용 내역',
+    dailyCosts: '일일 비용',
+    cost: '비용',
+    efficiencyReport: '효율 보고서',
+    efficiencyScore: '효율 점수',
+    dataAnomalyDetected: '데이터 이상이 감지되었습니다',
+    tokenAccumulationWarning:
+      'Token 수가 누적 집계되어 부풀려져 있을 수 있습니다. 비용과 ROI 계산이 부정확할 수 있습니다.',
+    title: '제목',
+    // alertRules는 ROI 외 알림 관리 페이지에서도 공유 사용되는 키입니다.
+    alertRules: '알림 규칙',
     overallEfficiency: '전체 효율',
     avgCostPerRequest: '평균 비용/요청',
     avgTokensPerRequest: '평균 Token/요청',
@@ -4950,6 +5078,12 @@ export function t(
   const lang = language ?? currentLanguage;
   const langTranslations = translations[lang] ?? translations.en;
   const template = langTranslations[key] ?? key;
+  // Surface missing keys during development so gaps are caught early. In
+  // production we keep the silent key fallback to avoid crashing the UI; this
+  // warning is DEV-only and changes no runtime behaviour.
+  if (import.meta.env.DEV && template === key) {
+    console.warn('[i18n] missing translation key:', key, '(', lang, ')');
+  }
   // Interpolate {placeholder} params into the template. A missing param leaves
   // the placeholder intact (never throws); pass all expected params to avoid
   // showing a literal {x} to users.

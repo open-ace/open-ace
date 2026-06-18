@@ -7,6 +7,7 @@ instead of scanning the large daily_messages table.
 """
 
 import logging
+import warnings
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -393,6 +394,16 @@ class DailyStatsRepository:
         """
         Get conversation statistics from pre-aggregated data.
 
+        .. deprecated::
+            This method estimates ``total_conversations`` as
+            ``unique_dates * unique_tools`` (a synthetic approximation) and does not
+            accept a date range, which previously caused the batch endpoint to report
+            session counts inconsistent with the standalone endpoint. It is no longer
+            on any hot path — ``analysis_service.get_session_stats`` and
+            ``message_repo.get_conversation_stats_summary`` are now the single source
+            of truth. Retained only as a rollback fallback; do not wire it back into
+            ``get_batch_analysis``.
+
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.
 
@@ -402,6 +413,14 @@ class DailyStatsRepository:
         Returns:
             Dict: Conversation statistics.
         """
+        warnings.warn(
+            "daily_stats_repo.get_conversation_stats is deprecated: it returns a "
+            "synthetic unique_dates * unique_tools estimate. Use "
+            "message_repo.get_conversation_stats_summary (via "
+            "analysis_service.get_session_stats) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         conditions = []
         params = []
 

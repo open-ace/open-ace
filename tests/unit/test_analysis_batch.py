@@ -47,7 +47,7 @@ class TestBatchAnalysisDataRange:
         self.daily_stats_repo.get_tool_totals.return_value = []
         self.daily_stats_repo.get_daily_totals.return_value = []
         self.daily_stats_repo.get_hourly_totals.return_value = []
-        self.daily_stats_repo.get_conversation_stats.return_value = {
+        self.message_repo.get_conversation_stats_summary.return_value = {
             "total_conversations": 50,
             "total_messages": 100,
             "total_tokens": 5000,
@@ -86,7 +86,7 @@ class TestBatchAnalysisDataRange:
         self.daily_stats_repo.get_tool_totals.return_value = []
         self.daily_stats_repo.get_daily_totals.return_value = []
         self.daily_stats_repo.get_hourly_totals.return_value = []
-        self.daily_stats_repo.get_conversation_stats.return_value = {
+        self.message_repo.get_conversation_stats_summary.return_value = {
             "total_conversations": 0,
             "total_messages": 0,
             "total_tokens": 0,
@@ -116,7 +116,7 @@ class TestBatchAnalysisDataRange:
         self.daily_stats_repo.get_tool_totals.return_value = []
         self.daily_stats_repo.get_daily_totals.return_value = []
         self.daily_stats_repo.get_hourly_totals.return_value = []
-        self.daily_stats_repo.get_conversation_stats.return_value = {}
+        self.message_repo.get_conversation_stats_summary.return_value = {}
         self.daily_stats_repo.get_data_range.return_value = {
             "min_date": "2024-01-01",
             "max_date": "2024-01-01",
@@ -165,7 +165,7 @@ class TestBatchAnalysisDataRange:
         self.daily_stats_repo.get_tool_totals.return_value = []
         self.daily_stats_repo.get_daily_totals.return_value = []
         self.daily_stats_repo.get_hourly_totals.return_value = []
-        self.daily_stats_repo.get_conversation_stats.return_value = {}
+        self.message_repo.get_conversation_stats_summary.return_value = {}
         self.daily_stats_repo.get_data_range.return_value = None
         self.usage_repo.get_request_count_total.return_value = 100
 
@@ -212,7 +212,7 @@ class TestBatchAnalysisDataRange:
         self.daily_stats_repo.get_tool_totals.return_value = []
         self.daily_stats_repo.get_daily_totals.return_value = []
         self.daily_stats_repo.get_hourly_totals.return_value = []
-        self.daily_stats_repo.get_conversation_stats.return_value = {}
+        self.message_repo.get_conversation_stats_summary.return_value = {}
         self.daily_stats_repo.get_data_range.return_value = None
         self.usage_repo.get_request_count_total.return_value = 100
 

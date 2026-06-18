@@ -78,6 +78,9 @@ class UsageRepository:
         Returns:
             bool: True if successful.
         """
+        # Normalize at the write boundary so variants (qwen-code/QWEN/...) can
+        # never re-enter daily_usage and split the ROI cost-breakdown pie.
+        tool_name = normalize_tool_name(tool_name)
         models_json = json.dumps(models_used) if models_used else None
 
         with self.db.connection() as conn:
