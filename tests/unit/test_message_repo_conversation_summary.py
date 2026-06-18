@@ -42,10 +42,13 @@ class TestGetConversationStatsSummary:
             "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
             in query
         )
+        # New implementation uses a per-session subquery (GROUP BY) + outer
+        # COUNT(*), replacing the old COUNT(DISTINCT COALESCE(...)) which
+        # could not use idx_messages_conversation.
         assert (
-            "COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id))"
-            in query
+            "GROUP BY COALESCE(conversation_id, feishu_conversation_id, agent_session_id)" in query
         )
+        assert "COUNT(*) AS total_conversations" in query
 
         assert result["total_conversations"] == 5
         assert result["total_messages"] == 50
