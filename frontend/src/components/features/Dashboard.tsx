@@ -1,10 +1,16 @@
 /**
  * Dashboard Component - Main dashboard with usage statistics
+ *
+ * Layout structure:
+ * 1. Header - Title
+ * 2. Today's Usage - Real-time tool usage cards
+ * 3. Time Range Statistics - Summary stats + Tool summary cards + Date filter
+ * 4. Trend Chart + Distribution Chart - Shared tool filter
  */
 
-import React, { useState, useMemo, startTransition } from 'react';
+import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
-import { useDashboard, useTools, usePageRefresh } from '@/hooks';
+import { useDashboard } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -16,9 +22,9 @@ import {
   TokenDistributionChart,
   DashboardSkeleton,
   TextInput,
-  PageRefreshControl,
+  StatCard,
 } from '@/components/common';
-import { formatTokens, TOOL_DISPLAY_NAMES, formatToolName, createMatcherConfig } from '@/utils';
+import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
 
 // Color palette for each tool
@@ -87,22 +93,11 @@ const getToday = (): string => {
 // Date validation error type
 type DateErrorType = 'invalid_range' | 'future_date' | null;
 
-// Sort configuration type
-type SortKey =
-  | 'total_tokens'
-  | 'total_requests'
-  | 'avg_tokens'
-  | 'total_input_tokens'
-  | 'total_output_tokens'
-  | 'days_count';
-type SortDirection = 'asc' | 'desc';
-
 export const Dashboard: React.FC = () => {
   const language = useLanguage();
-  const [selectedHost, setSelectedHost] = useState<string>('');
-  const [selectedTool, setSelectedTool] = useState<string>('');
-  const [sortKey, setSortKey] = useState<SortKey | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Tool filter for trend chart
+  const [selectedTool, setSelectedTool] = useState('all');
 
   // Date range state
   const [dateRangePreset, setDateRangePreset] = useState('30');
@@ -118,12 +113,10 @@ export const Dashboard: React.FC = () => {
     const endDateObj = new Date(end);
     const todayDateObj = new Date(today);
 
-    // Check if start date is after end date
     if (startDateObj > endDateObj) {
       return 'invalid_range';
     }
 
-    // Check if any date is in the future
     if (startDateObj > todayDateObj || endDateObj > todayDateObj) {
       return 'future_date';
     }
@@ -148,7 +141,7 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Compute actual date range based on preset or custom
+  // Compute actual date range
   const { startDate, endDate } = useMemo(() => {
     if (useCustomRange) {
       return { startDate: customStartDate, endDate: customEndDate };
@@ -171,84 +164,53 @@ export const Dashboard: React.FC = () => {
   const handlePresetChange = (value: string) => {
     if (value === 'custom') {
       setUseCustomRange(true);
-      // Validate current custom dates when switching to custom mode
       const error = validateDateRange(customStartDate, customEndDate);
       setDateError(error);
     } else {
       setUseCustomRange(false);
       setDateRangePreset(value);
-      setDateError(null); // Clear error when switching to preset
+      setDateError(null);
     }
   };
 
-  // Use combined dashboard hook with trend data for parallel fetching
-  // Note: autoRefresh parameter is deprecated - use usePageRefresh instead
-  const { todayData, summaryData, hosts, trendData, isLoading, isError, error, refetch } =
-    useDashboard({
-      tool: selectedTool || undefined,
-      host: selectedHost || undefined,
-      startDate,
-      endDate,
-      // DEPRECATED: autoRefresh parameter - will be removed in future versions
-      // Use PageRefreshControl component for refresh management
-      autoRefresh: false,
-    });
-
-  // Page refresh control - manages auto refresh for dashboard queries
-  const pageRefresh = usePageRefresh({
-    page: '/manage/dashboard',
-    refreshKey: createMatcherConfig([['dashboard']], 'prefix', [['dashboard', 'hosts']]),
-    interval: 60000, // 1 minute default
-    enabled: true, // Enable by default for real-time data
+  // Use combined dashboard hook
+  const { todayData, summaryData, trendData, isLoading, isError, error, refetch } = useDashboard({
+    startDate,
+    endDate,
+    autoRefresh: false,
   });
 
-  // Sort handler - use startTransition for non-urgent updates (rerender-transitions optimization)
-  const handleSort = (key: SortKey) => {
-    startTransition(() => {
-      if (sortKey === key) {
-        setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-      } else {
-        setSortKey(key);
-        setSortDirection('desc');
-      }
-    });
-  };
+  // Compute summary statistics for the selected time range
+  const summaryStats = useMemo(() => {
+    const tools = Object.keys(summaryData);
+    const totalTokens = tools.reduce(
+      (sum, tool) => sum + (summaryData[tool]?.total_tokens ?? 0),
+      0
+    );
+    const totalRequests = tools.reduce(
+      (sum, tool) => sum + (summaryData[tool]?.total_requests ?? 0),
+      0
+    );
+    const activeTools = tools.length;
+    const totalInputTokens = tools.reduce(
+      (sum, tool) => sum + (summaryData[tool]?.total_input_tokens ?? 0),
+      0
+    );
+    const totalOutputTokens = tools.reduce(
+      (sum, tool) => sum + (summaryData[tool]?.total_output_tokens ?? 0),
+      0
+    );
 
-  // Sorted summary data
-  const sortedSummaryData = useMemo(() => {
-    if (!sortKey) return summaryData;
-    const entries = Object.entries(summaryData);
-    entries.sort(([, a], [, b]) => {
-      const aVal = a[sortKey] ?? 0;
-      const bVal = b[sortKey] ?? 0;
-      return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-    });
-    return Object.fromEntries(entries);
-  }, [summaryData, sortKey, sortDirection]);
+    return {
+      totalTokens,
+      totalRequests,
+      activeTools,
+      totalInputTokens,
+      totalOutputTokens,
+    };
+  }, [summaryData]);
 
-  // Host options for select
-  const hostOptions = useMemo(
-    () => [
-      { value: '', label: t('dashboardFilterAllHosts', language) },
-      ...hosts.map((host) => ({ value: host, label: host })),
-    ],
-    [hosts, language]
-  );
-
-  // Get tools for filter
-  const { data: toolsData } = useTools();
-  const dynamicTools = useMemo(() => toolsData ?? [], [toolsData]);
-
-  // Tool options for select
-  const toolOptions = useMemo(
-    () => [
-      { value: '', label: t('dashboardFilterAllTools', language) },
-      ...dynamicTools.map((tool) => ({ value: tool, label: formatToolName(tool) })),
-    ],
-    [dynamicTools, language]
-  );
-
-  // Date range preset options with internationalized labels
+  // Date range preset options
   const dateRangeOptions = useMemo(
     () =>
       DATE_RANGE_PRESET_VALUES.map((preset) => ({
@@ -257,6 +219,44 @@ export const Dashboard: React.FC = () => {
       })),
     [language]
   );
+
+  // Tool filter options for trend chart
+  const toolOptions = useMemo(() => {
+    const tools = Object.keys(summaryData);
+    const options = [{ value: 'all', label: t('dashboardFilterAllTools', language) }];
+    tools.forEach((tool) => {
+      options.push({
+        value: tool,
+        label: TOOL_DISPLAY_NAMES[tool] ?? tool,
+      });
+    });
+    return options;
+  }, [summaryData, language]);
+
+  // Filtered trend data based on selected tool
+  const filteredTrendData = useMemo(() => {
+    if (selectedTool === 'all' || !trendData) {
+      return trendData;
+    }
+    // Filter trend data points for the selected tool
+    return trendData.filter((point) => point.tool === selectedTool);
+  }, [trendData, selectedTool]);
+
+  // Distribution data for chart - filtered by selected tool
+  const distributionData = useMemo(() => {
+    const tools = Object.keys(summaryData);
+    if (selectedTool === 'all') {
+      return tools.map((tool) => ({
+        tool,
+        tokens: summaryData[tool]?.total_tokens ?? 0,
+      }));
+    }
+    // Filter for selected tool only
+    if (tools.includes(selectedTool)) {
+      return [{ tool: selectedTool, tokens: summaryData[selectedTool]?.total_tokens ?? 0 }];
+    }
+    return [];
+  }, [summaryData, selectedTool]);
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -268,122 +268,134 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="dashboard">
-      {/* Header */}
-      <div className="dashboard-header d-flex justify-content-between align-items-center mb-4">
+      {/* Header - simple title row */}
+      <div className="dashboard-header mb-4">
         <h2>{t('dashboardTitle', language)}</h2>
-        <div className="page-header-controls d-flex gap-2 align-items-center flex-wrap">
-          {/* Page Refresh Control */}
-          <PageRefreshControl
-            refresh={pageRefresh}
-            showLastRefreshTime={true}
-            showNextRefreshTime={false}
-          />
-
-          {/* Date Range Selector */}
-          <Select
-            options={dateRangeOptions}
-            value={useCustomRange ? 'custom' : dateRangePreset}
-            onChange={handlePresetChange}
-            size="sm"
-            className="select-narrow"
-          />
-          {useCustomRange && (
-            <>
-              {/* Visually hidden labels for accessibility */}
-              <label htmlFor="date-start-input" className="visually-hidden">
-                {t('dateRangeStartDate', language)}
-              </label>
-              <TextInput
-                id="date-start-input"
-                type="date"
-                value={customStartDate}
-                onChange={handleStartDateChange}
-                className="date-input-narrow"
-                aria-describedby={dateError ? 'date-range-error' : undefined}
-              />
-              {/* Separator with aria-hidden to avoid duplicate announcement */}
-              <span aria-hidden="true" className="text-muted">
-                {t('dateRangeSeparator', language)}
-              </span>
-              <label htmlFor="date-end-input" className="visually-hidden">
-                {t('dateRangeEndDate', language)}
-              </label>
-              <TextInput
-                id="date-end-input"
-                type="date"
-                value={customEndDate}
-                onChange={handleEndDateChange}
-                className="date-input-narrow"
-                aria-describedby={dateError ? 'date-range-error' : undefined}
-              />
-              {/* Error message container with aria-live for screen readers */}
-              {dateError && (
-                <div
-                  id="date-range-error"
-                  className="text-danger small"
-                  role="alert"
-                  aria-live="polite"
-                >
-                  {dateError === 'invalid_range'
-                    ? t('dateRangeErrorInvalid', language)
-                    : t('dateRangeErrorFuture', language)}
-                </div>
-              )}
-            </>
-          )}
-          <Select
-            options={hostOptions}
-            value={selectedHost}
-            onChange={setSelectedHost}
-            size="sm"
-            className="select-narrow"
-          />
-          <Select
-            options={toolOptions}
-            value={selectedTool}
-            onChange={setSelectedTool}
-            size="sm"
-            className="select-narrow"
-          />
-        </div>
       </div>
 
-      {/* Today's Usage */}
+      {/* Today's Usage - Real-time data */}
       <section className="dashboard-section mb-4">
-        <h5 className="mb-3">{t('todayUsage', language)}</h5>
-        {todayData.length === 0 ? (
-          <EmptyState icon="bi-calendar-x" title={t('noData', language)} />
-        ) : (
-          <div className="row g-3">
-            {todayData.map((item) => (
-              <TodayCard key={item.tool_name} item={item} language={language} />
-            ))}
-          </div>
-        )}
+        <Card title={t('todayUsage', language)}>
+          {todayData.length === 0 ? (
+            <EmptyState icon="bi-calendar-x" title={t('noData', language)} />
+          ) : (
+            <div className="row g-3">
+              {todayData.map((item) => (
+                <TodayCard key={item.tool_name} item={item} language={language} />
+              ))}
+            </div>
+          )}
+        </Card>
       </section>
 
-      {/* Total Overview */}
+      {/* Time Range Statistics - Summary + Date filter */}
       <section className="dashboard-section mb-4">
-        <h5 className="mb-3">{t('totalOverview', language)}</h5>
-        {Object.keys(summaryData).length === 0 ? (
-          <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
-        ) : (
-          <div className="row g-3">
-            {Object.entries(summaryData).map(([tool, stats]) => (
-              <SummaryCard key={tool} tool={tool} stats={stats} language={language} />
-            ))}
+        <Card
+          title={t('timeRangeStatistics', language) || '时间范围统计'}
+          actions={
+            <div className="d-flex gap-2 align-items-center page-header-controls">
+              <Select
+                options={dateRangeOptions}
+                value={useCustomRange ? 'custom' : dateRangePreset}
+                onChange={handlePresetChange}
+                size="sm"
+                className="select-narrow"
+              />
+              {useCustomRange && (
+                <>
+                  <TextInput
+                    type="date"
+                    value={customStartDate}
+                    onChange={handleStartDateChange}
+                    className="date-input-narrow"
+                    aria-label={t('startDate', language)}
+                  />
+                  <span className="text-muted" aria-hidden="true">
+                    {t('dateRangeSeparator', language)}
+                  </span>
+                  <TextInput
+                    type="date"
+                    value={customEndDate}
+                    onChange={handleEndDateChange}
+                    className="date-input-narrow"
+                    aria-label={t('endDate', language)}
+                  />
+                  {dateError && (
+                    <small className="text-danger" role="alert">
+                      {dateError === 'invalid_range'
+                        ? t('dateRangeErrorInvalid', language)
+                        : t('dateRangeErrorFuture', language)}
+                    </small>
+                  )}
+                </>
+              )}
+            </div>
+          }
+        >
+          {/* Summary Stat Cards */}
+          <div className="row g-3 mb-4">
+            <div className="col-md-4">
+              <StatCard
+                label={t('totalTokens', language) || '总 Token'}
+                value={formatTokens(summaryStats.totalTokens)}
+                icon={<i className="bi bi-bar-chart fs-4" />}
+                variant="primary"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('totalRequests', language) || '总请求'}
+                value={summaryStats.totalRequests.toLocaleString()}
+                icon={<i className="bi bi-lightning fs-4" />}
+                variant="info"
+              />
+            </div>
+            <div className="col-md-4">
+              <StatCard
+                label={t('activeTools', language) || '活跃工具'}
+                value={summaryStats.activeTools.toString()}
+                icon={<i className="bi bi-tools fs-4" />}
+                variant="success"
+              />
+            </div>
           </div>
-        )}
+          {/* Tool Summary Cards */}
+          {Object.keys(summaryData).length === 0 ? (
+            <EmptyState icon="bi-bar-chart" title={t('noData', language)} />
+          ) : (
+            <div className="row g-3">
+              {Object.entries(summaryData).map(([tool, stats]) => (
+                <SummaryCard key={tool} tool={tool} stats={stats} language={language} />
+              ))}
+            </div>
+          )}
+        </Card>
       </section>
 
-      {/* Charts */}
+      {/* Trend Chart + Distribution Chart - Two columns with shared filter */}
       <section className="dashboard-section mb-4">
-        <div className="row">
-          <div className="col-md-8 mb-4">
+        {/* Global chart filter bar - controls both trend and distribution charts */}
+        <div className="chart-filter-bar bg-light rounded p-2 mb-3">
+          <div className="d-flex align-items-center page-header-controls">
+            <span className="text-muted small me-2" style={{ whiteSpace: 'nowrap' }}>
+              {t('tool', language)}:
+            </span>
+            <Select
+              options={toolOptions}
+              value={selectedTool}
+              onChange={setSelectedTool}
+              size="sm"
+              className="select-narrow"
+            />
+          </div>
+        </div>
+        <div className="row g-3">
+          {/* Trend Chart - Left */}
+          <div className="col-lg-8">
             <Card title={t('trendChart', language)}>
-              {trendData && trendData.length > 0 ? (
+              {filteredTrendData && filteredTrendData.length > 0 ? (
                 <TokenTrendChart
-                  data={trendData}
+                  data={filteredTrendData}
                   startDate={startDate}
                   endDate={endDate}
                   height={300}
@@ -393,25 +405,11 @@ export const Dashboard: React.FC = () => {
               )}
             </Card>
           </div>
-          <div className="col-md-4 mb-4">
+          {/* Distribution Chart - Right */}
+          <div className="col-lg-4">
             <Card title={t('tokenDistribution', language)}>
-              {trendData && trendData.length > 0 ? (
-                <TokenDistributionChart
-                  data={Object.values(
-                    trendData.reduce(
-                      (acc, item) => {
-                        const tool = item.tool;
-                        if (!acc[tool]) {
-                          acc[tool] = { tool, tokens: 0 };
-                        }
-                        acc[tool].tokens += item.tokens;
-                        return acc;
-                      },
-                      {} as Record<string, { tool: string; tokens: number }>
-                    )
-                  ).sort((a, b) => b.tokens - a.tokens)}
-                  height={300}
-                />
+              {distributionData.length > 0 ? (
+                <TokenDistributionChart data={distributionData} height={300} />
               ) : (
                 <EmptyState icon="bi-pie-chart" title={t('noData', language)} />
               )}
@@ -419,135 +417,12 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       </section>
-
-      {/* Tools Info Table */}
-      <section className="dashboard-section">
-        <Card title={t('toolsInfo', language)}>
-          {Object.keys(summaryData).length === 0 ? (
-            <EmptyState icon="bi-tools" title={t('noData', language)} />
-          ) : (
-            <div className="table-responsive">
-              <table className="table table-hover">
-                <thead>
-                  <tr>
-                    <th>{t('tableTool', language)}</th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('total_tokens')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('tableTokens', language)}
-                      {sortKey === 'total_tokens' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('total_requests')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('tableRequests', language)}
-                      {sortKey === 'total_requests' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('avg_tokens')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('tableAverage', language)}
-                      {sortKey === 'avg_tokens' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('total_input_tokens')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('tableInput', language)}
-                      {sortKey === 'total_input_tokens' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('total_output_tokens')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('tableOutput', language)}
-                      {sortKey === 'total_output_tokens' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th className="text-end">{t('tableRatio', language) || 'Ratio'}</th>
-                    <th
-                      className="text-end sortable"
-                      onClick={() => handleSort('days_count')}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      {t('days_tracked', language)}
-                      {sortKey === 'days_count' && (
-                        <i
-                          className={`bi bi-caret-${sortDirection === 'asc' ? 'up' : 'down'}-fill ms-1`}
-                        />
-                      )}
-                    </th>
-                    <th>{t('date_range', language)}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(sortedSummaryData).map(([tool, stats]) => (
-                    <tr key={tool}>
-                      <td>
-                        <span className={cn('badge', TOOL_COLORS[tool]?.card || 'bg-secondary')}>
-                          {tool.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="text-end">{formatTokens(stats.total_tokens)}</td>
-                      <td className="text-end">{stats.total_requests ?? '-'}</td>
-                      <td className="text-end">{(stats.avg_tokens / 1000000).toFixed(2)} M/day</td>
-                      <td className="text-end">{formatTokens(stats.total_input_tokens ?? 0)}</td>
-                      <td className="text-end">{formatTokens(stats.total_output_tokens ?? 0)}</td>
-                      <td className="text-end">
-                        {(stats.total_output_tokens ?? 0) > 0
-                          ? (
-                              (stats.total_input_tokens ?? 0) / (stats.total_output_tokens ?? 1)
-                            ).toFixed(1)
-                          : '-'}
-                      </td>
-                      <td className="text-end">{stats.days_count}</td>
-                      <td>
-                        <small className="text-muted">
-                          {stats.first_date} ~ {stats.last_date}
-                        </small>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </section>
     </div>
   );
 };
 
 /**
  * Today's Usage Card
- * Memoized for performance (rerender-memo optimization)
  */
 interface TodayCardProps {
   item: ToolUsage;
@@ -558,22 +433,39 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
   const colors = TOOL_COLORS[item.tool_name] || { card: 'bg-secondary' };
 
   return (
-    <div className="col-md-4">
+    <div className="col-md-3 col-sm-6">
       <div className={cn('card usage-card text-white', colors.card)}>
         <div className="card-body">
-          <h6 className="card-subtitle mb-3 text-white-50">
+          <h6 className="card-subtitle mb-2 text-white-50">
             {(TOOL_DISPLAY_NAMES[item.tool_name] ?? item.tool_name).toUpperCase()}
           </h6>
           {item.tokens_used > 0 ? (
-            <h3 className="card-title mb-3">
-              {formatTokens(item.tokens_used)}{' '}
-              <small className="fs-6">{t('tokens', language)}</small>
-            </h3>
+            <>
+              <h4 className="card-title mb-2">
+                {formatTokens(item.tokens_used)}{' '}
+                <small className="fs-6">{t('tokens', language)}</small>
+              </h4>
+              {item.input_tokens > 0 && (
+                <p className="card-text mb-1">
+                  <small>
+                    <strong>{t('tableInput', language)}:</strong> {formatTokens(item.input_tokens)}
+                  </small>
+                </p>
+              )}
+              {item.output_tokens > 0 && (
+                <p className="card-text mb-1">
+                  <small>
+                    <strong>{t('tableOutput', language)}:</strong>{' '}
+                    {formatTokens(item.output_tokens)}
+                  </small>
+                </p>
+              )}
+            </>
           ) : item.request_count > 0 ? (
             <>
-              <h3 className="card-title mb-3">
+              <h4 className="card-title mb-2">
                 {item.request_count} <small className="fs-6">{t('tableRequests', language)}</small>
-              </h3>
+              </h4>
               <p className="card-text mb-1 text-warning">
                 <small>
                   <i className="bi bi-exclamation-triangle" />{' '}
@@ -582,26 +474,13 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
               </p>
             </>
           ) : (
-            <h3 className="card-title mb-3">{t('noDataAvailable', language)}</h3>
+            <h4 className="card-title mb-2">{t('noDataAvailable', language)}</h4>
           )}
-          <p className="card-text mb-1">
-            <strong>{t('tableDate', language)}:</strong> {item.date}
-          </p>
           {item.tokens_used > 0 && item.request_count > 0 && (
-            <p className="card-text mb-1">
-              <strong>{t('tableRequests', language)}:</strong> {item.request_count}
-            </p>
-          )}
-          {item.input_tokens > 0 && (
-            <p className="card-text mb-1">
-              <strong>{t('tableInput', language)}:</strong> {formatTokens(item.input_tokens)}{' '}
-              <small className="fs-6">{t('tokens', language)}</small>
-            </p>
-          )}
-          {item.output_tokens > 0 && (
-            <p className="card-text mb-1">
-              <strong>{t('tableOutput', language)}:</strong> {formatTokens(item.output_tokens)}{' '}
-              <small className="fs-6">{t('tokens', language)}</small>
+            <p className="card-text mb-0">
+              <small>
+                {t('tableRequests', language)}: {item.request_count}
+              </small>
             </p>
           )}
         </div>
@@ -611,8 +490,7 @@ const TodayCard = React.memo<TodayCardProps>(({ item, language }) => {
 });
 
 /**
- * Summary Card
- * Memoized for performance (rerender-memo optimization)
+ * Summary Card - Shows tool statistics for selected time range
  */
 interface SummaryCardProps {
   tool: string;
@@ -627,7 +505,7 @@ const SummaryCard = React.memo<SummaryCardProps>(({ tool, stats, language }) => 
     <div className="col-md-4">
       <div className={cn('card usage-card text-white', colors.card)}>
         <div className="card-body">
-          <h5 className="card-title">{tool.toUpperCase()}</h5>
+          <h5 className="card-title">{(TOOL_DISPLAY_NAMES[tool] || tool).toUpperCase()}</h5>
           <p className="card-text">
             <strong>{formatTokens(stats.total_tokens)}</strong> {t('tokens', language)}
             <br />

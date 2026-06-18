@@ -12,6 +12,7 @@ import {
   formatRelativeTime,
   formatBytes,
   formatDuration,
+  formatChartDate,
 } from './format';
 
 describe('formatTokens', () => {
@@ -193,5 +194,72 @@ describe('formatDuration', () => {
     expect(formatDuration(3600)).toBe('1h 0m');
     expect(formatDuration(3661)).toBe('1h 1m');
     expect(formatDuration(7325)).toBe('2h 2m');
+  });
+});
+
+describe('formatChartDate', () => {
+  // Structural assertions only — never lock exact locale glyphs (ICU data
+  // varies across Node/CI), only the correctness properties that matter:
+  // day-of-month is preserved (no UTC cross-day shift), no time/weekday/year
+  // leaks onto the axis, and the single-month branch drops the month.
+
+  it('formats a clean YYYY-MM-DD with short month + day (en)', () => {
+    const result = formatChartDate('2026-06-15', 'en');
+    expect(result).not.toBe('-');
+    expect(result).toContain('15');
+    expect(result).not.toMatch(/2026/); // year dropped on axis
+    expect(result).not.toMatch(/:/); // no time component
+    expect(result).not.toMatch(/GMT/); // no RFC822 leak
+  });
+
+  it('strips a trailing time component (YYYY-MM-DD HH:MM:SS)', () => {
+    const result = formatChartDate('2026-06-15 00:00:00', 'en');
+    expect(result).not.toBe('-');
+    expect(result).toContain('15');
+    expect(result).not.toMatch(/00:00:00/);
+    expect(result).not.toMatch(/:/);
+  });
+
+  it('strips an ISO 8601 T separator', () => {
+    const result = formatChartDate('2026-06-15T00:00:00', 'en');
+    expect(result).not.toBe('-');
+    expect(result).toContain('15');
+    expect(result).not.toMatch(/T/);
+  });
+
+  it('returns "-" for RFC822 HTTP-date strings (defensive fallback)', () => {
+    // Post-normalization this never reaches the frontend, but the guard must
+    // not render garbage like "Mon," onto the axis.
+    expect(formatChartDate('Mon, 15 Jun 2026 00:00:00 GMT', 'en')).toBe('-');
+  });
+
+  it('does not shift the day across the UTC boundary (local parse)', () => {
+    // A pure-date string is parsed as LOCAL time, not UTC, so 2026-06-15 must
+    // render as day 15 (never 14 or 16) regardless of the host timezone.
+    const result = formatChartDate('2026-06-15', 'en');
+    expect(result).toContain('15');
+    expect(result).not.toMatch(/14|16/);
+  });
+
+  it('renders day-only when dayOnly option is set (single-month axis)', () => {
+    // en-US { day: 'numeric' } deterministically yields the bare day number.
+    expect(formatChartDate('2026-06-15', 'en', { dayOnly: true })).toBe('15');
+  });
+
+  it('localizes per language without leaking time/weekday/year', () => {
+    const langs = ['en', 'zh', 'ja', 'ko'] as const;
+    for (const lang of langs) {
+      const result = formatChartDate('2026-06-15', lang);
+      expect(result).not.toBe('-');
+      expect(result).toContain('15');
+      expect(result).not.toMatch(/GMT|Mon|Tue|Wed|Thu|Fri|Sat|Sun|:|2026/);
+    }
+  });
+
+  it('returns "-" for null / empty / unparseable input', () => {
+    expect(formatChartDate(null, 'en')).toBe('-');
+    expect(formatChartDate('', 'en')).toBe('-');
+    expect(formatChartDate(undefined, 'en')).toBe('-');
+    expect(formatChartDate('not-a-date', 'en')).toBe('-');
   });
 });

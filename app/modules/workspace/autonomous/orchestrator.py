@@ -2963,12 +2963,35 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically."""
+        """Merge PR and clean up. Resolves merge conflicts automatically.
+
+        Merge is retried across scheduler cycles instead of blocking on CI:
+        if CI is still running we return (staying in 'merging') and the
+        scheduler retries in ~10s. This avoids hogging a workflow thread for
+        the full CI duration (10+ min for Python 3.9) and naturally adapts
+        to variable CI times without --admin bypass or long polls.
+        """
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
+            # If CI is still running, defer this merge to the next scheduler
+            # cycle instead of blocking (synchronous poll) or failing. The
+            # scheduler re-enters _do_merge every ~10s.
+            try:
+                checks = gh.get_pr_checks(pr_number)
+            except Exception:
+                checks = []
+            pending = [c for c in checks if c.get("bucket") == "pending"]
+            if pending:
+                logger.info(
+                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
+                    pr_number,
+                    len(pending),
+                )
+                return
+
             try:
                 gh.merge_pr(pr_number, strategy="merge")
                 self._create_milestone(
@@ -2977,22 +3000,48 @@ class AutonomousOrchestrator:
                     status="completed",
                     title=f"PR #{pr_number} merged",
                 )
-            except GitHubOpsError:
-                # Merge conflict — resolve locally and retry
-                logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+            except GitHubOpsError as e:
+                err_msg = str(e)
+                if "base branch policy prohibits" in err_msg:
+                    # CI reports done but GitHub hasn't reconciled yet, or a
+                    # late check started. Check whether CI actually failed —
+                    # if so, this is a real failure, not a transient deferral.
+                    failed = [c for c in checks if c.get("bucket") == "fail"]
+                    if failed:
+                        failed_names = ", ".join(c.get("name", "?") for c in failed)
+                        raise GitHubOpsError(
+                            f"PR #{pr_number} CI failed ({failed_names}), cannot merge"
+                        )
+                    # No failures, just policy lag — defer to next cycle.
+                    logger.info(
+                        "PR #%s: policy prohibits (CI not failed), deferring merge", pr_number
+                    )
+                    return
                 try:
+                    # Merge conflict — resolve locally and retry
+                    logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
                     self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                except Exception as e:
+                    # Conflicts resolved + pushed, but NOT merged yet — the push
+                    # triggered a fresh CI run. Return here (staying in 'merging')
+                    # so _do_merge's CI-pending deferral handles the wait on the
+                    # next cycle. Falling through to cleanup would delete the
+                    # branch before the PR is merged (#1112 P1).
+                    return
+                except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
                         milestone_type="merged",
                         status="failed",
                         title="PR merge failed",
-                        error_message=f"Merge conflict resolution failed: {e}",
+                        error_message=f"Merge conflict resolution failed: {resolve_err}",
                     )
                     raise
 
-        # Clean up branch/worktree
+        # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
+        # may have cleared worktree_path (removed the original worktree to free
+        # the branch for the temp merge worktree); using the stale snapshot
+        # would retry the removal and fail, skipping branch deletion (#1107).
+        wf = self.workflow
         branch_name = wf.get("branch_name", "")
         worktree_path = wf.get("worktree_path", "")
         project_path = wf.get("project_path", "")
@@ -3027,99 +3076,127 @@ class AutonomousOrchestrator:
         self._emit("phase_change", {"phase": "completed"})
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
-        """Resolve merge conflicts locally, push, and merge the PR."""
-        # Remove worktree if it's blocking checkout (must do before any git ops
-        # on the main repo, since removing worktree deletes its directory)
+        """Resolve merge conflicts in an isolated worktree, push, and merge the PR.
+
+        Previously this checked out the PR branch directly in the main repo,
+        which polluted the shared working tree (``index.lock`` races with
+        concurrent workflows, ``reset --hard`` clobbered in-flight resolution
+        on scheduler re-entry). Now a throwaway worktree is created for the
+        branch, all merge/resolve/push happens inside it, and it is removed in
+        a ``finally`` — the main repo's index and HEAD are never touched.
+        """
         wf = self.workflow
-        worktree_path = wf.get("worktree_path", "")
         project_path = wf.get("project_path", "")
+        worktree_path = wf.get("worktree_path", "")
+
+        # Git forbids checking out the same branch in two worktrees, so the
+        # workflow's own worktree (if still present) must be removed first to
+        # free the branch for the temp worktree below.
+        main_gh = GitHubOps(project_path)
         if worktree_path:
             try:
-                # Use a separate GitHubOps for the main repo to remove worktree
-                main_gh = GitHubOps(project_path)
                 main_gh.remove_worktree(worktree_path)
-            except Exception:
-                pass
+            except GitHubOpsError as e:
+                logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
             self._update_workflow({"worktree_path": ""})
-            # Reinitialize gh to point at project_path (worktree dir is gone)
-            self._gh = GitHubOps(project_path)
-            gh = self._gh
+            # The caller's gh still points at the now-deleted worktree dir as
+            # its cwd. Rebind it (and the cached self._gh) to the main repo so
+            # the later merge_pr / _do_merge cleanup don't run subprocess with
+            # a gone cwd (#1107 review).
+            gh = GitHubOps(project_path)
+            self._gh = gh
 
-        # Clean up any leftover git state (conflicts, uncommitted changes)
-        gh._run_git(["reset", "--hard", "HEAD"])
-        gh._run_git(["clean", "-fd"])
-        # Fetch latest main and checkout our branch
-        gh._run_git(["fetch", "origin", "main"])
-        gh._run_git(["checkout", branch_name])
+        # Create an isolated worktree for the existing PR branch. Use the main
+        # repo's gh so the worktree is registered against the real .git.
+        temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
+        main_gh.add_worktree(temp_wt_path, branch_name)
+        logger.info("Created temporary merge worktree at %s", temp_wt_path)
+
+        # All subsequent git ops run inside the temp worktree.
+        wt_gh = GitHubOps(temp_wt_path)
         try:
-            gh._run_git(["merge", "origin/main"])
-        except GitHubOpsError:
-            # There are conflicts — use AI agent to resolve them
-            gh._run_git(["merge", "--abort"])  # Clean state first
-            merge_result = gh._run_git(["merge", "origin/main"], check=False)
-            if merge_result.returncode != 0 and "CONFLICT" not in merge_result.stderr:
-                raise GitHubOpsError(
-                    f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
+            # Fetch latest main and merge into the branch.
+            wt_gh._run_git(["fetch", "origin", "main"])
+            merge_result = wt_gh._run_git(["merge", "origin/main"], check=False)
+            # git writes conflict summaries to STDOUT (not stderr), so we must
+            # check both streams. Checking only stderr left stderr empty on a
+            # real conflict and the code misclassified it as a "non-conflict"
+            # failure, abandoning merge without ever invoking the AI resolver.
+            combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
+            if merge_result.returncode != 0:
+                if "CONFLICT" not in combined_output:
+                    raise GitHubOpsError(
+                        f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
+                    )
+
+                # Ask AI agent to resolve conflicts inside the temp worktree.
+                conflict_prompt = (
+                    AUTONOMOUS_CONTEXT
+                    + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
+                    "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
+                    "步骤：\n"
+                    "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
+                    "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
+                    "3. git add 所有解决后的文件\n"
+                    "4. git commit 完成合并"
                 )
 
-            # Ask AI agent to resolve conflicts
-            conflict_prompt = (
-                AUTONOMOUS_CONTEXT
-                + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
-                "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
-                "步骤：\n"
-                "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
-                "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
-                "3. git add 所有解决后的文件\n"
-                "4. git commit 完成合并"
-            )
+                wf = self.workflow
+                # Track this as its own milestone so conflict-resolution usage is
+                # captured in phase_* (and thus workflow totals = SUM(phase_*)).
+                conflict_ms = self._create_milestone(
+                    phase="merge",
+                    dev_round=wf.get("dev_round", 1),
+                    milestone_type="conflicts_resolved",
+                    status="in_progress",
+                    title=f"Resolving merge conflicts (PR #{pr_number})",
+                )
+                result = self._run_agent(
+                    wf=wf,
+                    workflow_id=self._workflow_id,
+                    cli_tool=wf.get("cli_tool", "claude-code"),
+                    model=wf.get("model", ""),
+                    project_path=temp_wt_path,
+                    prompt=conflict_prompt,
+                    workspace_type=wf.get("workspace_type", "local"),
+                    remote_machine_id=wf.get("remote_machine_id"),
+                    permission_mode=wf.get("permission_mode", "auto-edit"),
+                    allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                        wf.get("cli_tool", "claude-code"), []
+                    ),
+                    session_line="fresh",
+                    milestone_id=conflict_ms.get("milestone_id", ""),
+                )
+                self._accumulate_tokens(result)
+                self.repo.update_milestone(
+                    conflict_ms.get("milestone_id", ""),
+                    {
+                        "status": "completed" if result.success else "failed",
+                        "session_id": result.session_id,
+                        "error_message": result.error or "",
+                    },
+                )
 
-            wf = self.workflow
-            # Track this as its own milestone so conflict-resolution usage is
-            # captured in phase_* (and thus workflow totals = SUM(phase_*)).
-            conflict_ms = self._create_milestone(
+                if not result.success:
+                    raise RuntimeError(f"Conflict resolution failed: {result.error}")
+
+            # Push the resolved branch. The new merge commit triggers a fresh
+            # CI run, so we do NOT merge here — _do_merge will retry on the
+            # next scheduler cycle once CI passes (it checks for pending CI
+            # at the top and defers until checks are green).
+            wt_gh.git_push(branch=branch_name)
+            self._create_milestone(
                 phase="merge",
-                dev_round=wf.get("dev_round", 1),
-                milestone_type="conflicts_resolved",
-                status="in_progress",
-                title=f"Resolving merge conflicts (PR #{pr_number})",
+                milestone_type="conflicts_pushed",
+                status="completed",
+                title=f"PR #{pr_number} conflicts resolved, waiting for CI to merge",
             )
-            result = self._run_agent(
-                wf=wf,
-                workflow_id=self._workflow_id,
-                cli_tool=wf.get("cli_tool", "claude-code"),
-                model=wf.get("model", ""),
-                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                prompt=conflict_prompt,
-                workspace_type=wf.get("workspace_type", "local"),
-                remote_machine_id=wf.get("remote_machine_id"),
-                permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
-                session_line="main",
-                milestone_id=conflict_ms.get("milestone_id", ""),
-            )
-            self._accumulate_tokens(result)
-            self.repo.update_milestone(
-                conflict_ms.get("milestone_id", ""),
-                {
-                    "status": "completed" if result.success else "failed",
-                    "session_id": result.session_id,
-                    "error_message": result.error or "",
-                },
-            )
-
-            if not result.success:
-                raise RuntimeError(f"Conflict resolution failed: {result.error}")
-
-        # Push the merged branch and retry PR merge
-        gh.git_push(branch=branch_name)
-        gh.merge_pr(pr_number, strategy="merge")
-
-        self._create_milestone(
-            phase="merge",
-            milestone_type="merged",
-            status="completed",
-            title=f"PR #{pr_number} merged (conflicts resolved)",
-        )
+        finally:
+            # Always tear down the temp worktree, even on failure, so it does
+            # not leak and block future runs. Use the main repo's gh because
+            # a worktree cannot remove itself.
+            try:
+                main_gh.remove_worktree(temp_wt_path)
+                logger.info("Removed temporary merge worktree at %s", temp_wt_path)
+            except GitHubOpsError as e:
+                logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)

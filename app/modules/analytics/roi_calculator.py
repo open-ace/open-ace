@@ -941,9 +941,23 @@ class ROICalculator:
                 input_tokens, output_tokens, "default"
             )
 
+            # Normalize date to YYYY-MM-DD. On PostgreSQL the `date` column
+            # comes back as a datetime.date object, which Flask's default JSON
+            # provider would otherwise serialize as an RFC822 HTTP-date (e.g.
+            # "Mon, 01 Jun 2026 00:00:00 GMT") and leak onto the chart axis.
+            # On SQLite it is already a clean YYYY-MM-DD string. Mirrors the
+            # idiom used by usage_repo.get_request_trend / get_request_trend_by_tool.
+            date_val = row.get("date")
+            if date_val is None:
+                date_str = None
+            elif hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val)
+
             daily_costs.append(
                 {
-                    "date": row.get("date"),
+                    "date": date_str,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "input_cost": round(input_cost, 4),

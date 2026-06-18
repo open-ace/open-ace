@@ -39,7 +39,7 @@ import {
   type OptimizationSuggestion,
   type EfficiencyReport,
 } from '@/api';
-import { formatTokens, formatToolName } from '@/utils';
+import { formatTokens, formatToolName, formatChartDate } from '@/utils';
 import { useTools, usePageRefresh } from '@/hooks';
 
 // Cache key generator
@@ -368,18 +368,38 @@ export const ROIAnalysis: React.FC = () => {
   }, [roiTrend]);
 
   const dailyCostData = useMemo(() => {
-    if (!dailyCosts.length) return { labels: [], data: [] };
+    if (!dailyCosts.length) return { labels: [], tooltipLabels: [], data: [] };
+    const rawDates = dailyCosts.map((d) => d.date);
+    // d.date is backend-normalized to YYYY-MM-DD, so the first 7 chars
+    // (YYYY-MM) identify the month. When every tick shares the same month,
+    // render day-only axis labels to avoid repeating the month prefix; the
+    // month/year stays visible in the chart title and the full date in the
+    // tooltip.
+    const dayOnly = new Set(rawDates.map((d) => (d ?? '').slice(0, 7))).size === 1;
     return {
-      labels: dailyCosts.map((d) => d.date),
+      labels: rawDates.map((d) => formatChartDate(d, language, { dayOnly })),
+      // Full YYYY-MM-DD for the tooltip so hover keeps year context.
+      tooltipLabels: rawDates,
       data: dailyCosts.map((d) => d.cost ?? d.total_cost ?? 0),
     };
-  }, [dailyCosts]);
+  }, [dailyCosts, language]);
 
   const costBreakdownData = useMemo(() => {
     if (!costBreakdown.length) return { labels: [], data: [] };
+    // Defensive client-side aggregation: collapse any duplicate tool entries
+    // (same tool split across models/sources) so the pie never renders two
+    // slices for one tool, even if the backend regresses. Merge by the
+    // normalized tool_name, sort by cost desc, and render labels via
+    // formatToolName for consistent display + i18n casing.
+    const merged = costBreakdown.reduce<Record<string, number>>((acc, c) => {
+      const key = c.tool_name ?? c.category ?? c.model ?? 'unknown';
+      acc[key] = (acc[key] ?? 0) + (c.total_cost ?? 0);
+      return acc;
+    }, {});
+    const entries = Object.entries(merged).sort((a, b) => b[1] - a[1]);
     return {
-      labels: costBreakdown.map((c) => c.category ?? c.tool_name ?? c.model ?? 'Unknown'),
-      data: costBreakdown.map((c) => c.total_cost),
+      labels: entries.map(([key]) => formatToolName(key)),
+      data: entries.map(([, cost]) => cost),
     };
   }, [costBreakdown]);
 
@@ -588,6 +608,7 @@ export const ROIAnalysis: React.FC = () => {
         {dailyCostData.labels.length > 0 ? (
           <BarChart
             labels={dailyCostData.labels}
+            tooltipLabels={dailyCostData.tooltipLabels}
             datasets={[{ label: t('cost', language), data: dailyCostData.data }]}
             height={200}
           />

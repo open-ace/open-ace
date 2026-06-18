@@ -84,6 +84,11 @@ class MessageRepository:
         """
         from app.repositories.database import is_postgresql
 
+        # Normalize at the write boundary so variant tool names (qwen-code,
+        # QWEN, ...) can never split downstream aggregates (daily_stats,
+        # hourly_stats, ROI cost-breakdown) into duplicate slices.
+        tool_name = normalize_tool_name(tool_name)
+
         if is_postgresql():
             self.db.execute(
                 """
@@ -911,6 +916,13 @@ class MessageRepository:
         is the single source of truth for ``get_batch_analysis``,
         ``get_key_metrics`` and the standalone ``get_conversation_stats``.
 
+        Computes real distinct conversation count, total messages, multi-turn
+        ratio and per-conversation averages directly from ``daily_messages``
+        (grain: 1 row = 1 message). Supports date-range filtering so the batch
+        and standalone analysis endpoints share one consistent scope. This
+        replaces the previous ``unique_dates * unique_tools`` synthetic
+        approximation.
+
         Note: ``COUNT(DISTINCT COALESCE(...))`` cannot use
         ``idx_messages_conversation`` (the COALESCE expression defeats the
         btree); the query is cached at the repo layer (``@cached``) to bound
@@ -924,13 +936,18 @@ class MessageRepository:
             host_name: Optional host name filter.
 
         Returns:
-            Dict: Conversation statistics summary.
+            Dict: Conversation statistics summary. ``avg_conversation_length`` is kept
+            as a backward-compatible alias of ``average_messages_per_conversation``
+            for existing consumers (calculateHealthScore, insights, exports).
         """
         from datetime import datetime, timedelta, timezone
 
         conditions: list[str] = []
         params: list[Any] = []
 
+        # Default to the analysis callers' 30-day window when unset (aligned
+        # with get_batch_analysis / get_key_metrics / the standalone endpoint)
+        # so the batch and standalone paths share one consistent default scope.
         if not start_date:
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
@@ -938,67 +955,87 @@ class MessageRepository:
         if not end_date:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
-        conditions.append("date >= ?")
-        params.append(start_date)
-        conditions.append("date <= ?")
-        params.append(end_date)
+        # Session identifier expression — defined once and reused by the WHERE
+        # filter and the GROUP BY so the two cannot drift apart.
+        session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
 
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
         if host_name:
             conditions.append("host_name = ?")
             params.append(host_name)
 
         # Same id_filter set for numerator (SUM) and denominator (COUNT DISTINCT)
-        # so per-session averages stay scope-consistent. If a faster
+        # so per-session averages stay scope-consistent. Only count records that
+        # carry a session identifier. If a faster
         # ``COUNT(DISTINCT agent_session_id)`` variant is ever adopted, this
         # filter MUST switch to ``agent_session_id IS NOT NULL`` in tandem.
-        id_filter = (
-            "COALESCE(conversation_id, feishu_conversation_id, agent_session_id) IS NOT NULL"
-        )
+        id_filter = f"{session_expr} IS NOT NULL"
         conditions.append(id_filter)
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
+        # Single-pass aggregate: group once per session in a derived table, then
+        # roll up. One scan of daily_messages yields the distinct conversation
+        # count, the total message/token sums and the multi-turn count together
+        # (previously this required two separate queries).
         # COALESCE / COUNT(DISTINCT) / SUM are standard SQL (PostgreSQL + SQLite).
         query = f"""
             SELECT
-                COUNT(DISTINCT COALESCE(conversation_id, feishu_conversation_id, agent_session_id)) as total_conversations,
-                COUNT(*) as total_messages,
-                SUM(tokens_used) as total_tokens,
-                SUM(input_tokens) as total_input_tokens,
-                SUM(output_tokens) as total_output_tokens
-            FROM daily_messages
-            {where_clause}
+                COUNT(*) AS total_conversations,
+                COALESCE(SUM(cnt), 0) AS total_messages,
+                COALESCE(SUM(session_tokens), 0) AS total_tokens,
+                COALESCE(SUM(CASE WHEN cnt >= 2 THEN 1 ELSE 0 END), 0) AS multi_turn_session_count
+            FROM (
+                SELECT
+                    {session_expr} AS s,
+                    COUNT(*) AS cnt,
+                    SUM(tokens_used) AS session_tokens
+                FROM daily_messages
+                {where_clause}
+                GROUP BY {session_expr}
+            ) AS per_session
         """
 
         result = self.db.fetch_one(query, tuple(params))
 
-        if result:
-            total_conversations = result.get("total_conversations", 0) or 0
-            total_messages = result.get("total_messages", 0) or 0
-            total_tokens = result.get("total_tokens", 0) or 0
-
+        total_conversations = (result or {}).get("total_conversations", 0) or 0
+        if not result or total_conversations == 0:
+            # No matching rows (DB returns None) or a real empty set (the derived
+            # table has zero groups -> COUNT(*) = 0). SUM(CASE ...) is NULL in the
+            # latter, but the guard short-circuits before it is read.
             return {
-                "total_conversations": total_conversations,
-                "total_messages": total_messages,
-                "total_tokens": total_tokens,
-                "average_messages_per_conversation": (
-                    total_messages / total_conversations if total_conversations > 0 else 0
-                ),
-                "average_tokens_per_conversation": (
-                    total_tokens / total_conversations if total_conversations > 0 else 0
-                ),
-                "avg_conversation_length": (
-                    total_messages / total_conversations if total_conversations > 0 else 0
-                ),
+                "total_conversations": 0,
+                "total_messages": 0,
+                "total_tokens": 0,
+                "multi_turn_session_count": 0,
+                "multi_turn_ratio": 0,
+                "average_messages_per_conversation": 0,
+                "average_tokens_per_conversation": 0,
+                "avg_conversation_length": 0,
             }
 
+        total_messages = result.get("total_messages", 0) or 0
+        total_tokens = result.get("total_tokens", 0) or 0
+        multi_turn_session_count = result.get("multi_turn_session_count", 0) or 0
+
+        multi_turn_ratio = multi_turn_session_count / total_conversations
+        average_messages = total_messages / total_conversations
+
         return {
-            "total_conversations": 0,
-            "total_messages": 0,
-            "total_tokens": 0,
-            "average_messages_per_conversation": 0,
-            "average_tokens_per_conversation": 0,
-            "avg_conversation_length": 0,
+            "total_conversations": total_conversations,
+            "total_messages": total_messages,
+            "total_tokens": total_tokens,
+            "multi_turn_session_count": multi_turn_session_count,
+            "multi_turn_ratio": multi_turn_ratio,
+            "average_messages_per_conversation": average_messages,
+            "average_tokens_per_conversation": total_tokens / total_conversations,
+            # Backward-compatible alias consumed by calculateHealthScore, insights, exports
+            "avg_conversation_length": average_messages,
         }
 
     def get_daily_range_lightweight(

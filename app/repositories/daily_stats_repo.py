@@ -7,6 +7,7 @@ instead of scanning the large daily_messages table.
 """
 
 import logging
+import warnings
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -394,11 +395,16 @@ class DailyStatsRepository:
         Get conversation statistics from pre-aggregated data.
 
         .. deprecated::
-            This method ESTIMATES conversations as ``unique_dates * unique_tools``
-            (an inflated small denominator) and is no longer called in
-            production. Prefer ``MessageRepository.get_conversation_stats_summary``
-            which returns the real distinct conversation count from a single
-            scope-consistent query. Retained only for backward compatibility.
+            This method estimates ``total_conversations`` as
+            ``unique_dates * unique_tools`` (an inflated small denominator /
+            synthetic approximation) and does not accept a date range, which
+            previously caused the batch endpoint to report session counts
+            inconsistent with the standalone endpoint. It is no longer called in
+            production. ``analysis_service.get_session_stats`` and
+            ``message_repo.get_conversation_stats_summary`` are now the single
+            source of truth (real distinct conversation count from a single
+            scope-consistent query). Retained only for backward compatibility;
+            do not wire it back into ``get_batch_analysis``.
 
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.
@@ -409,6 +415,14 @@ class DailyStatsRepository:
         Returns:
             Dict: Conversation statistics.
         """
+        warnings.warn(
+            "daily_stats_repo.get_conversation_stats is deprecated: it returns a "
+            "synthetic unique_dates * unique_tools estimate. Use "
+            "message_repo.get_conversation_stats_summary (via "
+            "analysis_service.get_session_stats) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         conditions = []
         params = []
 

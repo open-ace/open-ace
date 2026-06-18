@@ -272,6 +272,11 @@ def test_extract_parts_text_resyncs_after_malformed_part(sync_mod):
     assert sync_mod.ZcodeSession._extract_parts_text(blob) == "firstlast"
 
 
+# --------------------------------------------------------------------------- #
+# Edge cases: model guard + unbalanced braces (post-merge review #1089)
+# --------------------------------------------------------------------------- #
+
+
 def test_parse_model_falls_back_to_nested_dict(sync_mod, tmp_path):
     """When modelID is absent, model is read from data["model"]["modelId"]."""
     db = tmp_path / "db.sqlite"
@@ -290,6 +295,27 @@ def test_parse_model_falls_back_to_nested_dict(sync_mod, tmp_path):
     assert session.parse() is True
     assert session.model == "GLM-5.2-Nested"
     assert session.messages[0]["model"] == "GLM-5.2-Nested"
+
+
+def test_parse_handles_string_model_value(sync_mod, tmp_path):
+    """data["model"] may be a string, not a dict — must not raise AttributeError."""
+    db = tmp_path / "db.sqlite"
+    _build_db(db)
+    sid = "sess_strmodel"
+    _insert_session(db, sid)
+    _insert_message(
+        db,
+        "msg_1",
+        sid,
+        1700000000100,
+        {"role": "assistant", "model": "GLM-5.2"},  # string, not dict
+        parts=[{"type": "text", "text": "ok"}],
+    )
+    session = sync_mod.ZcodeSession(sid, db)
+    # Must not raise; parse succeeds; model falls back to None (no modelID).
+    assert session.parse() is True
+    assert session.messages[0]["content"] == "ok"
+    assert session.model is None  # "GLM-5.2" string not under model.modelId
 
 
 def test_parse_model_handles_non_dict_model_field(sync_mod, tmp_path):
@@ -311,3 +337,65 @@ def test_parse_model_handles_non_dict_model_field(sync_mod, tmp_path):
     assert session.parse() is True  # no AttributeError
     assert session.messages[0]["model"] is None
     assert session.model is None
+
+
+def test_parse_handles_dict_model_with_modelId(sync_mod, tmp_path):
+    """When model is a dict with modelId, it is extracted correctly."""
+    db = tmp_path / "db.sqlite"
+    _build_db(db)
+    sid = "sess_dictmodel"
+    _insert_session(db, sid)
+    _insert_message(
+        db,
+        "msg_1",
+        sid,
+        1700000000100,
+        {"role": "assistant", "model": {"modelId": "GLM-5.2", "providerId": "zai"}},
+        parts=[{"type": "text", "text": "ok"}],
+    )
+    session = sync_mod.ZcodeSession(sid, db)
+    assert session.parse() is True
+    assert session.model == "GLM-5.2"
+
+
+def test_extract_parts_text_unbalanced_braces_in_content(sync_mod):
+    """Unbalanced braces inside a text value (common in code/JSON/regex) must
+    not break extraction — the JSONDecoder approach handles this correctly."""
+    blob = '{"type":"text","text":"broken json: {"}' '{"type":"text","text":"} more code"}'
+    # raw_decode handles each object; braces inside quoted strings are safe.
+    result = sync_mod.ZcodeSession._extract_parts_text(blob)
+    assert "broken json:" in result
+    assert "more code" in result
+
+
+def test_scan_loop_survives_malformed_message_data(sync_mod, tmp_path):
+    """A message with non-dict model value must not abort the scan loop.
+
+    This simulates the review scenario where one bad row could poison every
+    sync cycle. We verify parse() returns normally (no exception propagation).
+    """
+    db = tmp_path / "db.sqlite"
+    _build_db(db)
+    sid = "sess_poison"
+    _insert_session(db, sid)
+    # message with model as a list (another non-dict type)
+    _insert_message(
+        db,
+        "msg_bad",
+        sid,
+        1700000000100,
+        {"role": "assistant", "model": ["unexpected"]},
+        parts=[{"type": "text", "text": "survives"}],
+    )
+    _insert_message(
+        db,
+        "msg_ok",
+        sid,
+        1700000000200,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "second"}],
+    )
+    session = sync_mod.ZcodeSession(sid, db)
+    assert session.parse() is True
+    assert session.message_count == 2  # both messages parsed, no exception
+    assert session.model == "GLM-5.2"

@@ -348,3 +348,132 @@ class TestValidatePassword:
         is_valid, msg = validate_password(password)
         assert is_valid is False
         assert expected_in_msg in msg.lower()
+
+    @pytest.mark.parametrize(
+        "password,policy_settings,expected_valid",
+        [
+            # No policy - basic validation only
+            ("12345678", None, True),
+            ("abcdefgh", None, True),
+            # Policy with min_length
+            ("12345678", {"password_min_length": 10}, False),
+            ("1234567890", {"password_min_length": 10}, True),
+            # An admin-configured minimum below the default 8 is respected
+            # (no hardcoded floor overrides the policy).
+            ("123456", {"password_min_length": 6}, True),
+            ("12345", {"password_min_length": 6}, False),
+            # A negative / zero misconfiguration is floored to 1 rather than
+            # disabling the check or breaking validation.
+            ("ValidPass1", {"password_min_length": -100}, True),
+            # Policy requiring uppercase
+            ("abcdefgh", {"password_require_uppercase": True}, False),
+            ("Abcdefgh", {"password_require_uppercase": True}, True),
+            # Policy requiring lowercase
+            ("ABCDEFGH", {"password_require_lowercase": True}, False),
+            ("ABCDefgh", {"password_require_lowercase": True}, True),
+            # Policy requiring number
+            ("abcdefgh", {"password_require_number": True}, False),
+            ("abcdefg1", {"password_require_number": True}, True),
+            # Policy requiring special character
+            ("abcdefgh", {"password_require_special": True}, False),
+            ("abcdefg!", {"password_require_special": True}, True),
+            # Combined policy requirements
+            (
+                "Abcdefg1",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                },
+                True,
+            ),
+            (
+                "Abcdefg!",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_special": True,
+                },
+                True,
+            ),
+            (
+                "abcdefg1",
+                {
+                    "password_require_uppercase": True,
+                    "password_require_number": True,
+                },
+                False,
+            ),  # Missing uppercase
+            # Full policy requirements
+            (
+                "Abcdefg1!",
+                {
+                    "password_min_length": 8,
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                    "password_require_special": True,
+                },
+                True,
+            ),
+            (
+                "Abcdefg1",
+                {
+                    "password_min_length": 8,
+                    "password_require_uppercase": True,
+                    "password_require_lowercase": True,
+                    "password_require_number": True,
+                    "password_require_special": True,
+                },
+                False,
+            ),  # Missing special
+        ],
+        ids=[
+            "no_policy_basic_valid",
+            "no_policy_basic_valid_2",
+            "min_length_10_fail",
+            "min_length_10_pass",
+            "min_length_below_default_pass",
+            "min_length_below_default_fail",
+            "negative_min_length_floored",
+            "require_uppercase_fail",
+            "require_uppercase_pass",
+            "require_lowercase_fail",
+            "require_lowercase_pass",
+            "require_number_fail",
+            "require_number_pass",
+            "require_special_fail",
+            "require_special_pass",
+            "combined_upper_lower_number_pass",
+            "combined_upper_lower_special_pass",
+            "combined_missing_uppercase_fail",
+            "full_policy_pass",
+            "full_policy_missing_special_fail",
+        ],
+    )
+    def test_password_with_policy(self, password, policy_settings, expected_valid):
+        is_valid, msg = validate_password(password, policy_settings=policy_settings)
+        assert is_valid is expected_valid
+        if not expected_valid:
+            assert msg is not None
+
+    @pytest.mark.parametrize(
+        "min_length_value",
+        ["oops", None, "", [], {"nested": 1}],
+        ids=["non_numeric_string", "none", "empty_string", "list", "dict"],
+    )
+    def test_malformed_policy_min_length_falls_back_to_default(self, min_length_value):
+        """A malformed password_min_length must not raise; it falls back to 8.
+
+        Guards the try/except in validate_password so an admin misconfiguration
+        (None / non-numeric / wrong type) surfaces a clean validation result
+        instead of a 500.
+        """
+        policy = {"password_min_length": min_length_value}
+        # 8 chars satisfies the fallback minimum of 8.
+        is_valid, _ = validate_password("12345678", policy_settings=policy)
+        assert is_valid is True
+        # 7 chars fails the fallback minimum of 8.
+        is_valid, msg = validate_password("1234567", policy_settings=policy)
+        assert is_valid is False
+        assert "8" in msg

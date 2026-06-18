@@ -161,19 +161,24 @@ class TestAnalysisService:
 
     def test_get_conversation_stats(self):
         svc, _, mock_msg, _ = self._make_service()
-        # get_conversation_stats now delegates to method B (single source of
-        # truth), removing the old get_conversation_history(limit=1000)/7d path.
+        # get_conversation_stats now delegates to the single source of truth
+        # (get_session_stats -> get_conversation_stats_summary), removing the old
+        # get_conversation_history(limit=1000)/7d path.
         mock_msg.get_conversation_stats_summary.return_value = {
             "total_conversations": 2,
             "total_messages": 15,
             "total_tokens": 700,
             "total_input_tokens": 0,
             "total_output_tokens": 0,
+            "multi_turn_ratio": 0.5,
             "average_messages_per_conversation": 7.5,
             "average_tokens_per_conversation": 350.0,
             "avg_conversation_length": 7.5,
         }
         result = svc.get_conversation_stats("2026-05-01", "2026-05-23")
+        # Delegates to the real repo query (single source of truth), no longer
+        # to the previous get_conversation_history(limit=1000) in-memory path.
+        mock_msg.get_conversation_stats_summary.assert_called_once()
         assert result["total_conversations"] == 2
         assert result["total_messages"] == 15
         mock_msg.get_conversation_stats_summary.assert_called_once_with(

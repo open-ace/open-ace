@@ -10,6 +10,7 @@ import {
   useDeleteUser,
   useUpdateUserPassword,
   usePageRefresh,
+  useSecuritySettings,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -31,6 +32,7 @@ import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 export const UserManagement: React.FC = () => {
   const language = useLanguage();
   const { data: users, isLoading, isError, error, refetch } = useUsers();
+  const { data: securitySettings } = useSecuritySettings();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
@@ -69,6 +71,58 @@ export const UserManagement: React.FC = () => {
     { value: 'true', label: t('active', language) },
     { value: 'false', label: t('inactive', language) },
   ];
+
+  // Password policy validation
+  const validatePasswordPolicy = (password: string): string | null => {
+    if (!password) return t('passwordRequired', language) ?? 'Password is required';
+    if (password.length < 8)
+      return t('passwordTooShort', language) ?? 'Password must be at least 8 characters';
+
+    const policy = securitySettings;
+    if (policy) {
+      const minLen = policy.password_min_length || 8;
+      if (password.length < minLen) {
+        return `${t('passwordMinLength', language)}: ${minLen}`;
+      }
+      if (policy.password_require_uppercase && !/[A-Z]/.test(password)) {
+        return t('requireUppercase', language);
+      }
+      if (policy.password_require_lowercase && !/[a-z]/.test(password)) {
+        return t('requireLowercase', language);
+      }
+      if (policy.password_require_number && !/[0-9]/.test(password)) {
+        return t('requireNumber', language);
+      }
+      if (policy.password_require_special && !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+        return t('requireSpecial', language);
+      }
+    }
+    return null;
+  };
+
+  // Password policy hint component
+  const PasswordPolicyHint = () => {
+    const policy = securitySettings;
+    if (!policy) return null;
+
+    const requirements: string[] = [];
+    requirements.push(`${t('passwordMinLength', language)}: ${policy.password_min_length || 8}`);
+    if (policy.password_require_uppercase) requirements.push(t('requireUppercase', language));
+    if (policy.password_require_lowercase) requirements.push(t('requireLowercase', language));
+    if (policy.password_require_number) requirements.push(t('requireNumber', language));
+    if (policy.password_require_special) requirements.push(t('requireSpecial', language));
+
+    return (
+      <div className="password-policy-hint text-muted small mt-1">
+        <div>{t('passwordRequirements', language)}:</div>
+        <ul className="mb-0 ps-3" style={{ fontSize: '0.85em' }}>
+          {requirements.map((req, idx) => (
+            <li key={idx}>{req}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
 
   const handleOpenCreate = () => {
     setEditingUser(null);
@@ -130,13 +184,17 @@ export const UserManagement: React.FC = () => {
     }
 
     if (!editingUser) {
-      // Password required for new users
-      if (!formData.password || formData.password.trim() === '') {
-        setFormError(t('passwordRequired', language) ?? 'Password is required');
+      // Password required for new users - validate with policy
+      const passwordError = validatePasswordPolicy(formData.password);
+      if (passwordError) {
+        setFormError(passwordError);
         return;
       }
-      if (formData.password.length < 8) {
-        setFormError(t('passwordTooShort', language) ?? 'Password must be at least 8 characters');
+    } else if (formData.password && formData.password.trim() !== '') {
+      // Optional password update for existing user - validate with policy
+      const passwordError = validatePasswordPolicy(formData.password);
+      if (passwordError) {
+        setFormError(passwordError);
         return;
       }
     }
@@ -389,6 +447,7 @@ export const UserManagement: React.FC = () => {
                     onChange={(value: string) => setFormData({ ...formData, password: value })}
                     placeholder={t('enterPassword', language)}
                   />
+                  <PasswordPolicyHint />
                 </div>
                 <div className="col-md-6">
                   <label className="form-label">{t('confirmPassword', language)}</label>
@@ -417,6 +476,7 @@ export const UserManagement: React.FC = () => {
                     onChange={(value: string) => setFormData({ ...formData, password: value })}
                     placeholder={t('enterPassword', language)}
                   />
+                  <PasswordPolicyHint />
                 </div>
                 <div className="col-md-6">
                   <label className="form-label">{t('confirmPassword', language)}</label>

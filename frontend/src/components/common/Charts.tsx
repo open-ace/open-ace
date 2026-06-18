@@ -224,6 +224,13 @@ interface BarChartProps {
   unit?: 'none' | 'K' | 'M' | 'B';
   /** User names for tooltip display (used when labels are ranking numbers) */
   usernames?: string[];
+  /**
+   * Explicit per-bar tooltip titles. When provided, the tooltip title uses
+   * these instead of the (possibly compact) axis label — e.g. full YYYY-MM-DD
+   * dates on hover while the axis shows a short format. Optional; omitting it
+   * keeps the default behavior so existing callers are unaffected.
+   */
+  tooltipLabels?: string[];
   /** Language for tooltip translation */
   language?: Language;
 }
@@ -239,6 +246,7 @@ export const BarChart: React.FC<BarChartProps> = ({
   className,
   unit = 'none',
   usernames,
+  tooltipLabels,
   language,
 }) => {
   // Helper function to format values based on unit
@@ -292,6 +300,12 @@ export const BarChart: React.FC<BarChartProps> = ({
             if (horizontal && usernames && context[0]) {
               const dataIndex = context[0].dataIndex ?? 0;
               return usernames[dataIndex] ?? '';
+            }
+            // Prefer explicit tooltip labels (e.g. full YYYY-MM-DD dates) over
+            // the compact axis label when both are available.
+            if (tooltipLabels && context[0]) {
+              const dataIndex = context[0].dataIndex ?? 0;
+              return tooltipLabels[dataIndex] ?? '';
             }
             // Default: use label (ranking number or category)
             return context[0]?.label ?? '';

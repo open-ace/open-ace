@@ -34,6 +34,7 @@ import {
 } from '@/components/common';
 import { formatTokens, formatToolName, createMatcherConfig } from '@/utils';
 import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
+import { SessionStatisticsCard, calculateHealthScore } from './SessionStatisticsCard';
 
 // Skeleton components
 const MetricsSkeleton: React.FC = () => (
@@ -360,7 +361,7 @@ export const TrendAnalysis: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('totalRequests', language)}
-            value={(keyMetrics?.total_messages ?? 0).toLocaleString()}
+            value={Number(keyMetrics?.total_messages ?? 0).toLocaleString()}
             icon={<i className="bi bi-chat-dots fs-4" />}
             variant="success"
           />
@@ -499,32 +500,7 @@ export const TrendAnalysis: React.FC = () => {
       {/* Detailed Stats */}
       <div className="row mb-4">
         <div className="col-md-6">
-          <Card title={t('sessionStatistics', language)}>
-            <div style={{ height: 200 }}>
-              <table className="table table-sm">
-                <tbody>
-                  <tr>
-                    <td>{t('avgMessagesPerSession', language)}</td>
-                    <td className="text-end">
-                      {Math.round(keyMetrics?.avg_messages_per_session ?? 0)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>{t('avgTokensPerSession', language)}</td>
-                    <td className="text-end">
-                      {formatTokens(keyMetrics?.avg_tokens_per_session ?? 0)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>{t('totalSessions', language)}</td>
-                    <td className="text-end">
-                      {keyMetrics?.total_sessions?.toLocaleString() ?? '0'}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
+          <SessionStatisticsCard conversationStats={conversationStats} />
         </div>
         <div className="col-md-6">
           <Card
@@ -704,20 +680,8 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
 
 /**
  * Helper Functions
+ *
+ * `calculateHealthScore` and the session-statistics card are shared from
+ * `./SessionStatisticsCard` so the Token Trend and Analysis overview pages stay
+ * in sync.
  */
-function calculateHealthScore(
-  keyMetrics: { total_sessions?: number; avg_tokens_per_session?: number } | undefined,
-  conversationStats: { avg_conversation_length?: number } | undefined
-): number {
-  let score = 100;
-
-  if (keyMetrics?.avg_tokens_per_session && keyMetrics.avg_tokens_per_session < 1000) {
-    score -= 20;
-  }
-
-  if (conversationStats?.avg_conversation_length && conversationStats.avg_conversation_length < 2) {
-    score -= 15;
-  }
-
-  return Math.max(0, Math.min(100, score));
-}
