@@ -741,6 +741,24 @@ class TestAllowedFieldsFiltering:
         assert "malicious_field" not in updated
         assert "DROP TABLE" not in updated
 
+    def test_update_persists_transient_retry_count(self, auto_db):
+        """transient_retry_count must be in the whitelist so the orchestrator's
+        layer-2 retry counter actually reaches the database (#1127 P1)."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Retry Test",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+            }
+        )
+
+        repo.update_workflow(wf["workflow_id"], {"transient_retry_count": 3})
+        updated = repo.get_workflow(wf["workflow_id"])
+        assert updated["transient_retry_count"] == 3
+
     def test_update_filters_out_empty_update_set(self, auto_db):
         """When all fields are non-allowed, no update occurs (returns current state)."""
         repo = AutonomousWorkflowRepository(auto_db)
