@@ -2979,33 +2979,30 @@ class AutonomousOrchestrator:
                 )
             except GitHubOpsError as e:
                 err_msg = str(e)
-                if "base branch policy prohibits" in err_msg:
-                    # Not a conflict — branch protection (CI pending / review
-                    # required). Enable auto-merge so GitHub completes it once
-                    # requirements pass, instead of failing the workflow.
-                    try:
-                        gh.merge_pr(pr_number, strategy="merge", auto=True)
-                        self._create_milestone(
-                            phase="merge",
-                            milestone_type="merged",
-                            status="completed",
-                            title=f"PR #{pr_number} auto-merge enabled",
-                        )
-                        logger.info("PR #%s: enabled auto-merge (branch policy)", pr_number)
-                        return  # auto-merge pending; GitHub merges asynchronously
-                    except GitHubOpsError as auto_err:
-                        # --auto also rejected — fall through to local resolution
-                        logger.info(
-                            "PR #%s --auto rejected (%s), resolving conflicts",
-                            pr_number,
-                            auto_err,
-                        )
-                else:
-                    # Merge conflict — resolve locally and retry
-                    logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
-
                 try:
-                    self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                    if "base branch policy prohibits" in err_msg:
+                        # Not a conflict — branch protection (CI still running).
+                        # Poll CI until it finishes, then retry the merge.
+                        logger.info("PR #%s blocked by policy, waiting for CI", pr_number)
+                        self._poll_ci_status(gh, pr_number)
+                        try:
+                            gh.merge_pr(pr_number, strategy="merge")
+                            self._create_milestone(
+                                phase="merge",
+                                milestone_type="merged",
+                                status="completed",
+                                title=f"PR #{pr_number} merged",
+                            )
+                            logger.info("PR #%s merged after CI", pr_number)
+                        except GitHubOpsError:
+                            # Still rejected after CI — fall through to conflict
+                            # resolution (may have conflicts after all).
+                            logger.info("PR #%s still not mergeable after CI, resolving", pr_number)
+                            self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                    else:
+                        # Merge conflict — resolve locally and retry
+                        logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+                        self._resolve_merge_conflicts(gh, branch_name, pr_number)
                 except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
@@ -3159,8 +3156,13 @@ class AutonomousOrchestrator:
                 if not result.success:
                     raise RuntimeError(f"Conflict resolution failed: {result.error}")
 
-            # Push the merged branch and retry PR merge
+            # Push the merged branch, wait for CI, then merge. The freshly
+            # pushed merge commit triggers a new CI run; merging before it
+            # finishes would be rejected by branch protection. Poll CI first
+            # (same mechanism as pr_review) so the merge succeeds without
+            # bypassing checks.
             wt_gh.git_push(branch=branch_name)
+            self._poll_ci_status(gh, pr_number)
             gh.merge_pr(pr_number, strategy="merge")
 
             self._create_milestone(

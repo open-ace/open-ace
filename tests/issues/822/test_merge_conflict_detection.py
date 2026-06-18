@@ -139,16 +139,16 @@ class TestResolveMergeConflictsStdoutConflict:
 # ── Bug 2: branch-policy rejection uses --auto ───────────────────────────
 
 
-class TestDoMergeBranchPolicyAuto:
-    """ "base branch policy prohibits" should retry with --auto (#820)."""
+class TestDoMergeBranchPolicyPoll:
+    """ "base branch policy prohibits" should poll CI then retry merge (#820)."""
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_policy_prohibition_retries_with_auto(self, mock_gh_cls):
+    def test_policy_rejection_polls_ci_then_merges(self, mock_gh_cls):
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
-        # First merge_pr (no auto) → policy rejection.
-        # Second merge_pr (auto=True) → success.
+        o._gh = mock_gh
+        # First merge_pr → policy rejection. Second merge_pr (after CI poll) → success.
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError(
                 "gh pr merge 1103 --merge failed (exit 1): "
@@ -157,26 +157,26 @@ class TestDoMergeBranchPolicyAuto:
             ),
             {"merged": True, "number": 1103},
         ]
-        o._gh = mock_gh
+        o._poll_ci_status = MagicMock()
 
         o._do_merge(_make_workflow())
 
+        # CI was polled between the two merge attempts.
+        o._poll_ci_status.assert_called_once()
         assert mock_gh.merge_pr.call_count == 2
-        # Second call must include auto=True.
-        second_call = mock_gh.merge_pr.call_args_list[1]
-        assert second_call.kwargs.get("auto") is True
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_policy_then_auto_fail_falls_to_resolve(self, mock_gh_cls):
-        """If --auto is also rejected, fall through to conflict resolution."""
+    def test_policy_then_still_rejected_falls_to_resolve(self, mock_gh_cls):
+        """If merge is still rejected after CI poll, fall through to resolution."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("base branch policy prohibits the merge"),
-            GitHubOpsError("--auto also rejected"),
+            GitHubOpsError("still not mergeable after CI"),
         ]
-        o._gh = mock_gh
+        o._poll_ci_status = MagicMock()
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
@@ -185,14 +185,14 @@ class TestDoMergeBranchPolicyAuto:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_clean_conflict_goes_straight_to_resolve(self, mock_gh_cls):
-        """A conflict error (not policy) skips --auto and resolves directly."""
+        """A conflict error (not policy) skips CI poll and resolves directly."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
+        o._gh = mock_gh
         mock_gh.merge_pr.side_effect = [
             GitHubOpsError("gh pr merge 1103 failed: the merge commit cannot be cleanly created"),
         ]
-        o._gh = mock_gh
         o._resolve_merge_conflicts = MagicMock()
 
         o._do_merge(_make_workflow())
