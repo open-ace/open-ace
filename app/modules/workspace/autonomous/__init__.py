@@ -85,8 +85,12 @@ def get_ddl_statements():
             parent_workflow_id TEXT,
             fork_milestone_id TEXT,
             user_feedback TEXT DEFAULT '',
-            original_branch_name TEXT DEFAULT ''
+            original_branch_name TEXT DEFAULT '',
+            transient_retry_count INTEGER DEFAULT 0
         )
+        """,
+        """
+        ALTER TABLE autonomous_workflows ADD COLUMN IF NOT EXISTS transient_retry_count INTEGER DEFAULT 0
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_workflows_user_status

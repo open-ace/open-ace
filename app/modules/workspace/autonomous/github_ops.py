@@ -10,9 +10,48 @@ import json
 import logging
 import os
 import subprocess
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Transient git/gh error retry — network blips (TLS, DNS, connection reset)
+# are common and recover within seconds. Fixed-interval retry is sufficient
+# because git operations are lightweight and idempotent; exponential backoff
+# (designed for API rate-limiting) is unnecessary here.
+GIT_NETWORK_RETRY_COUNT = 3
+GIT_NETWORK_RETRY_INTERVAL = 10  # seconds
+
+# Keywords that indicate a transient network error (vs a real git failure like
+# conflicts, missing branches, etc.).
+_TRANSIENT_ERROR_KEYWORDS = [
+    "libressl",
+    "openssl",
+    "ssl",
+    "tls",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "timed out",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "unable to access",
+    "RPC failed",
+    "early eof",
+]
+
+
+def _is_transient_error(stderr: str, returncode: int) -> bool:
+    """Whether a git/gh subprocess failure looks like a transient network issue.
+
+    Returns True for transient issues (worth retrying) vs permanent errors
+    (conflict, missing branch, auth).
+    """
+    combined = f"{stderr}".lower()
+    if returncode == 128:  # git fatal errors — many are network-related
+        return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
+    return False
 
 
 class GitHubOpsError(Exception):
@@ -64,34 +103,92 @@ class GitHubOps:
         return kwargs
 
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-        """Run a gh CLI command."""
+        """Run a gh CLI command with transient-network-error retry."""
         cmd = ["gh"] + args
-        try:
-            result = subprocess.run(cmd, **self._build_subprocess_kwargs())
-            if check and result.returncode != 0:
-                raise GitHubOpsError(
-                    f"gh {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
-                )
-            return result
-        except subprocess.TimeoutExpired:
-            raise GitHubOpsError(f"gh {' '.join(args)} timed out after 120s")
-        except FileNotFoundError:
-            raise GitHubOpsError("gh CLI not found. Please install and authenticate gh.")
+        last_error: Optional[GitHubOpsError] = None
+        for attempt in range(GIT_NETWORK_RETRY_COUNT):
+            try:
+                result = subprocess.run(cmd, **self._build_subprocess_kwargs())
+                if check and result.returncode != 0:
+                    err = GitHubOpsError(
+                        f"gh {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
+                    )
+                    if (
+                        _is_transient_error(result.stderr, result.returncode)
+                        and attempt < GIT_NETWORK_RETRY_COUNT - 1
+                    ):
+                        last_error = err
+                        logger.warning(
+                            "gh %s transient error (attempt %d/%d), retrying in %ds",
+                            args[0],
+                            attempt + 1,
+                            GIT_NETWORK_RETRY_COUNT,
+                            GIT_NETWORK_RETRY_INTERVAL,
+                        )
+                        time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+                        continue
+                    raise err
+                return result
+            except subprocess.TimeoutExpired:
+                if attempt < GIT_NETWORK_RETRY_COUNT - 1:
+                    last_error = GitHubOpsError(f"gh {' '.join(args)} timed out after 120s")
+                    logger.warning(
+                        "gh %s timed out (attempt %d/%d), retrying in %ds",
+                        args[0],
+                        attempt + 1,
+                        GIT_NETWORK_RETRY_COUNT,
+                        GIT_NETWORK_RETRY_INTERVAL,
+                    )
+                    time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+                    continue
+                raise GitHubOpsError(f"gh {' '.join(args)} timed out after 120s")
+            except FileNotFoundError:
+                raise GitHubOpsError("gh CLI not found. Please install and authenticate gh.")
+        raise last_error or GitHubOpsError(f"gh {' '.join(args)} failed after retries")
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-        """Run a git command."""
+        """Run a git command with transient-network-error retry."""
         cmd = ["git"] + args
-        try:
-            result = subprocess.run(cmd, **self._build_subprocess_kwargs())
-            if check and result.returncode != 0:
-                raise GitHubOpsError(
-                    f"git {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
-                )
-            return result
-        except subprocess.TimeoutExpired:
-            raise GitHubOpsError(f"git {' '.join(args)} timed out after 120s")
-        except FileNotFoundError:
-            raise GitHubOpsError("git not found")
+        last_error: Optional[GitHubOpsError] = None
+        for attempt in range(GIT_NETWORK_RETRY_COUNT):
+            try:
+                result = subprocess.run(cmd, **self._build_subprocess_kwargs())
+                if check and result.returncode != 0:
+                    err = GitHubOpsError(
+                        f"git {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
+                    )
+                    if (
+                        _is_transient_error(result.stderr, result.returncode)
+                        and attempt < GIT_NETWORK_RETRY_COUNT - 1
+                    ):
+                        last_error = err
+                        logger.warning(
+                            "git %s transient error (attempt %d/%d), retrying in %ds",
+                            args[0],
+                            attempt + 1,
+                            GIT_NETWORK_RETRY_COUNT,
+                            GIT_NETWORK_RETRY_INTERVAL,
+                        )
+                        time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+                        continue
+                    raise err
+                return result
+            except subprocess.TimeoutExpired:
+                if attempt < GIT_NETWORK_RETRY_COUNT - 1:
+                    last_error = GitHubOpsError(f"git {' '.join(args)} timed out after 120s")
+                    logger.warning(
+                        "git %s timed out (attempt %d/%d), retrying in %ds",
+                        args[0],
+                        attempt + 1,
+                        GIT_NETWORK_RETRY_COUNT,
+                        GIT_NETWORK_RETRY_INTERVAL,
+                    )
+                    time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+                    continue
+                raise GitHubOpsError(f"git {' '.join(args)} timed out after 120s")
+            except FileNotFoundError:
+                raise GitHubOpsError("git not found")
+        raise last_error or GitHubOpsError(f"git {' '.join(args)} failed after retries")
 
     # ── Repo Operations ────────────────────────────────────────────
 
