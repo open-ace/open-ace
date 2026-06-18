@@ -48,8 +48,17 @@ class TestIsTransientError:
     def test_missing_branch_is_not_transient(self):
         assert not _is_transient_error("fatal: not a valid object name", 128)
 
-    def test_non_128_exit_not_transient(self):
-        assert not _is_transient_error("some ssl error", 1)
+    def test_gh_cli_exit_1_with_tls_is_transient(self):
+        """gh CLI exits 1 (not 128), but TLS errors are still transient."""
+        assert _is_transient_error("LibreSSL SSL_connect failed", 1)
+
+    def test_non_zero_exit_without_network_keywords_not_transient(self):
+        """Exit 1 with no network keywords (e.g. conflict) is not transient."""
+        assert not _is_transient_error("merge conflict in file.py", 1)
+
+    def test_exit_zero_is_not_transient(self):
+        """Exit 0 (success) is never transient."""
+        assert not _is_transient_error("LibreSSL", 0)
 
 
 # ── Layer 1: _run_git retry loop ─────────────────────────────────────────
@@ -90,6 +99,35 @@ class TestRunGitRetry:
             from app.modules.workspace.autonomous.github_ops import GIT_NETWORK_RETRY_COUNT
 
             assert mock_run.call_count == GIT_NETWORK_RETRY_COUNT
+
+
+# ── Layer 1: _run_gh retry loop (gh CLI uses exit 1, not 128) ────────────
+
+
+class TestRunGhRetry:
+    def test_retries_transient_exit_1_then_succeeds(self):
+        """gh CLI exits 1 on TLS error — should still retry."""
+        gh = GitHubOps("/tmp/repo")
+        results = [
+            MagicMock(returncode=1, stderr="LibreSSL SSL_connect failed", stdout=""),
+            MagicMock(returncode=0, stderr="", stdout="ok"),
+        ]
+        with patch("subprocess.run", side_effect=results) as mock_run, patch("time.sleep"):
+            result = gh._run_gh(["pr", "merge", "10"])
+            assert mock_run.call_count == 2
+            assert result.returncode == 0
+
+    def test_no_retry_on_gh_non_transient(self):
+        """gh permanent error (merge conflict) is not retried."""
+        gh = GitHubOps("/tmp/repo")
+        with patch("subprocess.run") as mock_run, patch("time.sleep") as mock_sleep:
+            mock_run.return_value = MagicMock(
+                returncode=1, stderr="not mergeable: merge commit cannot be created", stdout=""
+            )
+            with pytest.raises(GitHubOpsError, match="not mergeable"):
+                gh._run_gh(["pr", "merge", "10"])
+            assert mock_run.call_count == 1
+            mock_sleep.assert_not_called()
 
 
 # ── Layer 2: advance() transient auto-retry ──────────────────────────────
@@ -156,14 +194,15 @@ class TestAdvanceTransientRetry:
             c for c in mock_repo.update_workflow.call_args_list if c[0][1].get("status") == "failed"
         ]
         assert not status_updates, "workflow was marked failed on transient error"
-        # transient_retry_count was incremented.
-        retry_updates = [
+        # transient_retry_count must be persisted (not just error_message) so
+        # the next scheduler cycle sees the incremented count (#1127 P1).
+        count_updates = [
             c
             for c in mock_repo.update_workflow.call_args_list
-            if "transient_retry_count" not in c[0][1]
-            and "Transient network error" in c[0][1].get("error_message", "")
+            if c[0][1].get("transient_retry_count") == 1
         ]
-        assert retry_updates, "error_message should record transient retry"
+        assert count_updates, "transient_retry_count must be written back to DB"
+        assert "Transient network error" in count_updates[0][0][1].get("error_message", "")
 
     def test_non_transient_error_fails_immediately(self):
         """A conflict error (not network) marks failed right away."""

@@ -1218,6 +1218,7 @@ class AutonomousOrchestrator:
                     )
                     self._update_workflow(
                         {
+                            "transient_retry_count": transient_count,
                             "error_message": f"Transient network error (retry {transient_count}/{TRANSIENT_RETRY_MAX}): {e}",
                         }
                     )

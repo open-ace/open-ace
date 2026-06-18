@@ -47,11 +47,15 @@ def _is_transient_error(stderr: str, returncode: int) -> bool:
 
     Returns True for transient issues (worth retrying) vs permanent errors
     (conflict, missing branch, auth).
+
+    Git uses exit code 128 for fatal errors; gh CLI uses exit 1. Both can
+    carry network-related messages, so we check the keywords regardless of
+    the specific non-zero exit code.
     """
+    if returncode == 0:
+        return False
     combined = f"{stderr}".lower()
-    if returncode == 128:  # git fatal errors — many are network-related
-        return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
-    return False
+    return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
 
 
 class GitHubOpsError(Exception):
