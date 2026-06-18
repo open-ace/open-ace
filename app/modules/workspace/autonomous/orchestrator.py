@@ -2963,12 +2963,35 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically."""
+        """Merge PR and clean up. Resolves merge conflicts automatically.
+
+        Merge is retried across scheduler cycles instead of blocking on CI:
+        if CI is still running we return (staying in 'merging') and the
+        scheduler retries in ~10s. This avoids hogging a workflow thread for
+        the full CI duration (10+ min for Python 3.9) and naturally adapts
+        to variable CI times without --admin bypass or long polls.
+        """
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
+            # If CI is still running, defer this merge to the next scheduler
+            # cycle instead of blocking (synchronous poll) or failing. The
+            # scheduler re-enters _do_merge every ~10s.
+            try:
+                checks = gh.get_pr_checks(pr_number)
+            except Exception:
+                checks = []
+            pending = [c for c in checks if c.get("bucket") == "pending"]
+            if pending:
+                logger.info(
+                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
+                    pr_number,
+                    len(pending),
+                )
+                return
+
             try:
                 gh.merge_pr(pr_number, strategy="merge")
                 self._create_milestone(
@@ -2980,32 +3003,30 @@ class AutonomousOrchestrator:
             except GitHubOpsError as e:
                 err_msg = str(e)
                 if "base branch policy prohibits" in err_msg:
-                    # Not a conflict — branch protection (CI pending / review
-                    # required). Enable auto-merge so GitHub completes it once
-                    # requirements pass, instead of failing the workflow.
-                    try:
-                        gh.merge_pr(pr_number, strategy="merge", auto=True)
-                        self._create_milestone(
-                            phase="merge",
-                            milestone_type="merged",
-                            status="completed",
-                            title=f"PR #{pr_number} auto-merge enabled",
+                    # CI reports done but GitHub hasn't reconciled yet, or a
+                    # late check started. Check whether CI actually failed —
+                    # if so, this is a real failure, not a transient deferral.
+                    failed = [c for c in checks if c.get("bucket") == "fail"]
+                    if failed:
+                        failed_names = ", ".join(c.get("name", "?") for c in failed)
+                        raise GitHubOpsError(
+                            f"PR #{pr_number} CI failed ({failed_names}), cannot merge"
                         )
-                        logger.info("PR #%s: enabled auto-merge (branch policy)", pr_number)
-                        return  # auto-merge pending; GitHub merges asynchronously
-                    except GitHubOpsError as auto_err:
-                        # --auto also rejected — fall through to local resolution
-                        logger.info(
-                            "PR #%s --auto rejected (%s), resolving conflicts",
-                            pr_number,
-                            auto_err,
-                        )
-                else:
+                    # No failures, just policy lag — defer to next cycle.
+                    logger.info(
+                        "PR #%s: policy prohibits (CI not failed), deferring merge", pr_number
+                    )
+                    return
+                try:
                     # Merge conflict — resolve locally and retry
                     logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
-
-                try:
                     self._resolve_merge_conflicts(gh, branch_name, pr_number)
+                    # Conflicts resolved + pushed, but NOT merged yet — the push
+                    # triggered a fresh CI run. Return here (staying in 'merging')
+                    # so _do_merge's CI-pending deferral handles the wait on the
+                    # next cycle. Falling through to cleanup would delete the
+                    # branch before the PR is merged (#1112 P1).
+                    return
                 except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
@@ -3143,7 +3164,7 @@ class AutonomousOrchestrator:
                     allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
                         wf.get("cli_tool", "claude-code"), []
                     ),
-                    session_line="main",
+                    session_line="fresh",
                     milestone_id=conflict_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(result)
@@ -3159,15 +3180,16 @@ class AutonomousOrchestrator:
                 if not result.success:
                     raise RuntimeError(f"Conflict resolution failed: {result.error}")
 
-            # Push the merged branch and retry PR merge
+            # Push the resolved branch. The new merge commit triggers a fresh
+            # CI run, so we do NOT merge here — _do_merge will retry on the
+            # next scheduler cycle once CI passes (it checks for pending CI
+            # at the top and defers until checks are green).
             wt_gh.git_push(branch=branch_name)
-            gh.merge_pr(pr_number, strategy="merge")
-
             self._create_milestone(
                 phase="merge",
-                milestone_type="merged",
+                milestone_type="conflicts_pushed",
                 status="completed",
-                title=f"PR #{pr_number} merged (conflicts resolved)",
+                title=f"PR #{pr_number} conflicts resolved, waiting for CI to merge",
             )
         finally:
             # Always tear down the temp worktree, even on failure, so it does
