@@ -29,6 +29,8 @@ vi.mock('@/i18n', () => ({
       previous: 'Previous',
       next: 'Next',
       goToPage: 'Go to page {page}',
+      goToPageLabel: 'Go to page',
+      totalPages: 'Total {total} pages',
       pageInfo: 'Page {current} of {total}',
       invalidPageNumber: 'Please enter a valid page number (1-{total})',
       previousPage: 'Previous page',
@@ -394,14 +396,15 @@ describe('Pagination Component', () => {
       expect(screen.getByText('Next')).toBeInTheDocument();
     });
 
-    it('should show page info by default', () => {
+    it('should show total pages by default', () => {
       render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
 
-      // Should show "Page 5 of 10"
-      expect(screen.getByText(/Page 5 of 10/i)).toBeInTheDocument();
+      // Should show "Total 10 pages" (both desktop and mobile versions)
+      const totalPagesElements = screen.getAllByText(/Total 10 pages/i);
+      expect(totalPagesElements.length).toBeGreaterThan(0);
     });
 
-    it('should hide page info when showPageInfo=false', () => {
+    it('should show total pages even when showPageInfo=false (deprecated)', () => {
       render(
         <Pagination
           currentPage={5}
@@ -411,7 +414,9 @@ describe('Pagination Component', () => {
         />
       );
 
-      expect(screen.queryByText(/Page 5 of 10/i)).not.toBeInTheDocument();
+      // Total pages are now always displayed
+      const totalPagesElements = screen.getAllByText(/Total 10 pages/i);
+      expect(totalPagesElements.length).toBeGreaterThan(0);
     });
 
     it('should show jump input by default', () => {
