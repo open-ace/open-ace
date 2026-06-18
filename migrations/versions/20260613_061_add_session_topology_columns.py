@@ -39,8 +39,24 @@ def _column_exists(conn, table: str, column: str) -> bool:
     return any(row[1] == column for row in result.fetchall())
 
 
+def _table_exists(conn, table: str) -> bool:
+    """Check if a table exists."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table"),
+            {"table": table},
+        )
+        return result.fetchone() is not None
+
+    result = conn.execute(
+        sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name = :table"),
+        {"table": table},
+    )
+    return result.fetchone() is not None
+
+
 def _add_text(conn, table: str, column: str) -> None:
-    if not _column_exists(conn, table, column):
+    if _table_exists(conn, table) and not _column_exists(conn, table, column):
         op.add_column(
             table,
             sa.Column(column, sa.Text, server_default="", nullable=False),
@@ -48,7 +64,7 @@ def _add_text(conn, table: str, column: str) -> None:
 
 
 def _add_int(conn, table: str, column: str) -> None:
-    if not _column_exists(conn, table, column):
+    if _table_exists(conn, table) and not _column_exists(conn, table, column):
         op.add_column(
             table,
             sa.Column(column, sa.Integer, server_default="0", nullable=False),
@@ -78,7 +94,9 @@ def downgrade() -> None:
     """Remove session topology and per-phase usage columns."""
     conn = op.get_bind()
 
-    if _column_exists(conn, "session_messages", "milestone_id"):
+    if _table_exists(conn, "session_messages") and _column_exists(
+        conn, "session_messages", "milestone_id"
+    ):
         op.drop_column("session_messages", "milestone_id")
 
     for column in (
@@ -87,9 +105,13 @@ def downgrade() -> None:
         "phase_input_tokens",
         "phase_total_tokens",
     ):
-        if _column_exists(conn, "workflow_milestones", column):
+        if _table_exists(conn, "workflow_milestones") and _column_exists(
+            conn, "workflow_milestones", column
+        ):
             op.drop_column("workflow_milestones", column)
 
     for column in ("test_session_id", "review_session_id", "main_session_id"):
-        if _column_exists(conn, "autonomous_workflows", column):
+        if _table_exists(conn, "autonomous_workflows") and _column_exists(
+            conn, "autonomous_workflows", column
+        ):
             op.drop_column("autonomous_workflows", column)

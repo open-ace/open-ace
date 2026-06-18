@@ -26,14 +26,18 @@ depends_on = None
 
 def _column_exists(conn, table: str, column: str) -> bool:
     """Check if a column already exists (idempotent migration)."""
-    result = conn.execute(
-        sa.text(
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = :table AND column_name = :column"
-        ),
-        {"table": table, "column": column},
-    )
-    return result.scalar() > 0
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_name = :table AND column_name = :column"
+            ),
+            {"table": table, "column": column},
+        )
+        return result.scalar() > 0
+
+    result = conn.execute(sa.text(f"PRAGMA table_info({table})"))
+    return any(row[1] == column for row in result.fetchall())
 
 
 def upgrade() -> None:

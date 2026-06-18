@@ -47,11 +47,28 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     return result.fetchone() is not None
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    """Check if a table exists in the current database."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table_name"),
+            {"table_name": table_name},
+        )
+    else:
+        result = conn.execute(
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name = :table_name"),
+            {"table_name": table_name},
+        )
+    return result.fetchone() is not None
+
+
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
 
-    if not _column_exists(conn, "agent_sessions", "request_count"):
+    if _table_exists(conn, "agent_sessions") and not _column_exists(
+        conn, "agent_sessions", "request_count"
+    ):
         op.add_column(
             "agent_sessions",
             sa.Column("request_count", sa.Integer(), nullable=True, default=0),
@@ -67,5 +84,7 @@ def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
 
-    if _column_exists(conn, "agent_sessions", "request_count"):
+    if _table_exists(conn, "agent_sessions") and _column_exists(
+        conn, "agent_sessions", "request_count"
+    ):
         op.drop_column("agent_sessions", "request_count")

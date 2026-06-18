@@ -22,8 +22,15 @@ depends_on = None
 
 def _table_exists(conn, table: str) -> bool:
     """Check if a table already exists."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table"),
+            {"table": table},
+        )
+        return result.scalar() > 0
+
     result = conn.execute(
-        sa.text("SELECT COUNT(*) FROM information_schema.tables " "WHERE table_name = :table"),
+        sa.text("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = :table"),
         {"table": table},
     )
     return result.scalar() > 0
@@ -31,14 +38,18 @@ def _table_exists(conn, table: str) -> bool:
 
 def _column_exists(conn, table: str, column: str) -> bool:
     """Check if a column already exists."""
-    result = conn.execute(
-        sa.text(
-            "SELECT COUNT(*) FROM information_schema.columns "
-            "WHERE table_name = :table AND column_name = :column"
-        ),
-        {"table": table, "column": column},
-    )
-    return result.scalar() > 0
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_name = :table AND column_name = :column"
+            ),
+            {"table": table, "column": column},
+        )
+        return result.scalar() > 0
+
+    result = conn.execute(sa.text(f"PRAGMA table_info({table})"))
+    return any(row[1] == column for row in result.fetchall())
 
 
 def upgrade() -> None:
