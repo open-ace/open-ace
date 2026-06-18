@@ -526,6 +526,7 @@ const translations: Record<Language, Translations> = {
     previous: 'Previous',
     next: 'Next',
     goToPage: 'Go to page',
+    totalPages: 'Total {total} pages',
     pageInfo: 'Page {current} of {total}',
     invalidPageNumber: 'Please enter a valid page number (1-{total})',
     previousPage: 'Previous page',
@@ -1921,6 +1922,7 @@ const translations: Record<Language, Translations> = {
     previous: '上一页',
     next: '下一页',
     goToPage: '跳转到页',
+    totalPages: '总共 {total} 页',
     pageInfo: '第 {current} 页 / 共 {total} 页',
     invalidPageNumber: '请输入有效的页码 (1-{total})',
     previousPage: '上一页',
@@ -3366,6 +3368,7 @@ const translations: Record<Language, Translations> = {
     previous: '前へ',
     next: '次へ',
     goToPage: 'ページへ移動',
+    totalPages: '合計 {total} ページ',
     pageInfo: '{current}ページ / {total}ページ',
     invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
     previousPage: '前のページ',
@@ -4435,6 +4438,7 @@ const translations: Record<Language, Translations> = {
 
     // Pagination
     goToPage: '페이지 이동',
+    totalPages: '총 {total} 페이지',
     pageInfo: '{current}페이지 / {total}페이지',
     invalidPageNumber: '올바른 페이지 번호를 입력하세요 (1-{total})',
     firstPage: '첫 페이지',
