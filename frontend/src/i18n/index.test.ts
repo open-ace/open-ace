@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { t, setLanguage, getLanguage, initLanguage } from './index';
+import { t, setLanguage, getLanguage, initLanguage, translations } from './index';
 
 describe('i18n', () => {
   beforeEach(() => {
@@ -225,6 +225,18 @@ describe('i18n', () => {
       'actionItems',
       'showActions',
       'hideActions',
+      // Efficiency report card / anomaly warnings (issues #819/#820). These were
+      // present in en/zh but missing in ja/ko, leaking raw keys on the ROI page.
+      'efficiencyReport',
+      'efficiencyScore',
+      'roiDataAnomaly',
+      'dataAnomalyDetected',
+      'tokenAccumulationWarning',
+      'roiNegativeHint',
+      'avgTokensPerRequest',
+      'avgCostPerRequest',
+      'overallEfficiency',
+      'wastePercentage',
     ];
 
     it.each(languages)('should have all ROI suggestion keys in %s', (lang) => {
@@ -260,6 +272,85 @@ describe('i18n', () => {
         const translation = t(key, lang);
         expect(translation, `missing common label "${key}" in ${lang}`).not.toBe(key);
       });
+    });
+
+    // ---- Four-language key-set symmetry (root-cause defense for #819/#820) ----
+    // The leak bug class: a key exists in en/zh but is missing in ja/ko, so the
+    // raw key string renders in the UI. The full dictionary is NOT yet symmetric
+    // (ja/ko lag en/zh on many other pages), so we gate the ROI page precisely
+    // here, assert en/zh symmetry, and ratchet the broader ja/ko gap below.
+
+    // Every key consumed by ROIAnalysis.tsx via t('key', language). Each MUST
+    // exist in all four languages, otherwise a raw key leaks on the ROI page.
+    const roiPageKeys = [
+      'roiAnalysis',
+      'roi',
+      'roiPercentage',
+      'roiNegativeHint',
+      'roiDataAnomaly',
+      'roiTrend',
+      'totalCost',
+      'totalSavings',
+      'costBreakdown',
+      'dailyCosts',
+      'cost',
+      'efficiencyReport',
+      'efficiencyScore',
+      'dataAnomalyDetected',
+      'tokenAccumulationWarning',
+      'overallEfficiency',
+      'avgCostPerRequest',
+      'avgTokensPerRequest',
+      'wastePercentage',
+      'optimizationSuggestions',
+      'potentialSavings',
+      'noSuggestions',
+      'noData',
+      'impact',
+      'actionItems',
+      'showActions',
+      'hideActions',
+      'title',
+      'startDate',
+      'endDate',
+      'dashboardFilterAllTools',
+      'tableTool',
+      'description',
+      'recommendations',
+    ];
+
+    it.each(languages)(
+      'ROI page: every consumed key is translated in %s (issues #819/#820)',
+      (lang) => {
+        roiPageKeys.forEach((key) => {
+          expect(
+            translations[lang][key],
+            `ROI page key "${key}" missing in ${lang} — raw key would leak into the UI`
+          ).toBeDefined();
+        });
+      }
+    );
+
+    it('en and zh dictionaries are fully key-symmetric (the two primary languages)', () => {
+      expect(Object.keys(translations.en).sort()).toEqual(Object.keys(translations.zh).sort());
+    });
+
+    // ja/ko lag en by a known set of keys on OTHER pages (tenants/SMTP/SSO/...).
+    // This ratchet caps the gap so it can only shrink: adding an en-only key
+    // without ja/ko fails here — translate it, or (only for genuinely en-only
+    // keys) raise the cap with a comment explaining why. Baseline: 2026-06-18.
+    it('ja/ko key gap vs en never grows beyond the documented baseline', () => {
+      const enKeys = Object.keys(translations.en);
+      const jaMissing = enKeys.filter((k) => translations.ja[k] === undefined);
+      const koMissing = enKeys.filter((k) => translations.ko[k] === undefined);
+      expect(
+        jaMissing.length,
+        'ja is missing en keys — translate them rather than raising the cap'
+      ).toBeLessThanOrEqual(278);
+      expect(
+        koMissing.length,
+        'ko is missing en keys — translate them rather than raising the cap'
+      ).toBeLessThanOrEqual(278);
     });
   });
 });

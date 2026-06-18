@@ -10,7 +10,9 @@ export type Language = LanguageType;
 type TranslationKey = string;
 type Translations = Record<TranslationKey, string>;
 
-const translations: Record<Language, Translations> = {
+// Exported so the completeness test can assert four-language key-set symmetry
+// (see index.test.ts). Treat the dictionary as the source of truth for keys.
+export const translations: Record<Language, Translations> = {
   en: {
     // Common
     loading: 'Loading...',
@@ -875,6 +877,7 @@ const translations: Record<Language, Translations> = {
     totalCost: 'Total Cost',
     totalSavings: 'Total Savings',
     roiPercentage: 'ROI %',
+    roiNegativeHint: 'Investment cost exceeds estimated savings; consider optimizing usage.',
     roiDataAnomaly: 'Data anomaly detected',
     dataAnomalyDetected: 'Data Anomaly Detected',
     tokenAccumulationWarning:
@@ -2275,6 +2278,7 @@ const translations: Record<Language, Translations> = {
     totalCost: '总成本',
     totalSavings: '总节省',
     roiPercentage: 'ROI 百分比',
+    roiNegativeHint: '投入成本高于估算节约，可能需要优化使用策略',
     roiDataAnomaly: '数据异常',
     dataAnomalyDetected: '检测到数据异常',
     tokenAccumulationWarning: 'Token 计数可能存在累计膨胀，成本和 ROI 计算可能不准确。',
@@ -3511,6 +3515,25 @@ const translations: Record<Language, Translations> = {
     requestsMessages: 'リクエスト / メッセージ',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 分析',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint: '投入コストが節約見込みを上回っています。使用戦略の最適化を検討してください。',
+    roiDataAnomaly: 'データ異常',
+    roiTrend: 'ROI トレンド',
+    totalCost: '合計コスト',
+    totalSavings: '合計節約額',
+    costBreakdown: 'コスト内訳',
+    dailyCosts: '日次コスト',
+    cost: 'コスト',
+    efficiencyReport: '効率レポート',
+    efficiencyScore: '効率スコア',
+    dataAnomalyDetected: 'データ異常を検出しました',
+    tokenAccumulationWarning:
+      'Token 数が累積的にカウントされているため膨張している可能性があります。コストと ROI の計算が不正確になる場合があります。',
+    title: 'タイトル',
+    // alertRules は ROI 以外のアラート管理ページでも共有使用されるキーです。
+    alertRules: 'アラートルール',
     overallEfficiency: '全体効率',
     avgCostPerRequest: '平均コスト/リクエスト',
     avgTokensPerRequest: '平均 Token/リクエスト',
@@ -4594,6 +4617,26 @@ const translations: Record<Language, Translations> = {
     requestsMessages: '요청 / 메시지',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 분석',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint:
+      '투입 비용이 예상 절감액을 초과합니다. 사용 전략을 최적화하는 것을 권장합니다.',
+    roiDataAnomaly: '데이터 이상',
+    roiTrend: 'ROI 추세',
+    totalCost: '총 비용',
+    totalSavings: '총 절감액',
+    costBreakdown: '비용 내역',
+    dailyCosts: '일일 비용',
+    cost: '비용',
+    efficiencyReport: '효율 보고서',
+    efficiencyScore: '효율 점수',
+    dataAnomalyDetected: '데이터 이상이 감지되었습니다',
+    tokenAccumulationWarning:
+      'Token 수가 누적 집계되어 부풀려져 있을 수 있습니다. 비용과 ROI 계산이 부정확할 수 있습니다.',
+    title: '제목',
+    // alertRules는 ROI 외 알림 관리 페이지에서도 공유 사용되는 키입니다.
+    alertRules: '알림 규칙',
     overallEfficiency: '전체 효율',
     avgCostPerRequest: '평균 비용/요청',
     avgTokensPerRequest: '평균 Token/요청',
@@ -4991,6 +5034,12 @@ export function t(
   const lang = language ?? currentLanguage;
   const langTranslations = translations[lang] ?? translations.en;
   const template = langTranslations[key] ?? key;
+  // Surface missing keys during development so gaps are caught early. In
+  // production we keep the silent key fallback to avoid crashing the UI; this
+  // warning is DEV-only and changes no runtime behaviour.
+  if (import.meta.env.DEV && template === key) {
+    console.warn('[i18n] missing translation key:', key, '(', lang, ')');
+  }
   // Interpolate {placeholder} params into the template. A missing param leaves
   // the placeholder intact (never throws); pass all expected params to avoid
   // showing a literal {x} to users.
