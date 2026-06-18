@@ -63,8 +63,23 @@ def _table_exists(conn, table_name: str) -> bool:
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if not _table_exists(conn, "daily_stats"):
+        table_args = []
+        if not is_postgresql:
+            # SQLite cannot add a unique constraint via ALTER TABLE after
+            # creation, so define it inline when the table is created.
+            table_args.append(
+                sa.UniqueConstraint(
+                    "date",
+                    "tool_name",
+                    "host_name",
+                    "sender_name",
+                    name="uq_daily_stats_date_tool_host_sender",
+                )
+            )
+
         # Create daily_stats table
         op.create_table(
             "daily_stats",
@@ -82,14 +97,16 @@ def upgrade() -> None:
                 nullable=False,
                 server_default=sa.text("CURRENT_TIMESTAMP"),
             ),
+            *table_args,
         )
 
-        # Create unique constraint for date + tool_name + host_name + sender_name
-        op.create_unique_constraint(
-            "uq_daily_stats_date_tool_host_sender",
-            "daily_stats",
-            ["date", "tool_name", "host_name", "sender_name"],
-        )
+        if is_postgresql:
+            # PostgreSQL supports adding the named constraint after table creation.
+            op.create_unique_constraint(
+                "uq_daily_stats_date_tool_host_sender",
+                "daily_stats",
+                ["date", "tool_name", "host_name", "sender_name"],
+            )
 
         # Create indexes for fast lookup
         op.create_index("idx_daily_stats_date", "daily_stats", ["date"])
@@ -152,6 +169,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if _table_exists(conn, "daily_stats"):
         op.drop_index("idx_daily_stats_date_tool_host", "daily_stats")
@@ -159,5 +177,6 @@ def downgrade() -> None:
         op.drop_index("idx_daily_stats_host", "daily_stats")
         op.drop_index("idx_daily_stats_tool", "daily_stats")
         op.drop_index("idx_daily_stats_date", "daily_stats")
-        op.drop_constraint("uq_daily_stats_date_tool_host_sender", "daily_stats")
+        if is_postgresql:
+            op.drop_constraint("uq_daily_stats_date_tool_host_sender", "daily_stats")
         op.drop_table("daily_stats")

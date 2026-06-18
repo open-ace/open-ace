@@ -49,13 +49,30 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
     return False
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    """Check if a table exists."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table_name"),
+            {"table_name": table_name},
+        )
+        return result.fetchone() is not None
+    elif conn.dialect.name == "sqlite":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:table_name"),
+            {"table_name": table_name},
+        )
+        return result.fetchone() is not None
+    return False
+
+
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
 
     index_name = "idx_agent_sessions_session_type"
 
-    if not _index_exists(conn, "agent_sessions", index_name):
+    if _table_exists(conn, "agent_sessions") and not _index_exists(conn, "agent_sessions", index_name):
         if conn.dialect.name == "postgresql" or conn.dialect.name == "sqlite":
             op.execute(sa.text(f"CREATE INDEX {index_name} ON agent_sessions(session_type)"))
 
@@ -66,5 +83,5 @@ def downgrade() -> None:
 
     index_name = "idx_agent_sessions_session_type"
 
-    if _index_exists(conn, "agent_sessions", index_name):
+    if _table_exists(conn, "agent_sessions") and _index_exists(conn, "agent_sessions", index_name):
         op.execute(sa.text(f"DROP INDEX {index_name}"))

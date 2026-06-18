@@ -22,14 +22,32 @@ branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
 
-def upgrade() -> None:
-    for table in ("agent_sessions", "daily_messages", "daily_usage"):
-        op.execute(
-            sa.text(
-                f"UPDATE {table} SET tool_name = 'qwen' "
-                f"WHERE tool_name IN ('qwen-code', 'qwen-code-cli')"
-            )
+def _table_exists(conn, table_name: str) -> bool:
+    """Check whether a table exists."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table_name"),
+            {"table_name": table_name},
         )
+        return result.fetchone() is not None
+
+    result = conn.execute(
+        sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name = :table_name"),
+        {"table_name": table_name},
+    )
+    return result.fetchone() is not None
+
+
+def upgrade() -> None:
+    conn = op.get_bind()
+    for table in ("agent_sessions", "daily_messages", "daily_usage"):
+        if _table_exists(conn, table):
+            op.execute(
+                sa.text(
+                    f"UPDATE {table} SET tool_name = 'qwen' "
+                    f"WHERE tool_name IN ('qwen-code', 'qwen-code-cli')"
+                )
+            )
 
 
 def downgrade() -> None:
