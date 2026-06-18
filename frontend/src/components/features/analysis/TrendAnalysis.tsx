@@ -361,7 +361,7 @@ export const TrendAnalysis: React.FC = () => {
         <div className="col-md-3">
           <StatCard
             label={t('totalRequests', language)}
-            value={(keyMetrics?.total_messages ?? 0).toLocaleString()}
+            value={Number(keyMetrics?.total_messages ?? 0).toLocaleString()}
             icon={<i className="bi bi-chat-dots fs-4" />}
             variant="success"
           />
