@@ -3143,7 +3143,7 @@ class AutonomousOrchestrator:
                     allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
                         wf.get("cli_tool", "claude-code"), []
                     ),
-                    session_line="main",
+                    session_line="fresh",
                     milestone_id=conflict_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(result)
