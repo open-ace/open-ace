@@ -51,11 +51,16 @@ def auto_db(tmp_path):
                 )
                 conn.commit()
 
-                # Create autonomous tables
+                # Create autonomous tables (with try/except per statement,
+                # mirroring schema_init — ALTER TABLE may fail on duplicate
+                # columns for fresh DBs where CREATE TABLE already added them)
                 from app.modules.workspace.autonomous import get_ddl_statements
 
                 for sql in get_ddl_statements():
-                    cursor.execute(sql)
+                    try:
+                        cursor.execute(sql)
+                    except Exception:
+                        pass
                 conn.commit()
             finally:
                 conn.close()

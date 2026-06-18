@@ -90,15 +90,15 @@ def get_ddl_statements():
         )
         """,
     ]
-    # ALTER TABLE ADD COLUMN IF NOT EXISTS is PostgreSQL syntax; SQLite
-    # (used in tests) doesn't support it. For existing PG databases that
-    # predate this column, add it via ALTER. schema_init wraps each statement
-    # in try/except so "column already exists" errors are silently ignored.
-    if use_pg:
-        statements.append(
-            "ALTER TABLE autonomous_workflows ADD COLUMN IF NOT EXISTS "
-            "transient_retry_count INTEGER DEFAULT 0"
-        )
+    # Add transient_retry_count for existing databases that predate this
+    # column. CREATE TABLE IF NOT EXISTS is a no-op on existing tables, so
+    # the column won't appear without this ALTER. Use plain ADD COLUMN (no
+    # IF NOT EXISTS) — works on both PG and SQLite. schema_init wraps each
+    # statement in try/except so "duplicate column" errors are silently
+    # ignored on databases that already have the column.
+    statements.append(
+        "ALTER TABLE autonomous_workflows ADD COLUMN transient_retry_count INTEGER DEFAULT 0"
+    )
     statements.extend(
         [
             """
