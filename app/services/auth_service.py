@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, cast
 
 from app.repositories.user_repo import UserRepository
+from app.utils.validators import validate_password
 
 logger = logging.getLogger(__name__)
 
@@ -307,9 +308,7 @@ class AuthService:
             return False, "Current password is incorrect"
 
         # Validate new password with security policy
-        from app.utils.validators import validate_password
-
-        settings = get_security_settings_cached()
+        settings = _get_security_settings()
         is_valid, error_msg = validate_password(new_password, policy_settings=settings)
         if not is_valid:
             # Restore the "New" context so the error is unambiguous in the

@@ -83,6 +83,11 @@ class MessageRepository:
         """
         from app.repositories.database import is_postgresql
 
+        # Normalize at the write boundary so variant tool names (qwen-code,
+        # QWEN, ...) can never split downstream aggregates (daily_stats,
+        # hourly_stats, ROI cost-breakdown) into duplicate slices.
+        tool_name = normalize_tool_name(tool_name)
+
         if is_postgresql():
             self.db.execute(
                 """
@@ -921,9 +926,8 @@ class MessageRepository:
         conditions: list[str] = []
         params: list[Any] = []
 
-        # Session identifier expression — defined once and reused by the filter,
-        # the distinct-count aggregate and the multi-turn sub-query so the three
-        # cannot drift apart.
+        # Session identifier expression — defined once and reused by the WHERE
+        # filter and the GROUP BY so the two cannot drift apart.
         session_expr = "COALESCE(conversation_id, feishu_conversation_id, agent_session_id)"
 
         if start_date:

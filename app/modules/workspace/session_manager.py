@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Optional, Union
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +445,10 @@ class SessionManager:
         expires_at = None
         if expires_in_hours:
             expires_at = now + timedelta(hours=expires_in_hours)
+
+        # Normalize at the write boundary so agent_sessions never stores tool
+        # variants that would split aggregates (combined usage, ROI breakdown).
+        tool_name = normalize_tool_name(tool_name)
 
         session = AgentSession(
             session_id=session_id,
