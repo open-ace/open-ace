@@ -36,6 +36,8 @@ services:
       - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
       - WORKSPACE_BASE_DIR=/workspace
+      # Data fetch: container runs as root, use venv Python (Issue #1121)
+      - FETCH_USE_SUDO=false
     volumes:
       # CONFIG_DIR: Container runs as root (required for multi-user workspace mode)
       # ~/.open-ace expands to /root/.open-ace when running as root
