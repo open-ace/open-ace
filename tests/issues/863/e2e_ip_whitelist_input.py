@@ -102,7 +102,9 @@ def test_api_ip_whitelist(session):
 
     # Set a test IP list
     test_ips = ["192.168.1.100", "10.0.0.1"]
-    check(api_set_ip_whitelist(session, test_ips), "PUT /security-settings with ip_whitelist succeeds")
+    check(
+        api_set_ip_whitelist(session, test_ips), "PUT /security-settings with ip_whitelist succeeds"
+    )
 
     # Verify the change persisted
     result = api_get_ip_whitelist(session)
@@ -182,7 +184,9 @@ def test_ui_ip_whitelist_newline(page, session):
 
     # Check for success toast
     try:
-        toast_visible = page.locator(".toast-success, .Toastify__toast--success").is_visible(timeout=3000)
+        toast_visible = page.locator(".toast-success, .Toastify__toast--success").is_visible(
+            timeout=3000
+        )
     except Exception:
         toast_visible = "saved" in page.content().lower() or "保存成功" in page.content()
     check(toast_visible or True, "Save triggered (toast may auto-dismiss)")
