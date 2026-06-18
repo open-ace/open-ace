@@ -390,6 +390,43 @@ class TestResolveMergeConflictsWorktreeIsolation:
         assert agent_project_path != _make_workflow()["project_path"]
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_agent_uses_fresh_session_not_main(self, mock_gh_cls):
+        """Conflict resolution must use session_line='fresh', not 'main'.
+
+        Resuming the dev-phase session ('main') loads conversation history
+        that tells the agent the work is done, so it returns in seconds
+        without executing any git commands. A fresh session starts clean
+        in the temp worktree. Regression guard (#1112).
+        """
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): Merge conflict in app/x.py\n",
+                stderr="",
+            ),  # merge (conflict)
+        ]
+        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+
+        o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1", success=True, response_text="resolved"
+        )
+        o._resolve_session_line = MagicMock(return_value=("sess", None, False))
+        o._link_session_to_current_milestone = MagicMock()
+
+        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        session_line = o._run_agent.call_args.kwargs.get("session_line", "")
+        assert session_line == "fresh"
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_main_repo_never_checked_out(self, mock_gh_cls):
         """The main repo gh must NOT receive checkout/reset/merge calls."""
         o, _ = _make_orchestrator(_make_workflow())
