@@ -945,6 +945,44 @@ class AnalysisService:
         else:
             std_dev = 0
 
+        # Build a per-date top-contributing-tool map (single grouped query over
+        # the whole range). Used to explain WHY a day spiked/dropped — which
+        # tool drove it and how much of that day's usage it accounts for.
+        # Optional/forward-compatible: missing data simply omits the field.
+        daily_tool_map: dict[str, dict] = {}
+        try:
+            daily_tool_rows = self.message_repo.get_daily_tool_totals(
+                start_date, end_date, host_name
+            )
+        except Exception as e:
+            logger.warning(f"get_daily_tool_totals failed, skipping top_contributor: {e}")
+            daily_tool_rows = []
+
+        for row in daily_tool_rows:
+            day = row.get("date")
+            tool_tokens = row.get("total_tokens", 0) or 0
+            if not day or tool_tokens <= 0:
+                continue
+            # Rows are sorted by date then tokens desc, so the first tool seen
+            # for a date is its top contributor.
+            if day not in daily_tool_map:
+                daily_tool_map[day] = {
+                    "tool": row.get("tool_name", "unknown"),
+                    "tokens": tool_tokens,
+                }
+
+        def _build_top_contributor(date_value, day_tokens: int):
+            """Attach the day's top tool + its share of that day's tokens."""
+            top = daily_tool_map.get(date_value)
+            if not top or day_tokens <= 0:
+                return None
+            # Clamp to (0, 100]: guards against an aggregation mismatch between
+            # get_daily_tool_totals and get_daily_token_totals ever yielding >100%.
+            share_pct = min(round(top["tokens"] / day_tokens * 100, 1), 100)
+            if share_pct <= 0:
+                return None
+            return {"tool": top["tool"], "share_pct": share_pct}
+
         anomalies = []
 
         # Detect anomalies
@@ -971,6 +1009,9 @@ class AnalysisService:
                         "type": "spike",
                         "severity": "high" if std_deviation > 3 else "medium",
                     }
+                    top_contributor = _build_top_contributor(date, token)
+                    if top_contributor:
+                        anomaly["top_contributor"] = top_contributor
 
                     # Apply filters
                     if anomaly_type and anomaly["type"] != anomaly_type:
@@ -992,6 +1033,9 @@ class AnalysisService:
                         "type": "drop",
                         "severity": "low",
                     }
+                    top_contributor = _build_top_contributor(date, token)
+                    if top_contributor:
+                        anomaly["top_contributor"] = top_contributor
 
                     # Apply filters
                     if anomaly_type and anomaly["type"] != anomaly_type:

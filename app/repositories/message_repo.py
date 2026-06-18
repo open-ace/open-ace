@@ -835,6 +835,74 @@ class MessageRepository:
 
         return self.db.fetch_all(query, tuple(params))
 
+    def get_daily_tool_totals(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        host_name: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Get total tokens per day per tool.
+
+        Used to identify the top contributing tool for each anomaly date
+        (a single grouped query over the whole range, avoiding per-date N+1).
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+
+        Returns:
+            List[Dict]: Rows of {date, tool_name, total_tokens} with normalized
+            tool names merged across aliases, sorted by date then tokens desc.
+        """
+        conditions = []
+        params = []
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT
+                date,
+                tool_name,
+                SUM(tokens_used) as total_tokens
+            FROM daily_messages
+            {where_clause}
+            GROUP BY date, tool_name
+            ORDER BY date ASC, total_tokens DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        # Normalize tool names and merge aliases within each date. Coerce types
+        # explicitly so the merged map is statically typed (date:str, tokens:int),
+        # and sort the typed pairs (avoids arithmetic on loosely-typed dicts).
+        merged: dict[tuple[str, str], int] = {}
+        for row in rows:
+            date = str(row.get("date") or "")
+            tool = normalize_tool_name(row.get("tool_name", "unknown"))
+            tokens = int(row.get("total_tokens") or 0)
+            key = (date, tool)
+            merged[key] = merged.get(key, 0) + tokens
+
+        ordered = sorted(merged.items(), key=lambda kv: (kv[0][0], -kv[1]))
+        return [
+            {"date": date, "tool_name": tool, "total_tokens": tokens}
+            for (date, tool), tokens in ordered
+        ]
+
     def get_tool_token_totals(
         self,
         start_date: Optional[str] = None,

@@ -1332,8 +1332,8 @@ def init_auth_database() -> None:
             password_hash TEXT NOT NULL,
             email TEXT,
             role TEXT NOT NULL DEFAULT 'user',
-            daily_token_quota INTEGER DEFAULT 1000000,
-            monthly_token_quota INTEGER DEFAULT 30000000,
+            daily_token_quota INTEGER DEFAULT 1,    -- 1M tokens (stored in M units)
+            monthly_token_quota INTEGER DEFAULT 30, -- 30M tokens (stored in M units)
             daily_request_quota INTEGER DEFAULT 1000,
             monthly_request_quota INTEGER DEFAULT 30000,
             is_active INTEGER DEFAULT 1,

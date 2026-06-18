@@ -4,7 +4,7 @@
  * Features:
  * - Smart page number display (current page centered)
  * - Page jump input with validation
- * - Page information display
+ * - Total pages display
  * - Accessibility support (ARIA attributes)
  * - Responsive design
  * - Keyboard navigation
@@ -24,7 +24,10 @@ interface PaginationProps {
   onPageChange: (page: number) => void;
   /** Whether to show jump input, default true */
   showPageInput?: boolean;
-  /** Whether to show page info, default true */
+  /**
+   * Whether to show page info (deprecated - total pages now displayed separately)
+   * @deprecated Total pages are now always displayed at the start
+   */
   showPageInfo?: boolean;
   /** Maximum visible page numbers, default 5 */
   maxVisiblePages?: number;
@@ -104,7 +107,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   totalPages,
   onPageChange,
   showPageInput = true,
-  showPageInfo = true,
+  showPageInfo: _showPageInfo = true,
   maxVisiblePages = 5,
   className,
 }) => {
@@ -218,8 +221,13 @@ export const Pagination: React.FC<PaginationProps> = ({
 
   return (
     <div className={cn('pagination-container', className)}>
-      {/* Desktop layout */}
-      <div className="d-none d-sm-flex flex-column align-items-center gap-2">
+      {/* Desktop layout - horizontal row: total pages | pagination buttons | jump input */}
+      <div className="d-none d-sm-flex align-items-center justify-content-center gap-3">
+        {/* Total pages display */}
+        <span className="text-muted small">
+          {t('totalPages', language).replace('{total}', String(totalPages))}
+        </span>
+
         {/* Main pagination nav */}
         <nav aria-label={t('navigation', language)}>
           <ul className="pagination mb-0">
@@ -277,59 +285,44 @@ export const Pagination: React.FC<PaginationProps> = ({
           </ul>
         </nav>
 
-        {/* Jump input and page info row */}
-        <div className="d-flex align-items-center gap-3">
-          {/* Jump input */}
-          {showPageInput && (
-            <div className="d-flex align-items-center gap-1">
-              <small className="text-muted">{t('goToPage', language)}:</small>
-              <input
-                type="number"
-                className="form-control form-control-sm"
-                style={{ width: '60px' }}
-                value={inputValue}
-                onChange={handleInputChange}
-                onKeyDown={handleInputKeyDown}
-                min={1}
-                max={totalPages}
-                aria-label={t('goToPage', language)}
-              />
-              <Button
-                variant="outline-secondary"
-                size="sm"
-                onClick={handleJumpSubmit}
-                aria-label={t('goToPage', language)}
-              >
-                {t('goToPage', language)}
-              </Button>
-            </div>
-          )}
-
-          {/* Page info */}
-          {showPageInfo && (
-            <small className="text-muted">
-              {t('pageInfo', language)
-                .replace('{current}', String(currentPage))
-                .replace('{total}', String(totalPages))}
-            </small>
-          )}
-        </div>
+        {/* Jump input */}
+        {showPageInput && (
+          <div className="d-flex align-items-center gap-1">
+            <span className="text-muted small">{t('goToPageLabel', language)}:</span>
+            <input
+              type="number"
+              className="form-control form-control-sm"
+              style={{ width: '60px' }}
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              min={1}
+              max={totalPages}
+              aria-label={t('goToPageLabel', language)}
+            />
+          </div>
+        )}
 
         {/* Error message */}
         {error && (
-          <div
+          <span
             className="text-danger small"
             role="alert"
             aria-live="polite"
             style={{ animation: 'fadeIn 0.3s ease-in' }}
           >
             {error}
-          </div>
+          </span>
         )}
       </div>
 
       {/* Mobile layout (simplified) */}
       <div className="d-sm-none d-flex flex-column align-items-center gap-2">
+        {/* Total pages display */}
+        <span className="text-muted small">
+          {t('totalPages', language).replace('{total}', String(totalPages))}
+        </span>
+
         {/* Simplified pagination */}
         <nav aria-label={t('navigation', language)}>
           <ul className="pagination mb-0">
@@ -364,7 +357,7 @@ export const Pagination: React.FC<PaginationProps> = ({
         {/* Mobile jump input */}
         {showPageInput && (
           <div className="d-flex align-items-center gap-1">
-            <small className="text-muted">{t('goToPage', language)}:</small>
+            <small className="text-muted">{t('goToPageLabel', language)}:</small>
             <input
               type="number"
               className="form-control form-control-sm"
@@ -374,12 +367,12 @@ export const Pagination: React.FC<PaginationProps> = ({
               onKeyDown={handleInputKeyDown}
               min={1}
               max={totalPages}
-              aria-label={t('goToPage', language)}
+              aria-label={t('goToPageLabel', language)}
             />
             {error && (
-              <div className="text-danger small" role="alert" aria-live="polite">
+              <span className="text-danger small" role="alert" aria-live="polite">
                 {error}
-              </div>
+              </span>
             )}
           </div>
         )}
@@ -393,49 +386,5 @@ export const Pagination: React.FC<PaginationProps> = ({
         }
       `}</style>
     </div>
-  );
-};
-
-/**
- * Button Component (inline for Pagination use)
- * Minimal Button component for pagination jump submit
- */
-interface ButtonProps {
-  variant?: 'primary' | 'secondary' | 'outline-secondary';
-  size?: 'sm' | 'lg';
-  onClick?: () => void;
-  disabled?: boolean;
-  'aria-label'?: string;
-  children: React.ReactNode;
-}
-
-const Button: React.FC<ButtonProps> = ({
-  variant = 'primary',
-  size,
-  onClick,
-  disabled,
-  'aria-label': ariaLabel,
-  children,
-}) => {
-  const classes = cn(
-    'btn',
-    variant === 'primary' && 'btn-primary',
-    variant === 'secondary' && 'btn-secondary',
-    variant === 'outline-secondary' && 'btn-outline-secondary',
-    size === 'sm' && 'btn-sm',
-    size === 'lg' && 'btn-lg',
-    disabled && 'disabled'
-  );
-
-  return (
-    <button
-      className={classes}
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      type="button"
-    >
-      {children}
-    </button>
   );
 };

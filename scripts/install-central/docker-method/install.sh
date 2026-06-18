@@ -21,7 +21,9 @@ NC='\033[0m' # No Color
 
 # Default values
 RUN_USER="${RUN_USER:-open-ace}"
-RUN_USER_UID="${RUN_USER_UID:-999}"
+# RUN_USER_UID: Optional UID for the run user. If not set, system will auto-assign.
+# Set this for Docker bind mount or NFS share permission consistency (Issue #1116).
+RUN_USER_UID="${RUN_USER_UID:-}"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/$RUN_USER/open-ace}"
 IMAGE_NAME="${IMAGE_NAME:-open-ace:latest}"
 WEB_PORT="${WEB_PORT:-5000}"
@@ -715,7 +717,7 @@ show_help() {
     echo ""
     echo "Environment Variables:"
     echo "  RUN_USER             User to run docker commands (default: open-ace)"
-    echo "  RUN_USER_UID         UID for the run user (default: 999)"
+    echo "  RUN_USER_UID         UID for the run user (default: auto, for NFS/Docker bind mount set explicit UID)"
     echo "  DEPLOY_DIR           Deployment directory (default: /home/\$RUN_USER/open-ace)"
     echo "  IMAGE_NAME           Docker image name"
     echo "  WEB_PORT             Web server port"
@@ -2222,7 +2224,7 @@ show_upgrade_summary() {
     echo ""
 
     echo -e "${YELLOW}当前配置:${NC}"
-    echo "  运行用户: $RUN_USER (UID: ${RUN_USER_UID:-999})"
+    echo "  运行用户: $RUN_USER (UID: ${RUN_USER_UID:-auto})"
     echo "  主机名: $HOST_NAME"
     echo "  Web 端口: $WEB_PORT"
     echo "  数据库用户: $DB_USER"
@@ -2422,13 +2424,30 @@ upgrade_deployment() {
 create_directories() {
     print_header "创建目录结构"
 
-    print_info "运行用户: $RUN_USER (UID: ${RUN_USER_UID:-999})"
+    # Display UID info: show specified UID or "auto" for system assignment
+    local uid_info="${RUN_USER_UID:-auto}"
+    print_info "运行用户: $RUN_USER (UID: $uid_info)"
     print_info "部署目录: $DEPLOY_DIR"
 
-    # Create user if not exists
+    # Create user if not exists (Issue #1116: UID auto-assignment)
     if ! id "$RUN_USER" &>/dev/null; then
-        print_info "创建用户: $RUN_USER"
-        useradd -r -u "${RUN_USER_UID:-999}" -m -d "/home/$RUN_USER" -s /bin/bash "$RUN_USER"
+        if [ -n "$RUN_USER_UID" ]; then
+            # User specified UID: check for conflict
+            if getent passwd "$RUN_USER_UID" >/dev/null 2>&1; then
+                print_warning "UID $RUN_USER_UID 已被占用，使用系统自动分配"
+                print_info "创建用户: $RUN_USER"
+                useradd -r -m -d "/home/$RUN_USER" -s /bin/bash "$RUN_USER"
+            else
+                print_info "创建用户: $RUN_USER (UID: $RUN_USER_UID)"
+                useradd -r -u "$RUN_USER_UID" -m -d "/home/$RUN_USER" -s /bin/bash "$RUN_USER"
+            fi
+        else
+            # No UID specified: let system auto-assign (recommended)
+            print_info "创建用户: $RUN_USER"
+            useradd -r -m -d "/home/$RUN_USER" -s /bin/bash "$RUN_USER"
+        fi
+        # Display actual UID after creation
+        print_info "实际 UID: $(id -u "$RUN_USER")"
     fi
 
     local user_home="/home/$RUN_USER"
@@ -2770,7 +2789,7 @@ create_env_file() {
 # Keep this file secure!
 
 RUN_USER=$RUN_USER
-RUN_USER_UID=${RUN_USER_UID:-999}
+RUN_USER_UID=${RUN_USER_UID:-}
 DEPLOY_DIR=$DEPLOY_DIR
 IMAGE_NAME=$IMAGE_NAME
 WEB_PORT=$WEB_PORT
@@ -3025,7 +3044,7 @@ show_deployment_info() {
     echo "  数据库: $DB_NAME"
     echo ""
     echo "运行用户:"
-    echo "  用户: $RUN_USER (UID: ${RUN_USER_UID:-999})"
+    echo "  用户: $RUN_USER (UID: ${RUN_USER_UID:-auto})"
     echo "  家目录: /home/$RUN_USER"
     echo "  部署目录: $DEPLOY_DIR"
     echo ""
@@ -3317,7 +3336,7 @@ fi
 
 # Confirm deployment
 echo -e "${YELLOW}部署配置:${NC}"
-echo "  运行用户: $RUN_USER (UID: ${RUN_USER_UID:-999})"
+echo "  运行用户: $RUN_USER (UID: ${RUN_USER_UID:-auto})"
 echo "  部署目录: $DEPLOY_DIR"
 echo "  Docker 镜像: $IMAGE_NAME"
 echo "  主机名: $HOST_NAME"

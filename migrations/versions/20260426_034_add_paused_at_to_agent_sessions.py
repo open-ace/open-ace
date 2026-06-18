@@ -21,9 +21,27 @@ branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
 
+def _table_exists(bind, table_name: str) -> bool:
+    """Check if a table exists."""
+    if bind.dialect.name == "postgresql":
+        result = bind.execute(
+            sa.text("SELECT 1 FROM information_schema.tables " "WHERE table_name = :table_name"),
+            {"table_name": table_name},
+        )
+        return result.fetchone() is not None
+
+    result = bind.execute(
+        sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name = :table_name"),
+        {"table_name": table_name},
+    )
+    return result.fetchone() is not None
+
+
 def upgrade() -> None:
     """Add paused_at column to agent_sessions."""
     bind = op.get_bind()
+    if not _table_exists(bind, "agent_sessions"):
+        return
     if bind.dialect.name == "postgresql":
         result = bind.execute(
             sa.text(
@@ -41,4 +59,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove paused_at column from agent_sessions."""
-    op.drop_column("agent_sessions", "paused_at")
+    bind = op.get_bind()
+    if _table_exists(bind, "agent_sessions"):
+        op.drop_column("agent_sessions", "paused_at")

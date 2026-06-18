@@ -62,8 +62,23 @@ def _table_exists(conn, table_name: str) -> bool:
 def upgrade() -> None:
     """Upgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if not _table_exists(conn, "hourly_stats"):
+        table_args = []
+        if not is_postgresql:
+            # SQLite cannot add unique constraints via ALTER TABLE after table
+            # creation, so define the constraint inline.
+            table_args.append(
+                sa.UniqueConstraint(
+                    "date",
+                    "hour",
+                    "tool_name",
+                    "host_name",
+                    name="uq_hourly_stats_date_hour_tool_host",
+                )
+            )
+
         # Create hourly_stats table
         op.create_table(
             "hourly_stats",
@@ -81,14 +96,16 @@ def upgrade() -> None:
                 nullable=False,
                 server_default=sa.text("CURRENT_TIMESTAMP"),
             ),
+            *table_args,
         )
 
-        # Create unique constraint for date + hour + tool_name + host_name
-        op.create_unique_constraint(
-            "uq_hourly_stats_date_hour_tool_host",
-            "hourly_stats",
-            ["date", "hour", "tool_name", "host_name"],
-        )
+        if is_postgresql:
+            # PostgreSQL supports adding the named constraint after creation.
+            op.create_unique_constraint(
+                "uq_hourly_stats_date_hour_tool_host",
+                "hourly_stats",
+                ["date", "hour", "tool_name", "host_name"],
+            )
 
         # Create indexes for fast lookup
         op.create_index("idx_hourly_stats_date", "hourly_stats", ["date"])
@@ -150,10 +167,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade database schema."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if _table_exists(conn, "hourly_stats"):
         op.drop_index("idx_hourly_stats_date_hour", "hourly_stats")
         op.drop_index("idx_hourly_stats_hour", "hourly_stats")
         op.drop_index("idx_hourly_stats_date", "hourly_stats")
-        op.drop_constraint("uq_hourly_stats_date_hour_tool_host", "hourly_stats")
+        if is_postgresql:
+            op.drop_constraint("uq_hourly_stats_date_hour_tool_host", "hourly_stats")
         op.drop_table("hourly_stats")

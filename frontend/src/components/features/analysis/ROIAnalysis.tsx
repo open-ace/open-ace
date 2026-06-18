@@ -536,13 +536,13 @@ export const ROIAnalysis: React.FC = () => {
             {roiMetrics.roi_percentage < 0 && roiMetrics.roi_percentage >= -1000 && (
               <div className="text-muted small mt-1">
                 <i className="bi bi-info-circle me-1" />
-                {t('roiNegativeHint', language) || '投入成本高于估算节约，可能需要优化使用策略'}
+                {t('roiNegativeHint', language)}
               </div>
             )}
             {roiMetrics.roi_percentage < -1000 && (
               <div className="text-danger small mt-1">
                 <i className="bi bi-exclamation-triangle me-1" />
-                {t('roiDataAnomaly', language) || 'Data anomaly detected'}
+                {t('roiDataAnomaly', language)}
               </div>
             )}
           </div>
@@ -567,9 +567,8 @@ export const ROIAnalysis: React.FC = () => {
       {roiMetrics && roiMetrics.roi_percentage < -1000 && (
         <div className="alert alert-warning mb-4" role="alert">
           <i className="bi bi-exclamation-triangle me-2" />
-          <strong>{t('dataAnomalyDetected', language) || 'Data Anomaly Detected'}:</strong>{' '}
-          {t('tokenAccumulationWarning', language) ||
-            'Token counts may be inflated due to cumulative counting. Cost and ROI calculations may be inaccurate.'}
+          <strong>{t('dataAnomalyDetected', language)}:</strong>{' '}
+          {t('tokenAccumulationWarning', language)}
         </div>
       )}
 

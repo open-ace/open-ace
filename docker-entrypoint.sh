@@ -276,9 +276,10 @@ open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /us
 openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *
 
 # Preserve environment variables for sudo env_keep passing.
-# NODE_PATH is intentionally NOT preserved: it is a Node module-resolution
-# directory, not a binary path, and the app does not set it (spawn ENOENT is
-# handled via PATH). Keeping it was dead config contradicting webui_manager.
+# PATH is preserved so the sudo'd qwen-code-webui subprocess can resolve the
+# node binary (Issue #1083). NODE_PATH is intentionally NOT preserved: the
+# webui_manager no longer sets it (it controls Node *module* resolution, not
+# the binary path), so keeping it here was dead config.
 Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui

@@ -84,7 +84,4 @@ def is_valid_sender(name: str) -> bool:
         return False
 
     # Filter out Feishu user IDs (starts with "ou_" and longer than 10 chars)
-    if name.startswith("ou_") and len(name) > 10:
-        return False
-
-    return True
+    return not (name.startswith("ou_") and len(name) > 10)

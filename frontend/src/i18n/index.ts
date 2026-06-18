@@ -10,7 +10,9 @@ export type Language = LanguageType;
 type TranslationKey = string;
 type Translations = Record<TranslationKey, string>;
 
-const translations: Record<Language, Translations> = {
+// Exported so the completeness test can assert four-language key-set symmetry
+// (see index.test.ts). Treat the dictionary as the source of truth for keys.
+export const translations: Record<Language, Translations> = {
   en: {
     // Common
     loading: 'Loading...',
@@ -167,6 +169,9 @@ const translations: Record<Language, Translations> = {
     addToolAccount: 'Add Tool Account',
     editToolAccount: 'Edit Tool Account',
     noToolAccounts: 'No tool accounts configured',
+    toolAccountRequired: 'Tool account is required',
+    addToolAccountSuccess: 'Tool account added successfully',
+    addToolAccountFailed: 'Failed to add tool account',
     unmappedAccounts: 'Unmapped Accounts',
     mapToUser: 'Map to User',
     toolType: 'Tool Type',
@@ -412,6 +417,18 @@ const translations: Record<Language, Translations> = {
     anomalyTrend: 'Anomaly Trend',
     anomalyDistribution: 'Anomaly Distribution',
     anomalyList: 'Anomaly List',
+    anomalyMethodIntro: 'Detection Method',
+    anomalyMethodText:
+      'Spike: daily usage exceeds 2 standard deviations above the mean (>3σ is high severity). Drop: some activity but below 50% of the mean. Zero-activity days are not treated as anomalies.',
+    anomalyBaseline: 'Baseline: daily avg {avg}, std dev {std}, {n} days sampled',
+    anomalySpikeDesc: '{tokens} tokens, {pct}% above the daily average of {avg}',
+    anomalyDropDesc: '{tokens} tokens, {pct}% below the daily average of {avg}',
+    anomalyTopContributor: 'Driven mainly by {tool} ({pct}% of the day)',
+    anomalySuggestionSpike:
+      'Tip: check for abnormal tasks, retry storms, or traffic that needs rate limiting.',
+    anomalySuggestionDrop:
+      'Tip: confirm whether it was a maintenance window, degraded service, or availability issue.',
+    anomalyHelpLabel: 'Anomaly detection rules',
     newSession: 'New Session',
     sessionDetails: 'Session Details',
     renameSession: 'Rename Session',
@@ -525,7 +542,9 @@ const translations: Record<Language, Translations> = {
     created: 'Created',
     previous: 'Previous',
     next: 'Next',
-    goToPage: 'Go to page',
+    goToPage: 'Go to page {page}',
+    goToPageLabel: 'Go to page',
+    totalPages: 'Total {total} pages',
     pageInfo: 'Page {current} of {total}',
     invalidPageNumber: 'Please enter a valid page number (1-{total})',
     previousPage: 'Previous page',
@@ -873,6 +892,7 @@ const translations: Record<Language, Translations> = {
     totalCost: 'Total Cost',
     totalSavings: 'Total Savings',
     roiPercentage: 'ROI %',
+    roiNegativeHint: 'Investment cost exceeds estimated savings; consider optimizing usage.',
     roiDataAnomaly: 'Data anomaly detected',
     dataAnomalyDetected: 'Data Anomaly Detected',
     tokenAccumulationWarning:
@@ -1581,6 +1601,9 @@ const translations: Record<Language, Translations> = {
     addToolAccount: '添加工具账号',
     editToolAccount: '编辑工具账号',
     noToolAccounts: '未配置工具账号',
+    toolAccountRequired: '工具账号为必填项',
+    addToolAccountSuccess: '工具账号添加成功',
+    addToolAccountFailed: '工具账号添加失败',
     unmappedAccounts: '未映射账号',
     mapToUser: '映射到用户',
     toolType: '工具类型',
@@ -1824,6 +1847,16 @@ const translations: Record<Language, Translations> = {
     anomalyTrend: '异常趋势',
     anomalyDistribution: '异常分布',
     anomalyList: '异常列表',
+    anomalyMethodIntro: '检测说明',
+    anomalyMethodText:
+      '突增：日用量高于均值超过 2 个标准差（>3σ 记为高危）；骤降：有活动但低于均值的 50%。零活跃日不视为异常。',
+    anomalyBaseline: '基准：日均 {avg}，标准差 {std}，样本 {n} 天',
+    anomalySpikeDesc: '当日用量 {tokens}，较日均 {avg} 高出 {pct}%',
+    anomalyDropDesc: '当日用量 {tokens}，较日均 {avg} 低 {pct}%',
+    anomalyTopContributor: '主要由 {tool} 驱动（占当日 {pct}%）',
+    anomalySuggestionSpike: '建议：核查当日是否有异常任务、重试风暴或需限流。',
+    anomalySuggestionDrop: '建议：确认是否为维护期、服务降级或可用性问题。',
+    anomalyHelpLabel: '异常检测规则说明',
     newSession: '新建会话',
     sessionDetails: '会话详情',
     renameSession: '重命名会话',
@@ -1929,7 +1962,9 @@ const translations: Record<Language, Translations> = {
     created: '创建时间',
     previous: '上一页',
     next: '下一页',
-    goToPage: '跳转到页',
+    goToPage: '跳转到第 {page} 页',
+    goToPageLabel: '跳转到页',
+    totalPages: '总共 {total} 页',
     pageInfo: '第 {current} 页 / 共 {total} 页',
     invalidPageNumber: '请输入有效的页码 (1-{total})',
     previousPage: '上一页',
@@ -2271,6 +2306,7 @@ const translations: Record<Language, Translations> = {
     totalCost: '总成本',
     totalSavings: '总节省',
     roiPercentage: 'ROI 百分比',
+    roiNegativeHint: '投入成本高于估算节约，可能需要优化使用策略',
     roiDataAnomaly: '数据异常',
     dataAnomalyDetected: '检测到数据异常',
     tokenAccumulationWarning: 'Token 计数可能存在累计膨胀，成本和 ROI 计算可能不准确。',
@@ -3320,6 +3356,17 @@ const translations: Record<Language, Translations> = {
     anomalyTrend: '異常トレンド',
     anomalyDistribution: '異常分布',
     anomalyList: '異常リスト',
+    anomalyMethodIntro: '検出方法',
+    anomalyMethodText:
+      '急増：1日の使用量が平均を2標準偏差以上上回る（>3σは高重大度）。急減：活動はあるが平均の50%未満。ゼロ活動日は異常扱いしない。',
+    anomalyBaseline: '基準：日平均 {avg}、標準偏差 {std}、サンプル {n} 日',
+    anomalySpikeDesc: '当日の使用量 {tokens}、日平均 {avg} を {pct}% 上回る',
+    anomalyDropDesc: '当日の使用量 {tokens}、日平均 {avg} を {pct}% 下回る',
+    anomalyTopContributor: '主に {tool} が牽引（当日の {pct}%）',
+    anomalySuggestionSpike:
+      '提案：当日に異常タスク・リトライの急増・レート制限の必要性がないか確認。',
+    anomalySuggestionDrop: '提案：メンテナンス期間・サービス低下・可用性の問題でないか確認。',
+    anomalyHelpLabel: '異常検出ルールの説明',
     newSession: '新規セッション',
     today: '今日',
     yesterday: '昨日',
@@ -3393,7 +3440,9 @@ const translations: Record<Language, Translations> = {
     created: '作成日時',
     previous: '前へ',
     next: '次へ',
-    goToPage: 'ページへ移動',
+    goToPage: '{page}ページへ移動',
+    goToPageLabel: 'ページへ移動',
+    totalPages: '合計 {total} ページ',
     pageInfo: '{current}ページ / {total}ページ',
     invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
     previousPage: '前のページ',
@@ -3505,6 +3554,25 @@ const translations: Record<Language, Translations> = {
     requestsMessages: 'リクエスト / メッセージ',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 分析',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint: '投入コストが節約見込みを上回っています。使用戦略の最適化を検討してください。',
+    roiDataAnomaly: 'データ異常',
+    roiTrend: 'ROI トレンド',
+    totalCost: '合計コスト',
+    totalSavings: '合計節約額',
+    costBreakdown: 'コスト内訳',
+    dailyCosts: '日次コスト',
+    cost: 'コスト',
+    efficiencyReport: '効率レポート',
+    efficiencyScore: '効率スコア',
+    dataAnomalyDetected: 'データ異常を検出しました',
+    tokenAccumulationWarning:
+      'Token 数が累積的にカウントされているため膨張している可能性があります。コストと ROI の計算が不正確になる場合があります。',
+    title: 'タイトル',
+    // alertRules は ROI 以外のアラート管理ページでも共有使用されるキーです。
+    alertRules: 'アラートルール',
     overallEfficiency: '全体効率',
     avgCostPerRequest: '平均コスト/リクエスト',
     avgTokensPerRequest: '平均 Token/リクエスト',
@@ -3881,6 +3949,9 @@ const translations: Record<Language, Translations> = {
     autoCreationParameters: '作成パラメータ',
     autoYes: 'はい',
     autoNo: 'いいえ',
+    toolAccountRequired: 'ツールアカウントは必須です',
+    addToolAccountSuccess: 'ツールアカウントが正常に追加されました',
+    addToolAccountFailed: 'ツールアカウントの追加に失敗しました',
   },
   ko: {
     // Common
@@ -4398,6 +4469,17 @@ const translations: Record<Language, Translations> = {
     anomalyTrend: '이상 트렌드',
     anomalyDistribution: '이상 분포',
     anomalyList: '이상 목록',
+    anomalyMethodIntro: '탐지 방법',
+    anomalyMethodText:
+      '급증: 일일 사용량이 평균보다 2표준편차 이상 높음 (>3σ는 높은 심각도). 급감: 활동은 있으나 평균의 50% 미만. 활동이 없는 날은 이상으로 간주하지 않음.',
+    anomalyBaseline: '기준: 일일 평균 {avg}, 표준편차 {std}, 샘플 {n}일',
+    anomalySpikeDesc: '당일 사용량 {tokens}, 일일 평균 {avg}보다 {pct}% 높음',
+    anomalyDropDesc: '당일 사용량 {tokens}, 일일 평균 {avg}보다 {pct}% 낮음',
+    anomalyTopContributor: '주로 {tool}이(가) 구동 (당일의 {pct}%)',
+    anomalySuggestionSpike:
+      '제안: 당일 비정상 작업, 재시도 폭주, 속도 제한 필요 여부를 확인하세요.',
+    anomalySuggestionDrop: '제안: 유지보수 기간, 서비스 저하 또는 가용성 문제인지 확인하세요.',
+    anomalyHelpLabel: '이상 탐지 규칙 안내',
     newSession: '새 세션',
     today: '오늘',
     yesterday: '어제',
@@ -4472,7 +4554,9 @@ const translations: Record<Language, Translations> = {
     next: '다음',
 
     // Pagination
-    goToPage: '페이지 이동',
+    goToPage: '{page} 페이지 이동',
+    goToPageLabel: '페이지 이동',
+    totalPages: '총 {total} 페이지',
     pageInfo: '{current}페이지 / {total}페이지',
     invalidPageNumber: '올바른 페이지 번호를 입력하세요 (1-{total})',
     firstPage: '첫 페이지',
@@ -4586,6 +4670,26 @@ const translations: Record<Language, Translations> = {
     requestsMessages: '요청 / 메시지',
 
     // ROI Analysis
+    roiAnalysis: 'ROI 분석',
+    roi: 'ROI',
+    roiPercentage: 'ROI %',
+    roiNegativeHint:
+      '투입 비용이 예상 절감액을 초과합니다. 사용 전략을 최적화하는 것을 권장합니다.',
+    roiDataAnomaly: '데이터 이상',
+    roiTrend: 'ROI 추세',
+    totalCost: '총 비용',
+    totalSavings: '총 절감액',
+    costBreakdown: '비용 내역',
+    dailyCosts: '일일 비용',
+    cost: '비용',
+    efficiencyReport: '효율 보고서',
+    efficiencyScore: '효율 점수',
+    dataAnomalyDetected: '데이터 이상이 감지되었습니다',
+    tokenAccumulationWarning:
+      'Token 수가 누적 집계되어 부풀려져 있을 수 있습니다. 비용과 ROI 계산이 부정확할 수 있습니다.',
+    title: '제목',
+    // alertRules는 ROI 외 알림 관리 페이지에서도 공유 사용되는 키입니다.
+    alertRules: '알림 규칙',
     overallEfficiency: '전체 효율',
     avgCostPerRequest: '평균 비용/요청',
     avgTokensPerRequest: '평균 Token/요청',
@@ -4961,6 +5065,9 @@ const translations: Record<Language, Translations> = {
     autoCreationParameters: '생성 매개변수',
     autoYes: '예',
     autoNo: '아니요',
+    toolAccountRequired: '도구 계정은 필수입니다',
+    addToolAccountSuccess: '도구 계정이 성공적으로 추가되었습니다',
+    addToolAccountFailed: '도구 계정 추가 실패',
   },
 };
 
@@ -4983,6 +5090,12 @@ export function t(
   const lang = language ?? currentLanguage;
   const langTranslations = translations[lang] ?? translations.en;
   const template = langTranslations[key] ?? key;
+  // Surface missing keys during development so gaps are caught early. In
+  // production we keep the silent key fallback to avoid crashing the UI; this
+  // warning is DEV-only and changes no runtime behaviour.
+  if (import.meta.env.DEV && template === key) {
+    console.warn('[i18n] missing translation key:', key, '(', lang, ')');
+  }
   // Interpolate {placeholder} params into the template. A missing param leaves
   // the placeholder intact (never throws); pass all expected params to avoid
   // showing a literal {x} to users.

@@ -43,9 +43,19 @@ def _table_exists(conn, table_name: str) -> bool:
 def upgrade() -> None:
     """Create user_permissions table if not exists, ensure granted_at is timestamp."""
     conn = op.get_bind()
+    is_postgresql = conn.dialect.name == "postgresql"
 
     if not _table_exists(conn, "user_permissions"):
         # Table doesn't exist - create it with correct schema
+        table_args = []
+        if not is_postgresql:
+            table_args.append(
+                sa.UniqueConstraint(
+                    "user_id",
+                    "permission",
+                    name="user_permissions_user_id_permission_key",
+                )
+            )
         op.create_table(
             "user_permissions",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
@@ -53,15 +63,17 @@ def upgrade() -> None:
             sa.Column("permission", sa.Text, nullable=False),
             sa.Column("granted_by", sa.Integer, nullable=True),
             sa.Column("granted_at", sa.TIMESTAMP, nullable=True),
+            *table_args,
         )
-        op.create_unique_constraint(
-            "user_permissions_user_id_permission_key",
-            "user_permissions",
-            ["user_id", "permission"],
-        )
+        if is_postgresql:
+            op.create_unique_constraint(
+                "user_permissions_user_id_permission_key",
+                "user_permissions",
+                ["user_id", "permission"],
+            )
     else:
         # Table exists - check if granted_at column is text type
-        if conn.dialect.name == "postgresql":
+        if is_postgresql:
             result = conn.execute(
                 sa.text(
                     "SELECT data_type FROM information_schema.columns "
@@ -83,7 +95,7 @@ def downgrade() -> None:
     """Revert granted_at back to text."""
     conn = op.get_bind()
 
-    if _table_exists(conn, "user_permissions"):
+    if _table_exists(conn, "user_permissions") and conn.dialect.name == "postgresql":
         op.alter_column(
             "user_permissions",
             "granted_at",

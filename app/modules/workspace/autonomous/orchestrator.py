@@ -3133,12 +3133,24 @@ class AutonomousOrchestrator:
                 conflict_prompt = (
                     AUTONOMOUS_CONTEXT
                     + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
-                    "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
+                    "保留两边的有效修改。\n\n"
                     "步骤：\n"
                     "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
                     "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
                     "3. git add 所有解决后的文件\n"
-                    "4. git commit 完成合并"
+                    "4. 运行测试验证冲突解决没有破坏功能（不能跳过）：\n"
+                    "   - python -m pytest 或 python3 -m pytest\n"
+                    "   - 如果有测试失败，分析原因并修复，然后重新测试\n"
+                    "   - 特别注意：main 上的改动可能修改了函数签名/SQL/接口，\n"
+                    "     冲突文件相关的测试也需要同步更新\n"
+                    "   - 重复直到所有测试通过\n"
+                    "5. 测试全部通过后，git commit 完成合并\n\n"
+                    "## 总结报告（必须）\n"
+                    "在回复末尾简要总结：\n"
+                    "- 解决了哪些文件的冲突\n"
+                    "- 是否执行了测试，测试结果如何（如 42 passed, 0 failed）\n"
+                    "- 如果跳过了测试，说明原因\n"
+                    "- 这个总结会显示在工作流的 timeline 中，供用户查看"
                 )
 
                 wf = self.workflow
@@ -3168,12 +3180,15 @@ class AutonomousOrchestrator:
                     milestone_id=conflict_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(result)
+                response_text = result.response_text or ""
                 self.repo.update_milestone(
                     conflict_ms.get("milestone_id", ""),
                     {
                         "status": "completed" if result.success else "failed",
                         "session_id": result.session_id,
                         "error_message": result.error or "",
+                        "result_summary": response_text,
+                        "tldr": self._extract_tldr(response_text),
                     },
                 )
 

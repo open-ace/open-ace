@@ -24,7 +24,15 @@ export const SecuritySettings: React.FC = () => {
 
   const handleSave = async () => {
     try {
-      await updateSettings.mutateAsync(formData);
+      // Process ip_whitelist: trim each line, filter empty, dedupe
+      const formDataToSave = { ...formData };
+      if (formDataToSave.ip_whitelist) {
+        formDataToSave.ip_whitelist = formDataToSave.ip_whitelist
+          .map((ip: string) => ip.trim())
+          .filter((ip: string) => ip)
+          .filter((ip: string, index: number, arr: string[]) => arr.indexOf(ip) === index);
+      }
+      await updateSettings.mutateAsync(formDataToSave);
       toast.success(t('settingsSaved', language));
       setFormData({});
     } catch (err) {
@@ -208,12 +216,7 @@ export const SecuritySettings: React.FC = () => {
             className="form-control"
             rows={4}
             value={(currentSettings.ip_whitelist || []).join('\n')}
-            onChange={(e) =>
-              handleInputChange(
-                'ip_whitelist',
-                e.target.value.split('\n').filter((ip) => ip.trim())
-              )
-            }
+            onChange={(e) => handleInputChange('ip_whitelist', e.target.value.split('\n'))}
             placeholder={'192.168.1.1\n10.0.0.0/24'}
           />
           <small className="text-muted">{t('ipWhitelistHelp', language)}</small>

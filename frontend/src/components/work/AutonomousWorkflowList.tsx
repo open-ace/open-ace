@@ -780,7 +780,6 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                 totalPages={totalPages}
                 onPageChange={handlePageChange}
                 showPageInput={false}
-                showPageInfo={false}
                 maxVisiblePages={3}
               />
             </div>

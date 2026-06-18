@@ -435,5 +435,11 @@ class AuthService:
         return True, session
 
 
-# Public export for security settings (with 60-second cache)
-get_security_settings_cached = _get_security_settings
+def get_security_settings_cached() -> dict:
+    """Public accessor for security settings (60-second in-memory cache).
+
+    Thin wrapper over the module-private ``_get_security_settings`` so the
+    public API is a regular function rather than a bare alias. The cache lives
+    inside ``_get_security_settings`` and is preserved unchanged.
+    """
+    return _get_security_settings()

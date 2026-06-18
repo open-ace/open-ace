@@ -246,13 +246,14 @@ def upgrade() -> None:
         )
 
     # Add workspace_type and remote_machine_id columns to agent_sessions
-    if not _column_exists(conn, "agent_sessions", "workspace_type"):
-        op.execute(
-            sa.text("ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'")
-        )
+    if _table_exists(conn, "agent_sessions"):
+        if not _column_exists(conn, "agent_sessions", "workspace_type"):
+            op.execute(
+                sa.text("ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'")
+            )
 
-    if not _column_exists(conn, "agent_sessions", "remote_machine_id"):
-        op.execute(sa.text("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT"))
+        if not _column_exists(conn, "agent_sessions", "remote_machine_id"):
+            op.execute(sa.text("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT"))
 
 
 def downgrade() -> None:
@@ -261,7 +262,7 @@ def downgrade() -> None:
 
     # Drop columns from agent_sessions (SQLite doesn't support DROP COLUMN easily,
     # so we only do this for PostgreSQL)
-    if conn.dialect.name == "postgresql":
+    if conn.dialect.name == "postgresql" and _table_exists(conn, "agent_sessions"):
         if _column_exists(conn, "agent_sessions", "remote_machine_id"):
             op.execute(sa.text("ALTER TABLE agent_sessions DROP COLUMN remote_machine_id"))
         if _column_exists(conn, "agent_sessions", "workspace_type"):

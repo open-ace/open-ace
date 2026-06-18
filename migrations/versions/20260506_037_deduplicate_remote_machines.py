@@ -22,8 +22,27 @@ branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    """Check whether a table exists."""
+    if conn.dialect.name == "postgresql":
+        result = conn.execute(
+            sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table_name"),
+            {"table_name": table_name},
+        )
+        return result.fetchone() is not None
+
+    result = conn.execute(
+        sa.text("SELECT 1 FROM sqlite_master WHERE type='table' AND name = :table_name"),
+        {"table_name": table_name},
+    )
+    return result.fetchone() is not None
+
+
 def upgrade() -> None:
     conn = op.get_bind()
+
+    if not _table_exists(conn, "remote_machines"):
+        return
 
     # Add index for hostname+tenant lookups
     op.execute(
@@ -79,13 +98,14 @@ def upgrade() -> None:
             )
 
             # Migrate agent_sessions to survivor
-            conn.execute(
-                sa.text(
-                    "UPDATE agent_sessions SET remote_machine_id = :survivor "
-                    "WHERE remote_machine_id = :victim"
-                ),
-                {"survivor": survivor_id, "victim": victim_mid},
-            )
+            if _table_exists(conn, "agent_sessions"):
+                conn.execute(
+                    sa.text(
+                        "UPDATE agent_sessions SET remote_machine_id = :survivor "
+                        "WHERE remote_machine_id = :victim"
+                    ),
+                    {"survivor": survivor_id, "victim": victim_mid},
+                )
 
             # Delete the duplicate machine record
             conn.execute(
