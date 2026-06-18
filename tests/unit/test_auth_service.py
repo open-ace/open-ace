@@ -490,6 +490,8 @@ class TestAuthService:
         )
         assert success is False
         assert "8 characters" in error
+        # The change-password flow preserves the "New" context.
+        assert "new" in error.lower()
 
     def test_change_password_same_as_current(self):
         svc, mock_repo = self._make_service()

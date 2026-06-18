@@ -1,6 +1,7 @@
 """Unit tests for ROICalculator module."""
 
 import json
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -271,6 +272,26 @@ class TestROICalculator:
         assert len(costs) == 2
         assert costs[0]["date"] == "2026-01-01"
         assert costs[0]["total_cost"] > 0
+
+    def test_get_daily_costs_normalizes_date_object(self):
+        """PostgreSQL returns `daily_usage.date` as a datetime.date object; the
+        output must be normalized to a YYYY-MM-DD string so Flask jsonify does
+        not serialize it as an RFC822 HTTP-date onto the chart axis. The plain
+        string mock above only covers the SQLite path and would miss this."""
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_all.return_value = [
+            {"date": date(2026, 6, 1), "input_tokens": 1000, "output_tokens": 500},
+            {"date": date(2026, 6, 2), "input_tokens": 2000, "output_tokens": 1000},
+            {"date": None, "input_tokens": 300, "output_tokens": 100},
+        ]
+        costs = calc.get_daily_costs("2026-06-01", "2026-06-30")
+        assert len(costs) == 3
+        assert costs[0]["date"] == "2026-06-01"
+        assert costs[1]["date"] == "2026-06-02"
+        # None date is preserved (not coerced to "None" string)
+        assert costs[2]["date"] is None
+        # No date object should leak through
+        assert all(not hasattr(c["date"], "strftime") for c in costs if c["date"])
 
     def test_get_summary_stats(self):
         calc, mock_db = self._make_calculator()

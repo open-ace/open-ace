@@ -25,6 +25,7 @@ interface TextInputProps extends BaseInputProps {
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
   id?: string;
+  'aria-label'?: string;
   'aria-describedby'?: string;
 }
 
@@ -45,6 +46,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       iconPosition = 'left',
       className,
       id,
+      'aria-label': ariaLabel,
       'aria-describedby': ariaDescribedBy,
     },
     ref
@@ -70,6 +72,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             onKeyDown={onKeyDown}
             disabled={disabled}
             required={required}
+            aria-label={ariaLabel}
             aria-describedby={ariaDescribedBy}
           />
           {icon && iconPosition === 'right' && <span className="input-icon">{icon}</span>}

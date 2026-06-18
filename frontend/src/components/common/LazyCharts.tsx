@@ -58,6 +58,13 @@ export interface BarChartProps {
   className?: string;
   unit?: 'none' | 'K' | 'M' | 'B';
   usernames?: string[];
+  /**
+   * Explicit per-bar tooltip titles. When provided, the tooltip title uses
+   * these instead of the (possibly compact) axis label — e.g. full YYYY-MM-DD
+   * dates on hover while the axis shows a short format. Optional; omitting it
+   * keeps the default behavior so existing callers are unaffected.
+   */
+  tooltipLabels?: string[];
   /** Language for tooltip translation */
   language?: Language;
 }
