@@ -3074,6 +3074,12 @@ class AutonomousOrchestrator:
             except GitHubOpsError as e:
                 logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
             self._update_workflow({"worktree_path": ""})
+            # The caller's gh still points at the now-deleted worktree dir as
+            # its cwd. Rebind it (and the cached self._gh) to the main repo so
+            # the later merge_pr / _do_merge cleanup don't run subprocess with
+            # a gone cwd (#1107 review).
+            gh = GitHubOps(project_path)
+            self._gh = gh
 
         # Create an isolated worktree for the existing PR branch. Use the main
         # repo's gh so the worktree is registered against the real .git.

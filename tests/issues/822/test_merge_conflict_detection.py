@@ -365,15 +365,19 @@ class TestResolveMergeConflictsWorktreeIsolation:
         wf = _make_workflow(worktree_path="/srv/repo/../auto-dev-fc82f22a")
         o, _ = _make_orchestrator(wf)
         main_gh = MagicMock()
+        rebound_gh = MagicMock()  # gh rebound to project_path after worktree removal
         wt_gh = MagicMock()
-        caller_gh = MagicMock()
         wt_gh._run_git.side_effect = [
             MagicMock(),  # fetch
             MagicMock(returncode=0, stdout="", stderr=""),  # merge clean
         ]
-        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+        # GitHubOps construction order: main_gh, rebound_gh (after removal), wt_gh
+        mock_gh_cls.side_effect = [main_gh, rebound_gh, wt_gh]
 
-        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+        # caller_gh simulates the stale handle from _do_merge; it should be
+        # replaced by rebound_gh after worktree removal.
+        stale_gh = MagicMock()
+        o._resolve_merge_conflicts(stale_gh, "auto-dev/fc82f22a", 1103)
 
         # The existing worktree was removed BEFORE the temp one was added.
         remove_calls = main_gh.remove_worktree.call_args_list
@@ -387,6 +391,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # Second removal is the temp worktree (finally cleanup).
         temp_path = main_gh.add_worktree.call_args.args[0]
         assert remove_calls[1].args[0] == temp_path
+        # merge_pr ran on the REBOUND gh (project_path), NOT the stale handle
+        # whose cwd pointed at the deleted worktree.
+        rebound_gh.merge_pr.assert_called_once_with(1103, strategy="merge")
+        stale_gh.merge_pr.assert_not_called()
 
 
 # ── github_ops.add_worktree (no -b) ──────────────────────────────────────
