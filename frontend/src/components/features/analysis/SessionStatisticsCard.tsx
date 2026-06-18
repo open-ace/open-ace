@@ -64,11 +64,12 @@ export const SessionStatisticsCard: React.FC<SessionStatisticsCardProps> = ({
 }) => {
   const language = useLanguage();
 
-  const totalConversations = conversationStats?.total_conversations ?? 0;
-  const totalMessages = conversationStats?.total_messages ?? 0;
-  const avgMessages = conversationStats?.average_messages_per_conversation ?? 0;
-  const avgTokens = conversationStats?.average_tokens_per_conversation ?? 0;
-  const multiTurnRatio = conversationStats?.multi_turn_ratio ?? 0;
+  // Ensure numeric types - API may return strings in some cases
+  const totalConversations = Number(conversationStats?.total_conversations ?? 0) || 0;
+  const totalMessages = Number(conversationStats?.total_messages ?? 0) || 0;
+  const avgMessages = Number(conversationStats?.average_messages_per_conversation ?? 0) || 0;
+  const avgTokens = Number(conversationStats?.average_tokens_per_conversation ?? 0) || 0;
+  const multiTurnRatio = Number(conversationStats?.multi_turn_ratio ?? 0) || 0;
 
   const rows: Array<{
     testId: string;

@@ -16,27 +16,30 @@ const MAX_CACHE_SIZE = 1000; // Limit cache size to prevent memory issues
  * Cached for performance - same values return cached results
  */
 export function formatTokens(tokens: number): string {
+  // Ensure numeric type - API may return strings in some cases
+  const numTokens = Number(tokens) || 0;
+
   // Check cache first
-  const cached = tokenFormatCache.get(tokens);
+  const cached = tokenFormatCache.get(numTokens);
   if (cached !== undefined) {
     return cached;
   }
 
   // Calculate result
   let result: string;
-  if (tokens >= 1_000_000_000) {
-    result = (tokens / 1_000_000_000).toFixed(2) + 'B';
-  } else if (tokens >= 1_000_000) {
-    result = (tokens / 1_000_000).toFixed(2) + 'M';
-  } else if (tokens >= 1_000) {
-    result = (tokens / 1_000).toFixed(2) + 'K';
+  if (numTokens >= 1_000_000_000) {
+    result = (numTokens / 1_000_000_000).toFixed(2) + 'B';
+  } else if (numTokens >= 1_000_000) {
+    result = (numTokens / 1_000_000).toFixed(2) + 'M';
+  } else if (numTokens >= 1_000) {
+    result = (numTokens / 1_000).toFixed(2) + 'K';
   } else {
-    result = tokens.toString();
+    result = numTokens.toString();
   }
 
   // Cache result with size limit
   if (tokenFormatCache.size < MAX_CACHE_SIZE) {
-    tokenFormatCache.set(tokens, result);
+    tokenFormatCache.set(numTokens, result);
   }
 
   return result;
