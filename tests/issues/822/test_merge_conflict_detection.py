@@ -101,6 +101,13 @@ class TestResolveMergeConflictsStdoutConflict:
 
         # Stub the AI conflict resolver so we verify it IS reached.
         o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1",
+            success=True,
+            response_text="All tests passed.\nTEST_STATUS: passed",
+        )
         o._resolve_session_line = MagicMock(return_value=("sess", None, False))
         o._link_session_to_current_milestone = MagicMock()
 
@@ -402,7 +409,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
         o._run_agent.return_value = AgentTaskResult(
-            session_id="s1", success=True, response_text="resolved"
+            session_id="s1", success=True, response_text="resolved\nTEST_STATUS: passed"
         )
         o._resolve_session_line = MagicMock(return_value=("sess", None, False))
         o._link_session_to_current_milestone = MagicMock()
@@ -441,7 +448,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
         o._run_agent.return_value = AgentTaskResult(
-            session_id="s1", success=True, response_text="resolved"
+            session_id="s1", success=True, response_text="resolved\nTEST_STATUS: passed"
         )
         o._resolve_session_line = MagicMock(return_value=("sess", None, False))
         o._link_session_to_current_milestone = MagicMock()
@@ -476,7 +483,7 @@ class TestResolveMergeConflictsWorktreeIsolation:
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
         o._run_agent.return_value = AgentTaskResult(
-            session_id="s1", success=True, response_text="resolved"
+            session_id="s1", success=True, response_text="resolved\nTEST_STATUS: passed"
         )
         o._resolve_session_line = MagicMock(return_value=("sess", None, False))
         o._link_session_to_current_milestone = MagicMock()
@@ -491,6 +498,115 @@ class TestResolveMergeConflictsWorktreeIsolation:
         test_pos = prompt.lower().find("pytest")
         commit_pos = prompt.lower().find("git commit")
         assert test_pos < commit_pos, "tests must run before git commit"
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_refuses_push_without_test_sentinel(self, mock_gh_cls):
+        """If the agent does not report TEST_STATUS: passed, push is refused.
+
+        result.success only means the process exited normally — it says nothing
+        about whether tests ran. Without this machine-checkable gate, the agent
+        can skip pytest entirely and we push untested code (#1124 review).
+        """
+        import pytest as pytest_mod
+
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): Merge conflict in app/x.py\n",
+                stderr="",
+            ),  # merge (conflict)
+        ]
+        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+
+        o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        # Agent succeeded but NEVER mentioned tests — no sentinel, no evidence.
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1",
+            success=True,
+            response_text="I resolved the conflicts and committed.",
+        )
+        o._resolve_session_line = MagicMock(return_value=("sess", None, False))
+        o._link_session_to_current_milestone = MagicMock()
+
+        with pytest_mod.raises(RuntimeError, match="did not run tests"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        # Push must NOT have happened.
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_refuses_push_with_skipped_sentinel(self, mock_gh_cls):
+        """TEST_STATUS: skipped also blocks push — tests must actually pass."""
+        import pytest as pytest_mod
+
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): Merge conflict in app/x.py\n",
+                stderr="",
+            ),  # merge (conflict)
+        ]
+        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+
+        o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1",
+            success=True,
+            response_text="Resolved conflicts.\nTEST_STATUS: skipped",
+        )
+        o._resolve_session_line = MagicMock(return_value=("sess", None, False))
+        o._link_session_to_current_milestone = MagicMock()
+
+        with pytest_mod.raises(RuntimeError, match="did not run tests"):
+            o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_not_called()
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_pushes_after_test_sentinel(self, mock_gh_cls):
+        """TEST_STATUS: passed allows push to proceed."""
+        o, _ = _make_orchestrator(_make_workflow())
+        main_gh = MagicMock()
+        wt_gh = MagicMock()
+        caller_gh = MagicMock()
+        wt_gh._run_git.side_effect = [
+            MagicMock(),  # fetch
+            MagicMock(
+                returncode=1,
+                stdout="CONFLICT (content): Merge conflict in app/x.py\n",
+                stderr="",
+            ),  # merge (conflict)
+        ]
+        mock_gh_cls.side_effect = [main_gh, wt_gh, caller_gh]
+
+        o._run_agent = MagicMock()
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        o._run_agent.return_value = AgentTaskResult(
+            session_id="s1",
+            success=True,
+            response_text="All 42 tests passed.\nTEST_STATUS: passed",
+        )
+        o._resolve_session_line = MagicMock(return_value=("sess", None, False))
+        o._link_session_to_current_milestone = MagicMock()
+
+        o._resolve_merge_conflicts(caller_gh, "auto-dev/fc82f22a", 1103)
+
+        wt_gh.git_push.assert_called_once_with(branch="auto-dev/fc82f22a")
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_main_repo_never_checked_out(self, mock_gh_cls):
