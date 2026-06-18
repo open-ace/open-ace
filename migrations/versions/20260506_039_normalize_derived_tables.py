@@ -179,30 +179,13 @@ def _rebuild_sqlite_qwen_usage_summary() -> None:
     )
 
 
-def _normalize_sqlite_claude_usage_summary() -> None:
-    """Collapse usage_summary rows that would collide on claude normalization."""
+def _rebuild_sqlite_claude_usage_summary() -> None:
+    """Recalculate claude usage_summary rows from daily_messages."""
     op.execute(
         sa.text(
-            """
-            CREATE TEMP TABLE tmp_claude_usage_summary AS
-            SELECT
-                'claude' AS tool_name,
-                host_name,
-                MAX(days_count) AS days_count,
-                SUM(total_tokens) AS total_tokens,
-                SUM(total_requests) AS total_requests,
-                SUM(total_input_tokens) AS total_input_tokens,
-                SUM(total_output_tokens) AS total_output_tokens,
-                MIN(first_date) AS first_date,
-                MAX(last_date) AS last_date,
-                MAX(updated_at) AS updated_at
-            FROM usage_summary
-            WHERE tool_name IN ('claude', 'claude-code')
-            GROUP BY host_name
-            """
+            "DELETE FROM usage_summary WHERE tool_name IN ('claude', 'claude-code')"
         )
     )
-    op.execute(sa.text("DELETE FROM usage_summary WHERE tool_name IN ('claude', 'claude-code')"))
     op.execute(
         sa.text(
             """
@@ -210,22 +193,47 @@ def _normalize_sqlite_claude_usage_summary() -> None:
             (tool_name, host_name, days_count, total_tokens, avg_tokens, total_requests,
              total_input_tokens, total_output_tokens, first_date, last_date, updated_at)
             SELECT
-                tool_name,
+                'claude' AS tool_name,
                 host_name,
-                days_count,
-                total_tokens,
-                total_tokens / CASE WHEN days_count > 0 THEN days_count ELSE 1 END AS avg_tokens,
-                total_requests,
-                total_input_tokens,
-                total_output_tokens,
-                first_date,
-                last_date,
-                updated_at
-            FROM tmp_claude_usage_summary
+                COUNT(DISTINCT date) AS days_count,
+                SUM(tokens_used) AS total_tokens,
+                SUM(tokens_used) / COUNT(DISTINCT date) AS avg_tokens,
+                COUNT(CASE WHEN role = 'assistant' THEN 1 END) AS total_requests,
+                SUM(input_tokens) AS total_input_tokens,
+                SUM(output_tokens) AS total_output_tokens,
+                MIN(date) AS first_date,
+                MAX(date) AS last_date,
+                CURRENT_TIMESTAMP AS updated_at
+            FROM daily_messages
+            WHERE tool_name IN ('claude', 'claude-code')
+            GROUP BY host_name
             """
         )
     )
-    op.execute(sa.text("DROP TABLE tmp_claude_usage_summary"))
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO usage_summary
+            (tool_name, host_name, days_count, total_tokens, avg_tokens, total_requests,
+             total_input_tokens, total_output_tokens, first_date, last_date, updated_at)
+            SELECT
+                'claude' AS tool_name,
+                '' AS host_name,
+                COUNT(DISTINCT date) AS days_count,
+                SUM(tokens_used) AS total_tokens,
+                SUM(tokens_used) / COUNT(DISTINCT date) AS avg_tokens,
+                COUNT(CASE WHEN role = 'assistant' THEN 1 END) AS total_requests,
+                SUM(input_tokens) AS total_input_tokens,
+                SUM(output_tokens) AS total_output_tokens,
+                MIN(date) AS first_date,
+                MAX(date) AS last_date,
+                CURRENT_TIMESTAMP AS updated_at
+            FROM daily_messages
+            WHERE tool_name IN ('claude', 'claude-code')
+            GROUP BY 'claude'
+            """
+        )
+    )
 
 
 def upgrade() -> None:
@@ -238,7 +246,7 @@ def upgrade() -> None:
             _normalize_sqlite_hourly_stats()
         if _table_exists(conn, "usage_summary"):
             _rebuild_sqlite_qwen_usage_summary()
-            _normalize_sqlite_claude_usage_summary()
+            _rebuild_sqlite_claude_usage_summary()
         return
 
     for table in ("daily_stats", "hourly_stats", "usage_summary"):
