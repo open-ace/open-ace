@@ -3949,6 +3949,9 @@ export const translations: Record<Language, Translations> = {
     autoCreationParameters: '作成パラメータ',
     autoYes: 'はい',
     autoNo: 'いいえ',
+    toolAccountRequired: 'ツールアカウントは必須です',
+    addToolAccountSuccess: 'ツールアカウントが正常に追加されました',
+    addToolAccountFailed: 'ツールアカウントの追加に失敗しました',
   },
   ko: {
     // Common
@@ -5062,6 +5065,9 @@ export const translations: Record<Language, Translations> = {
     autoCreationParameters: '생성 매개변수',
     autoYes: '예',
     autoNo: '아니요',
+    toolAccountRequired: '도구 계정은 필수입니다',
+    addToolAccountSuccess: '도구 계정이 성공적으로 추가되었습니다',
+    addToolAccountFailed: '도구 계정 추가 실패',
   },
 };
 
