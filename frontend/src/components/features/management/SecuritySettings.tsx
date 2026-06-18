@@ -216,12 +216,7 @@ export const SecuritySettings: React.FC = () => {
             className="form-control"
             rows={4}
             value={(currentSettings.ip_whitelist || []).join('\n')}
-            onChange={(e) =>
-              handleInputChange(
-                'ip_whitelist',
-                e.target.value.split('\n')
-              )
-            }
+            onChange={(e) => handleInputChange('ip_whitelist', e.target.value.split('\n'))}
             placeholder={'192.168.1.1\n10.0.0.0/24'}
           />
           <small className="text-muted">{t('ipWhitelistHelp', language)}</small>

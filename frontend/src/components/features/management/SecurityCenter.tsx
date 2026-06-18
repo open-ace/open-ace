@@ -713,10 +713,7 @@ export const SecurityCenter: React.FC = () => {
               rows={4}
               value={(currentSettings.ip_whitelist || []).join('\n')}
               onChange={(e) =>
-                handleSettingsInputChange(
-                  'ip_whitelist',
-                  e.target.value.split('\n')
-                )
+                handleSettingsInputChange('ip_whitelist', e.target.value.split('\n'))
               }
               placeholder={'192.168.1.1\n10.0.0.0/24'}
             />
