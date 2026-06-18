@@ -396,13 +396,15 @@ class DailyStatsRepository:
 
         .. deprecated::
             This method estimates ``total_conversations`` as
-            ``unique_dates * unique_tools`` (a synthetic approximation) and does not
-            accept a date range, which previously caused the batch endpoint to report
-            session counts inconsistent with the standalone endpoint. It is no longer
-            on any hot path — ``analysis_service.get_session_stats`` and
-            ``message_repo.get_conversation_stats_summary`` are now the single source
-            of truth. Retained only as a rollback fallback; do not wire it back into
-            ``get_batch_analysis``.
+            ``unique_dates * unique_tools`` (an inflated small denominator /
+            synthetic approximation) and does not accept a date range, which
+            previously caused the batch endpoint to report session counts
+            inconsistent with the standalone endpoint. It is no longer called in
+            production. ``analysis_service.get_session_stats`` and
+            ``message_repo.get_conversation_stats_summary`` are now the single
+            source of truth (real distinct conversation count from a single
+            scope-consistent query). Retained only for backward compatibility;
+            do not wire it back into ``get_batch_analysis``.
 
         This method calculates conversation stats from daily_stats
         instead of scanning daily_messages.

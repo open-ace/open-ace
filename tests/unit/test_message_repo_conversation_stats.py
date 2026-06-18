@@ -109,12 +109,15 @@ class TestGetConversationStatsSummary:
         assert result["average_tokens_per_conversation"] == 0
 
     def test_no_date_range_still_filters_session_ids(self):
-        """Without date range the session-id filter still applies (no KeyError)."""
+        """Without explicit date range the implementation defaults to a 30-day
+        window (aligned with analysis callers), so date filters ARE present.
+        The session-id filter still applies regardless."""
         self.db.fetch_one.return_value = self._row()
         self.repo.get_conversation_stats_summary()
         query = self.db.fetch_one.call_args_list[0].args[0]
-        assert "date >= ?" not in query
-        assert "date <= ?" not in query
+        # Default 30-day window means date filters are always present.
+        assert "date >= ?" in query
+        assert "date <= ?" in query
         assert "IS NOT NULL" in query
 
     def test_multi_turn_ratio_equals_count_over_total(self):

@@ -8,6 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.repositories.database import Database, escape_like
+from app.utils.cache import cached
 from app.utils.senders import is_valid_sender
 from app.utils.tool_names import normalize_tool_name
 
@@ -966,6 +967,7 @@ class MessageRepository:
 
         return sorted(merged.values(), key=lambda x: x.get("total_tokens", 0), reverse=True)
 
+    @cached(ttl=300, key_prefix="conv_summary", skip_args=[0])
     def get_conversation_stats_summary(
         self,
         start_date: Optional[str] = None,
@@ -973,17 +975,32 @@ class MessageRepository:
         host_name: Optional[str] = None,
     ) -> dict:
         """
-        Real conversation statistics summary — single source of truth for session stats.
+        Get conversation statistics summary without fetching full history.
 
-        Computes real distinct conversation count, total messages, multi-turn ratio and
-        per-conversation averages directly from ``daily_messages`` (grain: 1 row = 1
-        message). Supports date-range filtering so the batch and standalone analysis
-        endpoints share one consistent scope. This replaces the previous
-        ``unique_dates * unique_tools`` synthetic approximation.
+        Single aggregate query over the SAME ``id_filter`` set, so the
+        returned ``total_conversations`` (distinct sessions, the denominator)
+        and the ``total_messages`` / ``total_tokens`` sums (the numerators)
+        share one scope. This makes per-session averages scope-consistent and
+        is the single source of truth for ``get_batch_analysis``,
+        ``get_key_metrics`` and the standalone ``get_conversation_stats``.
+
+        Computes real distinct conversation count, total messages, multi-turn
+        ratio and per-conversation averages directly from ``daily_messages``
+        (grain: 1 row = 1 message). Supports date-range filtering so the batch
+        and standalone analysis endpoints share one consistent scope. This
+        replaces the previous ``unique_dates * unique_tools`` synthetic
+        approximation.
+
+        Note: ``COUNT(DISTINCT COALESCE(...))`` cannot use
+        ``idx_messages_conversation`` (the COALESCE expression defeats the
+        btree); the query is cached at the repo layer (``@cached``) to bound
+        the cost of reintroducing a ``daily_messages`` aggregation into the
+        batch hot path.
 
         Args:
-            start_date: Optional start date filter (YYYY-MM-DD, inclusive).
-            end_date: Optional end date filter (YYYY-MM-DD, inclusive).
+            start_date: Optional start date filter (defaults to 30 days ago,
+                aligned with the analysis callers).
+            end_date: Optional end date filter (defaults to today).
             host_name: Optional host name filter.
 
         Returns:
@@ -991,8 +1008,20 @@ class MessageRepository:
             as a backward-compatible alias of ``average_messages_per_conversation``
             for existing consumers (calculateHealthScore, insights, exports).
         """
+        from datetime import datetime, timedelta, timezone
+
         conditions: list[str] = []
         params: list[Any] = []
+
+        # Default to the analysis callers' 30-day window when unset (aligned
+        # with get_batch_analysis / get_key_metrics / the standalone endpoint)
+        # so the batch and standalone paths share one consistent default scope.
+        if not start_date:
+            start_date = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            ).strftime("%Y-%m-%d")
+        if not end_date:
+            end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
 
         # Session identifier expression — defined once and reused by the WHERE
         # filter and the GROUP BY so the two cannot drift apart.
@@ -1008,14 +1037,21 @@ class MessageRepository:
             conditions.append("host_name = ?")
             params.append(host_name)
 
-        # Only count records that carry a session identifier
-        conditions.append(f"{session_expr} IS NOT NULL")
+        # Same id_filter set for numerator (SUM) and denominator (COUNT DISTINCT)
+        # so per-session averages stay scope-consistent. Only count records that
+        # carry a session identifier. If a faster
+        # ``COUNT(DISTINCT agent_session_id)`` variant is ever adopted, this
+        # filter MUST switch to ``agent_session_id IS NOT NULL`` in tandem.
+        id_filter = f"{session_expr} IS NOT NULL"
+        conditions.append(id_filter)
+
         where_clause = f"WHERE {' AND '.join(conditions)}"
 
         # Single-pass aggregate: group once per session in a derived table, then
         # roll up. One scan of daily_messages yields the distinct conversation
         # count, the total message/token sums and the multi-turn count together
         # (previously this required two separate queries).
+        # COALESCE / COUNT(DISTINCT) / SUM are standard SQL (PostgreSQL + SQLite).
         query = f"""
             SELECT
                 COUNT(*) AS total_conversations,

@@ -90,8 +90,8 @@ class AnalysisService:
                 self.daily_stats_repo.get_hourly_totals, start_date, end_date, host_name
             ): "hourly_data",
             _executor.submit(
-                self.get_session_stats, start_date, end_date, host_name
-            ): "conversation_stats",
+                self.message_repo.get_conversation_stats_summary, start_date, end_date, host_name
+            ): "session_summary",
             _executor.submit(
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name
             ): "total_requests",
@@ -106,7 +106,7 @@ class AnalysisService:
                 results[key] = future.result()
             except Exception as e:
                 logger.error(f"Query {key} failed: {e}")
-                results[key] = {} if key in ["aggregates", "conversation_stats"] else []
+                results[key] = {} if key in ["aggregates", "session_summary"] else []
 
         # Extract results
         aggregates = results.get("aggregates", {})
@@ -114,7 +114,7 @@ class AnalysisService:
         tool_stats = results.get("tool_stats", [])
         daily_data = results.get("daily_data", [])
         hourly_data = results.get("hourly_data", [])
-        conversation_stats = results.get("conversation_stats", {})
+        session_summary = results.get("session_summary", {})
         total_requests = results.get("total_requests", 0)
         data_range = results.get("data_range")
 
@@ -136,10 +136,40 @@ class AnalysisService:
             for tool, count in sorted(merged_tools.items(), key=lambda x: -x[1])[:5]:
                 top_tools.append({"tool": tool, "count": count})
 
-        # Sessions = unique days * unique tools (approximation)
-        total_sessions = aggregates.get("unique_days", 1) * unique_tools if unique_tools > 0 else 1
+        # Real conversation count + session-scoped sums from a single query
+        # (message_repo.get_conversation_stats_summary). The denominator
+        # (distinct conversations) and the per-session numerators share the
+        # same id_filter set, so the averages are scope-consistent. This
+        # replaces the legacy ``unique_days * unique_tools`` approximation,
+        # which was an inflated small denominator that never reflected real
+        # session counts.
+        total_sessions = session_summary.get("total_conversations", 0) or 0
+        session_messages = session_summary.get("total_messages", 0) or 0
+        session_tokens = session_summary.get("total_tokens", 0) or 0
+        legacy_approx_sessions = aggregates.get("unique_days", 0) * (
+            unique_tools if unique_tools > 0 else 0
+        )
 
-        # Key metrics
+        # Sanity log: surface order-of-magnitude divergence between the legacy
+        # approximation and the real count so any scope drift is visible post-deploy.
+        if legacy_approx_sessions and total_sessions:
+            ratio = legacy_approx_sessions / total_sessions
+            if ratio > 10 or ratio < 0.1:
+                logger.warning(
+                    "session count divergence: legacy approx=%s real distinct=%s "
+                    "(ratio=%.1fx) for range %s..%s host=%s",
+                    legacy_approx_sessions,
+                    total_sessions,
+                    ratio,
+                    start_date,
+                    end_date,
+                    host_name,
+                )
+
+        # Key metrics.
+        # total_tokens/total_messages stay as FULL aggregates (other cards rely
+        # on them); the per-session averages use the session-scoped sums so the
+        # numerator matches the distinct-conversation denominator.
         key_metrics = {
             "total_tokens": total_tokens,
             "total_input_tokens": total_input,
@@ -151,12 +181,19 @@ class AnalysisService:
             "top_tools": top_tools,
             "top_hosts": [],  # Will be populated from daily_data if needed
             "total_sessions": total_sessions,
-            "avg_tokens_per_session": total_tokens / total_sessions if total_sessions > 0 else 0,
+            "avg_tokens_per_session": (
+                session_tokens / total_sessions if total_sessions > 0 else 0
+            ),
             "avg_messages_per_session": (
-                total_messages / total_sessions if total_sessions > 0 else 0
+                session_messages / total_sessions if total_sessions > 0 else 0
             ),
             "date_range": {"start": start_date, "end": end_date},
         }
+
+        # Top-level conversation_stats comes from the same single source of
+        # truth (method B), so this card's totalConversations /
+        # avg_conversation_length are real and consistent with key_metrics.
+        conversation_stats = session_summary
 
         # Daily/Hourly usage - use pre-aggregated data
         daily_totals = {}
@@ -390,12 +427,18 @@ class AnalysisService:
                 reverse=True,
             )[:5]
 
-        # Calculate sessions and averages (normalize tool names for dedup)
-        total_sessions = len(
-            {(u.get("date"), normalize_tool_name(u.get("tool_name", ""))) for u in usage_data}
+        # Real conversation count + session-scoped sums from the single source
+        # of truth (message_repo.get_conversation_stats_summary). Replaces the
+        # legacy len({(date, tool)}) approximation and stays consistent with
+        # get_batch_analysis via the same method.
+        session_summary = self.message_repo.get_conversation_stats_summary(
+            start_date=start_date, end_date=end_date, host_name=host_name
         )
+        total_sessions = session_summary.get("total_conversations", 0) or 0
+        session_messages = session_summary.get("total_messages", 0) or 0
+        session_tokens = session_summary.get("total_tokens", 0) or 0
 
-        # Count total messages from user_tokens
+        # Count total messages from user_tokens (kept for the total_messages field)
         total_messages = (
             sum(u.get("message_count", 0) for u in user_tokens) if user_tokens else total_requests
         )
@@ -410,10 +453,12 @@ class AnalysisService:
             "unique_hosts": len(hosts) if hosts else 1,
             "top_tools": top_tools,
             "top_hosts": [{"host": h, "count": 0} for h in hosts][:5] if hosts else [],
-            "total_sessions": total_sessions if total_sessions > 0 else 1,
-            "avg_tokens_per_session": total_tokens / total_sessions if total_sessions > 0 else 0,
+            "total_sessions": total_sessions,
+            "avg_tokens_per_session": (
+                session_tokens / total_sessions if total_sessions > 0 else 0
+            ),
             "avg_messages_per_session": (
-                total_messages / total_sessions if total_sessions > 0 else 0
+                session_messages / total_sessions if total_sessions > 0 else 0
             ),
             "date_range": {"start": start_date, "end": end_date},
         }
@@ -637,9 +682,13 @@ class AnalysisService:
         Returns:
             Dict: Conversation statistics summary.
         """
-        return self.message_repo.get_conversation_stats_summary(
+        # ``get_conversation_stats_summary`` is ``@cached`` at the repo layer, so
+        # mypy sees its return as ``Any``; bind it to ``dict`` before returning to
+        # keep ``warn_return_any`` happy (mirrors the standalone caller's pattern).
+        summary: dict = self.message_repo.get_conversation_stats_summary(
             start_date=start_date, end_date=end_date, host_name=host_name
         )
+        return summary
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_conversation_stats(
@@ -656,16 +705,26 @@ class AnalysisService:
         ``get_conversation_history(limit=1000)`` in-memory aggregation that truncated
         large datasets and diverged from batch values.
 
+        Delegates to ``message_repo.get_conversation_stats_summary`` (the single
+        source of truth) so this standalone endpoint returns the SAME real,
+        scope-consistent numbers as the in-batch ``conversation_stats`` field.
+        This removes the previous ``get_conversation_history(limit=1000)`` /
+        7-day-default truncation that diverged from the batch path.
+
+        Behavior change: returned values are no longer capped at 1000
+        conversations / 7 days; they now reflect the full requested range.
+
         Returns:
             Dict: Conversation statistics.
         """
+        # Default to the analysis callers' 30-day window when unset (aligned
+        # with get_batch_analysis / get_key_metrics). Match the batch endpoint's
+        # default window so both paths share not only the same source of truth
+        # but also the same default scope when the caller omits a range.
         if not start_date:
-            # Match the batch endpoint's default window (30 days) so both paths
-            # share not only the same source of truth but also the same default
-            # scope when the caller omits a range.
-            start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            start_date = get_days_ago(30)
         if not end_date:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+            end_date = get_today()
 
         return self.get_session_stats(start_date=start_date, end_date=end_date, host_name=host_name)
 
