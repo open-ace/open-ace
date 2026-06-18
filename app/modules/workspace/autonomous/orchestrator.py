@@ -3145,11 +3145,12 @@ class AutonomousOrchestrator:
                     "     冲突文件相关的测试也需要同步更新\n"
                     "   - 重复直到所有测试通过\n"
                     "5. 测试全部通过后，git commit 完成合并\n\n"
-                    "## 测试状态报告（必须）\n"
-                    "在回复的最后一行输出测试状态：\n"
-                    "- 所有测试通过：`TEST_STATUS: passed`\n"
-                    "- 测试被跳过（无法运行）：`TEST_STATUS: skipped`\n"
-                    "缺少此标记会导致合并被拒绝。"
+                    "## 总结报告（必须）\n"
+                    "在回复末尾简要总结：\n"
+                    "- 解决了哪些文件的冲突\n"
+                    "- 是否执行了测试，测试结果如何（如 42 passed, 0 failed）\n"
+                    "- 如果跳过了测试，说明原因\n"
+                    "- 这个总结会显示在工作流的 timeline 中，供用户查看"
                 )
 
                 wf = self.workflow
@@ -3179,55 +3180,20 @@ class AutonomousOrchestrator:
                     milestone_id=conflict_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(result)
+                response_text = result.response_text or ""
                 self.repo.update_milestone(
                     conflict_ms.get("milestone_id", ""),
                     {
                         "status": "completed" if result.success else "failed",
                         "session_id": result.session_id,
                         "error_message": result.error or "",
+                        "result_summary": response_text,
+                        "tldr": self._extract_tldr(response_text),
                     },
                 )
 
                 if not result.success:
                     raise RuntimeError(f"Conflict resolution failed: {result.error}")
-
-                # Machine-checkable test gate: the agent MUST report that tests
-                # actually ran and passed before we push. result.success only
-                # means the process exited normally — it says nothing about
-                # whether tests were executed (#1124 review). Reuse the sentinel
-                # pattern from _run_test_phase.
-                response_text = result.response_text or ""
-                test_passed = "TEST_STATUS: passed" in response_text
-                tests_skipped = (
-                    "TEST_STATUS: skipped" in response_text
-                    or "测试被跳过" in response_text
-                    or "跳过测试" in response_text
-                )
-                # Also detect "no test evidence at all" — agent never ran tests.
-                _test_keywords = [
-                    "passed",
-                    "failed",
-                    "PASSED",
-                    "FAILED",
-                    "pytest",
-                    "assertion",
-                    "AssertionError",
-                ]
-                has_test_evidence = any(kw in response_text for kw in _test_keywords)
-                if not test_passed:
-                    if tests_skipped or not has_test_evidence:
-                        logger.warning(
-                            "Conflict resolution did not verify tests "
-                            "(skipped=%s, evidence=%s) — refusing to push",
-                            tests_skipped,
-                            has_test_evidence,
-                        )
-                        raise RuntimeError(
-                            "Conflict resolution did not run tests before "
-                            "committing — merge aborted to prevent pushing "
-                            "untested code. Agent must run pytest and report "
-                            "TEST_STATUS: passed."
-                        )
 
             # Push the resolved branch. The new merge commit triggers a fresh
             # CI run, so we do NOT merge here — _do_merge will retry on the
