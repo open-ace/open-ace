@@ -347,8 +347,13 @@ class GitHubOps:
                 pass
         return comments
 
-    def merge_pr(self, number: int, strategy: str = "merge") -> dict:
-        """Merge a PR."""
+    def merge_pr(self, number: int, strategy: str = "merge", auto: bool = False) -> dict:
+        """Merge a PR.
+
+        When ``auto`` is set, adds ``--auto`` so GitHub merges asynchronously
+        once branch-protection requirements (CI, reviews) pass — used when the
+        immediate merge is rejected solely because of policy, not conflicts.
+        """
         args = ["pr", "merge", str(number)]
         if strategy == "squash":
             args.append("--squash")
@@ -356,9 +361,11 @@ class GitHubOps:
             args.append("--rebase")
         else:
             args.append("--merge")
+        if auto:
+            args.append("--auto")
 
         self._run_gh(args)
-        logger.info("Merged PR #%s", number)
+        logger.info("Merged PR #%s (auto=%s)", number, auto)
         return {"number": number, "merged": True}
 
     def list_pr_commits(self, number: int) -> list:

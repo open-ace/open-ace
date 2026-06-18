@@ -2977,18 +2977,42 @@ class AutonomousOrchestrator:
                     status="completed",
                     title=f"PR #{pr_number} merged",
                 )
-            except GitHubOpsError:
-                # Merge conflict — resolve locally and retry
-                logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+            except GitHubOpsError as e:
+                err_msg = str(e)
+                if "base branch policy prohibits" in err_msg:
+                    # Not a conflict — branch protection (CI pending / review
+                    # required). Enable auto-merge so GitHub completes it once
+                    # requirements pass, instead of failing the workflow.
+                    try:
+                        gh.merge_pr(pr_number, strategy="merge", auto=True)
+                        self._create_milestone(
+                            phase="merge",
+                            milestone_type="merged",
+                            status="completed",
+                            title=f"PR #{pr_number} auto-merge enabled",
+                        )
+                        logger.info("PR #%s: enabled auto-merge (branch policy)", pr_number)
+                        return  # auto-merge pending; GitHub merges asynchronously
+                    except GitHubOpsError as auto_err:
+                        # --auto also rejected — fall through to local resolution
+                        logger.info(
+                            "PR #%s --auto rejected (%s), resolving conflicts",
+                            pr_number,
+                            auto_err,
+                        )
+                else:
+                    # Merge conflict — resolve locally and retry
+                    logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
+
                 try:
                     self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                except Exception as e:
+                except Exception as resolve_err:
                     self._create_milestone(
                         phase="merge",
                         milestone_type="merged",
                         status="failed",
                         title="PR merge failed",
-                        error_message=f"Merge conflict resolution failed: {e}",
+                        error_message=f"Merge conflict resolution failed: {resolve_err}",
                     )
                     raise
 
@@ -3057,7 +3081,12 @@ class AutonomousOrchestrator:
             # There are conflicts — use AI agent to resolve them
             gh._run_git(["merge", "--abort"])  # Clean state first
             merge_result = gh._run_git(["merge", "origin/main"], check=False)
-            if merge_result.returncode != 0 and "CONFLICT" not in merge_result.stderr:
+            # git writes conflict summaries to STDOUT (not stderr), so we must
+            # check both streams. Checking only stderr left stderr empty on a
+            # real conflict and the code misclassified it as a "non-conflict"
+            # failure, abandoning merge without ever invoking the AI resolver.
+            combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
+            if merge_result.returncode != 0 and "CONFLICT" not in combined_output:
                 raise GitHubOpsError(
                     f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
                 )
