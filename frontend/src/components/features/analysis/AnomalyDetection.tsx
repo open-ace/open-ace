@@ -369,65 +369,85 @@ export const AnomalyDetection: React.FC = () => {
           <div className="row mb-4">
             {/* Anomaly List */}
             <div className="col-md-6">
-              <Card title={t('anomalyList', language)} style={{ height: '100%' }}>
-                {anomalies.length > 0 ? (
-                  <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'hidden' }}>
-                    <table
-                      className="table table-sm table-hover mb-0"
-                      style={{ tableLayout: 'fixed', width: '100%' }}
-                    >
-                      <thead>
-                        <tr>
-                          <th style={{ width: '35%' }}>{t('tableDate', language)}</th>
-                          <th style={{ width: '25%' }}>{t('type', language)}</th>
-                          <th style={{ width: '20%' }}>{t('tableTokens', language)}</th>
-                          <th style={{ width: '20%' }}>{t('severity', language)}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {anomalies.map((anomaly, index) => (
-                          <tr key={index}>
-                            <td
-                              style={{
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              }}
-                            >
-                              {anomaly.date}
-                            </td>
-                            <td>
-                              <span
-                                className={cn(
-                                  'badge',
-                                  anomaly.type === 'spike' ? 'bg-danger' : 'bg-info'
-                                )}
-                              >
-                                {anomaly.type === 'spike'
-                                  ? t('usageSpike', language)
-                                  : t('usageDrop', language)}
-                              </span>
-                            </td>
-                            <td style={{ whiteSpace: 'nowrap' }}>{formatTokens(anomaly.tokens)}</td>
-                            <td>
-                              <span
-                                className={cn(
-                                  'badge',
-                                  anomaly.severity === 'high'
-                                    ? 'bg-danger'
-                                    : anomaly.severity === 'medium'
-                                      ? 'bg-warning'
-                                      : 'bg-info'
-                                )}
-                              >
-                                {anomaly.severity}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              <Card
+                title={t('anomalyList', language)}
+                style={{ height: '100%' }}
+                helpTooltip={t('anomalyMethodText', language)}
+              >
+                {/* Baseline banner — surfaces the detection context (currently discarded) */}
+                {anomalyData?.statistics && (
+                  <div className="mb-3 p-2 bg-light rounded">
+                    <small className="fw-semibold text-muted d-block mb-1">
+                      {t('anomalyMethodIntro', language)}
+                    </small>
+                    <small className="text-muted">
+                      {t('anomalyBaseline', language, {
+                        avg: formatTokens(anomalyData.statistics.average),
+                        std: formatTokens(anomalyData.statistics.std_deviation),
+                        n: anomalyData.statistics.data_points,
+                      })}
+                    </small>
                   </div>
+                )}
+                {anomalies.length > 0 ? (
+                  <ul
+                    className="list-group list-group-flush"
+                    style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'hidden' }}
+                  >
+                    {anomalies.map((anomaly, index) => {
+                      const contributor = getAnomalyTopContributor(anomaly, language);
+                      return (
+                        <li key={index} className="list-group-item px-0">
+                          <div className="d-flex justify-content-between align-items-start">
+                            <div className="me-2 flex-grow-1" style={{ minWidth: 0 }}>
+                              <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                                <span
+                                  className={cn(
+                                    'badge',
+                                    anomaly.type === 'spike' ? 'bg-danger' : 'bg-info'
+                                  )}
+                                >
+                                  {anomaly.type === 'spike'
+                                    ? t('usageSpike', language)
+                                    : t('usageDrop', language)}
+                                </span>
+                                <span className="text-muted small" style={{ whiteSpace: 'nowrap' }}>
+                                  {anomaly.date}
+                                </span>
+                                <span
+                                  className="ms-auto fw-semibold"
+                                  style={{ whiteSpace: 'nowrap' }}
+                                >
+                                  {formatTokens(anomaly.tokens)}
+                                </span>
+                              </div>
+                              <p className="mb-1 text-muted small">
+                                {getAnomalyDescription(anomaly, language)}
+                              </p>
+                              {contributor && (
+                                <p className="mb-1 text-muted small">{contributor}</p>
+                              )}
+                              <p className="mb-0 small text-primary">
+                                {getAnomalySuggestion(anomaly.type, language)}
+                              </p>
+                            </div>
+                            <span
+                              className={cn(
+                                'badge ms-2',
+                                anomaly.severity === 'high'
+                                  ? 'bg-danger'
+                                  : anomaly.severity === 'medium'
+                                    ? 'bg-warning'
+                                    : 'bg-info'
+                              )}
+                            >
+                              {anomaly.severity}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 ) : (
                   <div className="text-center py-4">
                     <i className="bi bi-check-circle text-success fs-1" />
@@ -550,4 +570,67 @@ function getTranslatedDetails(rec: { type: string; details?: string }, language:
   }
 
   return rec.details;
+}
+
+/**
+ * Anomaly description helpers — shared shape so both the dedicated anomaly
+ * page (backend-driven) and the Analysis overview table (client-driven) can
+ * render identical, localized descriptions.
+ */
+interface AnomalyLike {
+  date: string;
+  tokens: number;
+  expected?: number;
+  deviation?: number;
+  type: string;
+  severity?: string;
+  top_contributor?: { tool: string; share_pct: number };
+}
+
+/**
+ * Build a human-readable description of why a day is anomalous.
+ *
+ * `deviation` from the backend is a percentage of the daily average (always a
+ * positive number). The direction ("above"/"below") is derived from `type`,
+ * never from the deviation sign — a spike is always "above", a drop always
+ * "below". Falls back to the raw token count when the structured baseline
+ * fields are missing (legacy cache / older deployments).
+ */
+export function getAnomalyDescription(anomaly: AnomalyLike, language: Language): string {
+  const { expected, deviation, type, tokens } = anomaly;
+
+  // Guard: no usable baseline → degrade to plain token count (never NaN/empty)
+  if (
+    expected === undefined ||
+    expected === null ||
+    deviation === undefined ||
+    deviation === null ||
+    !isFinite(expected) ||
+    !isFinite(deviation) ||
+    expected <= 0
+  ) {
+    return formatTokens(tokens);
+  }
+
+  const key = type === 'spike' ? 'anomalySpikeDesc' : 'anomalyDropDesc';
+  return t(key, language, {
+    tokens: formatTokens(tokens),
+    avg: formatTokens(expected),
+    pct: deviation,
+  });
+}
+
+/** One-line handling suggestion keyed off the anomaly type. */
+export function getAnomalySuggestion(type: string, language: Language): string {
+  const key = type === 'spike' ? 'anomalySuggestionSpike' : 'anomalySuggestionDrop';
+  return t(key, language);
+}
+
+/** Optional "driven by tool X (Y%)" line; empty string when unavailable. */
+export function getAnomalyTopContributor(anomaly: AnomalyLike, language: Language): string {
+  const tc = anomaly.top_contributor;
+  if (!tc?.tool || tc.share_pct === undefined || tc.share_pct === null || !isFinite(tc.share_pct)) {
+    return '';
+  }
+  return t('anomalyTopContributor', language, { tool: tc.tool, pct: tc.share_pct });
 }

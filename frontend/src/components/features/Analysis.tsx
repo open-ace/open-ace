@@ -34,6 +34,11 @@ import {
   useDataRange,
 } from '@/hooks';
 import { ConversationHistory } from './ConversationHistory';
+import {
+  getAnomalyDescription,
+  getAnomalySuggestion,
+  getAnomalyTopContributor,
+} from './analysis/AnomalyDetection';
 import { SessionStatisticsCard, calculateHealthScore } from './analysis/SessionStatisticsCard';
 
 export const Analysis: React.FC = () => {
@@ -690,7 +695,15 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
  * Anomaly Table Component
  */
 interface AnomalyTableProps {
-  anomalies: Array<{ date: string; tokens: number; type: string; severity: string }>;
+  anomalies: Array<{
+    date: string;
+    tokens: number;
+    expected?: number;
+    deviation?: number;
+    type: string;
+    severity: string;
+    top_contributor?: { tool: string; share_pct: number };
+  }>;
   language: Language;
 }
 
@@ -706,7 +719,7 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
 
   return (
     <div className="table-responsive">
-      <table className="table table-sm table-hover">
+      <table className="table table-sm table-hover mb-0">
         <thead>
           <tr>
             <th>{t('tableDate', language)}</th>
@@ -716,27 +729,51 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
           </tr>
         </thead>
         <tbody>
-          {anomalies.slice(0, 5).map((anomaly, index) => (
-            <tr key={index}>
-              <td>{anomaly.date}</td>
-              <td>{anomaly.type}</td>
-              <td>{formatTokens(anomaly.tokens)}</td>
-              <td>
-                <span
-                  className={cn(
-                    'badge',
-                    anomaly.severity === 'high'
-                      ? 'bg-danger'
-                      : anomaly.severity === 'medium'
-                        ? 'bg-warning'
-                        : 'bg-info'
-                  )}
-                >
-                  {anomaly.severity}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {anomalies.slice(0, 5).map((anomaly, index) => {
+            const contributor = getAnomalyTopContributor(anomaly, language);
+            return (
+              <React.Fragment key={index}>
+                <tr>
+                  <td>{anomaly.date}</td>
+                  <td>
+                    <span
+                      className={cn('badge', anomaly.type === 'spike' ? 'bg-danger' : 'bg-info')}
+                    >
+                      {anomaly.type === 'spike'
+                        ? t('usageSpike', language)
+                        : t('usageDrop', language)}
+                    </span>
+                  </td>
+                  <td>{formatTokens(anomaly.tokens)}</td>
+                  <td>
+                    <span
+                      className={cn(
+                        'badge',
+                        anomaly.severity === 'high'
+                          ? 'bg-danger'
+                          : anomaly.severity === 'medium'
+                            ? 'bg-warning'
+                            : 'bg-info'
+                      )}
+                    >
+                      {anomaly.severity}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan={4} className="border-0 py-0">
+                    <p className="mb-1 text-muted small">
+                      {getAnomalyDescription(anomaly, language)}
+                    </p>
+                    {contributor && <p className="mb-1 text-muted small">{contributor}</p>}
+                    <p className="mb-0 small text-primary">
+                      {getAnomalySuggestion(anomaly.type, language)}
+                    </p>
+                  </td>
+                </tr>
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -751,26 +788,48 @@ const AnomalyTable: React.FC<AnomalyTableProps> = ({ anomalies, language }) => {
  * pages stay in sync.
  */
 
-function detectAnomalies(
-  dailyTrend: Array<{ date: string; tokens: number }>
-): Array<{ date: string; tokens: number; type: string; severity: string }> {
+function detectAnomalies(dailyTrend: Array<{ date: string; tokens: number }>): Array<{
+  date: string;
+  tokens: number;
+  expected: number;
+  deviation: number;
+  type: string;
+  severity: string;
+}> {
   if (dailyTrend.length < 3) return [];
 
-  const anomalies: Array<{ date: string; tokens: number; type: string; severity: string }> = [];
+  const anomalies: Array<{
+    date: string;
+    tokens: number;
+    expected: number;
+    deviation: number;
+    type: string;
+    severity: string;
+  }> = [];
   const avgTokens = dailyTrend.reduce((sum, d) => sum + d.tokens, 0) / dailyTrend.length;
   const stdDev = Math.sqrt(
     dailyTrend.reduce((sum, d) => sum + Math.pow(d.tokens - avgTokens, 2), 0) / dailyTrend.length
   );
 
   dailyTrend.forEach((day) => {
-    const deviation = Math.abs(day.tokens - avgTokens) / stdDev;
+    // stdDistance drives detection (matches the >2σ / >3σ rule); deviation is
+    // the percentage off the daily average. NOTE: only the `deviation` *field's*
+    // value is aligned with the backend here so descriptions read identically —
+    // the drop *detection rule* itself still differs (this client flags any day
+    // below the mean at >2σ as a drop; the backend requires <50% of the mean).
+    // That divergence predates this change and is out of scope.
+    const stdDistance = stdDev > 0 ? Math.abs(day.tokens - avgTokens) / stdDev : 0;
+    const deviationPct =
+      avgTokens > 0 ? Math.round((Math.abs(day.tokens - avgTokens) / avgTokens) * 1000) / 10 : 0;
 
-    if (deviation > 2) {
+    if (stdDistance > 2) {
       anomalies.push({
         date: day.date,
         tokens: day.tokens,
+        expected: Math.round(avgTokens),
+        deviation: deviationPct,
         type: day.tokens > avgTokens ? 'spike' : 'drop',
-        severity: deviation > 3 ? 'high' : 'medium',
+        severity: stdDistance > 3 ? 'high' : 'medium',
       });
     }
   });
