@@ -898,6 +898,97 @@ class APIKeyProxyService:
             "empty_reason": empty_reason,
         }
 
+    def get_tool_models(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+    ) -> dict[str, Any]:
+        """Return the available models for a tool, provider-agnostic.
+
+        Unlike :meth:`get_tool_model_pool` (which filters ``WHERE provider =
+        'openai'`` and reads only ``modelProviders.openai``), this queries keys
+        by ``cli_tools`` membership and extracts models from wherever the tool
+        stores them. This is what the model *dropdown* should use; the pool
+        method remains the source of truth for functional HA routing.
+
+        Each tool stores models differently (see frontend templates in
+        ``APIKeyManagement.tsx`` and remote-agent ``cli_settings.py``):
+
+        - **qwen / codex**: ``settings["modelProviders"]``, possibly under
+          several provider subkeys (openai, anthropic, ...) — flatten all.
+        - **claude**: ``settings["env"]["ANTHROPIC_MODEL"]`` and the
+          ``ANTHROPIC_DEFAULT_(SONNET|HAIKU)_MODEL`` variants — claude-code has
+          no ``modelProviders`` block.
+        - **zcode**: top-level ``settings["model"]`` (``{main, lite}`` or a
+          bare string), with values like ``"zai/glm-5.2"`` — strip the
+          ``provider/`` prefix.
+
+        Returns a dict shaped like ``get_tool_model_pool``'s:
+        ``{"models": [{...}, ...], "empty_reason": str | None}``.
+        """
+        settings = self.get_cli_settings_for_tool(tenant_id, tool_name, scope)
+        if not settings:
+            return {
+                "models": [],
+                "empty_reason": (f"No active {tool_name} API keys configured for scope '{scope}'"),
+            }
+
+        canonical = normalize_tool_name(tool_name)
+        models: list[dict[str, Any]] = []
+
+        if canonical == "claude":
+            # claude-code configures models via env vars, not modelProviders.
+            env = settings.get("env") or {}
+            for key in (
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            ):
+                value = env.get(key)
+                if isinstance(value, str) and value.strip():
+                    models.append({"id": value.strip(), "name": value.strip()})
+        elif canonical == "zcode":
+            # zcode stores the active model(s) under a top-level `model` field.
+            raw_model = settings.get("model")
+            candidates: list[str] = []
+            if isinstance(raw_model, dict):
+                candidates = [v for v in raw_model.values() if isinstance(v, str)]
+            elif isinstance(raw_model, str):
+                candidates = [raw_model]
+            for value in candidates:
+                # Values look like "zai/glm-5.2"; drop the provider/ prefix.
+                name = value.split("/", 1)[1] if "/" in value else value
+                name = name.strip()
+                if name:
+                    models.append({"id": name, "name": name})
+        else:
+            # qwen / codex / future tools: flatten every modelProviders subkey.
+            providers = settings.get("modelProviders") or {}
+            for provider_models in providers.values():
+                if not isinstance(provider_models, list):
+                    continue
+                for entry in provider_models:
+                    if isinstance(entry, dict) and entry.get("id"):
+                        models.append({"id": entry["id"], "name": entry.get("name") or entry["id"]})
+
+        # Dedup by id while preserving discovery order.
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for model in models:
+            mid = str(model.get("id"))
+            if mid in seen:
+                continue
+            seen.add(mid)
+            unique.append(model)
+
+        return {
+            "models": unique,
+            "empty_reason": (
+                None if unique else f"Current {tool_name} API keys do not configure any models"
+            ),
+        }
+
     def _build_cli_settings_for_tool(
         self,
         tool_name: str,

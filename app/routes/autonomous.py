@@ -1341,12 +1341,14 @@ def get_available_models():
         # and silently miss every remote key. See _list_tool_key_rows
         # (api_key_proxy.py:770-776) and migration 048.
         scope = "remote" if workspace_type == "remote" else "local"
-        pool = api_proxy.get_tool_model_pool(
-            tenant_id=tenant_id, tool_name=tool, scope=scope, provider="openai"
-        )
-        # The frontend model dropdown renders ``model.name``; pool entries are the
-        # raw config dicts keyed by ``id``. Normalize so a display name is always
-        # present (fall back to id), and surface ``empty_reason`` for future UX.
+        # Provider-agnostic: keys are matched by cli_tools membership and models
+        # are extracted from wherever the tool stores them (modelProviders for
+        # qwen/codex, env for claude, top-level `model` for zcode). The openai-only
+        # get_tool_model_pool is reserved for functional HA routing.
+        pool = api_proxy.get_tool_models(tenant_id=tenant_id, tool_name=tool, scope=scope)
+        # The frontend model dropdown renders ``model.name``; entries are keyed by
+        # ``id``. Normalize so a display name is always present (fall back to id),
+        # and surface ``empty_reason`` for future UX.
         models = [
             {"name": m.get("name") or m.get("id") or str(m), **m}
             for m in pool.get("models", [])

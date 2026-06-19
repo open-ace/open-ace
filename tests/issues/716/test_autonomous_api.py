@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import app.repositories.database as db_mod
+from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.repositories.database import Database
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -779,15 +780,14 @@ class TestGetModels:
     """Tests for GET /api/autonomous/models."""
 
     def test_get_models_returns_normalized_models(self, client):
-        """Endpoint extracts pool['models'] and normalizes display names.
+        """Endpoint extracts models and normalizes display names.
 
-        Regression: previously the route read ``g.tenant_id`` (never set, so it
-        always returned []) and passed args positionally into
-        ``get_tool_model_pool`` (misaligning scope/tool_name) and returned the
-        entire pool dict instead of the models list.
+        The route now uses the provider-agnostic ``get_tool_models`` (matched by
+        cli_tools, not provider). Regression: previously it read ``g.tenant_id``
+        (never set → always []) and returned the whole pool dict.
         """
         mock_proxy = MagicMock()
-        mock_proxy.get_tool_model_pool.return_value = {
+        mock_proxy.get_tool_models.return_value = {
             "models": [
                 {"name": "claude-sonnet-4-6", "id": "claude-sonnet-4-6"},
                 # entry with only an id -> name should fall back to id
@@ -807,15 +807,16 @@ class TestGetModels:
         assert data["success"] is True
         names = [m["name"] for m in data["models"]]
         assert names == ["claude-sonnet-4-6", "claude-opus-4-8"]
-        # Local workspace resolves to the default single tenant (1) and local scope.
-        mock_proxy.get_tool_model_pool.assert_called_once_with(
-            tenant_id=1, tool_name="claude-code", scope="local", provider="openai"
+        # Local workspace resolves to the default single tenant (1) and local scope;
+        # provider is NOT passed (provider-agnostic).
+        mock_proxy.get_tool_models.assert_called_once_with(
+            tenant_id=1, tool_name="claude-code", scope="local"
         )
 
     def test_get_models_no_keys_returns_empty(self, client):
         """No configured keys -> empty list (not because tenant is missing)."""
         mock_proxy = MagicMock()
-        mock_proxy.get_tool_model_pool.return_value = {
+        mock_proxy.get_tool_models.return_value = {
             "models": [],
             "empty_reason": "No active claude-code API keys configured for scope 'local'",
         }
@@ -838,7 +839,7 @@ class TestGetModels:
         querying with 'shared' would silently miss every remote-only key.
         """
         mock_proxy = MagicMock()
-        mock_proxy.get_tool_model_pool.return_value = {"models": [], "empty_reason": None}
+        mock_proxy.get_tool_models.return_value = {"models": [], "empty_reason": None}
         mock_mgr = MagicMock()
         mock_mgr.check_user_access.return_value = "admin"
         mock_mgr.get_machine.return_value = {"tenant_id": 7}
@@ -860,8 +861,8 @@ class TestGetModels:
         assert resp.status_code == 200
         mock_mgr.check_user_access.assert_called_once()
         mock_mgr.get_machine.assert_called_once_with("m-42")
-        mock_proxy.get_tool_model_pool.assert_called_once_with(
-            tenant_id=7, tool_name="claude-code", scope="remote", provider="openai"
+        mock_proxy.get_tool_models.assert_called_once_with(
+            tenant_id=7, tool_name="claude-code", scope="remote"
         )
 
     def test_get_models_remote_denies_without_access(self, client):
@@ -885,16 +886,16 @@ class TestGetModels:
                     "&workspace_type=remote&machine_id=m-42"
                 )
         assert resp.status_code == 404
-        mock_proxy.get_tool_model_pool.assert_not_called()
+        mock_proxy.get_tool_models.assert_not_called()
 
     def test_get_models_exception_returns_empty(self, client):
-        """Any unexpected error in the model pool query is swallowed.
+        """Any unexpected error in the model query is swallowed.
 
-        Only the pool query/formatting is wrapped — a failure there reasonably
+        Only the query/formatting is wrapped — a failure there reasonably
         degrades to an empty list (the dropdown shows "Default").
         """
         mock_proxy = MagicMock()
-        mock_proxy.get_tool_model_pool.side_effect = RuntimeError("boom")
+        mock_proxy.get_tool_models.side_effect = RuntimeError("boom")
         with _mock_auth():
             with patch(
                 "app.modules.workspace.api_key_proxy.APIKeyProxyService",
@@ -910,7 +911,7 @@ class TestGetModels:
         """Remote machine-lookup failure must not be masked as success+empty.
 
         The remote resolution (get_remote_agent_manager / check_user_access /
-        get_machine) runs outside the try that swallows pool-query errors, so an
+        get_machine) runs outside the try that swallows query errors, so an
         infrastructure failure there surfaces as an error rather than a
         misleading {"success": True, "models": []}. Regression guard for the
         behavior change flagged in review.
@@ -935,7 +936,77 @@ class TestGetModels:
                 )
         # Must not be a misleading "success, no models" — surface the failure.
         assert resp.status_code != 200
-        mock_proxy.get_tool_model_pool.assert_not_called()
+        mock_proxy.get_tool_models.assert_not_called()
+
+
+class TestGetToolModelsExtractor:
+    """Unit tests for APIKeyProxyService.get_tool_models (provider-agnostic).
+
+    The extractor branches on the canonical tool name because each tool stores
+    its models in a different location (see APIKeyManagement.tsx templates and
+    remote-agent cli_settings.py). These tests stub get_cli_settings_for_tool
+    so no DB is needed.
+    """
+
+    def _proxy(self):
+        # Bypass __init__ — it needs an encryption key/DB only for key
+        # management, which get_tool_models (pure extraction over the stubbed
+        # get_cli_settings_for_tool return value) does not touch.
+        return object.__new__(APIKeyProxyService)
+
+    def test_no_settings_returns_empty_with_reason(self):
+        proxy = self._proxy()
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value=None):
+            result = proxy.get_tool_models(1, "claude-code", "local")
+        assert result["models"] == []
+        assert "No active" in result["empty_reason"]
+
+    def test_claude_extracts_from_env(self):
+        """claude-code stores models in env vars, not modelProviders."""
+        proxy = self._proxy()
+        settings = {
+            "env": {
+                "ANTHROPIC_MODEL": "glm-5",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5",  # dup of ANTHROPIC_MODEL
+            }
+        }
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+            result = proxy.get_tool_models(1, "claude-code", "local")
+        ids = [m["id"] for m in result["models"]]
+        assert ids == ["glm-5", "glm-5.1"]  # deduped, order preserved
+        assert all(m["name"] == m["id"] for m in result["models"])
+
+    def test_zcode_extracts_from_model_field(self):
+        """zcode stores models under a top-level `model` dict; strip provider/."""
+        proxy = self._proxy()
+        settings = {"model": {"main": "zai/glm-5.2", "lite": "zai/glm-4.5-air"}}
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+            result = proxy.get_tool_models(1, "zcode", "remote")
+        names = sorted(m["name"] for m in result["models"])
+        assert names == ["glm-4.5-air", "glm-5.2"]  # prefix stripped
+
+    def test_qwen_flattens_all_model_providers(self):
+        """qwen/codex: union models across every modelProviders subkey."""
+        proxy = self._proxy()
+        settings = {
+            "modelProviders": {
+                "openai": [{"id": "glm-5", "name": "glm-5"}],
+                "anthropic": [{"id": "claude-sonnet", "name": "Claude Sonnet"}],
+            }
+        }
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+            result = proxy.get_tool_models(1, "qwen-code", "local")
+        ids = sorted(m["id"] for m in result["models"])
+        assert ids == ["claude-sonnet", "glm-5"]
+
+    def test_models_present_with_no_matching_models(self):
+        """Keys exist but none configure models -> empty with reason."""
+        proxy = self._proxy()
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value={"env": {}}):
+            result = proxy.get_tool_models(1, "claude-code", "local")
+        assert result["models"] == []
+        assert "do not configure" in result["empty_reason"]
 
 
 # ── Auth Tests ───────────────────────────────────────────────────────────
