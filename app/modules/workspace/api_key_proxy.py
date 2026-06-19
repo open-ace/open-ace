@@ -587,6 +587,32 @@ class APIKeyProxyService:
             Dict with complete settings ready for agent to write to settings.json,
             or None if no matching API key found.
         """
+        ranked_settings = self._collect_tool_key_settings(tenant_id, tool_name, scope)
+        if not ranked_settings:
+            return None
+
+        # Single key fast path — backward compatible
+        if len(ranked_settings) == 1:
+            return ranked_settings[0][1]
+
+        # Multiple keys — merge modelProviders from all keys
+        return self._merge_multi_key_settings(ranked_settings)
+
+    def _collect_tool_key_settings(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+    ) -> list[tuple[tuple[int, int, int], dict[str, Any]]]:
+        """Return per-key settings for every active key matching a tool.
+
+        Shared backing store for :meth:`get_cli_settings_for_tool` (which merges
+        the results for agent settings.json) and :meth:`get_tool_models` (which
+        unions models across keys). Returns settings ranked by
+        ``(-priority, -weight, key_id)`` ascending (highest-priority key first),
+        or an empty list when no key matches. Tool-name normalization is applied
+        so aliases ("codex"/"codex-cli", "claude"/"claude-code") match.
+        """
         canonical_tool = normalize_tool_name(tool_name)
 
         conn = self._get_connection()
@@ -609,7 +635,6 @@ class APIKeyProxyService:
         rows = cursor.fetchall()
         conn.close()
 
-        # Collect ALL matching keys with their ranked settings
         ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
         for row in rows:
             cli_tools_str = row["cli_tools"] or ""
@@ -644,15 +669,7 @@ class APIKeyProxyService:
             rank = (-priority, -weight, key_id)
             ranked_settings.append((rank, settings))
 
-        if not ranked_settings:
-            return None
-
-        # Single key fast path — backward compatible
-        if len(ranked_settings) == 1:
-            return ranked_settings[0][1]
-
-        # Multiple keys — merge modelProviders from all keys
-        return self._merge_multi_key_settings(ranked_settings)
+        return ranked_settings
 
     @staticmethod
     def _collect_model_entries(
@@ -897,6 +914,114 @@ class APIKeyProxyService:
             "settings": base_settings,
             "empty_reason": empty_reason,
         }
+
+    def get_tool_models(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+    ) -> dict[str, Any]:
+        """Return the available models for a tool, provider-agnostic.
+
+        Unlike :meth:`get_tool_model_pool` (which filters ``WHERE provider =
+        'openai'`` and reads only ``modelProviders.openai``), this queries keys
+        by ``cli_tools`` membership and extracts models from wherever the tool
+        stores them. This is what the model *dropdown* should use; the pool
+        method remains the source of truth for functional HA routing.
+
+        Each tool stores models differently (see frontend templates in
+        ``APIKeyManagement.tsx`` and remote-agent ``cli_settings.py``):
+
+        - **qwen / codex**: ``settings["modelProviders"]``, possibly under
+          several provider subkeys (openai, anthropic, ...) — flatten all.
+        - **claude**: ``settings["env"]["ANTHROPIC_MODEL"]`` and the
+          ``ANTHROPIC_DEFAULT_(SONNET|HAIKU)_MODEL`` variants — claude-code has
+          no ``modelProviders`` block.
+        - **zcode**: top-level ``settings["model"]`` (``{main, lite}`` or a
+          bare string), with values like ``"zai/glm-5.2"`` — strip the
+          ``provider/`` prefix.
+
+        Models are extracted from **every** matching key and unioned (deduped
+        by id), so a tenant with several claude-code/zcode keys sees the union
+        of all their models — not just the highest-priority key's.
+
+        Returns a dict shaped like ``get_tool_model_pool``'s:
+        ``{"models": [{...}, ...], "empty_reason": str | None}``.
+        """
+        ranked_settings = self._collect_tool_key_settings(tenant_id, tool_name, scope)
+        if not ranked_settings:
+            return {
+                "models": [],
+                "empty_reason": (f"No active {tool_name} API keys configured for scope '{scope}'"),
+            }
+
+        canonical = normalize_tool_name(tool_name)
+        models: list[dict[str, Any]] = []
+
+        # Walk every matching key (highest priority first) and union its models.
+        for _rank, settings in ranked_settings:
+            models.extend(self._extract_models_for_tool(canonical, settings))
+
+        # Dedup by id while preserving discovery order (highest-priority key wins).
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for model in models:
+            mid = str(model.get("id"))
+            if mid in seen:
+                continue
+            seen.add(mid)
+            unique.append(model)
+
+        return {
+            "models": unique,
+            "empty_reason": (
+                None if unique else f"Current {tool_name} API keys do not configure any models"
+            ),
+        }
+
+    @staticmethod
+    def _extract_models_for_tool(canonical: str, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract model entries from one key's settings for a canonical tool."""
+        if canonical == "claude":
+            # claude-code configures models via env vars, not modelProviders.
+            env = settings.get("env") or {}
+            models: list[dict[str, Any]] = []
+            for key in (
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            ):
+                value = env.get(key)
+                if isinstance(value, str) and value.strip():
+                    models.append({"id": value.strip(), "name": value.strip()})
+            return models
+
+        if canonical == "zcode":
+            # zcode stores the active model(s) under a top-level `model` field.
+            raw_model = settings.get("model")
+            candidates: list[str] = []
+            if isinstance(raw_model, dict):
+                candidates = [v for v in raw_model.values() if isinstance(v, str)]
+            elif isinstance(raw_model, str):
+                candidates = [raw_model]
+            models = []
+            for value in candidates:
+                # Values look like "zai/glm-5.2"; drop the provider/ prefix.
+                name = value.split("/", 1)[1] if "/" in value else value
+                name = name.strip()
+                if name:
+                    models.append({"id": name, "name": name})
+            return models
+
+        # qwen / codex / future tools: flatten every modelProviders subkey.
+        models = []
+        for provider_models in (settings.get("modelProviders") or {}).values():
+            if not isinstance(provider_models, list):
+                continue
+            for entry in provider_models:
+                if isinstance(entry, dict) and entry.get("id"):
+                    models.append({"id": entry["id"], "name": entry.get("name") or entry["id"]})
+        return models
 
     def _build_cli_settings_for_tool(
         self,
