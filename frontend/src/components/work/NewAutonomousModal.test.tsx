@@ -322,4 +322,68 @@ describe('NewAutonomousModal', () => {
     });
     expect(localStorage.getItem('local-last-project-path')).toBeNull();
   });
+
+  describe('issue-mode suggestion in text mode', () => {
+    it('suggests switching when the text input is a bare issue number', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      fireEvent.change(textarea, { target: { value: '830' } });
+
+      expect(screen.getByText('autoIssueSuggestionSwitch')).toBeInTheDocument();
+    });
+
+    it('suggests switching for comma/space/range/URL selectors', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      fireEvent.change(textarea, {
+        target: { value: '807, 820-824 https://github.com/open-ace/open-ace/issues/830' },
+      });
+
+      expect(screen.getByText('autoIssueSuggestionSwitch')).toBeInTheDocument();
+    });
+
+    it('does not suggest for prose that merely contains a number', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      fireEvent.change(textarea, { target: { value: 'Fix the bug described in issue 830' } });
+
+      expect(screen.queryByText('autoIssueSuggestionSwitch')).not.toBeInTheDocument();
+    });
+
+    it('does not suggest for a normal feature description', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      fireEvent.change(textarea, { target: { value: 'Add a login page with OAuth' } });
+
+      expect(screen.queryByText('autoIssueSuggestionSwitch')).not.toBeInTheDocument();
+    });
+
+    it('does not suggest for non-positive or inverted ranges the backend rejects', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      for (const bad of ['0', '0-5', '100-50', '830 0']) {
+        fireEvent.change(textarea, { target: { value: bad } });
+        expect(screen.queryByText('autoIssueSuggestionSwitch')).not.toBeInTheDocument();
+      }
+    });
+
+    it('migrates the text and switches to url mode on click', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      fireEvent.change(screen.getByPlaceholderText('autoRequirementsPlaceholder'), {
+        target: { value: '830' },
+      });
+      fireEvent.click(screen.getByText('autoIssueSuggestionSwitch'));
+
+      // url-mode textarea is revealed with the migrated value
+      expect(screen.getByDisplayValue('830')).toBeInTheDocument();
+      // text-mode textarea is gone (its value cleared and mode switched)
+      expect(screen.queryByPlaceholderText('autoRequirementsPlaceholder')).not.toBeInTheDocument();
+    });
+  });
 });

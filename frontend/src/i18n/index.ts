@@ -1261,6 +1261,9 @@ export const translations: Record<Language, Translations> = {
     autoIssueInputPlaceholder: '123 125,128-130 or https://github.com/owner/repo/issues/123',
     autoIssueInputHint:
       'Supports commas, spaces, new lines, ranges like 12-15, and mixed GitHub issue URLs.',
+    autoIssueSuggestionHint:
+      'This looks like a GitHub issue number or URL. Switch to GitHub Issue mode to parse it correctly.',
+    autoIssueSuggestionSwitch: 'Switch to GitHub Issue',
     autoTextDescription: 'Text Description',
     autoAgentTool: 'Agent Tool',
     autoModel: 'Model',
@@ -2668,6 +2671,9 @@ export const translations: Record<Language, Translations> = {
     autoRequirementsPlaceholder: '描述你希望 AI 开发的功能或变更...',
     autoIssueInputPlaceholder: '123 125,128-130 或 https://github.com/owner/repo/issues/123',
     autoIssueInputHint: '支持逗号、空格、换行、12-15 这样的范围，以及混合 GitHub issue URL。',
+    autoIssueSuggestionHint:
+      '这看起来像是 GitHub issue 编号或链接。切换到 GitHub Issue 模式可以正确解析。',
+    autoIssueSuggestionSwitch: '切换到 GitHub Issue',
     autoTextDescription: '文字描述',
     autoAgentTool: 'Agent 工具',
     autoModel: '模型',
@@ -3778,6 +3784,9 @@ export const translations: Record<Language, Translations> = {
     autoIssueInputPlaceholder: '123 125,128-130 または https://github.com/owner/repo/issues/123',
     autoIssueInputHint:
       'カンマ、空白、改行、12-15 のような範囲、GitHub issue URL の混在入力に対応します。',
+    autoIssueSuggestionHint:
+      'これは GitHub issue 番号または URL のようです。正しく解析するために GitHub Issue モードに切り替えてください。',
+    autoIssueSuggestionSwitch: 'GitHub Issue に切り替え',
     autoTextDescription: 'テキスト説明',
     autoAgentTool: 'エージェントツール',
     autoModel: 'モデル',
@@ -4897,6 +4906,9 @@ export const translations: Record<Language, Translations> = {
     autoIssueInputPlaceholder: '123 125,128-130 또는 https://github.com/owner/repo/issues/123',
     autoIssueInputHint:
       '쉼표, 공백, 줄바꿈, 12-15 같은 범위, GitHub 이슈 URL 혼합 입력을 지원합니다.',
+    autoIssueSuggestionHint:
+      'GitHub 이슈 번호 또는 URL로 보입니다. 올바르게 파싱하려면 GitHub Issue 모드로 전환하세요.',
+    autoIssueSuggestionSwitch: 'GitHub Issue로 전환',
     autoTextDescription: '텍스트 설명',
     autoAgentTool: '에이전트 도구',
     autoModel: '모델',

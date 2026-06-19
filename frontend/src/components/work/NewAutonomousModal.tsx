@@ -40,6 +40,26 @@ function setStoredPath(key: string, path: string): void {
   }
 }
 
+// Regexes mirror the backend `_parse_issue_selectors` contract
+// (ISSUE_URL_RE / ISSUE_RANGE_RE in app/routes/autonomous.py). Hoisted to
+// module scope so they are allocated once, not per render.
+const ISSUE_URL_RE = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+(?:[/?#].*)?$/i;
+const ISSUE_RANGE_RE = /^(\d+)-(\d+)$/;
+
+// Returns true only for tokens the backend would actually accept (rejecting
+// non-positive numbers and inverted ranges), so the suggestion never nudges the
+// user toward a mode where every token would be silently dropped.
+function isAcceptableIssueToken(tok: string): boolean {
+  if (/^\d+$/.test(tok)) return Number(tok) > 0;
+  const rangeMatch = ISSUE_RANGE_RE.exec(tok);
+  if (rangeMatch) {
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    return start > 0 && end > 0 && start <= end;
+  }
+  return ISSUE_URL_RE.test(tok);
+}
+
 export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   show,
   onClose,
@@ -127,6 +147,28 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       setProjectPath(selectedMachineWorkDir);
     }
   }, [show, isNewProject, workspaceType, selectedMachineId, selectedMachineWorkDir]);
+
+  // Detect when a "Text Description" input actually looks like a GitHub issue
+  // selector (bare numbers, ranges, or issue URLs). Mirrors the backend's
+  // _parse_issue_selectors so we can nudge the user toward the correct mode
+  // instead of silently storing e.g. "830" as a literal requirement body.
+  const issueLikeSuggestion = useMemo(() => {
+    if (requirementsMode !== 'text') return null;
+    const trimmed = requirementsText.trim();
+    if (!trimmed) return null;
+    const tokens = trimmed.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0) return null;
+    // Only suggest when the ENTIRE input parses as issue selectors. A prose
+    // description that merely contains a number ("see issue 830 for details")
+    // must not trigger the nudge.
+    return tokens.every(isAcceptableIssueToken) ? trimmed : null;
+  }, [requirementsMode, requirementsText]);
+
+  const switchToIssueMode = useCallback(() => {
+    setRequirementsUrl(requirementsText);
+    setRequirementsText('');
+    setRequirementsMode('url');
+  }, [requirementsText]);
 
   const canSubmit = useMemo(() => {
     const hasRequirements =
@@ -278,13 +320,30 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               </button>
             </div>
             {requirementsMode === 'text' ? (
-              <textarea
-                className="form-control"
-                rows={4}
-                placeholder={t('autoRequirementsPlaceholder', language)}
-                value={requirementsText}
-                onChange={(e) => setRequirementsText(e.target.value)}
-              />
+              <>
+                <textarea
+                  className="form-control"
+                  rows={4}
+                  placeholder={t('autoRequirementsPlaceholder', language)}
+                  value={requirementsText}
+                  onChange={(e) => setRequirementsText(e.target.value)}
+                />
+                {issueLikeSuggestion && (
+                  <div
+                    className="alert alert-warning py-2 mt-2 d-flex align-items-center gap-2 flex-wrap"
+                    role="alert"
+                  >
+                    <span>{t('autoIssueSuggestionHint', language)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary ms-auto"
+                      onClick={switchToIssueMode}
+                    >
+                      {t('autoIssueSuggestionSwitch', language)}
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <textarea
