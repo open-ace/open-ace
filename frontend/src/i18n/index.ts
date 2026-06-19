@@ -1172,6 +1172,10 @@ export const translations: Record<Language, Translations> = {
       'Configure non-sensitive Codex settings only (model, sandbox, etc.). Do NOT include API keys — they are injected via environment variables automatically.',
     claudeSettingsInvalid: 'Claude Code settings JSON is invalid',
     qwenSettingsInvalid: 'Qwen Code settings JSON is invalid',
+    zcodeSettings: 'ZCode Settings (JSON)',
+    zcodeSettingsHint:
+      'Configure non-sensitive settings only (provider, model, etc.). Do NOT include API keys or base URLs — they are injected via the proxy automatically.',
+    zcodeSettingsInvalid: 'ZCode settings JSON is invalid',
     jsonValid: 'JSON is valid',
     jsonInvalid: 'JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
@@ -2578,6 +2582,10 @@ export const translations: Record<Language, Translations> = {
       '仅配置非敏感 Codex 设置（model、sandbox 等）。请勿填写 API Key — 系统会通过环境变量自动注入。',
     claudeSettingsInvalid: 'Claude Code 设置 JSON 无效',
     qwenSettingsInvalid: 'Qwen Code 设置 JSON 无效',
+    zcodeSettings: 'ZCode 设置 (JSON)',
+    zcodeSettingsHint:
+      '仅配置非敏感设置（provider、model 等）。请勿填写 API Key 或 Base URL — 系统会通过代理自动注入。',
+    zcodeSettingsInvalid: 'ZCode 设置 JSON 无效',
     jsonValid: 'JSON 格式正确',
     jsonInvalid: 'JSON 格式错误',
     providerCannotChange: '提供商不可更改',
@@ -3726,6 +3734,10 @@ export const translations: Record<Language, Translations> = {
     codexSettings: 'Codex 設定 (TOML)',
     codexSettingsHint:
       '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
+    zcodeSettings: 'ZCode 設定 (JSON)',
+    zcodeSettingsHint:
+      '機密情報以外の設定のみを構成してください（provider、model など）。API キーや Base URL は含めないでください — プロキシ経由で自動的に注入されます。',
+    zcodeSettingsInvalid: 'ZCode 設定の JSON が無効です',
     providerCannotChange: 'プロバイダーは変更できません',
 
     // Fullscreen
@@ -4841,6 +4853,10 @@ export const translations: Record<Language, Translations> = {
     codexSettings: 'Codex 설정 (TOML)',
     codexSettingsHint:
       '민감하지 않은 Codex 설정만 구성하세요 (model, sandbox 등). API 키는 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
+    zcodeSettings: 'ZCode 설정 (JSON)',
+    zcodeSettingsHint:
+      '민감하지 않은 설정만 구성하세요 (provider, model 등). API 키나 Base URL은 포함하지 마세요 — 프록시를 통해 자동으로 주입됩니다.',
+    zcodeSettingsInvalid: 'ZCode 설정 JSON이 잘못되었습니다',
     providerCannotChange: '공급자를 변경할 수 없습니다',
 
     // Fullscreen

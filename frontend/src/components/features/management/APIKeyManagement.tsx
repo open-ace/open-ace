@@ -116,6 +116,21 @@ model = "glm-5"
 name = "Open ACE Proxy"
 wire_api = "responses"`;
 
+const defaultZcodeSettings = `{
+  "provider": {
+    "zai": {
+      "id": "zai",
+      "kind": "anthropic",
+      "name": "Z.AI (Anthropic-compatible)",
+      "options": {}
+    }
+  },
+  "model": {
+    "main": "zai/glm-5.2",
+    "lite": "zai/glm-4.5-air"
+  }
+}`;
+
 export const APIKeyManagement: React.FC = () => {
   const language = useLanguage();
   const { data: keysData, isLoading, isError, error, refetch } = useApiKeys();
@@ -168,6 +183,7 @@ export const APIKeyManagement: React.FC = () => {
     claude_settings: '',
     qwen_settings: '',
     codex_settings: '',
+    zcode_settings: '',
     scope: 'shared' as string,
     priority: 0,
     weight: 100,
@@ -195,6 +211,11 @@ export const APIKeyManagement: React.FC = () => {
   const qwenValidation = useMemo(
     () => getJsonValidationResult(formData.qwen_settings),
     [formData.qwen_settings]
+  );
+
+  const zcodeValidation = useMemo(
+    () => getJsonValidationResult(formData.zcode_settings),
+    [formData.zcode_settings]
   );
 
   const stringifyCodexSettings = (value: unknown): string => {
@@ -250,6 +271,7 @@ export const APIKeyManagement: React.FC = () => {
       claude_settings: '',
       qwen_settings: '',
       codex_settings: '',
+      zcode_settings: '',
       scope: 'shared',
       priority: 0,
       weight: 100,
@@ -267,6 +289,7 @@ export const APIKeyManagement: React.FC = () => {
     let claudeSettings = '';
     let qwenSettings = '';
     let codexSettings = '';
+    let zcodeSettings = '';
 
     if (key.cli_tools) {
       try {
@@ -288,6 +311,9 @@ export const APIKeyManagement: React.FC = () => {
         if (settings['codex-cli']) {
           codexSettings = stringifyCodexSettings(settings['codex-cli']);
         }
+        if (settings['zcode']) {
+          zcodeSettings = JSON.stringify(settings['zcode'], null, 2);
+        }
       } catch {
         // Ignore parse errors
       }
@@ -302,6 +328,7 @@ export const APIKeyManagement: React.FC = () => {
       claude_settings: claudeSettings,
       qwen_settings: qwenSettings,
       codex_settings: codexSettings,
+      zcode_settings: zcodeSettings,
       scope: key.scope || 'shared',
       priority: key.priority ?? 0,
       weight: key.weight ?? 100,
@@ -322,6 +349,7 @@ export const APIKeyManagement: React.FC = () => {
       let newClaudeSettings = formData.claude_settings;
       let newQwenSettings = formData.qwen_settings;
       let newCodexSettings = formData.codex_settings;
+      let newZcodeSettings = formData.zcode_settings;
 
       if (tool === 'claude-code' && !formData.claude_settings) {
         newClaudeSettings = defaultClaudeSettings;
@@ -332,6 +360,9 @@ export const APIKeyManagement: React.FC = () => {
       if (tool === 'codex-cli' && !formData.codex_settings) {
         newCodexSettings = defaultCodexSettings;
       }
+      if (tool === 'zcode' && !formData.zcode_settings) {
+        newZcodeSettings = defaultZcodeSettings;
+      }
 
       setFormData({
         ...formData,
@@ -339,6 +370,7 @@ export const APIKeyManagement: React.FC = () => {
         claude_settings: newClaudeSettings,
         qwen_settings: newQwenSettings,
         codex_settings: newCodexSettings,
+        zcode_settings: newZcodeSettings,
       });
     }
   };
@@ -435,6 +467,13 @@ export const APIKeyManagement: React.FC = () => {
       // raw editor text here and let the backend validate/parse it.
       settings['codex-cli'] = formData.codex_settings;
     }
+    if (formData.cli_tools.includes('zcode') && formData.zcode_settings) {
+      try {
+        settings['zcode'] = stripSensitiveFields(JSON.parse(formData.zcode_settings));
+      } catch {
+        // Skip invalid JSON
+      }
+    }
     return JSON.stringify(settings);
   };
 
@@ -460,6 +499,10 @@ export const APIKeyManagement: React.FC = () => {
     }
     if (formData.cli_tools.includes('qwen-code') && !validateJsonSettings(formData.qwen_settings)) {
       setFormError(t('qwenSettingsInvalid', language));
+      return;
+    }
+    if (formData.cli_tools.includes('zcode') && !validateJsonSettings(formData.zcode_settings)) {
+      setFormError(t('zcodeSettingsInvalid', language));
       return;
     }
 
@@ -502,6 +545,10 @@ export const APIKeyManagement: React.FC = () => {
     }
     if (formData.cli_tools.includes('qwen-code') && !validateJsonSettings(formData.qwen_settings)) {
       setFormError(t('qwenSettingsInvalid', language));
+      return;
+    }
+    if (formData.cli_tools.includes('zcode') && !validateJsonSettings(formData.zcode_settings)) {
+      setFormError(t('zcodeSettingsInvalid', language));
       return;
     }
 
@@ -865,6 +912,28 @@ export const APIKeyManagement: React.FC = () => {
             <small className="text-muted">{t('codexSettingsHint', language)}</small>
           </div>
         )}
+
+        {/* ZCode Settings */}
+        {formData.cli_tools.includes('zcode') && (
+          <div className="mb-3">
+            <label className="form-label">{t('zcodeSettings', language)}</label>
+            <textarea
+              className={`form-control ${
+                formData.zcode_settings.trim() && !zcodeValidation.valid ? 'is-invalid' : ''
+              }`}
+              rows={10}
+              value={formData.zcode_settings}
+              onChange={(e) => setFormData({ ...formData, zcode_settings: e.target.value })}
+              placeholder={defaultZcodeSettings}
+            />
+            <JsonValidationIndicator
+              jsonStr={formData.zcode_settings}
+              validation={zcodeValidation}
+              language={language}
+            />
+            <small className="text-muted">{t('zcodeSettingsHint', language)}</small>
+          </div>
+        )}
       </Modal>
 
       {/* Edit API Key Dialog */}
@@ -1042,6 +1111,27 @@ export const APIKeyManagement: React.FC = () => {
               onChange={(e) => setFormData({ ...formData, codex_settings: e.target.value })}
             />
             <small className="text-muted">{t('codexSettingsHint', language)}</small>
+          </div>
+        )}
+
+        {formData.cli_tools.includes('zcode') && (
+          <div className="mb-3">
+            <label className="form-label">{t('zcodeSettings', language)}</label>
+            <textarea
+              className={`form-control ${
+                formData.zcode_settings.trim() && !zcodeValidation.valid ? 'is-invalid' : ''
+              }`}
+              rows={10}
+              value={formData.zcode_settings}
+              onChange={(e) => setFormData({ ...formData, zcode_settings: e.target.value })}
+              placeholder={defaultZcodeSettings}
+            />
+            <JsonValidationIndicator
+              jsonStr={formData.zcode_settings}
+              validation={zcodeValidation}
+              language={language}
+            />
+            <small className="text-muted">{t('zcodeSettingsHint', language)}</small>
           </div>
         )}
       </Modal>
