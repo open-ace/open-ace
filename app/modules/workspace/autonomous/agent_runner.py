@@ -957,12 +957,23 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
-        # Determine ZCode --mode from the explicit zcode_mode hint (passed by
-        # the orchestrator per-phase), falling back to a safe default.
-        # Planning/review phases pass zcode_mode="plan" (read-only, #761);
-        # dev/test phases pass zcode_mode="yolo" (no approval prompts).
-        # We can't infer this from allowed_tools because both planning and
-        # dev use [] for zcode (it has its own built-in tool set).
+        # Resolve the ZCode --mode here (single source of truth). The
+        # orchestrator passes open-ace permission modes; planning calls use
+        # _zcode_planning_mode() which forces "plan" for zcode. Here we
+        # map any open-ace mode to a safe zcode mode:
+        #   plan  → plan (read-only, safe for unattended planning)
+        #   yolo  → yolo (fully autonomous, no approval prompts)
+        #   other → yolo (safe default; edit/build stall on tool-approval-request)
+        #
+        # Note: build_start_args → _map_permission_mode will run again, but
+        # plan/yolo pass through unchanged. This double-resolution is harmless
+        # but intentional: this layer picks the autonomous-safe mode, the
+        # adapter layer handles the CLI flag format.
+        #
+        # Warning: zcode has an "auto" mode in its enum, but it is NOT mapped
+        # here — if open-ace sends permission_mode="auto", it falls to the
+        # "yolo" default, which is safe. Do NOT map "auto" → "build" here
+        # (build stalls on non-read-only tools in autonomous mode).
         zcode_mode = permission_mode if permission_mode in ("plan", "yolo") else "yolo"
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
