@@ -17,7 +17,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+from app.modules.workspace.autonomous.agent_runner import (
+    DEFAULT_TASK_TIMEOUT,
+    AutonomousAgentRunner,
+)
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -929,9 +932,13 @@ class AutonomousOrchestrator:
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
             self._link_session_to_current_milestone(result.session_id)
-            # First successful call on a resume line establishes it for later milestones.
+            # Always update the session line with the real CLI session id.
+            # Resume can fail silently (e.g. the prior session died after a
+            # crash/timeout), in which case the agent falls back to a fresh
+            # session/create and returns a new id. If we don't overwrite here,
+            # subsequent milestones resume the stale dead id forever (#525).
             field = SESSION_LINE_FIELDS.get(session_line)
-            if field and not resume and not (workflow_data or {}).get(field):
+            if field:
                 self._update_workflow({field: result.session_id})
 
         # Transient API error retry (429 / 5xx / overload) — exponential
@@ -1900,6 +1907,7 @@ class AutonomousOrchestrator:
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="main",
+            timeout=DEFAULT_TASK_TIMEOUT,
             milestone_id=ms.get("milestone_id", ""),
         )
 

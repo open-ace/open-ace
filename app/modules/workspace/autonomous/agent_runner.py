@@ -926,11 +926,15 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
+        # ZCode --mode edit/build still prompts for tool-approval-request on
+        # each edit, which stalls forever in autonomous mode (no human to
+        # approve). Force yolo (fully autonomous, no prompts) regardless of
+        # the workflow's permission_mode setting.
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
             project_path,
             model,
-            permission_mode=permission_mode,
+            permission_mode="yolo",
             resume=resume,
         )
         logger.info("Launching ZCode app-server: %s", " ".join(cmd))
