@@ -83,6 +83,14 @@ class OpenClawAdapter(BaseCLIAdapter):
 
         return args
 
+    def supports_stdin_input(self) -> bool:
+        """Return False — self-contained agent run with no stdin protocol.
+
+        Sending Claude SDK stream-json messages to its stdin is unsupported;
+        the autonomous runner should use single-shot mode instead.
+        """
+        return False
+
     def get_display_name(self) -> str:
         """Return the display name for this CLI tool."""
         return self.DISPLAY_NAME

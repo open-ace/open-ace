@@ -44,6 +44,10 @@ class TestAgentRunnerRunTask:
         """Should fail gracefully when CLI tool not found."""
         mock_adapter = MagicMock()
         mock_adapter.get_executable_name.return_value = "nonexistent-tool"
+        # Must explicitly return bool — MagicMock truthiness causes dispatch confusion
+        mock_adapter.supports_stdin_input.return_value = True
+        mock_adapter.provides_full_command.return_value = False
+        mock_adapter.build_start_args.return_value = ["nonexistent-tool"]
         mock_cli_adapters = MagicMock()
         mock_cli_adapters.get_adapter.return_value = mock_adapter
 
