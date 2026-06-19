@@ -362,6 +362,16 @@ describe('NewAutonomousModal', () => {
       expect(screen.queryByText('autoIssueSuggestionSwitch')).not.toBeInTheDocument();
     });
 
+    it('does not suggest for non-positive or inverted ranges the backend rejects', () => {
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      const textarea = screen.getByPlaceholderText('autoRequirementsPlaceholder');
+      for (const bad of ['0', '0-5', '100-50', '830 0']) {
+        fireEvent.change(textarea, { target: { value: bad } });
+        expect(screen.queryByText('autoIssueSuggestionSwitch')).not.toBeInTheDocument();
+      }
+    });
+
     it('migrates the text and switches to url mode on click', () => {
       render(<NewAutonomousModal {...defaultProps} />);
 
