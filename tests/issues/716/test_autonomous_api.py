@@ -778,21 +778,23 @@ class TestGetTools:
 class TestGetModels:
     """Tests for GET /api/autonomous/models."""
 
-    def test_get_models_with_tenant(self, client):
-        """Models endpoint returns models when tenant_id is set on g."""
+    def test_get_models_returns_normalized_models(self, client):
+        """Endpoint extracts pool['models'] and normalizes display names.
+
+        Regression: previously the route read ``g.tenant_id`` (never set, so it
+        always returned []) and passed args positionally into
+        ``get_tool_model_pool`` (misaligning scope/tool_name) and returned the
+        entire pool dict instead of the models list.
+        """
         mock_proxy = MagicMock()
-        mock_proxy.get_tool_model_pool.return_value = [
-            {"name": "claude-sonnet-4-6"},
-            {"name": "claude-opus-4-8"},
-        ]
-        # Set g.tenant_id via a before_request hook on the test app
-        from flask import g as flask_g
-
-        def _set_tenant():
-            flask_g.tenant_id = 1
-
-        # Access the app from the client and register the hook
-        client.application.before_request(_set_tenant)
+        mock_proxy.get_tool_model_pool.return_value = {
+            "models": [
+                {"name": "claude-sonnet-4-6", "id": "claude-sonnet-4-6"},
+                # entry with only an id -> name should fall back to id
+                {"id": "claude-opus-4-8"},
+            ],
+            "empty_reason": None,
+        }
 
         with _mock_auth():
             with patch(
@@ -802,14 +804,138 @@ class TestGetModels:
                 resp = client.get("/api/autonomous/models?tool=claude-code")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert len(data["models"]) == 2
+        assert data["success"] is True
+        names = [m["name"] for m in data["models"]]
+        assert names == ["claude-sonnet-4-6", "claude-opus-4-8"]
+        # Local workspace resolves to the default single tenant (1) and local scope.
+        mock_proxy.get_tool_model_pool.assert_called_once_with(
+            tenant_id=1, tool_name="claude-code", scope="local", provider="openai"
+        )
 
-    def test_get_models_no_tenant_returns_empty(self, client):
+    def test_get_models_no_keys_returns_empty(self, client):
+        """No configured keys -> empty list (not because tenant is missing)."""
+        mock_proxy = MagicMock()
+        mock_proxy.get_tool_model_pool.return_value = {
+            "models": [],
+            "empty_reason": "No active claude-code API keys configured for scope 'local'",
+        }
         with _mock_auth():
-            resp = client.get("/api/autonomous/models?tool=claude-code")
+            with patch(
+                "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                return_value=mock_proxy,
+            ):
+                resp = client.get("/api/autonomous/models?tool=claude-code")
         assert resp.status_code == 200
         data = resp.get_json()
+        assert data["success"] is True
         assert data["models"] == []
+        assert "No active" in data["empty_reason"]
+
+    def test_get_models_remote_derives_tenant_from_machine(self, client):
+        """Remote workspace derives tenant_id from the machine record.
+
+        ``scope`` must be 'remote' (matching keys tagged remote *or* shared);
+        querying with 'shared' would silently miss every remote-only key.
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.get_tool_model_pool.return_value = {"models": [], "empty_reason": None}
+        mock_mgr = MagicMock()
+        mock_mgr.check_user_access.return_value = "admin"
+        mock_mgr.get_machine.return_value = {"tenant_id": 7}
+        with _mock_auth():
+            with (
+                patch(
+                    "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                    return_value=mock_proxy,
+                ),
+                patch(
+                    "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
+                    return_value=mock_mgr,
+                ),
+            ):
+                resp = client.get(
+                    "/api/autonomous/models?tool=claude-code"
+                    "&workspace_type=remote&machine_id=m-42"
+                )
+        assert resp.status_code == 200
+        mock_mgr.check_user_access.assert_called_once()
+        mock_mgr.get_machine.assert_called_once_with("m-42")
+        mock_proxy.get_tool_model_pool.assert_called_once_with(
+            tenant_id=7, tool_name="claude-code", scope="remote", provider="openai"
+        )
+
+    def test_get_models_remote_denies_without_access(self, client):
+        """A user without access to the machine gets 404, never the model list."""
+        mock_proxy = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.check_user_access.return_value = None  # no access
+        with _mock_auth():
+            with (
+                patch(
+                    "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                    return_value=mock_proxy,
+                ),
+                patch(
+                    "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
+                    return_value=mock_mgr,
+                ),
+            ):
+                resp = client.get(
+                    "/api/autonomous/models?tool=claude-code"
+                    "&workspace_type=remote&machine_id=m-42"
+                )
+        assert resp.status_code == 404
+        mock_proxy.get_tool_model_pool.assert_not_called()
+
+    def test_get_models_exception_returns_empty(self, client):
+        """Any unexpected error in the model pool query is swallowed.
+
+        Only the pool query/formatting is wrapped — a failure there reasonably
+        degrades to an empty list (the dropdown shows "Default").
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.get_tool_model_pool.side_effect = RuntimeError("boom")
+        with _mock_auth():
+            with patch(
+                "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                return_value=mock_proxy,
+            ):
+                resp = client.get("/api/autonomous/models?tool=claude-code")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["models"] == []
+
+    def test_get_models_remote_lookup_failure_not_masked_as_success(self, client):
+        """Remote machine-lookup failure must not be masked as success+empty.
+
+        The remote resolution (get_remote_agent_manager / check_user_access /
+        get_machine) runs outside the try that swallows pool-query errors, so an
+        infrastructure failure there surfaces as an error rather than a
+        misleading {"success": True, "models": []}. Regression guard for the
+        behavior change flagged in review.
+        """
+        mock_proxy = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.check_user_access.side_effect = RuntimeError("db down")
+        with _mock_auth():
+            with (
+                patch(
+                    "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                    return_value=mock_proxy,
+                ),
+                patch(
+                    "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
+                    return_value=mock_mgr,
+                ),
+            ):
+                resp = client.get(
+                    "/api/autonomous/models?tool=claude-code"
+                    "&workspace_type=remote&machine_id=m-42"
+                )
+        # Must not be a misleading "success, no models" — surface the failure.
+        assert resp.status_code != 200
+        mock_proxy.get_tool_model_pool.assert_not_called()
 
 
 # ── Auth Tests ───────────────────────────────────────────────────────────
