@@ -11,6 +11,7 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from flask import Blueprint, g, jsonify, request
 
@@ -1981,7 +1982,7 @@ def get_workspace_config():
         config_path = os.path.join(CONFIG_DIR, "config.json")
 
         # Get workspace base directory for path validation
-        base_dir = os.environ.get("WORKSPACE_BASE_DIR", "/home")
+        base_dir = os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
 
         workspace_config = {
             "enabled": False,
@@ -2019,7 +2020,7 @@ def get_workspace_config():
                 "enabled": False,
                 "url": "",
                 "multi_user_mode": False,
-                "base_dir": "/home",
+                "base_dir": str(Path.home()),
                 "autonomous_enabled": False,
             }
         )
