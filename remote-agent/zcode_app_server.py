@@ -92,11 +92,14 @@ class ZCodeAppServerSession:
 
         # Event polling state: last consumed event seq per session.
         self._last_event_seq = 0
-        # Secondary dedup: some events (model.streaming deltas) may lack a
-        # seq field, causing them to be re-forwarded on every poll cycle and
-        # the tail poll after turn.completed. Track hashes of forwarded
-        # events to prevent duplication in assistant_text accumulation.
-        self._forwarded_event_hashes: set[str] = set()
+        # Cross-poll hash dedup for events without seq. _prior_event_hashes
+        # holds hashes from previous poll cycles; _current_event_hashes
+        # accumulates during the current cycle. At the start of each poll,
+        # current → prior, current is cleared. This prevents re-delivery of
+        # the same streaming delta across polls (including the tail poll)
+        # while allowing legitimate same-content deltas within a single batch.
+        self._prior_event_hashes: set[str] = set()
+        self._current_event_hashes: set[str] = set()
         # Set = no turn in progress (idle); cleared while a turn runs.
         self._turn_done = threading.Event()
         self._turn_done.set()
@@ -228,7 +231,8 @@ class ZCodeAppServerSession:
         """Worker-thread body: send the message and stream events until done."""
         # Reset per-turn dedup state so hashes from prior turns don't block
         # legitimate re-delivery of identical content in a new turn.
-        self._forwarded_event_hashes.clear()
+        self._prior_event_hashes = set()
+        self._current_event_hashes = set()
         self._last_event_seq = 0
         try:
             send_result = self._request(
@@ -279,6 +283,11 @@ class ZCodeAppServerSession:
         deadline = time.monotonic() + timeout
         interval = _EVENTS_POLL_INTERVAL
         while time.monotonic() < deadline and not self._stopped.is_set():
+            # Rotate hash dedup sets: prior ← current, clear current.
+            # This allows same-content events in THIS poll batch to be
+            # forwarded, while blocking re-delivery from prior batches.
+            self._prior_event_hashes = self._current_event_hashes
+            self._current_event_hashes = set()
             result = self._request(
                 "session/events",
                 {"sessionId": self._cli_session_id},
@@ -307,9 +316,13 @@ class ZCodeAppServerSession:
         """Forward new events to the output callback. Returns True if turn done.
 
         Two-layer dedup: (1) seq-based for events that carry a monotonic seq,
-        (2) content-hash for events without seq (e.g. model.streaming deltas).
-        Without the hash layer, the tail poll after turn.completed re-delivers
-        streaming deltas, duplicating every section in assistant_text.
+        (2) cross-poll-cycle hash for events without seq (e.g. model.streaming
+        deltas). The hash set persists across poll cycles within a turn but
+        is NOT cleared between forward calls — so the first occurrence of a
+        given delta in any poll is forwarded, but re-deliveries in subsequent
+        polls (including the tail poll) are skipped. Legitimate same-content
+        deltas within a single poll batch are still forwarded because the hash
+        is checked against prior cycles, not the current batch.
         """
         done = False
         for ev in events:
@@ -318,11 +331,12 @@ class ZCodeAppServerSession:
                 continue
             if seq:
                 self._last_event_seq = seq
-            # Hash-based dedup for events without seq (streaming deltas).
+            # Cross-poll hash dedup for events without seq (streaming deltas).
+            # Only skip if we've seen this EXACT event in a PRIOR poll cycle.
             ev_hash = json.dumps(ev, sort_keys=True, default=str)
-            if ev_hash in self._forwarded_event_hashes:
+            if ev_hash in self._prior_event_hashes:
                 continue
-            self._forwarded_event_hashes.add(ev_hash)
+            self._current_event_hashes.add(ev_hash)
             done = self._forward_one_event(ev) or done
         return done
 

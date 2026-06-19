@@ -16,56 +16,69 @@ if _REMOTE_AGENT_DIR not in sys.path:
     sys.path.insert(0, _REMOTE_AGENT_DIR)
 
 
-# ── P1-2a: ZCode event dedup prevents duplication ─────────────────────────
+# ── P1-2a: ZCode event dedup prevents cross-poll duplication ─────────────
 
 
-def test_forward_events_dedup_by_hash():
-    """_forward_events must not forward the same event twice — prevents
-    duplicated plan sections from the tail poll after turn.completed."""
-    import json
-
+def _make_test_session():
+    """Create a minimal ZCodeAppServerSession for testing _forward_events."""
     from zcode_app_server import ZCodeAppServerSession
 
-    # Create a minimal session-like object to test _forward_events
     session = ZCodeAppServerSession.__new__(ZCodeAppServerSession)
     session._last_event_seq = 0
-    session._forwarded_event_hashes = set()
+    session._prior_event_hashes = set()
+    session._current_event_hashes = set()
     session.session_id = "test"
     session._stopped = MagicMock()
     session._stopped.is_set = lambda: False
+    return session
 
+
+def test_forward_events_dedup_across_polls():
+    """_forward_events must not forward the same event across poll cycles —
+    prevents duplicated plan sections from the tail poll after turn.completed."""
+    session = _make_test_session()
     forwarded = []
     session.output_callback = lambda sid, data, stream, done: forwarded.append(data)
 
-    # Simulate a model.streaming event without seq (the problematic case)
     streaming_event = {"type": "model.streaming", "payload": {"delta": "Hello "}}
 
-    # First forward — should go through
+    # Simulate poll cycle 1: prior←current, clear current, then forward
+    session._prior_event_hashes = session._current_event_hashes
+    session._current_event_hashes = set()
     session._forward_events([streaming_event])
     assert len(forwarded) == 1
 
-    # Second forward (tail poll re-delivery) — must be deduped
+    # Simulate poll cycle 2 (tail poll): same event re-delivered
+    session._prior_event_hashes = session._current_event_hashes
+    session._current_event_hashes = set()
     session._forward_events([streaming_event])
-    assert len(forwarded) == 1  # NOT 2
+    assert len(forwarded) == 1  # NOT 2 — deduped across polls
+
+
+def test_forward_events_allows_same_content_in_one_batch():
+    """Two identical events in the SAME poll batch must BOTH be forwarded —
+    this covers legitimate repeated streaming deltas (e.g. two '\\n' tokens)."""
+    session = _make_test_session()
+    forwarded = []
+    session.output_callback = lambda sid, data, stream, done: forwarded.append(data)
+
+    # Two identical streaming events in one batch
+    delta_event = {"type": "model.streaming", "payload": {"delta": "\n"}}
+    session._prior_event_hashes = set()  # first poll, no prior
+    session._current_event_hashes = set()
+    session._forward_events([delta_event, delta_event])
+    assert len(forwarded) == 2  # Both forwarded — same batch, not cross-poll
 
 
 def test_forward_events_seq_still_works():
     """seq-based dedup must still function alongside hash dedup."""
-    from zcode_app_server import ZCodeAppServerSession
-
-    session = ZCodeAppServerSession.__new__(ZCodeAppServerSession)
-    session._last_event_seq = 0
-    session._forwarded_event_hashes = set()
-    session.session_id = "test"
-    session._stopped = MagicMock()
-    session._stopped.is_set = lambda: False
-
+    session = _make_test_session()
     forwarded = []
     session.output_callback = lambda sid, data, stream, done: forwarded.append(data)
 
     event = {"seq": 1, "type": "model.streaming", "payload": {"delta": "Hi"}}
     session._forward_events([event])
-    session._forward_events([event])  # same seq
+    session._forward_events([event])  # same seq, same batch
     assert len(forwarded) == 1
 
 
@@ -74,14 +87,16 @@ def test_run_turn_resets_dedup_state():
     from zcode_app_server import ZCodeAppServerSession
 
     session = ZCodeAppServerSession.__new__(ZCodeAppServerSession)
-    session._forwarded_event_hashes = {"old_hash_1", "old_hash_2"}
+    session._prior_event_hashes = {"old_hash_1", "old_hash_2"}
+    session._current_event_hashes = {"old_hash_3"}
     session._last_event_seq = 42
 
     # _run_turn resets at the top — we test by checking the reset lines exist
     import inspect
 
     source = inspect.getsource(ZCodeAppServerSession._run_turn)
-    assert "_forwarded_event_hashes.clear()" in source
+    assert "_prior_event_hashes = set()" in source
+    assert "_current_event_hashes = set()" in source
     assert "_last_event_seq = 0" in source
 
 

@@ -706,6 +706,7 @@ class AutonomousAgentRunner:
                 workflow_id=workflow_id,
                 user_id=user_id,
                 workspace_type=workspace_type,
+                allowed_tools=allowed_tools,
                 resume=resume,
                 resume_session_id=resume_session_id,
                 milestone_id=milestone_id,
@@ -928,6 +929,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         user_id: int | None,
         workspace_type: str,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
         resume_session_id: str = None,
         milestone_id: str = "",
@@ -953,18 +955,24 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
-        # ZCode --mode edit/build still prompts for tool-approval-request on
-        # each edit, which stalls forever in autonomous mode (no human to
-        # approve). Force yolo (fully autonomous, no prompts) regardless of
-        # the workflow's permission_mode setting.
+        # ZCode --mode controls tool approval behavior:
+        # - Planning phase (allowed_tools=[]): use "plan" mode (read-only,
+        #   preserves the #761 read-only boundary).
+        # - Development/test phase (allowed_tools=None or non-empty): use
+        #   "yolo" (fully autonomous, no prompts). edit/build modes stall on
+        #   tool-approval-request which no human approves in autonomous mode.
+        if allowed_tools is not None and len(allowed_tools) == 0:
+            zcode_mode = "plan"
+        else:
+            zcode_mode = "yolo"
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
             project_path,
             model,
-            permission_mode="yolo",
+            permission_mode=zcode_mode,
             resume=resume,
         )
-        logger.info("Launching ZCode app-server: %s", " ".join(cmd))
+        logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
         try:
             process = subprocess.Popen(

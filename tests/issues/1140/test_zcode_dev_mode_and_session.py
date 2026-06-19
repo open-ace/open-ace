@@ -46,12 +46,30 @@ def test_zcode_adapter_maps_yolo_correctly():
     assert args[idx + 1] == "yolo"
 
 
-def test_zcode_run_zcode_appserver_forces_yolo():
-    """_run_zcode_appserver must pass permission_mode='yolo' to build_start_args,
-    regardless of the workflow's permission_mode (auto-edit/plan/etc).
+def test_zcode_dev_phase_uses_yolo_mode():
+    """Dev/test phase (allowed_tools=None) must use yolo mode — no approval
+    prompts that would stall in autonomous mode."""
 
-    This prevents tool-approval-request stalls in autonomous mode.
-    """
+    def fake_build_start_args(sid, path, model, permission_mode=None, **kw):
+        return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
+
+    captured = _run_zcode_with_mock(allowed_tools=None, fake_build=fake_build_start_args)
+    assert captured["mode"] == "yolo", f"Dev phase should use yolo, got {captured['mode']}"
+
+
+def test_zcode_planning_phase_uses_plan_mode():
+    """Planning phase (allowed_tools=[]) must use plan mode — preserves the
+    #761 read-only boundary. Must NOT be elevated to yolo."""
+
+    def fake_build_start_args(sid, path, model, permission_mode=None, **kw):
+        return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
+
+    captured = _run_zcode_with_mock(allowed_tools=[], fake_build=fake_build_start_args)
+    assert captured["mode"] == "plan", f"Planning phase should use plan, got {captured['mode']}"
+
+
+def _run_zcode_with_mock(allowed_tools, fake_build):
+    """Helper: run _run_zcode_appserver with mocked deps, capture permission_mode."""
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     runner = AutonomousAgentRunner(
@@ -60,14 +78,14 @@ def test_zcode_run_zcode_appserver_forces_yolo():
         on_pid_cleared=MagicMock(),
     )
 
-    captured_mode = {}
+    captured = {}
 
-    def fake_build_start_args(sid, path, model, permission_mode=None, **kw):
-        captured_mode["mode"] = permission_mode
-        return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
+    def capturing_build(sid, path, model, permission_mode=None, **kw):
+        captured["mode"] = permission_mode
+        return fake_build(sid, path, model, permission_mode=permission_mode, **kw)
 
     mock_adapter = MagicMock()
-    mock_adapter.build_start_args = fake_build_start_args
+    mock_adapter.build_start_args = capturing_build
 
     mock_zc_cls = MagicMock()
     mock_zc_instance = MagicMock()
@@ -89,22 +107,19 @@ def test_zcode_run_zcode_appserver_forces_yolo():
         with patch("cli_adapters.get_adapter", return_value=mock_adapter):
             with patch("zcode_app_server.ZCodeAppServerSession", mock_zc_cls):
                 runner._run_zcode_appserver(
-                    session_id="test-yolo",
+                    session_id="test-mode",
                     cli_tool="zcode",
                     model="glm-5.2",
                     project_path="/tmp/proj",
                     prompt="do something",
-                    permission_mode="auto-edit",  # workflow says auto-edit
+                    permission_mode="auto-edit",
                     timeout=60,
                     workflow_id="wf-1",
                     user_id=1,
                     workspace_type="local",
+                    allowed_tools=allowed_tools,
                 )
-
-    # The adapter must have received yolo, NOT auto-edit
-    assert (
-        captured_mode["mode"] == "yolo"
-    ), f"Expected yolo (no approval prompts), got {captured_mode['mode']}"
+    return captured
 
 
 # ── P0-2: Session line always updates on success ──────────────────────────
