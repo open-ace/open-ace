@@ -51,11 +51,16 @@ def auto_db(tmp_path):
                 )
                 conn.commit()
 
-                # Create autonomous tables
+                # Create autonomous tables (with try/except per statement,
+                # mirroring schema_init — ALTER TABLE may fail on duplicate
+                # columns for fresh DBs where CREATE TABLE already added them)
                 from app.modules.workspace.autonomous import get_ddl_statements
 
                 for sql in get_ddl_statements():
-                    cursor.execute(sql)
+                    try:
+                        cursor.execute(sql)
+                    except Exception:
+                        pass
                 conn.commit()
             finally:
                 conn.close()
@@ -740,6 +745,24 @@ class TestAllowedFieldsFiltering:
         # Disallowed fields should NOT appear as columns
         assert "malicious_field" not in updated
         assert "DROP TABLE" not in updated
+
+    def test_update_persists_transient_retry_count(self, auto_db):
+        """transient_retry_count must be in the whitelist so the orchestrator's
+        layer-2 retry counter actually reaches the database (#1127 P1)."""
+        repo = AutonomousWorkflowRepository(auto_db)
+        wf = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Retry Test",
+                "requirements_text": "t",
+                "cli_tool": "cc",
+                "project_path": "/tmp",
+            }
+        )
+
+        repo.update_workflow(wf["workflow_id"], {"transient_retry_count": 3})
+        updated = repo.get_workflow(wf["workflow_id"])
+        assert updated["transient_retry_count"] == 3
 
     def test_update_filters_out_empty_update_set(self, auto_db):
         """When all fields are non-allowed, no update occurs (returns current state)."""
