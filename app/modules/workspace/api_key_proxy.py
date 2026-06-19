@@ -587,6 +587,32 @@ class APIKeyProxyService:
             Dict with complete settings ready for agent to write to settings.json,
             or None if no matching API key found.
         """
+        ranked_settings = self._collect_tool_key_settings(tenant_id, tool_name, scope)
+        if not ranked_settings:
+            return None
+
+        # Single key fast path — backward compatible
+        if len(ranked_settings) == 1:
+            return ranked_settings[0][1]
+
+        # Multiple keys — merge modelProviders from all keys
+        return self._merge_multi_key_settings(ranked_settings)
+
+    def _collect_tool_key_settings(
+        self,
+        tenant_id: int,
+        tool_name: str,
+        scope: str = "remote",
+    ) -> list[tuple[tuple[int, int, int], dict[str, Any]]]:
+        """Return per-key settings for every active key matching a tool.
+
+        Shared backing store for :meth:`get_cli_settings_for_tool` (which merges
+        the results for agent settings.json) and :meth:`get_tool_models` (which
+        unions models across keys). Returns settings ranked by
+        ``(-priority, -weight, key_id)`` ascending (highest-priority key first),
+        or an empty list when no key matches. Tool-name normalization is applied
+        so aliases ("codex"/"codex-cli", "claude"/"claude-code") match.
+        """
         canonical_tool = normalize_tool_name(tool_name)
 
         conn = self._get_connection()
@@ -609,7 +635,6 @@ class APIKeyProxyService:
         rows = cursor.fetchall()
         conn.close()
 
-        # Collect ALL matching keys with their ranked settings
         ranked_settings: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
         for row in rows:
             cli_tools_str = row["cli_tools"] or ""
@@ -644,15 +669,7 @@ class APIKeyProxyService:
             rank = (-priority, -weight, key_id)
             ranked_settings.append((rank, settings))
 
-        if not ranked_settings:
-            return None
-
-        # Single key fast path — backward compatible
-        if len(ranked_settings) == 1:
-            return ranked_settings[0][1]
-
-        # Multiple keys — merge modelProviders from all keys
-        return self._merge_multi_key_settings(ranked_settings)
+        return ranked_settings
 
     @staticmethod
     def _collect_model_entries(
@@ -924,18 +941,15 @@ class APIKeyProxyService:
           bare string), with values like ``"zai/glm-5.2"`` — strip the
           ``provider/`` prefix.
 
+        Models are extracted from **every** matching key and unioned (deduped
+        by id), so a tenant with several claude-code/zcode keys sees the union
+        of all their models — not just the highest-priority key's.
+
         Returns a dict shaped like ``get_tool_model_pool``'s:
         ``{"models": [{...}, ...], "empty_reason": str | None}``.
-
-        Multi-key tenancy: for tenants with several matching keys,
-        ``get_cli_settings_for_tool`` unions ``modelProviders`` across keys but
-        carries ``env``/top-level ``model`` from only the highest-priority key.
-        So qwen/codex models are fully unioned, while claude/zcode reflect the
-        highest-priority key only. Single-key tenants (the common case) are
-        unaffected.
         """
-        settings = self.get_cli_settings_for_tool(tenant_id, tool_name, scope)
-        if not settings:
+        ranked_settings = self._collect_tool_key_settings(tenant_id, tool_name, scope)
+        if not ranked_settings:
             return {
                 "models": [],
                 "empty_reason": (f"No active {tool_name} API keys configured for scope '{scope}'"),
@@ -944,42 +958,11 @@ class APIKeyProxyService:
         canonical = normalize_tool_name(tool_name)
         models: list[dict[str, Any]] = []
 
-        if canonical == "claude":
-            # claude-code configures models via env vars, not modelProviders.
-            env = settings.get("env") or {}
-            for key in (
-                "ANTHROPIC_MODEL",
-                "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            ):
-                value = env.get(key)
-                if isinstance(value, str) and value.strip():
-                    models.append({"id": value.strip(), "name": value.strip()})
-        elif canonical == "zcode":
-            # zcode stores the active model(s) under a top-level `model` field.
-            raw_model = settings.get("model")
-            candidates: list[str] = []
-            if isinstance(raw_model, dict):
-                candidates = [v for v in raw_model.values() if isinstance(v, str)]
-            elif isinstance(raw_model, str):
-                candidates = [raw_model]
-            for value in candidates:
-                # Values look like "zai/glm-5.2"; drop the provider/ prefix.
-                name = value.split("/", 1)[1] if "/" in value else value
-                name = name.strip()
-                if name:
-                    models.append({"id": name, "name": name})
-        else:
-            # qwen / codex / future tools: flatten every modelProviders subkey.
-            providers = settings.get("modelProviders") or {}
-            for provider_models in providers.values():
-                if not isinstance(provider_models, list):
-                    continue
-                for entry in provider_models:
-                    if isinstance(entry, dict) and entry.get("id"):
-                        models.append({"id": entry["id"], "name": entry.get("name") or entry["id"]})
+        # Walk every matching key (highest priority first) and union its models.
+        for _rank, settings in ranked_settings:
+            models.extend(self._extract_models_for_tool(canonical, settings))
 
-        # Dedup by id while preserving discovery order.
+        # Dedup by id while preserving discovery order (highest-priority key wins).
         seen: set[str] = set()
         unique: list[dict[str, Any]] = []
         for model in models:
@@ -995,6 +978,50 @@ class APIKeyProxyService:
                 None if unique else f"Current {tool_name} API keys do not configure any models"
             ),
         }
+
+    @staticmethod
+    def _extract_models_for_tool(canonical: str, settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract model entries from one key's settings for a canonical tool."""
+        if canonical == "claude":
+            # claude-code configures models via env vars, not modelProviders.
+            env = settings.get("env") or {}
+            models: list[dict[str, Any]] = []
+            for key in (
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            ):
+                value = env.get(key)
+                if isinstance(value, str) and value.strip():
+                    models.append({"id": value.strip(), "name": value.strip()})
+            return models
+
+        if canonical == "zcode":
+            # zcode stores the active model(s) under a top-level `model` field.
+            raw_model = settings.get("model")
+            candidates: list[str] = []
+            if isinstance(raw_model, dict):
+                candidates = [v for v in raw_model.values() if isinstance(v, str)]
+            elif isinstance(raw_model, str):
+                candidates = [raw_model]
+            models = []
+            for value in candidates:
+                # Values look like "zai/glm-5.2"; drop the provider/ prefix.
+                name = value.split("/", 1)[1] if "/" in value else value
+                name = name.strip()
+                if name:
+                    models.append({"id": name, "name": name})
+            return models
+
+        # qwen / codex / future tools: flatten every modelProviders subkey.
+        models = []
+        for provider_models in (settings.get("modelProviders") or {}).values():
+            if not isinstance(provider_models, list):
+                continue
+            for entry in provider_models:
+                if isinstance(entry, dict) and entry.get("id"):
+                    models.append({"id": entry["id"], "name": entry.get("name") or entry["id"]})
+        return models
 
     def _build_cli_settings_for_tool(
         self,

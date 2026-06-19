@@ -944,19 +944,24 @@ class TestGetToolModelsExtractor:
 
     The extractor branches on the canonical tool name because each tool stores
     its models in a different location (see APIKeyManagement.tsx templates and
-    remote-agent cli_settings.py). These tests stub get_cli_settings_for_tool
-    so no DB is needed.
+    remote-agent cli_settings.py). These tests stub _collect_tool_key_settings
+    (which returns the per-key settings list) so no DB is needed.
     """
 
     def _proxy(self):
         # Bypass __init__ — it needs an encryption key/DB only for key
         # management, which get_tool_models (pure extraction over the stubbed
-        # get_cli_settings_for_tool return value) does not touch.
+        # per-key settings) does not touch.
         return object.__new__(APIKeyProxyService)
 
-    def test_no_settings_returns_empty_with_reason(self):
+    @staticmethod
+    def _keys(*settings):
+        """Wrap per-key settings dicts as ranked entries (rank irrelevant here)."""
+        return [((-priority, -100, i), s) for i, (priority, s) in enumerate(settings)]
+
+    def test_no_keys_returns_empty_with_reason(self):
         proxy = self._proxy()
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value=None):
+        with patch.object(proxy, "_collect_tool_key_settings", return_value=[]):
             result = proxy.get_tool_models(1, "claude-code", "local")
         assert result["models"] == []
         assert "No active" in result["empty_reason"]
@@ -971,7 +976,9 @@ class TestGetToolModelsExtractor:
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5",  # dup of ANTHROPIC_MODEL
             }
         }
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys((1, settings))
+        ):
             result = proxy.get_tool_models(1, "claude-code", "local")
         ids = [m["id"] for m in result["models"]]
         assert ids == ["glm-5", "glm-5.1"]  # deduped, order preserved
@@ -981,7 +988,9 @@ class TestGetToolModelsExtractor:
         """zcode stores models under a top-level `model` dict; strip provider/."""
         proxy = self._proxy()
         settings = {"model": {"main": "zai/glm-5.2", "lite": "zai/glm-4.5-air"}}
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys((1, settings))
+        ):
             result = proxy.get_tool_models(1, "zcode", "remote")
         names = sorted(m["name"] for m in result["models"])
         assert names == ["glm-4.5-air", "glm-5.2"]  # prefix stripped
@@ -995,34 +1004,64 @@ class TestGetToolModelsExtractor:
                 "anthropic": [{"id": "claude-sonnet", "name": "Claude Sonnet"}],
             }
         }
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value=settings):
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys((1, settings))
+        ):
             result = proxy.get_tool_models(1, "qwen-code", "local")
         ids = sorted(m["id"] for m in result["models"])
         assert ids == ["claude-sonnet", "glm-5"]
 
-    def test_models_present_with_no_matching_models(self):
+    def test_keys_present_with_no_matching_models(self):
         """Keys exist but none configure models -> empty with reason."""
         proxy = self._proxy()
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value={"env": {}}):
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys((1, {"env": {}}))
+        ):
             result = proxy.get_tool_models(1, "claude-code", "local")
         assert result["models"] == []
         assert "do not configure" in result["empty_reason"]
 
-    def test_multi_key_claude_reflects_merged_settings_only(self):
-        """Pin multi-key merge behavior for claude/zcode.
+    def test_multi_key_claude_unions_models_across_keys(self):
+        """Multi-key claude-code: union env models from ALL keys, not just top.
 
-        get_cli_settings_for_tool unions modelProviders across keys but carries
-        env/top-level model from only the highest-priority key. So for a merged
-        claude-code config, get_tool_models reflects whatever env the merge
-        produced (here: the top-priority key's models). This test pins that
-        inherited contract so a future change to the merge is caught.
+        Regression: an earlier version delegated to get_cli_settings_for_tool,
+        whose merge carries env from only the highest-priority key — so a
+        tenant with two claude-code keys saw only the top key's models. The
+        extractor now walks every key and unions.
         """
         proxy = self._proxy()
-        # Simulate the merged output: env from top-priority key only.
-        merged = {"env": {"ANTHROPIC_MODEL": "glm-5", "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1"}}
-        with patch.object(proxy, "get_cli_settings_for_tool", return_value=merged):
+        # Two keys, each configuring a different model. Priority: key A (10) > B (5).
+        key_a = (10, {"env": {"ANTHROPIC_MODEL": "glm-5"}})
+        key_b = (5, {"env": {"ANTHROPIC_MODEL": "glm-5.1"}})
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys(key_a, key_b)
+        ):
             result = proxy.get_tool_models(1, "claude-code", "local")
-        assert [m["id"] for m in result["models"]] == ["glm-5", "glm-5.1"]
+        assert sorted(m["id"] for m in result["models"]) == ["glm-5", "glm-5.1"]
+        # Highest-priority key's model discovered first.
+        assert result["models"][0]["id"] == "glm-5"
+
+    def test_multi_key_zcode_unions_models_across_keys(self):
+        """Multi-key zcode: union top-level model entries from all keys."""
+        proxy = self._proxy()
+        key_a = (10, {"model": {"main": "zai/glm-5.2"}})
+        key_b = (5, {"model": {"main": "zai/glm-4.5-air"}})
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys(key_a, key_b)
+        ):
+            result = proxy.get_tool_models(1, "zcode", "remote")
+        assert sorted(m["id"] for m in result["models"]) == ["glm-4.5-air", "glm-5.2"]
+
+    def test_multi_key_qwen_unions_model_providers_across_keys(self):
+        """Multi-key qwen: union modelProviders across keys (already correct)."""
+        proxy = self._proxy()
+        key_a = (10, {"modelProviders": {"openai": [{"id": "glm-5"}]}})
+        key_b = (5, {"modelProviders": {"openai": [{"id": "glm-5.1"}]}})
+        with patch.object(
+            proxy, "_collect_tool_key_settings", return_value=self._keys(key_a, key_b)
+        ):
+            result = proxy.get_tool_models(1, "qwen-code", "local")
+        assert sorted(m["id"] for m in result["models"]) == ["glm-5", "glm-5.1"]
 
 
 # ── Auth Tests ───────────────────────────────────────────────────────────
