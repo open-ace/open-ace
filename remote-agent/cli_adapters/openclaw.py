@@ -83,6 +83,32 @@ class OpenClawAdapter(BaseCLIAdapter):
 
         return args
 
+    def build_single_shot_args(
+        self, prompt: str, project_path: str, model: str | None = None
+    ) -> list[str]:
+        """Build args for a single-shot OpenClaw execution.
+
+        Mirrors build_start_args but appends the prompt as the final
+        positional argument, matching OpenClaw's agent-mode CLI contract.
+        """
+        args = [
+            self.EXECUTABLE,
+            "--agent",
+            "--json",
+        ]
+        if model:
+            args.extend(["--model", model])
+        args.append(prompt)
+        return args
+
+    def supports_stdin_input(self) -> bool:
+        """Return False — self-contained agent run with no stdin protocol.
+
+        Sending Claude SDK stream-json messages to its stdin is unsupported;
+        the autonomous runner should use single-shot mode instead.
+        """
+        return False
+
     def get_display_name(self) -> str:
         """Return the display name for this CLI tool."""
         return self.DISPLAY_NAME

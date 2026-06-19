@@ -76,6 +76,16 @@ SESSION_DETECTION_POLL_INTERVAL = 0.25
 # this only bounds how quickly we notice a pause/resume/stop transition.
 COMPLETION_POLL_INTERVAL = 5.0
 
+# CLI tools that run a persistent app-server process with their own stdio
+# protocol (not Claude's stream-json). These must be driven through a dedicated
+# session class instead of the generic _LocalSession path. Mirrors
+# remote-agent/executor.py::_APPSERVER_TOOLS.
+_APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
+
+
+class ZCodeSessionError(Exception):
+    """Raised when a ZCode app-server session fails to start or send."""
+
 
 @dataclass
 class _LocalSession:
@@ -116,6 +126,125 @@ class _LocalSession:
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
+
+
+class _ZcodeResultCollector:
+    """Collects assistant text, tool calls, and token usage from ZCode app-server.
+
+    Acts as the ``output_callback`` / ``usage_callback`` for
+    ``ZCodeAppServerSession``, translating ZCode Protocol notifications into
+    the same data ``_LocalSession`` accumulates for Claude SDK sessions.
+    """
+
+    def __init__(self) -> None:
+        self.assistant_text: str = ""
+        self.tool_calls: list[dict] = []
+        self.total_tokens: int = 0
+        self.input_tokens: int = 0
+        self.output_tokens: int = 0
+        self.request_count: int = 0
+        # When the usage_callback provides an authoritative model_requests
+        # count, we use that instead of counting done=True callbacks. This
+        # avoids double-counting: ZCode calls on_usage (with modelRequestCount)
+        # BEFORE the final on_output(done=True), so both would increment.
+        self._request_count_from_usage: bool = False
+        self.event_log: list = []
+        self.error: str | None = None
+
+    def on_output(self, session_id: str, data: str, stream: str, done: bool) -> None:
+        """Receive ZCode output_callback invocations.
+
+        Builds ``event_log`` dicts in the same shape ``_LocalSession._read_stdout``
+        produces, so ``_persist_local_session_messages`` can consume them
+        identically regardless of CLI tool. See agent_runner.py:1443-1472.
+        """
+        if not data:
+            if done and not self._request_count_from_usage:
+                # Fallback: no authoritative model_requests from usage_callback,
+                # so count this turn as 1 request.
+                self.request_count += 1
+            return
+        try:
+            parsed = json.loads(data)
+        except (json.JSONDecodeError, ValueError):
+            return
+
+        if not isinstance(parsed, dict):
+            return
+
+        msg_type = parsed.get("type", "")
+
+        # Assistant text delta (from model.streaming → {"type":"assistant",...})
+        if msg_type == "assistant":
+            content = parsed.get("message", {}).get("content", "")
+            text = ""
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text += block.get("text", "")
+            elif isinstance(content, str):
+                text = content
+            if text:
+                self.assistant_text += text
+                self.event_log.append(
+                    {
+                        "type": "assistant",
+                        "text": text,
+                        "message_id": parsed.get("message", {}).get("id"),
+                        "model": parsed.get("message", {}).get("model"),
+                    }
+                )
+
+        # Tool events: ZCode emits tool.<name> with data payload.
+        # Normalize to the Claude SDK tool_use shape for persistence.
+        elif msg_type.startswith("tool."):
+            tool_name = msg_type.split(".", 1)[1]
+            payload = parsed.get("data", {}) or {}
+            tool_input = payload.get("input", payload)
+            tool_id = payload.get("id", "")
+            self.tool_calls.append(
+                {"tool": {"name": tool_name, "input": tool_input, "id": tool_id}}
+            )
+            self.event_log.append(
+                {
+                    "type": "tool_use",
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_use_id": tool_id,
+                }
+            )
+
+        elif msg_type == "error":
+            err_data = parsed.get("data", {})
+            if isinstance(err_data, dict):
+                msg = err_data.get("message", "")
+                if msg and self.error is None:
+                    self.error = msg
+
+    def on_usage(self, session_id: str, usage: dict) -> None:
+        """Receive ZCode usage_callback invocations.
+
+        ZCodeAppServerSession emits a normalized dict with snake_case keys
+        (input, output, cache_read, reasoning, model_requests), NOT the
+        camelCase session/usage response. See zcode_app_server.py:335-417.
+        """
+        self.input_tokens = usage.get("input", self.input_tokens)
+        self.output_tokens = usage.get("output", self.output_tokens)
+        self.total_tokens = self.input_tokens + self.output_tokens
+        # model_requests is the authoritative request count from the model
+        # gateway. When present, it takes precedence over the done=True
+        # fallback counting in on_output to avoid double-counting.
+        if "model_requests" in usage:
+            self.request_count = usage["model_requests"]
+            self._request_count_from_usage = True
+
+    def on_permission(self, session_id: str, control_request: dict) -> None:
+        """Auto-approve all permission requests in autonomous mode.
+
+        ZCode app-server in edit/yolo mode auto-approves tool calls, so this
+        callback is rarely invoked. Left as a no-op notification hook.
+        """
+        pass
 
 
 class AutonomousAgentRunner:
@@ -532,6 +661,40 @@ class AutonomousAgentRunner:
         project_path = os.path.expanduser(project_path)
         Path(project_path).mkdir(parents=True, exist_ok=True)
 
+        # Protocol dispatch: different CLI tools speak different stdin protocols.
+        # The generic _LocalSession path below assumes Claude SDK stream-json,
+        # which only claude-code and qwen-code-cli support. Route tools with
+        # their own app-server protocol (ZCode) or no stdin protocol at all
+        # (codex, openclaw) through dedicated paths. Mirrors the dispatch in
+        # remote-agent/executor.py (_APPSERVER_TOOLS + supports_stdin_input).
+        if cli_tool in _APPSERVER_TOOLS:
+            return self._run_zcode_appserver(
+                session_id=session_id,
+                cli_tool=cli_tool,
+                model=model,
+                project_path=project_path,
+                prompt=prompt,
+                permission_mode=permission_mode,
+                timeout=timeout,
+                workflow_id=workflow_id,
+                user_id=user_id,
+                workspace_type=workspace_type,
+                resume=resume,
+                resume_session_id=resume_session_id,
+                milestone_id=milestone_id,
+            )
+        if not adapter.supports_stdin_input():
+            return self._run_single_shot(
+                session_id=session_id,
+                cli_tool=cli_tool,
+                model=model,
+                project_path=project_path,
+                prompt=prompt,
+                timeout=timeout,
+                workflow_id=workflow_id,
+                milestone_id=milestone_id,
+            )
+
         # Build env vars (use direct env vars, no proxy for local autonomous)
         env = dict(os.environ)
 
@@ -725,6 +888,318 @@ class AutonomousAgentRunner:
             error=session.error,
             event_log=session.event_log,
         )
+
+    def _run_zcode_appserver(
+        self,
+        session_id: str,
+        cli_tool: str,
+        model: str,
+        project_path: str,
+        prompt: str,
+        permission_mode: str,
+        timeout: int,
+        workflow_id: str,
+        user_id: int | None,
+        workspace_type: str,
+        resume: bool = False,
+        resume_session_id: str = None,
+        milestone_id: str = "",
+    ) -> AgentTaskResult:
+        """Run a ZCode agent task via the persistent app-server protocol.
+
+        ZCode speaks the *ZCode Protocol* (``{id, method, params}``), not
+        Claude's stream-json. We reuse ``ZCodeAppServerSession`` — the same
+        class the interactive executor uses — to drive ``session/create`` →
+        ``session/send`` → ``session/events`` and collect results.
+        """
+        import sys
+
+        _remote_agent_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "remote-agent")
+        )
+        if _remote_agent_dir not in sys.path:
+            sys.path.insert(0, _remote_agent_dir)
+        from cli_adapters import get_adapter
+        from zcode_app_server import ZCodeAppServerSession
+
+        _ensure_usage_parser()
+        adapter = get_adapter(cli_tool)
+
+        env = dict(os.environ)
+        cmd = adapter.build_start_args(
+            resume_session_id if (resume and resume_session_id) else session_id,
+            project_path,
+            model,
+            permission_mode=permission_mode,
+            resume=resume,
+        )
+        logger.info("Launching ZCode app-server: %s", " ".join(cmd))
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=project_path,
+                env=env,
+                start_new_session=True,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Failed to start ZCode process: {e}",
+            )
+
+        collector = _ZcodeResultCollector()
+
+        zc_session = ZCodeAppServerSession(
+            session_id=session_id,
+            process=process,
+            project_path=project_path,
+            output_callback=collector.on_output,
+            usage_callback=collector.on_usage,
+            permission_callback=lambda sid, req: collector.on_permission(sid, req),
+            model=model,
+            permission_mode=permission_mode,
+            env=env,
+        )
+        zc_session.allowed_tools = []  # planning restriction handled by --mode
+
+        # Register PID + wrap into a _LocalSession-compatible tracker so the
+        # orchestrator's stop/pause/cancel can reach the process.
+        tracker = _LocalSession(
+            session_id=session_id,
+            process=process,
+            cli_tool=cli_tool,
+            project_path=project_path,
+            encoded_project_path=self._encode_project_path(project_path),
+            workflow_id=workflow_id,
+            user_id=user_id,
+            workspace_type=workspace_type,
+            started_at_epoch=time.time(),
+            milestone_id=milestone_id,
+        )
+        self._local_sessions[session_id] = tracker
+        if self._on_pid_registered:
+            try:
+                self._on_pid_registered(session_id, process.pid)
+            except Exception as e:
+                logger.warning("on_pid_registered callback failed: %s", e)
+
+        # Start stderr reader so app-server diagnostics surface as errors.
+        stderr_thread = threading.Thread(
+            target=self._read_zcode_stderr_local,
+            args=(session_id, process, collector),
+            name=f"zcode-err-{session_id[:8]}",
+            daemon=True,
+        )
+        stderr_thread.start()
+
+        try:
+            if not zc_session.start(
+                model=model,
+                permission_mode=permission_mode,
+                resume_session_id=resume_session_id if resume else None,
+            ):
+                raise ZCodeSessionError("ZCode session/create failed")
+
+            tracker.cli_session_id = zc_session._cli_session_id
+            tracker.persisted_session_id = zc_session._cli_session_id
+            tracker.sdk_initialized.set()
+
+            if not zc_session.send_message(prompt):
+                raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
+
+            completed = zc_session.wait_turn(timeout=timeout)
+        except ZCodeSessionError as e:
+            return AgentTaskResult(
+                session_id=zc_session._cli_session_id or session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=str(e),
+            )
+        finally:
+            # Always clean up: stop the process, remove the tracker, clear PID.
+            zc_session.stop()
+            self._local_sessions.pop(session_id, None)
+            if self._on_pid_cleared:
+                try:
+                    self._on_pid_cleared(session_id)
+                except Exception as e:
+                    logger.warning("on_pid_cleared callback failed: %s", e)
+
+        cli_sid = zc_session._cli_session_id or session_id
+        if not completed:
+            return AgentTaskResult(
+                session_id=cli_sid,
+                tracking_session_id=session_id,
+                response_text=collector.assistant_text,
+                total_tokens=collector.total_tokens,
+                total_input_tokens=collector.input_tokens,
+                total_output_tokens=collector.output_tokens,
+                request_count=collector.request_count,
+                tool_calls=collector.tool_calls,
+                success=False,
+                error=f"Agent task timed out after {timeout}s",
+                event_log=collector.event_log,
+            )
+
+        return AgentTaskResult(
+            session_id=cli_sid,
+            tracking_session_id=session_id,
+            response_text=collector.assistant_text,
+            total_tokens=collector.total_tokens,
+            total_input_tokens=collector.input_tokens,
+            total_output_tokens=collector.output_tokens,
+            request_count=collector.request_count,
+            tool_calls=collector.tool_calls,
+            success=collector.error is None,
+            error=collector.error,
+            event_log=collector.event_log,
+        )
+
+    def _run_single_shot(
+        self,
+        session_id: str,
+        cli_tool: str,
+        model: str,
+        project_path: str,
+        prompt: str,
+        timeout: int,
+        workflow_id: str,
+        milestone_id: str = "",
+    ) -> AgentTaskResult:
+        """Run a CLI tool in single-shot mode for tools without stdin protocol.
+
+        Uses ``adapter.build_single_shot_args`` to produce a self-contained
+        command (e.g. ``codex exec --json "<prompt>"``) and captures output.
+        """
+        import sys
+
+        _remote_agent_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "remote-agent")
+        )
+        if _remote_agent_dir not in sys.path:
+            sys.path.insert(0, _remote_agent_dir)
+        from cli_adapters import get_adapter
+
+        _ensure_usage_parser()
+        adapter = get_adapter(cli_tool)
+
+        exe_name = adapter.get_executable_name()
+        executable = shutil.which(exe_name)
+        if not executable:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"CLI tool '{exe_name}' not found",
+            )
+
+        args = adapter.build_single_shot_args(prompt, project_path, model)
+        cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
+        env = dict(os.environ)
+
+        logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=project_path,
+                env=env,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Agent task timed out after {timeout}s",
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Failed to run command: {e}",
+            )
+
+        response_text = ""
+        total_tokens = 0
+        input_tokens = 0
+        output_tokens = 0
+        event_log = []
+
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            event_log.append(line)
+            try:
+                parsed = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                response_text += line + "\n"
+                continue
+
+            # Extract text content from common JSON shapes
+            if isinstance(parsed, dict):
+                text = (
+                    parsed.get("response")
+                    or parsed.get("text")
+                    or parsed.get("content")
+                    or parsed.get("output")
+                )
+                if isinstance(text, str):
+                    response_text += text + "\n"
+                usage = _extract_stream_usage(cli_tool, parsed)
+                if usage:
+                    input_tokens += usage["input"]
+                    output_tokens += usage["output"]
+
+        total_tokens = input_tokens + output_tokens
+
+        stderr_text = (proc.stderr or "").strip()
+        success = proc.returncode == 0
+        error = None
+        if not success:
+            error = stderr_text or f"Command exited with code {proc.returncode}"
+
+        return AgentTaskResult(
+            session_id=session_id,
+            tracking_session_id=session_id,
+            response_text=response_text.strip(),
+            total_tokens=total_tokens,
+            total_input_tokens=input_tokens,
+            total_output_tokens=output_tokens,
+            request_count=1,
+            success=success,
+            error=error,
+            event_log=event_log,
+        )
+
+    @staticmethod
+    def _read_zcode_stderr_local(
+        session_id: str, process: subprocess.Popen, collector: _ZcodeResultCollector
+    ) -> None:
+        """Forward ZCode app-server stderr lines as errors (autonomous variant)."""
+        stream = process.stderr
+        if stream is None:
+            return
+        try:
+            for raw in stream:
+                line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+                text = line.strip()
+                if text:
+                    logger.warning("[zcode %s stderr] %s", session_id[:8], text)
+                    if collector.error is None:
+                        collector.error = text
+        except (OSError, ValueError):
+            pass
 
     def _run_remote(
         self,

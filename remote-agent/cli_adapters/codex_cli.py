@@ -146,8 +146,16 @@ class CodexCLIAdapter(BaseCLIAdapter):
         return args
 
     def supports_stdin_input(self) -> bool:
-        """Codex CLI supports stdin input via JSONRPC 2.0 (app-server mode)."""
-        return True
+        """Codex does NOT use the Claude stream-json stdin protocol.
+
+        Although Codex has a JSONRPC 2.0 ``serve`` mode, ``build_start_args``
+        launches a bare interactive ``codex`` TTY process, not an app-server.
+        Sending Claude SDK ``control_request`` / ``user`` messages to that
+        process is silently ignored, causing the autonomous runner to hang
+        until timeout. Return False so the runner uses ``codex exec --json``
+        single-shot mode instead.
+        """
+        return False
 
     # ------------------------------------------------------------------
     # Display helpers
