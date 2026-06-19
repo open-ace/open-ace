@@ -955,16 +955,13 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
-        # ZCode --mode controls tool approval behavior:
-        # - Planning phase (allowed_tools=[]): use "plan" mode (read-only,
-        #   preserves the #761 read-only boundary).
-        # - Development/test phase (allowed_tools=None or non-empty): use
-        #   "yolo" (fully autonomous, no prompts). edit/build modes stall on
-        #   tool-approval-request which no human approves in autonomous mode.
-        if allowed_tools is not None and len(allowed_tools) == 0:
-            zcode_mode = "plan"
-        else:
-            zcode_mode = "yolo"
+        # Determine ZCode --mode from the explicit zcode_mode hint (passed by
+        # the orchestrator per-phase), falling back to a safe default.
+        # Planning/review phases pass zcode_mode="plan" (read-only, #761);
+        # dev/test phases pass zcode_mode="yolo" (no approval prompts).
+        # We can't infer this from allowed_tools because both planning and
+        # dev use [] for zcode (it has its own built-in tool set).
+        zcode_mode = permission_mode if permission_mode in ("plan", "yolo") else "yolo"
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
             project_path,

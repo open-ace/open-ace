@@ -148,6 +148,21 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 # Normal planning should complete in a few minutes; this caps runaway agents.
 PLANNING_TIMEOUT = 600
 
+
+def _zcode_planning_mode(wf: dict) -> str:
+    """Return the ZCode --mode for planning-phase calls.
+
+    ZCode planning must stay read-only (plan mode, #761). For all other CLI
+    tools, pass through the workflow's permission_mode unchanged. For ZCode,
+    force "plan" so the agent can't write files or run commands during
+    planning — allowed_tools is [] for both planning and dev (zcode uses its
+    own built-in toolset), so the mode is the only reliable read-only signal.
+    """
+    if wf.get("cli_tool") in ("zcode", "zcode-code"):
+        return "plan"
+    return wf.get("permission_mode", "auto-edit")
+
+
 # Minimum review text length (chars) to be considered substantive feedback.
 # Below this threshold the review is treated as "no feedback" (e.g. empty
 # output or trivially short responses).  The fallback message injected for
@@ -1557,7 +1572,7 @@ class AutonomousOrchestrator:
             prompt=prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=wf.get("permission_mode", "auto-edit"),
+            permission_mode=_zcode_planning_mode(wf),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
             session_line="main",
@@ -1651,7 +1666,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=wf.get("permission_mode", "auto-edit"),
+            permission_mode=_zcode_planning_mode(wf),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
             session_line="review",
@@ -1759,7 +1774,7 @@ class AutonomousOrchestrator:
                     prompt=finalize_prompt,
                     workspace_type=wf.get("workspace_type", "local"),
                     remote_machine_id=wf.get("remote_machine_id"),
-                    permission_mode=wf.get("permission_mode", "auto-edit"),
+                    permission_mode=_zcode_planning_mode(wf),
                     allowed_tools=planning_allowed,
                     timeout=PLANNING_TIMEOUT,
                     session_line="main",

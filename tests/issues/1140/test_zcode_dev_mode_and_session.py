@@ -47,28 +47,42 @@ def test_zcode_adapter_maps_yolo_correctly():
 
 
 def test_zcode_dev_phase_uses_yolo_mode():
-    """Dev/test phase (allowed_tools=None) must use yolo mode — no approval
-    prompts that would stall in autonomous mode."""
+    """Dev/test phase (permission_mode=auto-edit) must use yolo mode — no
+    approval prompts that would stall in autonomous mode."""
 
-    def fake_build_start_args(sid, path, model, permission_mode=None, **kw):
+    def fake_build(sid, path, model, permission_mode=None, **kw):
         return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
 
-    captured = _run_zcode_with_mock(allowed_tools=None, fake_build=fake_build_start_args)
+    captured = _run_zcode_with_mock(permission_mode="auto-edit", fake_build=fake_build)
     assert captured["mode"] == "yolo", f"Dev phase should use yolo, got {captured['mode']}"
 
 
 def test_zcode_planning_phase_uses_plan_mode():
-    """Planning phase (allowed_tools=[]) must use plan mode — preserves the
-    #761 read-only boundary. Must NOT be elevated to yolo."""
+    """Planning phase (permission_mode=plan) must use plan mode — preserves the
+    #761 read-only boundary. The orchestrator's _zcode_planning_mode() forces
+    'plan' for zcode planning calls regardless of workflow setting."""
 
-    def fake_build_start_args(sid, path, model, permission_mode=None, **kw):
+    def fake_build(sid, path, model, permission_mode=None, **kw):
         return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
 
-    captured = _run_zcode_with_mock(allowed_tools=[], fake_build=fake_build_start_args)
+    captured = _run_zcode_with_mock(permission_mode="plan", fake_build=fake_build)
     assert captured["mode"] == "plan", f"Planning phase should use plan, got {captured['mode']}"
 
 
-def _run_zcode_with_mock(allowed_tools, fake_build):
+def test_zcode_planning_mode_helper():
+    """_zcode_planning_mode returns 'plan' for zcode, passthrough for others."""
+    from app.modules.workspace.autonomous.orchestrator import _zcode_planning_mode
+
+    assert _zcode_planning_mode({"cli_tool": "zcode"}) == "plan"
+    assert _zcode_planning_mode({"cli_tool": "zcode-code"}) == "plan"
+    assert (
+        _zcode_planning_mode({"cli_tool": "claude-code", "permission_mode": "auto-edit"})
+        == "auto-edit"
+    )
+    assert _zcode_planning_mode({"cli_tool": "qwen-code-cli"}) == "auto-edit"
+
+
+def _run_zcode_with_mock(permission_mode, fake_build):
     """Helper: run _run_zcode_appserver with mocked deps, capture permission_mode."""
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
@@ -112,12 +126,12 @@ def _run_zcode_with_mock(allowed_tools, fake_build):
                     model="glm-5.2",
                     project_path="/tmp/proj",
                     prompt="do something",
-                    permission_mode="auto-edit",
+                    permission_mode=permission_mode,
                     timeout=60,
                     workflow_id="wf-1",
                     user_id=1,
                     workspace_type="local",
-                    allowed_tools=allowed_tools,
+                    allowed_tools=[],
                 )
     return captured
 
