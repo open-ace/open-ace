@@ -7,6 +7,7 @@ API routes for admin operations.
 import logging
 import os
 import subprocess
+from pathlib import Path
 from typing import Optional, cast
 
 import bcrypt
@@ -32,8 +33,12 @@ def hash_password(password: str) -> str:
 
 
 def get_workspace_base_dir() -> str:
-    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var."""
-    return os.environ.get("WORKSPACE_BASE_DIR", "/home")
+    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var.
+
+    Falls back to the user's home directory when unset — see fs.py's
+    ``get_workspace_base_dir`` for rationale.
+    """
+    return os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
 
 
 def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:

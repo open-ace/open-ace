@@ -134,8 +134,14 @@ def get_webui_user():
 
 
 def get_workspace_base_dir() -> str:
-    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var."""
-    return os.environ.get("WORKSPACE_BASE_DIR", "/home")
+    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var.
+
+    When the env var is unset, falls back to the current user's home directory
+    (e.g. ``/Users/<user>`` on macOS, ``/home/<user>`` on Linux) so the
+    directory browser works out of the box on any platform. Docker/server
+    deployments set ``WORKSPACE_BASE_DIR`` explicitly (e.g. ``/workspace``).
+    """
+    return os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
 
 
 def get_workspace_base_dirs() -> list[str]:
@@ -143,8 +149,11 @@ def get_workspace_base_dirs() -> list[str]:
 
     Example: WORKSPACE_BASE_DIR=/workspace,/tools,/projects
     Returns: ['/workspace', '/tools', '/projects']
+
+    When unset, defaults to ``[str(Path.home())]`` — see
+    :func:`get_workspace_base_dir`.
     """
-    base_dir = os.environ.get("WORKSPACE_BASE_DIR", "/home")
+    base_dir = os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
     return [d.strip() for d in base_dir.split(",") if d.strip()]
 
 
