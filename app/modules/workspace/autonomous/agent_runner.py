@@ -128,6 +128,29 @@ class _LocalSession:
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
+# Top-level keys that indicate a JSON object is a leaked tool-call blob
+# rather than genuine assistant prose. ZCode sometimes streams tool
+# invocations as text content before emitting a structured tool.* event.
+_TOOL_JSON_KEYS = frozenset({"tool", "command", "subagent_type", "file_path"})
+
+
+def _looks_like_tool_json(text: str) -> bool:
+    """Detect leaked tool-call JSON in assistant text deltas.
+
+    Only filters when the ENTIRE text is valid JSON with a tool-call key at
+    the top level. This avoids false-positives on legitimate prose that
+    contains JSON snippets (e.g. a plan section showing a config example).
+    """
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(obj, dict) and any(k in obj for k in _TOOL_JSON_KEYS)
+
+
 class _ZcodeResultCollector:
     """Collects assistant text, tool calls, and token usage from ZCode app-server.
 
@@ -184,6 +207,12 @@ class _ZcodeResultCollector:
                         text += block.get("text", "")
             elif isinstance(content, str):
                 text = content
+            # Filter out leaked tool-call JSON: ZCode sometimes streams tool
+            # invocations as text content before emitting a structured tool.*
+            # event. These look like raw JSON with tool/command markers and
+            # would pollute the plan text if appended verbatim.
+            if text and _looks_like_tool_json(text):
+                return
             if text:
                 self.assistant_text += text
                 self.event_log.append(
@@ -679,6 +708,7 @@ class AutonomousAgentRunner:
                 workflow_id=workflow_id,
                 user_id=user_id,
                 workspace_type=workspace_type,
+                allowed_tools=allowed_tools,
                 resume=resume,
                 resume_session_id=resume_session_id,
                 milestone_id=milestone_id,
@@ -901,6 +931,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         user_id: int | None,
         workspace_type: str,
+        allowed_tools: list[str] | None = None,
         resume: bool = False,
         resume_session_id: str = None,
         milestone_id: str = "",
@@ -926,14 +957,32 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
+        # Resolve the ZCode --mode here (single source of truth). The
+        # orchestrator passes open-ace permission modes; planning calls use
+        # _zcode_planning_mode() which forces "plan" for zcode. Here we
+        # map any open-ace mode to a safe zcode mode:
+        #   plan  → plan (read-only, safe for unattended planning)
+        #   yolo  → yolo (fully autonomous, no approval prompts)
+        #   other → yolo (safe default; edit/build stall on tool-approval-request)
+        #
+        # Note: build_start_args → _map_permission_mode will run again, but
+        # plan/yolo pass through unchanged. This double-resolution is harmless
+        # but intentional: this layer picks the autonomous-safe mode, the
+        # adapter layer handles the CLI flag format.
+        #
+        # Warning: zcode has an "auto" mode in its enum, but it is NOT mapped
+        # here — if open-ace sends permission_mode="auto", it falls to the
+        # "yolo" default, which is safe. Do NOT map "auto" → "build" here
+        # (build stalls on non-read-only tools in autonomous mode).
+        zcode_mode = permission_mode if permission_mode in ("plan", "yolo") else "yolo"
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
             project_path,
             model,
-            permission_mode=permission_mode,
+            permission_mode=zcode_mode,
             resume=resume,
         )
-        logger.info("Launching ZCode app-server: %s", " ".join(cmd))
+        logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
         try:
             process = subprocess.Popen(
