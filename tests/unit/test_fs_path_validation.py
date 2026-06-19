@@ -62,6 +62,18 @@ class TestIsValidPath:
         # itself on both Linux and macOS and is blacklisted on both.
         assert not is_valid_path("/usr/bin", allowed_prefixes=[str(Path.home())])
 
+    def test_blacklist_catches_symlinked_path(self):
+        # Regression: macOS symlinks /etc -> /private/etc, so a realpath of /etc
+        # yields /private/etc and the literal-blacklist check used to miss it.
+        # The blacklist now resolves each entry through realpath, so both the
+        # literal and its symlink target are rejected on any platform.
+        import os
+
+        resolved = os.path.realpath("/etc")
+        assert not is_valid_path("/etc", allowed_prefixes=None)
+        if resolved != "/etc":  # e.g. /private/etc on macOS — also blocked
+            assert not is_valid_path(resolved, allowed_prefixes=None)
+
     def test_inside_prefix_accepted_outside_rejected(self, monkeypatch):
         # Use a synthetic, non-blacklisted prefix that realpath leaves alone.
         # /workspace is not in BLACKLISTED_PATHS and resolves to itself on both
