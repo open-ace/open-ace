@@ -384,6 +384,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               <RemoteMachineSelector
                 selectedMachineId={selectedMachineId}
                 onSelectMachine={(machineId, machine) => {
+                  if (selectedMachineId !== machineId) {
+                    setProjectPath('');
+                  }
                   setSelectedMachineId(machineId);
                   setSelectedMachineOsType(machine?.os_type ?? '');
                   setSelectedMachineWorkDir(machine?.work_dir ?? '');

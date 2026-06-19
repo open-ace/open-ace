@@ -268,6 +268,22 @@ describe('NewAutonomousModal', () => {
     );
   });
 
+  it('preserves the current path when re-selecting the same remote machine', () => {
+    render(<NewAutonomousModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('autoRemoteWorkspace'));
+    fireEvent.click(screen.getByTestId('select-remote-machine-1'));
+    fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
+      target: { value: 'C:\\custom\\repo' },
+    });
+
+    fireEvent.click(screen.getByTestId('select-remote-machine-1'));
+
+    expect(screen.getByPlaceholderText('autoProjectPathPlaceholder')).toHaveValue(
+      'C:\\custom\\repo'
+    );
+  });
+
   it('saves the final remote path after successful task creation', async () => {
     render(<NewAutonomousModal {...defaultProps} />);
 
