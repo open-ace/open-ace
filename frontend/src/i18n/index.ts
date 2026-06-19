@@ -2671,7 +2671,8 @@ export const translations: Record<Language, Translations> = {
     autoRequirementsPlaceholder: '描述你希望 AI 开发的功能或变更...',
     autoIssueInputPlaceholder: '123 125,128-130 或 https://github.com/owner/repo/issues/123',
     autoIssueInputHint: '支持逗号、空格、换行、12-15 这样的范围，以及混合 GitHub issue URL。',
-    autoIssueSuggestionHint: '这看起来像是 GitHub issue 编号或链接。切换到 GitHub Issue 模式可以正确解析。',
+    autoIssueSuggestionHint:
+      '这看起来像是 GitHub issue 编号或链接。切换到 GitHub Issue 模式可以正确解析。',
     autoIssueSuggestionSwitch: '切换到 GitHub Issue',
     autoTextDescription: '文字描述',
     autoAgentTool: 'Agent 工具',

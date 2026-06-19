@@ -329,7 +329,10 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                   onChange={(e) => setRequirementsText(e.target.value)}
                 />
                 {issueLikeSuggestion && (
-                  <div className="alert alert-warning py-2 mt-2 d-flex align-items-center gap-2 flex-wrap" role="alert">
+                  <div
+                    className="alert alert-warning py-2 mt-2 d-flex align-items-center gap-2 flex-wrap"
+                    role="alert"
+                  >
                     <span>{t('autoIssueSuggestionHint', language)}</span>
                     <button
                       type="button"
