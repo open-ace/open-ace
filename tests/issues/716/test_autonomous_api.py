@@ -832,10 +832,15 @@ class TestGetModels:
         assert "No active" in data["empty_reason"]
 
     def test_get_models_remote_derives_tenant_from_machine(self, client):
-        """Remote workspace derives tenant_id from the machine record."""
+        """Remote workspace derives tenant_id from the machine record.
+
+        ``scope`` must be 'remote' (matching keys tagged remote *or* shared);
+        querying with 'shared' would silently miss every remote-only key.
+        """
         mock_proxy = MagicMock()
         mock_proxy.get_tool_model_pool.return_value = {"models": [], "empty_reason": None}
         mock_mgr = MagicMock()
+        mock_mgr.check_user_access.return_value = "admin"
         mock_mgr.get_machine.return_value = {"tenant_id": 7}
         with _mock_auth():
             with (
@@ -853,10 +858,34 @@ class TestGetModels:
                     "&workspace_type=remote&machine_id=m-42"
                 )
         assert resp.status_code == 200
+        mock_mgr.check_user_access.assert_called_once()
         mock_mgr.get_machine.assert_called_once_with("m-42")
         mock_proxy.get_tool_model_pool.assert_called_once_with(
-            tenant_id=7, tool_name="claude-code", scope="shared", provider="openai"
+            tenant_id=7, tool_name="claude-code", scope="remote", provider="openai"
         )
+
+    def test_get_models_remote_denies_without_access(self, client):
+        """A user without access to the machine gets 404, never the model list."""
+        mock_proxy = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.check_user_access.return_value = None  # no access
+        with _mock_auth():
+            with (
+                patch(
+                    "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                    return_value=mock_proxy,
+                ),
+                patch(
+                    "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
+                    return_value=mock_mgr,
+                ),
+            ):
+                resp = client.get(
+                    "/api/autonomous/models?tool=claude-code"
+                    "&workspace_type=remote&machine_id=m-42"
+                )
+        assert resp.status_code == 404
+        mock_proxy.get_tool_model_pool.assert_not_called()
 
     def test_get_models_exception_returns_empty(self, client):
         """Any unexpected error is swallowed and returns an empty model list."""

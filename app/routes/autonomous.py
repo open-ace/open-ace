@@ -1321,15 +1321,24 @@ def get_available_models():
         # endpoint short-circuited to an empty list. Mirrors workspace.py:199-251.
         tenant_id = 1
         if workspace_type == "remote" and machine_id:
-            try:
-                from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+            from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 
-                machine = get_remote_agent_manager().get_machine(machine_id) or {}
-                tenant_id = machine.get("tenant_id", 1)
-            except Exception:
-                tenant_id = 1
+            agent_mgr = get_remote_agent_manager()
+            # Guard the machine before reading it — a caller must not read an
+            # arbitrary machine's tenant/model list. Mirrors workspace.py:244.
+            if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+                return (
+                    jsonify({"success": False, "error": "Machine not found or access denied"}),
+                    404,
+                )
+            machine = agent_mgr.get_machine(machine_id) or {}
+            tenant_id = machine.get("tenant_id", 1)
 
-        scope = "shared" if workspace_type == "remote" else "local"
+        # ``scope`` is a query value: 'local'/'remote' match keys tagged with
+        # that scope *or* 'shared'; 'shared' itself would match only shared keys
+        # and silently miss every remote key. See _list_tool_key_rows
+        # (api_key_proxy.py:770-776) and migration 048.
+        scope = "remote" if workspace_type == "remote" else "local"
         pool = api_proxy.get_tool_model_pool(
             tenant_id=tenant_id, tool_name=tool, scope=scope, provider="openai"
         )
