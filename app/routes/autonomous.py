@@ -1310,30 +1310,32 @@ def get_available_models():
     workspace_type = request.args.get("workspace_type", "local")
     machine_id = request.args.get("machine_id", "")
 
+    # Resolve tenant. Local is single-tenant (default 1); remote derives it from
+    # the machine. ``g.tenant_id`` is never set in the app, so the previous
+    # ``getattr`` here always returned None and short-circuited to []. The
+    # remote lookup is outside the try below on purpose: an infrastructure
+    # failure here should surface (mirrors workspace.py:241-251), not be masked
+    # as a "success, no models" response or silently fall back to tenant 1
+    # (which could surface another tenant's local-scope keys).
+    tenant_id = 1
+    if workspace_type == "remote" and machine_id:
+        from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+        agent_mgr = get_remote_agent_manager()
+        # Guard the machine before reading it — a caller must not read an
+        # arbitrary machine's tenant/model list. Mirrors workspace.py:244.
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return (
+                jsonify({"success": False, "error": "Machine not found or access denied"}),
+                404,
+            )
+        machine = agent_mgr.get_machine(machine_id) or {}
+        tenant_id = machine.get("tenant_id", 1)
+
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
         api_proxy = APIKeyProxyService()
-
-        # Resolve tenant: local is single-tenant (default 1); remote derives it
-        # from the machine (falling back to 1). ``g.tenant_id`` is never set in
-        # the app, so the previous ``getattr`` here always returned None and the
-        # endpoint short-circuited to an empty list. Mirrors workspace.py:199-251.
-        tenant_id = 1
-        if workspace_type == "remote" and machine_id:
-            from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-
-            agent_mgr = get_remote_agent_manager()
-            # Guard the machine before reading it — a caller must not read an
-            # arbitrary machine's tenant/model list. Mirrors workspace.py:244.
-            if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-                return (
-                    jsonify({"success": False, "error": "Machine not found or access denied"}),
-                    404,
-                )
-            machine = agent_mgr.get_machine(machine_id) or {}
-            tenant_id = machine.get("tenant_id", 1)
-
         # ``scope`` is a query value: 'local'/'remote' match keys tagged with
         # that scope *or* 'shared'; 'shared' itself would match only shared keys
         # and silently miss every remote key. See _list_tool_key_rows

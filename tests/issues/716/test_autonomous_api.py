@@ -888,7 +888,11 @@ class TestGetModels:
         mock_proxy.get_tool_model_pool.assert_not_called()
 
     def test_get_models_exception_returns_empty(self, client):
-        """Any unexpected error is swallowed and returns an empty model list."""
+        """Any unexpected error in the model pool query is swallowed.
+
+        Only the pool query/formatting is wrapped — a failure there reasonably
+        degrades to an empty list (the dropdown shows "Default").
+        """
         mock_proxy = MagicMock()
         mock_proxy.get_tool_model_pool.side_effect = RuntimeError("boom")
         with _mock_auth():
@@ -901,6 +905,37 @@ class TestGetModels:
         data = resp.get_json()
         assert data["success"] is True
         assert data["models"] == []
+
+    def test_get_models_remote_lookup_failure_not_masked_as_success(self, client):
+        """Remote machine-lookup failure must not be masked as success+empty.
+
+        The remote resolution (get_remote_agent_manager / check_user_access /
+        get_machine) runs outside the try that swallows pool-query errors, so an
+        infrastructure failure there surfaces as an error rather than a
+        misleading {"success": True, "models": []}. Regression guard for the
+        behavior change flagged in review.
+        """
+        mock_proxy = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.check_user_access.side_effect = RuntimeError("db down")
+        with _mock_auth():
+            with (
+                patch(
+                    "app.modules.workspace.api_key_proxy.APIKeyProxyService",
+                    return_value=mock_proxy,
+                ),
+                patch(
+                    "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
+                    return_value=mock_mgr,
+                ),
+            ):
+                resp = client.get(
+                    "/api/autonomous/models?tool=claude-code"
+                    "&workspace_type=remote&machine_id=m-42"
+                )
+        # Must not be a misleading "success, no models" — surface the failure.
+        assert resp.status_code != 200
+        mock_proxy.get_tool_model_pool.assert_not_called()
 
 
 # ── Auth Tests ───────────────────────────────────────────────────────────
