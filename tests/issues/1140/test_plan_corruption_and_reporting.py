@@ -135,20 +135,29 @@ def test_collector_keeps_normal_assistant_text():
 
 
 def test_looks_like_tool_json_helper():
-    """The _looks_like_tool_json helper correctly classifies text."""
+    """The _looks_like_tool_json helper correctly classifies text.
+
+    Uses full JSON parse + top-level key check (not substring), so prose
+    containing JSON snippets is NOT filtered — only actual tool-call blobs."""
     from app.modules.workspace.autonomous.agent_runner import _looks_like_tool_json
 
-    # Tool JSON variants
+    # Tool-call JSON (valid JSON with tool keys at top level)
     assert _looks_like_tool_json('{"command": "ls /tmp"}')
     assert _looks_like_tool_json('{"tool": "Read", "file_path": "/tmp/a.py"}')
-    assert _looks_like_tool_json('{"type": "tool_use", "name": "Write"}')
     assert _looks_like_tool_json('{"subagent_type": "Explore", "prompt": "..."}')
 
-    # Normal prose
+    # NOT tool JSON: valid JSON but no tool keys at top level
+    assert not _looks_like_tool_json('{"type": "assistant"}')
+    assert not _looks_like_tool_json('{"name": "Write"}')
+
+    # NOT tool JSON: prose that happens to contain JSON-like text
     assert not _looks_like_tool_json("## Implementation Plan")
     assert not _looks_like_tool_json("First, we need to fix the backend.")
-    assert not _looks_like_tool_json('{"type": "assistant"}')  # no tool markers
+    assert not _looks_like_tool_json('Run this: {"command": "make test"}')  # prose prefix
     assert not _looks_like_tool_json("")
+
+    # NOT tool JSON: invalid JSON (prose with braces but not parseable)
+    assert not _looks_like_tool_json("{some prose with braces}")
 
 
 # ── P2-1a: Dev completion comment skipped on failure ─────────────────────

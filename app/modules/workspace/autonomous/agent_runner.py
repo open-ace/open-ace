@@ -128,25 +128,27 @@ class _LocalSession:
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
-# Markers that indicate a text chunk is actually a leaked tool-call JSON
+# Top-level keys that indicate a JSON object is a leaked tool-call blob
 # rather than genuine assistant prose. ZCode sometimes streams tool
 # invocations as text content before emitting a structured tool.* event.
-_TOOL_JSON_MARKERS = (
-    '"tool"',
-    '"command"',
-    '"type": "tool_use"',
-    '"subagent_type"',
-    '"file_path"',
-    '"prompt":',
-)
+_TOOL_JSON_KEYS = frozenset({"tool", "command", "subagent_type", "file_path"})
 
 
 def _looks_like_tool_json(text: str) -> bool:
-    """Best-effort detect leaked tool-call JSON in assistant text deltas."""
+    """Detect leaked tool-call JSON in assistant text deltas.
+
+    Only filters when the ENTIRE text is valid JSON with a tool-call key at
+    the top level. This avoids false-positives on legitimate prose that
+    contains JSON snippets (e.g. a plan section showing a config example).
+    """
     stripped = text.strip()
     if not stripped.startswith("{"):
         return False
-    return any(marker in stripped for marker in _TOOL_JSON_MARKERS)
+    try:
+        obj = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(obj, dict) and any(k in obj for k in _TOOL_JSON_KEYS)
 
 
 class _ZcodeResultCollector:
