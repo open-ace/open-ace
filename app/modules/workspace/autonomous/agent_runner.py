@@ -527,19 +527,6 @@ class AutonomousAgentRunner:
 
         # Find executable
         adapter = get_adapter(cli_tool)
-        exe_name = adapter.get_executable_name()
-        executable = shutil.which(exe_name)
-        if not executable:
-            return AgentTaskResult(
-                session_id=(
-                    ""
-                    if self._uses_sidebar_session_source(cli_tool, workspace_type)
-                    else session_id
-                ),
-                tracking_session_id=session_id,
-                success=False,
-                error=f"CLI tool '{exe_name}' not found",
-            )
 
         # Expand project path
         project_path = os.path.expanduser(project_path)
@@ -561,7 +548,28 @@ class AutonomousAgentRunner:
             allowed_tools=allowed_tools,
             resume=resume,
         )
-        cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
+
+        # Some adapters (e.g. ZCode) return a self-contained command whose first
+        # element is an interpreter (``node <engine.cjs>``) rather than a PATH
+        # executable. Use those args verbatim; otherwise resolve the executable
+        # via PATH and prepend it.
+        if adapter.provides_full_command():
+            cmd = adapter_args
+        else:
+            exe_name = adapter.get_executable_name()
+            executable = shutil.which(exe_name)
+            if not executable:
+                return AgentTaskResult(
+                    session_id=(
+                        ""
+                        if self._uses_sidebar_session_source(cli_tool, workspace_type)
+                        else session_id
+                    ),
+                    tracking_session_id=session_id,
+                    success=False,
+                    error=f"CLI tool '{exe_name}' not found",
+                )
+            cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 

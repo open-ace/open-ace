@@ -178,6 +178,32 @@ PHASE_STATUS_MAP = {
 CI_POLL_INTERVAL = 30  # seconds between polls
 CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
+# Transient network error auto-retry (layer 2). When advance() catches a
+# GitHubOpsError that looks like a network issue (not a code/conflict error),
+# the workflow stays in its current active status and the scheduler retries
+# on the next cycle (~10s). After this many consecutive transient failures,
+# the workflow is marked failed for manual intervention.
+TRANSIENT_RETRY_MAX = 6
+
+# Keywords identifying transient network errors at the orchestrator level
+# (the error_message stored by advance's except block). Mirrors the
+# _TRANSIENT_ERROR_KEYWORDS in github_ops.py but checks the wrapped message.
+_TRANSIENT_ORCHESTRATOR_KEYWORDS = [
+    "libressl",
+    "openssl",
+    "ssl",
+    "tls",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "timed out",
+    "could not resolve host",
+    "network is unreachable",
+    "unable to access",
+    "rpc failed",
+    "early eof",
+]
+
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
 # review / fix / test) can exceed that, so very long comments are capped with
 # a notice pointing to the timeline full-text view (#988).
@@ -1165,12 +1191,50 @@ class AutonomousOrchestrator:
                 self._do_wait(wf)
             elif phase == "merge":
                 self._do_merge(wf)
+            # Success — reset the transient retry counter so the next network
+            # blip starts fresh.
+            if wf.get("transient_retry_count", 0):
+                self._update_workflow({"transient_retry_count": 0, "error_message": ""})
         except Exception as e:
+            err_str = str(e).lower()
+            is_transient = isinstance(e, GitHubOpsError) and any(
+                kw in err_str for kw in _TRANSIENT_ORCHESTRATOR_KEYWORDS
+            )
+            if is_transient:
+                # Layer 2 auto-retry: don't mark failed. Increment the
+                # transient retry counter and let the scheduler retry on the
+                # next cycle (~10s). This handles sustained network outages
+                # that outlast the layer-1 in-call retry (3×10s in _run_git).
+                transient_count = int(wf.get("transient_retry_count", 0) or 0) + 1
+                if transient_count <= TRANSIENT_RETRY_MAX:
+                    logger.warning(
+                        "Transient error in %s for workflow %s (attempt %d/%d): %s — "
+                        "will retry on next scheduler cycle",
+                        phase,
+                        self._workflow_id[:8],
+                        transient_count,
+                        TRANSIENT_RETRY_MAX,
+                        e,
+                    )
+                    self._update_workflow(
+                        {
+                            "transient_retry_count": transient_count,
+                            "error_message": f"Transient network error (retry {transient_count}/{TRANSIENT_RETRY_MAX}): {e}",
+                        }
+                    )
+                    return
+                logger.error(
+                    "Transient error retry exhausted for workflow %s after %d attempts",
+                    self._workflow_id[:8],
+                    transient_count - 1,
+                )
+            # Non-transient error, or transient retries exhausted → fail.
             logger.error("Orchestrator error in %s: %s", phase, e, exc_info=True)
             self._update_workflow(
                 {
                     "status": "failed",
                     "error_message": str(e),
+                    "transient_retry_count": 0,
                 }
             )
             self._emit("error", {"phase": phase, "error": str(e)})

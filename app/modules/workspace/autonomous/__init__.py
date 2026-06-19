@@ -28,7 +28,7 @@ def get_ddl_statements():
     bool_false = "FALSE" if use_pg else "0"
     bool_true = "TRUE" if use_pg else "1"
 
-    return [
+    statements = [
         f"""
         CREATE TABLE IF NOT EXISTS autonomous_workflows (
             id {pk_type},
@@ -85,22 +85,35 @@ def get_ddl_statements():
             parent_workflow_id TEXT,
             fork_milestone_id TEXT,
             user_feedback TEXT DEFAULT '',
-            original_branch_name TEXT DEFAULT ''
+            original_branch_name TEXT DEFAULT '',
+            transient_retry_count INTEGER DEFAULT 0
         )
         """,
-        """
+    ]
+    # Add transient_retry_count for existing databases that predate this
+    # column. CREATE TABLE IF NOT EXISTS is a no-op on existing tables, so
+    # the column won't appear without this ALTER. Use plain ADD COLUMN (no
+    # IF NOT EXISTS) — works on both PG and SQLite. schema_init wraps each
+    # statement in try/except so "duplicate column" errors are silently
+    # ignored on databases that already have the column.
+    statements.append(
+        "ALTER TABLE autonomous_workflows ADD COLUMN transient_retry_count INTEGER DEFAULT 0"
+    )
+    statements.extend(
+        [
+            """
         CREATE INDEX IF NOT EXISTS idx_workflows_user_status
             ON autonomous_workflows(user_id, status)
         """,
-        """
+            """
         CREATE INDEX IF NOT EXISTS idx_workflows_parent
             ON autonomous_workflows(parent_workflow_id)
         """,
-        """
+            """
         CREATE INDEX IF NOT EXISTS idx_workflows_batch_order
             ON autonomous_workflows(batch_id, batch_order)
         """,
-        f"""
+            f"""
         CREATE TABLE IF NOT EXISTS workflow_milestones (
             id {pk_type},
             workflow_id TEXT NOT NULL REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE,
@@ -138,15 +151,15 @@ def get_ddl_statements():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
-        """
+            """
         CREATE INDEX IF NOT EXISTS idx_milestones_workflow_phase
             ON workflow_milestones(workflow_id, phase, status)
         """,
-        """
+            """
         CREATE INDEX IF NOT EXISTS idx_milestones_workflow_round
             ON workflow_milestones(workflow_id, dev_round)
         """,
-        f"""
+            f"""
         CREATE TABLE IF NOT EXISTS workflow_events (
             id {pk_type},
             workflow_id TEXT NOT NULL,
@@ -156,11 +169,13 @@ def get_ddl_statements():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
-        """
+            """
         CREATE INDEX IF NOT EXISTS idx_events_workflow_created
             ON workflow_events(workflow_id, created_at)
         """,
-    ]
+        ]
+    )
+    return statements
 
 
 __all__ = [

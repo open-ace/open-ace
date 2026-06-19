@@ -71,6 +71,30 @@ def test_zcode_supports_stdin_input_is_false(cli_adapters_pkg):
     assert adapter.supports_stdin_input() is False
 
 
+def test_zcode_provides_full_command(cli_adapters_pkg):
+    """ZCode's build_start_args returns a self-contained command.
+
+    This lets agent_runner use the args verbatim instead of shutil.which +
+    [exe] + args[1:], which fails because the bundled engine isn't on PATH.
+    The first element is the interpreter (``node`` on macOS where the bundled
+    .cjs engine exists, or the resolved ``zcode`` binary on Linux); we only
+    assert the contract, not the host-dependent prefix.
+    """
+    adapter = cli_adapters_pkg.get_adapter("zcode")
+    assert adapter.provides_full_command() is True
+    args = adapter.build_start_args("sess_x", "/tmp/proj", permission_mode="bypass")
+    # Self-contained command is non-empty and includes app-server + cwd.
+    assert len(args) >= 3
+    assert "app-server" in args
+
+
+def test_other_adapters_do_not_provide_full_command(cli_adapters_pkg):
+    """Claude/Qwen/Codex/OpenClaw go through the shutil.which path (default)."""
+    for tool in ("claude-code", "qwen-code-cli", "codex", "openclaw"):
+        adapter = cli_adapters_pkg.get_adapter(tool)
+        assert adapter.provides_full_command() is False, tool
+
+
 def test_zcode_get_settings_path(cli_adapters_pkg):
     adapter = cli_adapters_pkg.get_adapter("zcode")
     assert adapter.get_settings_path().endswith(".zcode/cli/config.json")

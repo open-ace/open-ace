@@ -71,6 +71,7 @@ class AutonomousWorkflowRepository:
         "main_session_id",
         "review_session_id",
         "test_session_id",
+        "transient_retry_count",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",

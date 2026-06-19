@@ -642,7 +642,10 @@ class TestStopPauseCancelsTask:
                 from app.modules.workspace.autonomous import get_ddl_statements
 
                 for sql in get_ddl_statements():
-                    cursor.execute(sql)
+                    try:
+                        cursor.execute(sql)
+                    except Exception:
+                        pass
                 conn.commit()
         finally:
             pass
