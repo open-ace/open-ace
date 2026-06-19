@@ -199,6 +199,15 @@ class ZCodeAdapter(BaseCLIAdapter):
         }
         return mode_map.get(permission_mode or "", "yolo")
 
+    def provides_full_command(self) -> bool:
+        """Return True; build_start_args returns a self-contained command.
+
+        The command starts with ``node <engine.cjs>`` (the bundled engine is
+        not on PATH), so callers must use the args verbatim rather than
+        resolving an executable via shutil.which.
+        """
+        return True
+
     def supports_stdin_input(self) -> bool:
         """
         Return False; the tool does not use the stream-json stdin protocol.

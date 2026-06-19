@@ -37,7 +37,7 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "temporary failure in name resolution",
     "network is unreachable",
     "unable to access",
-    "RPC failed",
+    "rpc failed",
     "early eof",
 ]
 
