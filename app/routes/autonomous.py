@@ -1308,18 +1308,46 @@ def get_available_models():
     """Get available models for a given tool and workspace type."""
     tool = request.args.get("tool", "")
     workspace_type = request.args.get("workspace_type", "local")
-    request.args.get("machine_id", "")
+    machine_id = request.args.get("machine_id", "")
 
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
         api_proxy = APIKeyProxyService()
-        tenant_id = getattr(g, "tenant_id", None)
+
+        # Resolve tenant: local is single-tenant (default 1); remote derives it
+        # from the machine (falling back to 1). ``g.tenant_id`` is never set in
+        # the app, so the previous ``getattr`` here always returned None and the
+        # endpoint short-circuited to an empty list. Mirrors workspace.py:199-251.
+        tenant_id = 1
+        if workspace_type == "remote" and machine_id:
+            try:
+                from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+                machine = get_remote_agent_manager().get_machine(machine_id) or {}
+                tenant_id = machine.get("tenant_id", 1)
+            except Exception:
+                tenant_id = 1
+
         scope = "shared" if workspace_type == "remote" else "local"
-        if tenant_id is None:
-            return jsonify({"success": True, "models": []})
-        models = api_proxy.get_tool_model_pool(tenant_id, tool, scope)
-        return jsonify({"success": True, "models": models})
+        pool = api_proxy.get_tool_model_pool(
+            tenant_id=tenant_id, tool_name=tool, scope=scope, provider="openai"
+        )
+        # The frontend model dropdown renders ``model.name``; pool entries are the
+        # raw config dicts keyed by ``id``. Normalize so a display name is always
+        # present (fall back to id), and surface ``empty_reason`` for future UX.
+        models = [
+            {"name": m.get("name") or m.get("id") or str(m), **m}
+            for m in pool.get("models", [])
+            if isinstance(m, dict)
+        ]
+        return jsonify(
+            {
+                "success": True,
+                "models": models,
+                "empty_reason": pool.get("empty_reason"),
+            }
+        )
     except Exception as e:
         logger.error("Failed to get models: %s", e)
         return jsonify({"success": True, "models": []})
