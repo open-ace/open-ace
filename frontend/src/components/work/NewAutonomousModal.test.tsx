@@ -236,7 +236,23 @@ describe('NewAutonomousModal', () => {
     expect(screen.getByPlaceholderText('autoProjectPathPlaceholder')).toHaveValue('/srv/workspace');
   });
 
-  it('does not replace a non-empty current path when switching to another remote machine', () => {
+  it('replaces the current path when switching to another remote machine', () => {
+    render(<NewAutonomousModal {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('autoRemoteWorkspace'));
+    fireEvent.click(screen.getByTestId('select-remote-machine-1'));
+    fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
+      target: { value: 'C:\\custom\\repo' },
+    });
+
+    fireEvent.click(screen.getByTestId('select-remote-machine-2'));
+
+    expect(screen.getByPlaceholderText('autoProjectPathPlaceholder')).toHaveValue('/srv/workspace');
+  });
+
+  it('uses the new machine remembered path when switching remote machines', () => {
+    localStorage.setItem('remote-last-project-path-machine-2', '/saved/machine-2-repo');
+
     render(<NewAutonomousModal {...defaultProps} />);
 
     fireEvent.click(screen.getByText('autoRemoteWorkspace'));
@@ -248,7 +264,7 @@ describe('NewAutonomousModal', () => {
     fireEvent.click(screen.getByTestId('select-remote-machine-2'));
 
     expect(screen.getByPlaceholderText('autoProjectPathPlaceholder')).toHaveValue(
-      'C:\\custom\\repo'
+      '/saved/machine-2-repo'
     );
   });
 

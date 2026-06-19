@@ -113,7 +113,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   }, [show, isNewProject, workspaceType, projectPath]);
 
   useEffect(() => {
-    if (!show || isNewProject || workspaceType !== 'remote' || !selectedMachineId || projectPath) {
+    if (!show || isNewProject || workspaceType !== 'remote' || !selectedMachineId) {
       return;
     }
 
@@ -126,7 +126,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     if (selectedMachineWorkDir) {
       setProjectPath(selectedMachineWorkDir);
     }
-  }, [show, isNewProject, workspaceType, selectedMachineId, selectedMachineWorkDir, projectPath]);
+  }, [show, isNewProject, workspaceType, selectedMachineId, selectedMachineWorkDir]);
 
   const canSubmit = useMemo(() => {
     const hasRequirements =
