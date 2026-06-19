@@ -101,11 +101,13 @@ docker compose up -d --build
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `WORKSPACE_MULTI_USER_MODE` | 启用多用户模式 | false |
-| `WORKSPACE_BASE_DIR` | 用户项目存储根目录 | /workspace（Docker）/home（二进制） |
+| `WORKSPACE_BASE_DIR` | 用户项目存储根目录，支持逗号分隔多个目录（如 `/workspace,/opt/projects`） | /workspace（Docker）/ 用户家目录（二进制，未设时） |
 | `WORKSPACE_PORT_RANGE_START` | 端口池起始端口 | 3100 |
 | `WORKSPACE_PORT_RANGE_END` | 端口池结束端口 | 3200 |
 | `WORKSPACE_MAX_INSTANCES` | 最大实例数 | 30 |
 | `WORKSPACE_IDLE_TIMEOUT` | 空闲超时(分钟) | 30 |
+
+> ⚠️ **二进制部署以 root 运行时**：未设 `WORKSPACE_BASE_DIR` 会回退到 `/root`（root 家目录），而 `/root` 在黑名单中会被拒绝，导致目录浏览不可用。以 root 运行的部署请显式设置 `WORKSPACE_BASE_DIR`（如 `/workspace` 或 `/home`）。
 
 **启动方式：**
 

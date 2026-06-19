@@ -7,7 +7,6 @@ API routes for admin operations.
 import logging
 import os
 import subprocess
-from pathlib import Path
 from typing import Optional, cast
 
 import bcrypt
@@ -19,6 +18,7 @@ from app.repositories.user_repo import UserRepository
 from app.schemas.quota import validate_quota_update
 from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
+from app.utils.workspace import get_workspace_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +30,6 @@ usage_repo = UsageRepository()
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
-
-
-def get_workspace_base_dir() -> str:
-    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var.
-
-    Falls back to the user's home directory when unset — see fs.py's
-    ``get_workspace_base_dir`` for rationale.
-    """
-    return os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
 
 
 def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:

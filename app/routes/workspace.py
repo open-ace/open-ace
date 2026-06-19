@@ -11,7 +11,6 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from flask import Blueprint, g, jsonify, request
 
@@ -24,6 +23,7 @@ from app.modules.workspace.session_manager import SessionType, _param, get_sessi
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
+from app.utils.workspace import get_workspace_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -1982,7 +1982,7 @@ def get_workspace_config():
         config_path = os.path.join(CONFIG_DIR, "config.json")
 
         # Get workspace base directory for path validation
-        base_dir = os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
+        base_dir = get_workspace_base_dir()
 
         workspace_config = {
             "enabled": False,
@@ -2020,7 +2020,7 @@ def get_workspace_config():
                 "enabled": False,
                 "url": "",
                 "multi_user_mode": False,
-                "base_dir": str(Path.home()),
+                "base_dir": get_workspace_base_dir(),
                 "autonomous_enabled": False,
             }
         )

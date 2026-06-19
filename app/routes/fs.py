@@ -17,6 +17,7 @@ from typing import Any
 from flask import Blueprint, g, jsonify, request
 
 from app.repositories.user_repo import UserRepository
+from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,16 @@ BLACKLISTED_PATHS = [
     "/lib",  # Shared libraries
     "/lib64",  # 64-bit libraries
 ]
+
+# Resolved blacklist used for matching: each literal is canonicalized through
+# realpath so symlinked entries still match. On macOS /etc → /private/etc,
+# /var → /private/var, /tmp → /private/tmp; without this, a path like /etc
+# (realpath /private/etc) would slip past the literal /etc check. Keep both the
+# literal (for readability/docs above) and its realpath here.
+_BLACKLISTED_RESOLVED = {
+    *BLACKLISTED_PATHS,
+    *(os.path.realpath(p) for p in BLACKLISTED_PATHS),
+}
 
 
 @fs_bp.before_request
@@ -133,30 +144,6 @@ def get_webui_user():
     return user, None, 200
 
 
-def get_workspace_base_dir() -> str:
-    """Get the workspace base directory. Configurable via WORKSPACE_BASE_DIR env var.
-
-    When the env var is unset, falls back to the current user's home directory
-    (e.g. ``/Users/<user>`` on macOS, ``/home/<user>`` on Linux) so the
-    directory browser works out of the box on any platform. Docker/server
-    deployments set ``WORKSPACE_BASE_DIR`` explicitly (e.g. ``/workspace``).
-    """
-    return os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
-
-
-def get_workspace_base_dirs() -> list[str]:
-    """Get list of workspace base directories. Supports comma-separated WORKSPACE_BASE_DIR.
-
-    Example: WORKSPACE_BASE_DIR=/workspace,/tools,/projects
-    Returns: ['/workspace', '/tools', '/projects']
-
-    When unset, defaults to ``[str(Path.home())]`` — see
-    :func:`get_workspace_base_dir`.
-    """
-    base_dir = os.environ.get("WORKSPACE_BASE_DIR") or str(Path.home())
-    return [d.strip() for d in base_dir.split(",") if d.strip()]
-
-
 def get_home_directory(user=None):
     """Get user's home directory based on system_account."""
     base_dir = get_workspace_base_dir()
@@ -208,7 +195,7 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
             return False
 
         # Blacklist check for Linux/Mac - protect system directories
-        for blocked in BLACKLISTED_PATHS:
+        for blocked in _BLACKLISTED_RESOLVED:
             if abs_path == blocked or abs_path.startswith(blocked + os.sep):
                 return False
 
