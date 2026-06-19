@@ -82,22 +82,36 @@ def test_forward_events_seq_still_works():
     assert len(forwarded) == 1
 
 
-def test_run_turn_resets_dedup_state():
-    """_run_turn should clear dedup state so new turns aren't blocked."""
+def test_run_turn_resets_dedup_state_behavioral():
+    """_run_turn should clear dedup state so new turns aren't blocked.
+
+    Behavioral test: populate dedup sets, call _run_turn (mocked internals),
+    then verify the sets were cleared at the top of the method.
+    """
     from zcode_app_server import ZCodeAppServerSession
 
-    session = ZCodeAppServerSession.__new__(ZCodeAppServerSession)
+    session = _make_test_session()
     session._prior_event_hashes = {"old_hash_1", "old_hash_2"}
     session._current_event_hashes = {"old_hash_3"}
     session._last_event_seq = 42
+    session._cli_session_id = "sess_test"
+    session._turn_done = MagicMock()
+    session._turn_done.clear = MagicMock()
+    session._turn_done.set = MagicMock()
+    session._turn_done.is_set = lambda: False
+    session.output_callback = MagicMock()
+    session._request = MagicMock(return_value=None)
+    session._report_usage = MagicMock()
+    session._drain_events_until_idle = MagicMock()
+    session._stopped = MagicMock()
+    session._stopped.is_set = lambda: False
 
-    # _run_turn resets at the top — we test by checking the reset lines exist
-    import inspect
+    session._run_turn("test prompt")
 
-    source = inspect.getsource(ZCodeAppServerSession._run_turn)
-    assert "_prior_event_hashes = set()" in source
-    assert "_current_event_hashes = set()" in source
-    assert "_last_event_seq = 0" in source
+    # Dedup state must be cleared by _run_turn
+    assert len(session._prior_event_hashes) == 0
+    assert len(session._current_event_hashes) == 0
+    assert session._last_event_seq == 0
 
 
 # ── P1-2b: Collector filters leaked tool-call JSON ────────────────────────
@@ -163,15 +177,20 @@ def test_looks_like_tool_json_helper():
 # ── P2-1a: Dev completion comment skipped on failure ─────────────────────
 
 
-def test_do_development_checks_status_before_comment():
+def test_do_development_skips_comment_on_failure():
     """_do_development must check workflow status after _run_development_agent
-    and skip _post_dev_completion_comment if failed."""
+    and skip _post_dev_completion_comment if failed.
+
+    Static assertion: _do_development is deeply coupled to the orchestrator's
+    internal state (_gh, repo, workflow property), making a pure behavioral
+    test impractical without a full integration harness. The source guard
+    catches regressions to the unconditional comment call.
+    """
     import inspect
 
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
     source = inspect.getsource(AutonomousOrchestrator._do_development)
-    # The fix adds a status check before the comment call
     assert 'status") != "failed"' in source or 'status") == "failed"' in source, (
         "_do_development must guard _post_dev_completion_comment with a "
         "status check to avoid false 'Completed' comments on failure"

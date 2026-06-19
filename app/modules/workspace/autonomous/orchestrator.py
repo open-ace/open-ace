@@ -1927,7 +1927,7 @@ class AutonomousOrchestrator:
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="main",
-            timeout=DEFAULT_TASK_TIMEOUT,
+            timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
             milestone_id=ms.get("milestone_id", ""),
         )
 
