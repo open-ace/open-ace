@@ -83,6 +83,10 @@ COMPLETION_POLL_INTERVAL = 5.0
 _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 
 
+class ZCodeSessionError(Exception):
+    """Raised when a ZCode app-server session fails to start or send."""
+
+
 @dataclass
 class _LocalSession:
     """Tracks a local CLI subprocess session."""
@@ -178,10 +182,18 @@ class _ZcodeResultCollector:
                     self.error = msg
 
     def on_usage(self, session_id: str, usage: dict) -> None:
-        """Receive ZCode usage_callback invocations."""
-        self.total_tokens = usage.get("totalTokens", self.total_tokens)
-        self.input_tokens = usage.get("inputTokens", self.input_tokens)
-        self.output_tokens = usage.get("outputTokens", self.output_tokens)
+        """Receive ZCode usage_callback invocations.
+
+        ZCodeAppServerSession emits a normalized dict with snake_case keys
+        (input, output, cache_read, reasoning, model_requests), NOT the
+        camelCase session/usage response. See zcode_app_server.py:335-417.
+        """
+        self.input_tokens = usage.get("input", self.input_tokens)
+        self.output_tokens = usage.get("output", self.output_tokens)
+        self.total_tokens = self.input_tokens + self.output_tokens
+        # model_requests maps to request_count for parity with Claude SDK path
+        if "model_requests" in usage:
+            self.request_count = usage["model_requests"]
 
     def on_permission(self, session_id: str, control_request: dict) -> None:
         """Auto-approve all permission requests in autonomous mode.
@@ -949,36 +961,32 @@ class AutonomousAgentRunner:
                 permission_mode=permission_mode,
                 resume_session_id=resume_session_id if resume else None,
             ):
-                return AgentTaskResult(
-                    session_id=session_id,
-                    tracking_session_id=session_id,
-                    success=False,
-                    error="ZCode session/create failed",
-                )
+                raise ZCodeSessionError("ZCode session/create failed")
 
             tracker.cli_session_id = zc_session._cli_session_id
             tracker.persisted_session_id = zc_session._cli_session_id
             tracker.sdk_initialized.set()
 
             if not zc_session.send_message(prompt):
-                return AgentTaskResult(
-                    session_id=zc_session._cli_session_id or session_id,
-                    tracking_session_id=session_id,
-                    success=False,
-                    error=zc_session.last_send_error or "ZCode session/send failed",
-                )
+                raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
 
             completed = zc_session.wait_turn(timeout=timeout)
+        except ZCodeSessionError as e:
+            return AgentTaskResult(
+                session_id=zc_session._cli_session_id or session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=str(e),
+            )
         finally:
-            # Ensure the app-server process is terminated.
+            # Always clean up: stop the process, remove the tracker, clear PID.
             zc_session.stop()
-
-        self._local_sessions.pop(session_id, None)
-        if self._on_pid_cleared:
-            try:
-                self._on_pid_cleared(session_id)
-            except Exception as e:
-                logger.warning("on_pid_cleared callback failed: %s", e)
+            self._local_sessions.pop(session_id, None)
+            if self._on_pid_cleared:
+                try:
+                    self._on_pid_cleared(session_id)
+                except Exception as e:
+                    logger.warning("on_pid_cleared callback failed: %s", e)
 
         cli_sid = zc_session._cli_session_id or session_id
         if not completed:

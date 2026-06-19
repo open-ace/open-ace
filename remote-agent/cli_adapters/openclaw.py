@@ -83,6 +83,24 @@ class OpenClawAdapter(BaseCLIAdapter):
 
         return args
 
+    def build_single_shot_args(
+        self, prompt: str, project_path: str, model: str | None = None
+    ) -> list[str]:
+        """Build args for a single-shot OpenClaw execution.
+
+        Mirrors build_start_args but appends the prompt as the final
+        positional argument, matching OpenClaw's agent-mode CLI contract.
+        """
+        args = [
+            self.EXECUTABLE,
+            "--agent",
+            "--json",
+        ]
+        if model:
+            args.extend(["--model", model])
+        args.append(prompt)
+        return args
+
     def supports_stdin_input(self) -> bool:
         """Return False — self-contained agent run with no stdin protocol.
 

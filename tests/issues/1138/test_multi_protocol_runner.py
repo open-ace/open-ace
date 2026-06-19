@@ -10,6 +10,8 @@ codex/openclaw to hang until timeout because they don't understand the
 stream-json protocol.
 """
 
+import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -256,13 +258,16 @@ def test_collector_accumulates_tool_calls():
 
 
 def test_collector_captures_usage():
+    """on_usage must read snake_case keys (input/output/model_requests),
+    matching what ZCodeAppServerSession actually emits (zcode_app_server.py:335-417)."""
     from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
 
     c = _ZcodeResultCollector()
-    c.on_usage("sid", {"totalTokens": 500, "inputTokens": 300, "outputTokens": 200})
+    c.on_usage("sid", {"input": 300, "output": 200, "model_requests": 3})
     assert c.total_tokens == 500
     assert c.input_tokens == 300
     assert c.output_tokens == 200
+    assert c.request_count == 3
 
 
 def test_collector_captures_error():
@@ -280,3 +285,69 @@ def test_collector_ignores_non_json():
     c.on_output("sid", "not json at all", "stdout", False)
     assert c.assistant_text == ""
     assert len(c.event_log) == 1  # still logged
+
+
+# ── ZCode session failure cleanup ─────────────────────────────────────────
+
+
+def test_zcode_session_start_failure_cleans_up(runner):
+    """When ZCode session/create fails, _local_sessions and PID must be cleared."""
+    with patch("app.modules.workspace.autonomous.agent_runner.subprocess.Popen") as mock_popen:
+        mock_proc = MagicMock(returncode=None, pid=12345)
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        # Patch ZCodeAppServerSession where _run_zcode_appserver imports it
+        _ra = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
+        )
+        if _ra not in sys.path:
+            sys.path.insert(0, _ra)
+        import zcode_app_server
+
+        mock_zc_instance = MagicMock()
+        mock_zc_instance.start.return_value = False  # session/create fails
+        mock_zc_instance._cli_session_id = None
+        mock_zc_instance.stop = MagicMock()
+
+        with patch.object(zcode_app_server, "ZCodeAppServerSession", return_value=mock_zc_instance):
+            result = runner._run_zcode_appserver(
+                session_id="test-fail",
+                cli_tool="zcode",
+                model="glm-5.2",
+                project_path="/tmp/test",
+                prompt="hello",
+                permission_mode="edit",
+                timeout=10,
+                workflow_id="wf-1",
+                user_id=1,
+                workspace_type="local",
+            )
+        assert result.success is False
+        assert "session/create failed" in result.error
+        # Tracker must be removed even on failure (issue #2 fix)
+        assert "test-fail" not in runner._local_sessions
+        runner._on_pid_cleared.assert_called_once_with("test-fail")
+
+
+# ── OpenClaw single-shot args ─────────────────────────────────────────────
+
+
+def test_openclaw_single_shot_includes_agent_json_flags():
+    """build_single_shot_args must include --agent --json, not just [exe, prompt]."""
+    import os
+    import sys
+
+    _ra = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
+    )
+    if _ra not in sys.path:
+        sys.path.insert(0, _ra)
+    from cli_adapters.openclaw import OpenClawAdapter
+
+    args = OpenClawAdapter().build_single_shot_args("do something", "/tmp/proj")
+    assert "--agent" in args
+    assert "--json" in args
+    assert "do something" in args
