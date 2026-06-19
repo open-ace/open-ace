@@ -60,6 +60,11 @@ class TestIsTransientError:
         """Exit 0 (success) is never transient."""
         assert not _is_transient_error("LibreSSL", 0)
 
+    def test_rpc_failed_uppercase_is_transient(self):
+        """git outputs 'RPC failed' (uppercase) — _is_transient_error lowercases
+        stderr before matching, so the keyword must also be lowercase."""
+        assert _is_transient_error("fatal: the remote end hung up unexpectedly\nRPC failed", 128)
+
 
 # ── Layer 1: _run_git retry loop ─────────────────────────────────────────
 

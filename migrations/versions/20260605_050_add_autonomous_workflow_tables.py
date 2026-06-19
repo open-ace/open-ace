@@ -83,6 +83,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.TIMESTAMP),
         sa.Column("completed_at", sa.TIMESTAMP, nullable=True),
         sa.Column("paused_at", sa.TIMESTAMP, nullable=True),
+        sa.Column("transient_retry_count", sa.Integer, server_default="0"),
     )
     op.create_index(
         "idx_workflows_user_status",
