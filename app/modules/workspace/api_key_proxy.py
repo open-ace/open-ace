@@ -926,6 +926,13 @@ class APIKeyProxyService:
 
         Returns a dict shaped like ``get_tool_model_pool``'s:
         ``{"models": [{...}, ...], "empty_reason": str | None}``.
+
+        Multi-key tenancy: for tenants with several matching keys,
+        ``get_cli_settings_for_tool`` unions ``modelProviders`` across keys but
+        carries ``env``/top-level ``model`` from only the highest-priority key.
+        So qwen/codex models are fully unioned, while claude/zcode reflect the
+        highest-priority key only. Single-key tenants (the common case) are
+        unaffected.
         """
         settings = self.get_cli_settings_for_tool(tenant_id, tool_name, scope)
         if not settings:

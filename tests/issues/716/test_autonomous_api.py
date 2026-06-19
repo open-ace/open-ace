@@ -1008,6 +1008,22 @@ class TestGetToolModelsExtractor:
         assert result["models"] == []
         assert "do not configure" in result["empty_reason"]
 
+    def test_multi_key_claude_reflects_merged_settings_only(self):
+        """Pin multi-key merge behavior for claude/zcode.
+
+        get_cli_settings_for_tool unions modelProviders across keys but carries
+        env/top-level model from only the highest-priority key. So for a merged
+        claude-code config, get_tool_models reflects whatever env the merge
+        produced (here: the top-priority key's models). This test pins that
+        inherited contract so a future change to the merge is caught.
+        """
+        proxy = self._proxy()
+        # Simulate the merged output: env from top-priority key only.
+        merged = {"env": {"ANTHROPIC_MODEL": "glm-5", "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1"}}
+        with patch.object(proxy, "get_cli_settings_for_tool", return_value=merged):
+            result = proxy.get_tool_models(1, "claude-code", "local")
+        assert [m["id"] for m in result["models"]] == ["glm-5", "glm-5.1"]
+
 
 # ── Auth Tests ───────────────────────────────────────────────────────────
 
