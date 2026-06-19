@@ -228,6 +228,9 @@ def test_claude_code_still_uses_local_session(runner):
 
 
 def test_collector_accumulates_assistant_text():
+    """on_output must build event_log dicts matching _LocalSession._read_stdout
+    shape: {"type":"assistant","text":...,"message_id":...,"model":...}.
+    _persist_local_session_messages reads event.get("type")/event.get("text")."""
     from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
 
     c = _ZcodeResultCollector()
@@ -246,15 +249,34 @@ def test_collector_accumulates_assistant_text():
     c.on_output("sid", "", "stdout", True)
     assert c.assistant_text == "Hello world"
     assert c.request_count == 1
+    # event_log entries must be dicts (not raw strings) for persistence
+    assert len(c.event_log) == 2
+    assert c.event_log[0]["type"] == "assistant"
+    assert c.event_log[0]["text"] == "Hello "
 
 
 def test_collector_accumulates_tool_calls():
+    """Tool events arrive as tool.<name> from ZCode, normalized to
+    {"tool":{"name","input","id"}} in tool_calls and {"type":"tool_use",...}
+    in event_log — matching what _persist_local_session_messages expects."""
     from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
 
     c = _ZcodeResultCollector()
-    c.on_output("sid", '{"type":"tool_use","name":"Read","input":{"file":"a.py"}}', "stdout", False)
+    c.on_output(
+        "sid",
+        '{"type":"tool.Read","data":{"input":{"file":"a.py"},"id":"tu_123"}}',
+        "stdout",
+        False,
+    )
     assert len(c.tool_calls) == 1
-    assert c.tool_calls[0]["name"] == "Read"
+    # Fallback path reads tool_call.get("tool", {}).get("name"/"input")
+    assert c.tool_calls[0]["tool"]["name"] == "Read"
+    assert c.tool_calls[0]["tool"]["input"] == {"file": "a.py"}
+    # event_log path reads event.get("tool_name"/"tool_input"/"tool_use_id")
+    assert c.event_log[0]["type"] == "tool_use"
+    assert c.event_log[0]["tool_name"] == "Read"
+    assert c.event_log[0]["tool_input"] == {"file": "a.py"}
+    assert c.event_log[0]["tool_use_id"] == "tu_123"
 
 
 def test_collector_captures_usage():
@@ -284,7 +306,7 @@ def test_collector_ignores_non_json():
     c = _ZcodeResultCollector()
     c.on_output("sid", "not json at all", "stdout", False)
     assert c.assistant_text == ""
-    assert len(c.event_log) == 1  # still logged
+    assert len(c.event_log) == 0  # non-JSON is silently dropped
 
 
 # ── ZCode session failure cleanup ─────────────────────────────────────────

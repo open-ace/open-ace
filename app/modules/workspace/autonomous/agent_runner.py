@@ -147,12 +147,16 @@ class _ZcodeResultCollector:
         self.error: str | None = None
 
     def on_output(self, session_id: str, data: str, stream: str, done: bool) -> None:
-        """Receive ZCode output_callback invocations."""
+        """Receive ZCode output_callback invocations.
+
+        Builds ``event_log`` dicts in the same shape ``_LocalSession._read_stdout``
+        produces, so ``_persist_local_session_messages`` can consume them
+        identically regardless of CLI tool. See agent_runner.py:1443-1472.
+        """
         if not data:
             if done:
                 self.request_count += 1
             return
-        self.event_log.append(data)
         try:
             parsed = json.loads(data)
         except (json.JSONDecodeError, ValueError):
@@ -162,18 +166,47 @@ class _ZcodeResultCollector:
             return
 
         msg_type = parsed.get("type", "")
+
+        # Assistant text delta (from model.streaming → {"type":"assistant",...})
         if msg_type == "assistant":
             content = parsed.get("message", {}).get("content", "")
+            text = ""
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        self.assistant_text += block.get("text", "")
+                        text += block.get("text", "")
             elif isinstance(content, str):
-                self.assistant_text += content
-        elif msg_type == "tool_use":
+                text = content
+            if text:
+                self.assistant_text += text
+                self.event_log.append(
+                    {
+                        "type": "assistant",
+                        "text": text,
+                        "message_id": parsed.get("message", {}).get("id"),
+                        "model": parsed.get("message", {}).get("model"),
+                    }
+                )
+
+        # Tool events: ZCode emits tool.<name> with data payload.
+        # Normalize to the Claude SDK tool_use shape for persistence.
+        elif msg_type.startswith("tool."):
+            tool_name = msg_type.split(".", 1)[1]
+            payload = parsed.get("data", {}) or {}
+            tool_input = payload.get("input", payload)
+            tool_id = payload.get("id", "")
             self.tool_calls.append(
-                {"name": parsed.get("name", ""), "input": parsed.get("input", {})}
+                {"tool": {"name": tool_name, "input": tool_input, "id": tool_id}}
             )
+            self.event_log.append(
+                {
+                    "type": "tool_use",
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_use_id": tool_id,
+                }
+            )
+
         elif msg_type == "error":
             err_data = parsed.get("data", {})
             if isinstance(err_data, dict):
