@@ -147,6 +147,18 @@ class BaseCLIAdapter(abc.ABC):
         """Whether this CLI tool supports sending messages via stdin pipe."""
         return True
 
+    def provides_full_command(self) -> bool:
+        """Whether build_start_args returns a complete, self-contained command.
+
+        Most adapters return args whose first element is the executable name
+        (to be located via PATH and prepended by the caller). Adapters that
+        bundle their own launcher (e.g. ZCode's ``node <engine.cjs>``) return a
+        fully-qualified command where the first element is already the
+        interpreter (``node``). Such adapters override this to return True so
+        callers use the args verbatim instead of shutil.which + [exe] + args[1:].
+        """
+        return False
+
     def build_single_shot_args(
         self, prompt: str, project_path: str, model: str | None = None
     ) -> list[str]:
