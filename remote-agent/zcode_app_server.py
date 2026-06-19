@@ -92,6 +92,11 @@ class ZCodeAppServerSession:
 
         # Event polling state: last consumed event seq per session.
         self._last_event_seq = 0
+        # Secondary dedup: some events (model.streaming deltas) may lack a
+        # seq field, causing them to be re-forwarded on every poll cycle and
+        # the tail poll after turn.completed. Track hashes of forwarded
+        # events to prevent duplication in assistant_text accumulation.
+        self._forwarded_event_hashes: set[str] = set()
         # Set = no turn in progress (idle); cleared while a turn runs.
         self._turn_done = threading.Event()
         self._turn_done.set()
@@ -221,6 +226,10 @@ class ZCodeAppServerSession:
 
     def _run_turn(self, content: str) -> None:
         """Worker-thread body: send the message and stream events until done."""
+        # Reset per-turn dedup state so hashes from prior turns don't block
+        # legitimate re-delivery of identical content in a new turn.
+        self._forwarded_event_hashes.clear()
+        self._last_event_seq = 0
         try:
             send_result = self._request(
                 "session/send",
@@ -295,7 +304,13 @@ class ZCodeAppServerSession:
         )
 
     def _forward_events(self, events: list[dict[str, Any]]) -> bool:
-        """Forward new events to the output callback. Returns True if turn done."""
+        """Forward new events to the output callback. Returns True if turn done.
+
+        Two-layer dedup: (1) seq-based for events that carry a monotonic seq,
+        (2) content-hash for events without seq (e.g. model.streaming deltas).
+        Without the hash layer, the tail poll after turn.completed re-delivers
+        streaming deltas, duplicating every section in assistant_text.
+        """
         done = False
         for ev in events:
             seq = ev.get("seq", 0)
@@ -303,6 +318,11 @@ class ZCodeAppServerSession:
                 continue
             if seq:
                 self._last_event_seq = seq
+            # Hash-based dedup for events without seq (streaming deltas).
+            ev_hash = json.dumps(ev, sort_keys=True, default=str)
+            if ev_hash in self._forwarded_event_hashes:
+                continue
+            self._forwarded_event_hashes.add(ev_hash)
             done = self._forward_one_event(ev) or done
         return done
 

@@ -1837,8 +1837,13 @@ class AutonomousOrchestrator:
             )
         else:
             self._run_development_agent(wf, dev_round, gh)
-            # Post development completion comment (before tests)
-            self._post_dev_completion_comment(wf, dev_round, gh)
+            # Post development completion comment — but only if dev succeeded.
+            # _run_development_agent sets status="failed" on failure; without
+            # this guard, a "✅ Completed" comment is posted with a stale
+            # commit that isn't the agent's work (#525).
+            wf = self.workflow or {}
+            if wf.get("status") != "failed":
+                self._post_dev_completion_comment(wf, dev_round, gh)
 
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)
@@ -1982,7 +1987,11 @@ class AutonomousOrchestrator:
             except Exception:
                 pass
 
-            if branch_has_changes_vs_base:
+            if branch_has_changes_vs_base and commit_sha != commit_before:
+                # The branch has commits vs origin/main AND the HEAD advanced
+                # during this session (commit_sha differs from commit_before).
+                # This covers resume scenarios where the agent committed in a
+                # prior session on the same branch.
                 logger.info(
                     "No new commit this session, but branch '%s' has %d commits vs origin/main",
                     branch_name,
@@ -1994,7 +2003,15 @@ class AutonomousOrchestrator:
                         commit_sha = gh.get_current_commit()
                     except Exception:
                         pass
-            else:
+            elif branch_has_changes_vs_base and commit_sha == commit_before:
+                # Branch has pre-existing divergence (e.g. it was created
+                # behind main), but the agent produced NO new commit this
+                # session. The diff is NOT the agent's work — treat as failure.
+                logger.warning(
+                    "Branch has %d commits vs origin/main but HEAD unchanged "
+                    "this session (commit_sha == commit_before) — not agent work",
+                    base_diff_stats.get("commits", 0),
+                )
                 logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
@@ -2189,6 +2206,17 @@ class AutonomousOrchestrator:
         # Treat skipped tests as failure — tests must actually run.
         # Allow 1 retry in case of transient environment issues.
         if tests_actually_skipped:
+            # Correct the milestone status: it was optimistically set to
+            # "completed" above based on session success alone, but tests
+            # were not actually executed. Without this correction, the
+            # timeline shows "completed" while the comment says "skipped".
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "error_message": "Tests were not actually run (skipped by agent)",
+                },
+            )
             skip_retries = wf.get("skip_retries", 0) + 1
             if skip_retries <= 1:
                 logger.warning(

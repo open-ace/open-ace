@@ -128,6 +128,27 @@ class _LocalSession:
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
+# Markers that indicate a text chunk is actually a leaked tool-call JSON
+# rather than genuine assistant prose. ZCode sometimes streams tool
+# invocations as text content before emitting a structured tool.* event.
+_TOOL_JSON_MARKERS = (
+    '"tool"',
+    '"command"',
+    '"type": "tool_use"',
+    '"subagent_type"',
+    '"file_path"',
+    '"prompt":',
+)
+
+
+def _looks_like_tool_json(text: str) -> bool:
+    """Best-effort detect leaked tool-call JSON in assistant text deltas."""
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    return any(marker in stripped for marker in _TOOL_JSON_MARKERS)
+
+
 class _ZcodeResultCollector:
     """Collects assistant text, tool calls, and token usage from ZCode app-server.
 
@@ -184,6 +205,12 @@ class _ZcodeResultCollector:
                         text += block.get("text", "")
             elif isinstance(content, str):
                 text = content
+            # Filter out leaked tool-call JSON: ZCode sometimes streams tool
+            # invocations as text content before emitting a structured tool.*
+            # event. These look like raw JSON with tool/command markers and
+            # would pollute the plan text if appended verbatim.
+            if text and _looks_like_tool_json(text):
+                return
             if text:
                 self.assistant_text += text
                 self.event_log.append(
