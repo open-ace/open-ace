@@ -292,6 +292,30 @@ def test_collector_captures_usage():
     assert c.request_count == 3
 
 
+def test_collector_no_double_count_request():
+    """Real ZCode callback order: on_usage(model_requests=N) THEN
+    on_output(done=True). The done=True must NOT increment again — otherwise
+    request_count becomes N+1. See zcode_app_server.py:249-260."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    # Simulate the real callback sequence from _run_turn → _report_usage → output_callback(done=True)
+    c.on_usage("sid", {"input": 300, "output": 200, "model_requests": 3})
+    assert c.request_count == 3
+    c.on_output("sid", "", "stdout", True)
+    assert c.request_count == 3  # NOT 4
+
+
+def test_collector_done_fallback_without_usage():
+    """When no usage_callback fires (e.g. error before turn completes),
+    done=True should count as 1 request as a fallback."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    c.on_output("sid", "", "stdout", True)
+    assert c.request_count == 1
+
+
 def test_collector_captures_error():
     from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
 

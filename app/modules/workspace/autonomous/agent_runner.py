@@ -143,6 +143,11 @@ class _ZcodeResultCollector:
         self.input_tokens: int = 0
         self.output_tokens: int = 0
         self.request_count: int = 0
+        # When the usage_callback provides an authoritative model_requests
+        # count, we use that instead of counting done=True callbacks. This
+        # avoids double-counting: ZCode calls on_usage (with modelRequestCount)
+        # BEFORE the final on_output(done=True), so both would increment.
+        self._request_count_from_usage: bool = False
         self.event_log: list = []
         self.error: str | None = None
 
@@ -154,7 +159,9 @@ class _ZcodeResultCollector:
         identically regardless of CLI tool. See agent_runner.py:1443-1472.
         """
         if not data:
-            if done:
+            if done and not self._request_count_from_usage:
+                # Fallback: no authoritative model_requests from usage_callback,
+                # so count this turn as 1 request.
                 self.request_count += 1
             return
         try:
@@ -224,9 +231,12 @@ class _ZcodeResultCollector:
         self.input_tokens = usage.get("input", self.input_tokens)
         self.output_tokens = usage.get("output", self.output_tokens)
         self.total_tokens = self.input_tokens + self.output_tokens
-        # model_requests maps to request_count for parity with Claude SDK path
+        # model_requests is the authoritative request count from the model
+        # gateway. When present, it takes precedence over the done=True
+        # fallback counting in on_output to avoid double-counting.
         if "model_requests" in usage:
             self.request_count = usage["model_requests"]
+            self._request_count_from_usage = True
 
     def on_permission(self, session_id: str, control_request: dict) -> None:
         """Auto-approve all permission requests in autonomous mode.
