@@ -128,6 +128,34 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     }
   }, [show, isNewProject, workspaceType, selectedMachineId, selectedMachineWorkDir]);
 
+  // Detect when a "Text Description" input actually looks like a GitHub issue
+  // selector (bare numbers, ranges, or issue URLs). Mirrors the backend's
+  // _parse_issue_selectors so we can nudge the user toward the correct mode
+  // instead of silently storing e.g. "830" as a literal requirement body.
+  const issueLikeSuggestion = useMemo(() => {
+    if (requirementsMode !== 'text') return null;
+    const trimmed = requirementsText.trim();
+    if (!trimmed) return null;
+    const tokens = trimmed.split(/[\s,]+/).filter(Boolean);
+    if (tokens.length === 0) return null;
+    const issueUrlRe = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+(?:[/?#].*)?$/i;
+    const rangeRe = /^\d+-\d+$/;
+    const isIssueToken = (tok: string) =>
+      /^\d+$/.test(tok) || rangeRe.test(tok) || issueUrlRe.test(tok);
+    // Only suggest when the ENTIRE input parses as issue selectors. A prose
+    // description that merely contains a number ("see issue 830 for details")
+    // must not trigger the nudge.
+    const allMatch = tokens.every(isIssueToken);
+    if (!allMatch) return null;
+    return trimmed;
+  }, [requirementsMode, requirementsText]);
+
+  const switchToIssueMode = useCallback(() => {
+    setRequirementsUrl(requirementsText);
+    setRequirementsText('');
+    setRequirementsMode('url');
+  }, [requirementsText]);
+
   const canSubmit = useMemo(() => {
     const hasRequirements =
       requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
@@ -278,13 +306,27 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               </button>
             </div>
             {requirementsMode === 'text' ? (
-              <textarea
-                className="form-control"
-                rows={4}
-                placeholder={t('autoRequirementsPlaceholder', language)}
-                value={requirementsText}
-                onChange={(e) => setRequirementsText(e.target.value)}
-              />
+              <>
+                <textarea
+                  className="form-control"
+                  rows={4}
+                  placeholder={t('autoRequirementsPlaceholder', language)}
+                  value={requirementsText}
+                  onChange={(e) => setRequirementsText(e.target.value)}
+                />
+                {issueLikeSuggestion && (
+                  <div className="alert alert-warning py-2 mt-2 d-flex align-items-center gap-2 flex-wrap" role="alert">
+                    <span>{t('autoIssueSuggestionHint', language)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary ms-auto"
+                      onClick={switchToIssueMode}
+                    >
+                      {t('autoIssueSuggestionSwitch', language)}
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <textarea
