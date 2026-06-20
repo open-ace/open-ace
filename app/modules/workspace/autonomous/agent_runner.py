@@ -229,6 +229,18 @@ class _ZcodeResultCollector:
         elif msg_type.startswith("tool."):
             tool_name = msg_type.split(".", 1)[1]
             payload = parsed.get("data", {}) or {}
+            # ZCode sends tool.updated lifecycle notifications (kind =
+            # scheduled/started/result/batch) that carry only scheduling
+            # metadata, not real tool input/output. These would leak as
+            # tool_name="updated" garbage messages, so skip them. Real
+            # tool_use events have no "kind" field and carry actual input.
+            if isinstance(payload, dict) and payload.get("kind") in (
+                "scheduled",
+                "started",
+                "result",
+                "batch",
+            ):
+                return
             tool_input = payload.get("input", payload)
             tool_id = payload.get("id", "")
             self.tool_calls.append(
@@ -1120,7 +1132,7 @@ class AutonomousAgentRunner:
                 workspace_type,
             )
 
-            if not zc_session.send_message(prompt):
+            if not zc_session.send_message(prompt, timeout=timeout):
                 raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
 
             completed = zc_session.wait_turn(timeout=timeout)
