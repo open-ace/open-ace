@@ -161,22 +161,23 @@ def process_zcode_session(
     )
 
     messages: list[dict[str, Any]] = []
-    # Collect distinct dates (from message timestamps) and request count
-    # (assistant turns). Token totals are authoritative session-level values
-    # from the turn_usage table (session.total_input_tokens /
-    # total_output_tokens); per-message ``data.tokens`` is sparse, so we do NOT
-    # sum it (see review feedback — that path under-counts). Tokens are
-    # attributed to the session's dominant date below and injected into the
-    # first assistant message for agent_sessions (codex pattern).
+    # Collect distinct dates (from message timestamps). request_count is
+    # incremented per assistant message on its own date (mirrors
+    # fetch_codex.py:331), so daily request volume reflects real turn counts.
+    # Token totals are authoritative session-level values from the turn_usage
+    # table (session.total_input_tokens / total_output_tokens); per-message
+    # ``data.tokens`` is sparse, so we do NOT sum it (see review feedback —
+    # that path under-counts). Tokens are attributed to the session's dominant
+    # date below and injected into the first assistant message for
+    # agent_sessions (codex pattern).
     session_dates: set[str] = set()
-    assistant_dates: set[str] = set()
     for msg in session.messages:
         ts = msg.get("timestamp")
         date_key = _ms_to_date(_iso_to_ms(ts)) if ts else "unknown"
         session_dates.add(date_key)
         role = msg.get("role", "")
         if role == "assistant":
-            assistant_dates.add(date_key)
+            daily[date_key]["request_count"] += 1
 
         model = msg.get("model")
         if model:
@@ -223,7 +224,9 @@ def process_zcode_session(
     daily[dominant_date]["prompt_tokens"] += total_input
     daily[dominant_date]["candidates_tokens"] += total_output
     daily[dominant_date]["total_tokens"] += total_tokens
-    daily[dominant_date]["request_count"] += len(assistant_dates)
+    # NOTE: request_count is NOT added here — it is incremented per assistant
+    # message on its own date in the loop above (matches fetch_codex.py), so a
+    # session reports its real assistant-turn count rather than collapsing to 1.
 
     # Inject session-level totals into the first assistant message so
     # update_agent_sessions_stats records the real total_tokens (codex pattern,

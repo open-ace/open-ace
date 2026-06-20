@@ -287,6 +287,52 @@ def test_process_zcode_session_returns_messages_and_project(fetch_mod, tmp_path)
     assert daily[only_date]["request_count"] == 1
 
 
+def test_process_zcode_session_request_count_counts_assistant_messages(fetch_mod, tmp_path):
+    """Regression: request_count must count assistant messages, not distinct
+    dates. A single-day session with multiple assistant turns should report a
+    count > 1 (previously collapsed to 1 by counting distinct dates)."""
+    src_db = tmp_path / "zcode.sqlite"
+    _build_zcode_source_db(src_db)
+    sid = "sess_multi"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", 1700000000000, 1700000001000, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    # user, assistant, user, assistant — 2 assistant turns, same day
+    _insert_zcode_message(
+        src_db, "m1", sid, 1700000000100, {"role": "user"}, parts=[{"type": "text", "text": "q1"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        1700000000200,
+        {"role": "assistant"},
+        parts=[{"type": "text", "text": "a1"}],
+    )
+    _insert_zcode_message(
+        src_db, "m3", sid, 1700000000300, {"role": "user"}, parts=[{"type": "text", "text": "q2"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m4",
+        sid,
+        1700000000400,
+        {"role": "assistant"},
+        parts=[{"type": "text", "text": "a2"}],
+    )
+
+    daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, "localhost", None)
+
+    assert len(messages) == 4
+    only_date = next(iter(daily))
+    assert daily[only_date]["request_count"] == 2
+
+
 def test_process_zcode_session_skips_empty(fetch_mod, tmp_path):
     src_db = tmp_path / "zcode.sqlite"
     _build_zcode_source_db(src_db)
