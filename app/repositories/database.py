@@ -50,7 +50,10 @@ def parse_db_datetime(value: Any) -> Optional[datetime]:
 
         def _pad(match: "re.Match[str]") -> str:
             frac = match.group(1)[1:]  # drop the leading dot
-            # Round to 6 digits so microsecond precision is preserved.
+            # Truncate/pad to 6 digits so microsecond precision is accepted by
+            # ``fromisoformat``. This truncates (not rounds): ``.1234567`` ->
+            # ``.123456``. The dropped sub-microsecond precision is below what
+            # a datetime can store, so the difference is immaterial.
             return "." + (frac + "000000")[:6]
 
         text = _FRACTIONAL_RE.sub(_pad, text)

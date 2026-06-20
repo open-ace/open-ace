@@ -10,6 +10,7 @@ codex/openclaw to hang until timeout because they don't understand the
 stream-json protocol.
 """
 
+import json
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -277,6 +278,52 @@ def test_collector_accumulates_tool_calls():
     assert c.event_log[0]["tool_name"] == "Read"
     assert c.event_log[0]["tool_input"] == {"file": "a.py"}
     assert c.event_log[0]["tool_use_id"] == "tu_123"
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["scheduled", "started", "result", "batch"],
+)
+def test_collector_skips_tool_updated_lifecycle_events(kind):
+    """ZCode emits tool.updated lifecycle notifications (kind =
+    scheduled/started/result/batch) carrying only scheduling metadata. These
+    would otherwise leak through the 'tool.*' branch as a tool_name="updated"
+    garbage tool call and pollute event_log -> session_messages. The collector
+    must skip them; real tool_use events (no 'kind', carries actual input)
+    are unaffected."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    c.on_output(
+        "sid",
+        json.dumps(
+            {
+                "type": "tool.updated",
+                "data": {"kind": kind, "id": "sch_1", "scheduledAt": "2026-06-20T00:00:00Z"},
+            }
+        ),
+        "stdout",
+        False,
+    )
+    assert c.tool_calls == []
+    assert c.event_log == []
+
+
+def test_collector_keeps_real_tool_use_without_kind_field():
+    """A real tool.<name> event that happens to be named 'updated' but lacks
+    a lifecycle 'kind' must still be recorded — the filter keys on 'kind', not
+    on the tool name. Guards against over-broad filtering."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    c.on_output(
+        "sid",
+        '{"type":"tool.Write","data":{"input":{"file":"a.py"},"id":"tu_456"}}',
+        "stdout",
+        False,
+    )
+    assert len(c.tool_calls) == 1
+    assert c.tool_calls[0]["tool"]["name"] == "Write"
 
 
 def test_collector_captures_usage():

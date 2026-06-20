@@ -347,6 +347,12 @@ class ZCodeAppServerSession:
         blocked - heartbeats and other commands (stop/pause/permission) keep
         flowing while the turn runs. The worker streams assistant events through
         the existing callbacks and signals completion via ``_turn_done``.
+
+        Note: the worker drains events with the module-level ``_TURN_TIMEOUT``
+        (600s), NOT the caller's ``wait_turn`` timeout. This is intentional: if
+        the caller returns early (e.g. a shorter 60s task timeout), the daemon
+        worker keeps draining up to 600s to finalize usage reporting and let the
+        app-server flush. It is a daemon thread, so it won't block process exit.
         """
         if not self._cli_session_id or not self.is_running:
             self.last_send_error = "ZCode session is not active"
@@ -463,6 +469,10 @@ class ZCodeAppServerSession:
                     False,
                 )
                 return
+            # Drain with the module-level _TURN_TIMEOUT (600s), not the caller's
+            # wait_turn timeout. The worker is a daemon thread; if the caller
+            # returns early it keeps draining to finalize usage reporting. See
+            # send_message docstring for the rationale behind this decoupling.
             self._drain_events_until_idle(_TURN_TIMEOUT)
             self._report_usage()
         except Exception:  # noqa: BLE001

@@ -229,6 +229,22 @@ class _ZcodeResultCollector:
         elif msg_type.startswith("tool."):
             tool_name = msg_type.split(".", 1)[1]
             payload = parsed.get("data", {}) or {}
+            # ZCode sends tool.updated lifecycle notifications (kind =
+            # scheduled/started/result/batch) that carry only scheduling
+            # metadata, not real tool input/output. Without this guard they
+            # leak through as tool_name="updated" garbage tool calls (and thus
+            # into event_log -> _persist_local_session_messages) because the
+            # 'tool.*' branch above treats every tool.<x> as a real tool_use.
+            # Skip them; real tool_use events have no "kind" field and carry
+            # actual input. The app-server forwards ALL tool.* events here, so
+            # this filter is the sole defense against the lifecycle noise.
+            if isinstance(payload, dict) and payload.get("kind") in (
+                "scheduled",
+                "started",
+                "result",
+                "batch",
+            ):
+                return
             tool_input = payload.get("input", payload)
             tool_id = payload.get("id", "")
             self.tool_calls.append(
