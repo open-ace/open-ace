@@ -148,6 +148,36 @@ class ZCodeAppServerSession:
         workspace_param = {"workspacePath": workspace, "workspaceKey": workspace}
         resumed = False
 
+        # Initialize the workspace model catalog BEFORE session/resume.
+        # Each agent task spawns a fresh app-server process whose
+        # workspaceModelCatalogs is empty. session/resume checks whether the
+        # session's historical model is in the catalog (_Er in zcode.cjs); if
+        # the catalog is empty the check fails and the session is flagged with
+        # ZCODE_RUNTIME_MODEL_UNAVAILABLE, making session/send reject every
+        # message. The native ZCode app avoids this because it is a long-lived
+        # process whose catalog is already populated. workspace/readState builds
+        # the catalog (r1 in zcode.cjs) so the resume model-availability check
+        # passes. Only needed before resume; session/create does not look up a
+        # historical model.
+        if resume_session_id:
+            ws_result = self._request(
+                "workspace/readState",
+                {"workspace": workspace_param},
+                timeout=30.0,
+            )
+            if not ws_result or "error" in ws_result:
+                logger.warning(
+                    "ZCode workspace/readState failed for %s: %s — "
+                    "session/resume may hit MODEL_UNAVAILABLE",
+                    self.session_id[:8],
+                    ws_result,
+                )
+            else:
+                logger.info(
+                    "ZCode workspace state initialized for %s",
+                    self.session_id[:8],
+                )
+
         if resume_session_id:
             result = self._request(
                 "session/resume",
