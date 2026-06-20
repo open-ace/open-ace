@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any, Optional, Union
 
 from app.repositories.database import DB_PATH, escape_like, get_database_url, is_postgresql
-from app.utils.tool_names import normalize_tool_name
+from app.utils.tool_names import normalize_message_role, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -810,6 +810,12 @@ class SessionManager:
         if not cursor.fetchone():
             conn.close()
             return None
+
+        # Normalize the role at this write boundary so session_messages stays
+        # consistent with daily_messages (which is normalized in save_message).
+        # Tool-result spellings (tool_result, ToolResult, tool-result) collapse
+        # to the canonical ``toolResult``; other roles pass through unchanged.
+        role = normalize_message_role(role)
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         message = SessionMessage(

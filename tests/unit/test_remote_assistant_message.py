@@ -374,9 +374,7 @@ class TestToolResultExtraction(unittest.TestCase):
                 {
                     "type": "assistant",
                     "message": {
-                        "content": [
-                            {"type": "tool_result", "tool_use_id": "tu1", "content": ""}
-                        ]
+                        "content": [{"type": "tool_result", "tool_use_id": "tu1", "content": ""}]
                     },
                 }
             )

@@ -19,16 +19,14 @@ logger = logging.getLogger(__name__)
 def _parse_datetime(value: Any) -> Optional[datetime]:
     """Parse datetime value from database.
 
-    PostgreSQL returns datetime objects directly, while SQLite returns strings.
-    This helper handles both cases.
+    PostgreSQL returns datetime objects directly, while SQLite returns strings
+    in shapes (space separator, variable fractional seconds) that Python 3.9's
+    ``datetime.fromisoformat`` cannot parse. Delegates to the shared helper so
+    both backends are handled consistently.
     """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        return datetime.fromisoformat(value)
-    return None
+    from app.repositories.database import parse_db_datetime
+
+    return parse_db_datetime(value)
 
 
 class TenantRepository:

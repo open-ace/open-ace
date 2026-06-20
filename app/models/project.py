@@ -42,13 +42,11 @@ class Project:
         """Create from dictionary."""
 
         def parse_datetime(value):
-            if value is None:
-                return None
-            if isinstance(value, datetime):
-                return value
-            if isinstance(value, str):
-                return datetime.fromisoformat(value)
-            return None
+            # Delegate to the shared DB parser so SQLite space-separated
+            # timestamps and non-standard fractional seconds parse correctly.
+            from app.repositories.database import parse_db_datetime
+
+            return parse_db_datetime(value)
 
         return cls(
             id=data.get("id"),
@@ -107,13 +105,11 @@ class UserProject:
         """Create from dictionary."""
 
         def parse_datetime(value):
-            if value is None:
-                return None
-            if isinstance(value, datetime):
-                return value
-            if isinstance(value, str):
-                return datetime.fromisoformat(value)
-            return None
+            # Delegate to the shared DB parser so SQLite space-separated
+            # timestamps and non-standard fractional seconds parse correctly.
+            from app.repositories.database import parse_db_datetime
+
+            return parse_db_datetime(value)
 
         return cls(
             id=data.get("id"),

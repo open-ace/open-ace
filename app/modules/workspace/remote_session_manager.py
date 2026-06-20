@@ -19,7 +19,7 @@ from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.session_manager import SessionManager
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
-from app.utils.tool_names import normalize_message_role, normalize_tool_name
+from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -598,14 +598,20 @@ class RemoteSessionManager:
                 if block_type in ("text", "tool_use", "thinking", "tool_result"):
                     structured_blocks.append(block)
 
-            if text_parts:
-                combined = "".join(text_parts)
+            # Cache structured blocks even when there is no text: a turn that
+            # only carries tool_result blocks must still emit its own
+            # ``toolResult`` rows on flush (otherwise the conversation-detail
+            # "ToolResult" filter shows no messages for remote sessions).
+            if structured_blocks or text_parts:
                 with self._buffer_lock:
-                    buf = self._assistant_text_buffer.get(session_id, "")
-                    self._assistant_text_buffer[session_id] = buf + combined
-                    blocks_buf = self._content_blocks_buffer.get(session_id, [])
-                    blocks_buf.extend(structured_blocks)
-                    self._content_blocks_buffer[session_id] = blocks_buf
+                    if text_parts:
+                        combined = "".join(text_parts)
+                        buf = self._assistant_text_buffer.get(session_id, "")
+                        self._assistant_text_buffer[session_id] = buf + combined
+                    if structured_blocks:
+                        blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                        blocks_buf.extend(structured_blocks)
+                        self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "message":
             role = parsed.get("role")
@@ -631,13 +637,15 @@ class RemoteSessionManager:
                                 text_parts.append(text)
                         if block_type in ("text", "tool_use", "thinking", "tool_result"):
                             structured_blocks.append(block)
-                    if text_parts:
+                    if structured_blocks or text_parts:
                         with self._buffer_lock:
-                            buf = self._assistant_text_buffer.get(session_id, "")
-                            self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
-                            blocks_buf = self._content_blocks_buffer.get(session_id, [])
-                            blocks_buf.extend(structured_blocks)
-                            self._content_blocks_buffer[session_id] = blocks_buf
+                            if text_parts:
+                                buf = self._assistant_text_buffer.get(session_id, "")
+                                self._assistant_text_buffer[session_id] = buf + "".join(text_parts)
+                            if structured_blocks:
+                                blocks_buf = self._content_blocks_buffer.get(session_id, [])
+                                blocks_buf.extend(structured_blocks)
+                                self._content_blocks_buffer[session_id] = blocks_buf
 
         elif msg_type == "system":
             # System messages (e.g., init) are stored directly, not accumulated
@@ -747,14 +755,23 @@ class RemoteSessionManager:
         tool_result_blocks = [b for b in blocks if b.get("type") == "tool_result"]
         non_tool_blocks = [b for b in blocks if b.get("type") != "tool_result"]
 
+        # Tool-result rows are written before the assistant text row. Both share
+        # a near-identical timestamp (``datetime.now()`` at flush), so a timeline
+        # sorted by timestamp ASC renders tool results just ahead of their
+        # assistant text — acceptable since each result logically precedes the
+        # turn that consumes it. Blocks here are guaranteed non-empty dicts
+        # (filtered by ``type`` above), so no ``else`` branch is needed.
         for block in tool_result_blocks:
             tr_content = self._render_tool_result_content(block)
             if not tr_content:
                 continue
-            tr_metadata = {"content_blocks": [block]} if block else None
+            # ``toolResult`` is already the canonical spelling; ``add_message``
+            # and ``_save_to_daily_messages`` re-normalize at their own write
+            # boundaries, so this stays correct even if the alias changes.
+            tr_metadata = {"content_blocks": [block]}
             self._session_manager.add_message(
                 session_id=session_id,
-                role=normalize_message_role("toolResult"),
+                role="toolResult",
                 content=tr_content,
                 metadata=tr_metadata,
             )

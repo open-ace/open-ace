@@ -7,11 +7,59 @@ Supports both SQLite (default) and PostgreSQL databases with connection pooling.
 
 import logging
 import os
+import re
 import sqlite3
 from contextlib import contextmanager, suppress
+from datetime import datetime
 from typing import Any, Optional, Union
 
 logger = logging.getLogger(__name__)
+
+
+# Matches an optional fractional-seconds component (e.g. ".654590") in an
+# ISO/timestamp string so we can normalize it to 3 or 6 digits before parsing.
+_FRACTIONAL_RE = re.compile(r"(\.\d+)")
+
+
+def parse_db_datetime(value: Any) -> Optional[datetime]:
+    """Parse a datetime value returned by SQLite or PostgreSQL.
+
+    Databases store timestamps in a few text shapes that Python 3.9's
+    ``datetime.fromisoformat`` rejects: SQLite defaults to a space separator
+    (``2026-06-20 14:32:53``) and may emit a non-standard fractional-seconds
+    width (``...65459``). This helper normalizes both so repository code can
+    rely on a single robust parser.
+
+    Args:
+        value: A ``datetime`` instance (PostgreSQL), a string, or ``None``.
+
+    Returns:
+        A naive ``datetime`` or ``None`` when the input cannot be parsed.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        # ``fromisoformat`` in Python < 3.11 requires a "T" date/time separator
+        # and accepts only 3- or 6-digit fractional seconds. Normalize both.
+        text = text.replace(" ", "T", 1)
+
+        def _pad(match: "re.Match[str]") -> str:
+            frac = match.group(1)[1:]  # drop the leading dot
+            # Round to 6 digits so microsecond precision is preserved.
+            return "." + (frac + "000000")[:6]
+
+        text = _FRACTIONAL_RE.sub(_pad, text)
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
 
 # Database configuration
 CONFIG_DIR = os.path.expanduser("~/.open-ace")
