@@ -554,9 +554,16 @@ class AutonomousAgentRunner:
         """
         session_id = session_id or str(uuid.uuid4())
         uses_sidebar_session = self._uses_sidebar_session_source(cli_tool, workspace_type)
+        # App-server tools (ZCode) resolve their real CLI session id only after
+        # session/create inside _run_zcode_appserver. The wrapper row must be
+        # keyed by that CLI id (not the uuid) so add_message's session-exists
+        # check passes and milestone/messages keys line up — same invariant
+        # _ensure_sidebar_session gives Claude. So skip the uuid-keyed pre-create
+        # here; _run_zcode_appserver creates the row under the real CLI id.
+        creates_session_late = uses_sidebar_session or cli_tool in _APPSERVER_TOOLS
 
-        # Create wrapper sessions only for tools without a native sidebar session source.
-        if self.session_manager and not uses_sidebar_session:
+        # Create wrapper sessions only for tools without a deferred session id.
+        if self.session_manager and not creates_session_late:
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
@@ -1059,13 +1066,53 @@ class AutonomousAgentRunner:
             tracker.persisted_session_id = zc_session._cli_session_id
             tracker.sdk_initialized.set()
 
+            # Create the wrapper agent_sessions row under the REAL CLI session
+            # id (not the uuid). run_agent_task skips the pre-create for
+            # app-server tools because the CLI id is only known after
+            # session/create. Keying the row here by cli_sid makes add_message's
+            # session-exists check pass during _persist_local_session_messages
+            # and keeps milestone/session_messages keys aligned — mirroring
+            # Claude's _ensure_sidebar_session. create_session is idempotent.
+            if self.session_manager and zc_session._cli_session_id:
+                try:
+                    self.session_manager.create_session(
+                        session_id=zc_session._cli_session_id,
+                        session_type="workflow",
+                        title=f"Autonomous: {workflow_id[:8]}",
+                        tool_name=cli_tool,
+                        user_id=user_id,
+                        project_path=project_path,
+                        workspace_type=workspace_type,
+                        context={"workflow_id": workflow_id},
+                    )
+                except Exception as e:
+                    logger.warning("Failed to create zcode session record: %s", e)
+
             if not zc_session.send_message(prompt):
                 raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
 
             completed = zc_session.wait_turn(timeout=timeout)
         except ZCodeSessionError as e:
+            # session/create may have failed before _cli_session_id was known,
+            # in which case no wrapper row exists yet. Create one under whatever
+            # id we have so the failed session is still visible in the list.
+            err_sid = zc_session._cli_session_id or session_id
+            if self.session_manager and err_sid:
+                try:
+                    self.session_manager.create_session(
+                        session_id=err_sid,
+                        session_type="workflow",
+                        title=f"Autonomous: {workflow_id[:8]}",
+                        tool_name=cli_tool,
+                        user_id=user_id,
+                        project_path=project_path,
+                        workspace_type=workspace_type,
+                        context={"workflow_id": workflow_id},
+                    )
+                except Exception as ce:
+                    logger.warning("Failed to create zcode error session record: %s", ce)
             return AgentTaskResult(
-                session_id=zc_session._cli_session_id or session_id,
+                session_id=err_sid,
                 tracking_session_id=session_id,
                 success=False,
                 error=str(e),
