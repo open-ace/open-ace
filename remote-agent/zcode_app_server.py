@@ -272,7 +272,10 @@ class ZCodeAppServerSession:
         with self._lock:
             self._cli_session_id = session_obj["sessionId"]
             # Reset dedup/seq state so events from the fresh session are not
-            # dropped as duplicates of the poisoned session's stream.
+            # dropped as duplicates of the poisoned session's stream. This
+            # mirrors the reset at the top of _run_turn; it is repeated here
+            # because the new session's event seq restarts from 0 and the
+            # poisoned session's accumulated _last_event_seq must be cleared.
             self._last_event_seq = 0
             self._prior_event_hashes = set()
             self._current_event_hashes = set()
@@ -299,6 +302,10 @@ class ZCodeAppServerSession:
                     setmode_result,
                 )
         if self.model:
+            # Always bind the model here, even though start() only binds on
+            # `resumed` sessions. The fresh session was created precisely
+            # because the old session's model binding was unavailable; leaving
+            # it unbound would re-trip MODEL_UNAVAILABLE on the next send.
             model_str = self.model
             if "/" in model_str:
                 provider_id, model_id = model_str.split("/", 1)
@@ -419,6 +426,23 @@ class ZCodeAppServerSession:
                             {"sessionId": self._cli_session_id, "content": content},
                             timeout=30.0,
                         )
+                        # If the fresh session *also* hits MODEL_UNAVAILABLE,
+                        # this is an account/config-level problem (not single
+                        # session pollution). Flag it distinctly so ops can
+                        # tell it apart from an ordinary send rejection.
+                        if isinstance(send_result, dict) and "error" in send_result:
+                            retry_data = send_result.get("error", {}).get("data", {})
+                            retry_code = (
+                                retry_data.get("code", "") if isinstance(retry_data, dict) else ""
+                            )
+                            if retry_code == "ZCODE_RUNTIME_MODEL_UNAVAILABLE":
+                                logger.error(
+                                    "ZCode MODEL_UNAVAILABLE persists on fresh session "
+                                    "for %s — model %s likely unavailable at account level, "
+                                    "not session pollution",
+                                    self.session_id[:8],
+                                    self.model,
+                                )
 
             if not send_result or not send_result.get("accepted"):
                 # Surface send failures (e.g. model unavailable) to the user via
