@@ -360,7 +360,7 @@ class QwenSession:
 
             self.message_count += 1
             msg = {
-                "role": "system",  # map to system for frontend compatibility
+                "role": "toolResult",  # canonical tool-result role (see app/utils/tool_names.py)
                 "content": text_content,
                 "content_blocks": content_blocks or None,
                 "timestamp": entry.get("timestamp"),

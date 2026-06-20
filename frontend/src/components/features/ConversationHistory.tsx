@@ -988,7 +988,14 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                     <MessageItem key={msg.id ?? index} msg={msg} language={language} />
                   ))
                 ) : (
-                  <EmptyState icon="bi-chat-dots" title={t('noMessages', language)} />
+                  <EmptyState
+                    icon="bi-chat-dots"
+                    title={
+                      roleFilter !== 'all'
+                        ? t('noRoleMessages', language)
+                        : t('noMessages', language)
+                    }
+                  />
                 )}
               </div>
             </>

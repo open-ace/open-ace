@@ -37,6 +37,16 @@ CANONICAL_TOOL_NAMES = {
     "zcode-cli": "zcode",
 }
 
+# Canonical message role for tool execution results, matching the OpenClaw
+# importer (scripts/fetch_openclaw.py) and docs/en/CONCEPTS.md. Other write
+# paths (remote session_sync, RemoteSessionManager) historically emitted
+# inconsistent spellings (``tool_result``) or collapsed tool results into a
+# generic ``system`` role, which broke the conversation-detail "ToolResult"
+# filter. ``normalize_message_role`` unifies them at the write boundary, the
+# same pattern as ``normalize_tool_name``.
+TOOL_RESULT_ROLE_ALIASES = ("tool_result", "toolresult", "tool-result")
+CANONICAL_TOOL_RESULT_ROLE = "toolResult"
+
 
 def normalize_tool_name(name: Optional[str]) -> str:
     """Normalize a tool name to its canonical, lower-cased form.
@@ -64,3 +74,43 @@ def normalize_tool_name(name: Optional[str]) -> str:
         return "unknown"
     cleaned = name.strip().lower()
     return CANONICAL_TOOL_NAMES.get(cleaned, cleaned)
+
+
+def normalize_message_role(role: Optional[str]) -> str:
+    """Normalize a message role, collapsing tool-result spellings to ``toolResult``.
+
+    Different write paths spell the tool-execution-result role differently
+    (``toolResult`` from the OpenClaw importer, ``tool_result`` from the
+    remote agent session_sync, ``toolResult`` from the frontend). This
+    collapses every known spelling/casing variant to the canonical
+    ``toolResult`` so the conversation-detail "ToolResult" filter matches
+    consistently across all data sources.
+
+    Other roles (``user``, ``assistant``, ``system``, ``error``, ...) are
+    returned stripped (case preserved) so unrelated consumers are
+    unaffected. ``None``/blank input returns an empty string.
+
+    Note: this does NOT remap a generic ``system`` role to ``toolResult`` —
+    that cannot be done reliably from the role alone because genuine system
+    messages share the ``system`` role. Tool-result detection from content
+    must happen at the originating write path (where the tool_result block
+    is known), not here.
+
+    Examples:
+        >>> normalize_message_role("tool_result")
+        'toolResult'
+        >>> normalize_message_role("ToolResult")
+        'toolResult'
+        >>> normalize_message_role("user")
+        'user'
+        >>> normalize_message_role(None)
+        ''
+    """
+    if role is None:
+        return ""
+    cleaned = role.strip()
+    if not cleaned:
+        return ""
+    if cleaned.lower() in TOOL_RESULT_ROLE_ALIASES:
+        return CANONICAL_TOOL_RESULT_ROLE
+    return cleaned

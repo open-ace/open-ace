@@ -10,7 +10,7 @@ from typing import Any, Optional
 from app.repositories.database import Database, escape_like
 from app.utils.cache import cached
 from app.utils.senders import is_valid_sender
-from app.utils.tool_names import normalize_tool_name
+from app.utils.tool_names import normalize_message_role, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,14 @@ class MessageRepository:
         # QWEN, ...) can never split downstream aggregates (daily_stats,
         # hourly_stats, ROI cost-breakdown) into duplicate slices.
         tool_name = normalize_tool_name(tool_name)
+        # Likewise normalize the role so tool-result spellings (toolResult,
+        # tool_result, Tool-Result) collapse to the canonical ``toolResult``,
+        # keeping the conversation-detail "ToolResult" filter consistent across
+        # all write paths. This is a backstop; originators are expected to emit
+        # the canonical role already. Genuine ``system`` roles are left as-is —
+        # tool results masquerading as ``system`` cannot be recovered here
+        # because the role alone does not reveal the block type.
+        role = normalize_message_role(role)
 
         if is_postgresql():
             self.db.execute(

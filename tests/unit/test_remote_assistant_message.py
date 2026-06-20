@@ -242,6 +242,178 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self.assertEqual(self.mock_agent_mgr.buffer_output.call_count, 2)
 
 
+class TestToolResultExtraction(unittest.TestCase):
+    """Test that tool_result blocks are extracted into separate toolResult rows.
+
+    Previously tool_result blocks arriving inside an assistant turn were buried
+    in the assistant row's metadata, so the conversation-detail "ToolResult"
+    filter always showed "no messages" for remote sessions. They must now be
+    persisted as their own ``toolResult`` messages.
+    """
+
+    def setUp(self):
+        """Set up mocks for SessionManager and RemoteAgentManager."""
+        self.mock_session_mgr = MagicMock()
+        self.mock_agent_mgr = MagicMock()
+
+        from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
+        RemoteSessionManager._assistant_text_buffer.clear()
+
+        self.patcher_sm = patch(
+            "app.modules.workspace.remote_session_manager.SessionManager",
+            return_value=self.mock_session_mgr,
+        )
+        self.patcher_am = patch(
+            "app.modules.workspace.remote_session_manager.get_remote_agent_manager",
+            return_value=self.mock_agent_mgr,
+        )
+        self.patcher_proxy = patch(
+            "app.modules.workspace.remote_session_manager.APIKeyProxyService",
+        )
+        self.patcher_sm.start()
+        self.patcher_am.start()
+        self.patcher_proxy.start()
+
+        from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
+        self.manager = RemoteSessionManager()
+
+    def tearDown(self):
+        self.patcher_sm.stop()
+        self.patcher_am.stop()
+        self.patcher_proxy.stop()
+
+    def _send_output(self, data, stream="stdout", is_complete=False):
+        self.manager.process_session_output("test-session", data, stream, is_complete)
+
+    def _get_messages_by_role(self, role):
+        return [
+            call
+            for call in self.mock_session_mgr.add_message.call_args_list
+            if call.kwargs.get("role") == role
+        ]
+
+    def test_tool_result_block_emits_separate_toolresult_message(self):
+        """A tool_result block in an assistant turn becomes its own toolResult row."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tu1",
+                                "content": [{"type": "text", "text": "42"}],
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        toolresult_msgs = self._get_messages_by_role("toolResult")
+        self.assertEqual(len(toolresult_msgs), 1)
+        content = toolresult_msgs[0].kwargs.get("content")
+        self.assertIn("42", content)
+
+    def test_tool_result_string_content_rendered(self):
+        """tool_result block with string content is rendered directly."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "tu1", "content": "done"}
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        toolresult_msgs = self._get_messages_by_role("toolResult")
+        self.assertEqual(len(toolresult_msgs), 1)
+        self.assertEqual(toolresult_msgs[0].kwargs.get("content"), "done")
+
+    def test_assistant_text_and_tool_result_coexist(self):
+        """An assistant turn with both text and a tool_result emits both rows."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Here is the answer."},
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tu1",
+                                "content": "result data",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        assistant_msgs = self._get_messages_by_role("assistant")
+        toolresult_msgs = self._get_messages_by_role("toolResult")
+        self.assertEqual(len(assistant_msgs), 1)
+        self.assertEqual(assistant_msgs[0].kwargs.get("content"), "Here is the answer.")
+        self.assertEqual(len(toolresult_msgs), 1)
+        self.assertEqual(toolresult_msgs[0].kwargs.get("content"), "result data")
+
+    def test_empty_tool_result_not_stored(self):
+        """A tool_result block with no readable content is skipped."""
+        self._send_output(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "tu1", "content": ""}
+                        ]
+                    },
+                }
+            )
+        )
+        self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+        toolresult_msgs = self._get_messages_by_role("toolResult")
+        self.assertEqual(len(toolresult_msgs), 0)
+        # No assistant text either
+        assistant_msgs = self._get_messages_by_role("assistant")
+        self.assertEqual(len(assistant_msgs), 0)
+
+    def test_tool_result_role_normalized_in_daily_messages(self):
+        """_save_to_daily_messages receives the canonical 'toolResult' role."""
+        with patch.object(self.manager, "_save_to_daily_messages") as mock_save:
+            self._send_output(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "tu1",
+                                    "content": "payload",
+                                }
+                            ]
+                        },
+                    }
+                )
+            )
+            self._send_output(json.dumps({"type": "result", "subtype": "success"}))
+
+            roles_saved = [call.args[1] for call in mock_save.call_args_list]
+            self.assertIn("toolResult", roles_saved)
+
+
 class TestSystemMessageInStdout(unittest.TestCase):
     """Test system messages sent via stdout stream (JSON format).
 

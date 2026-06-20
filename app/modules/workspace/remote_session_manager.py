@@ -19,7 +19,7 @@ from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.session_manager import SessionManager
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
-from app.utils.tool_names import normalize_tool_name
+from app.utils.tool_names import normalize_message_role, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -739,10 +739,31 @@ class RemoteSessionManager:
             text = self._assistant_text_buffer.pop(session_id, "")
             blocks = self._content_blocks_buffer.pop(session_id, [])
 
+        # Separate tool_result blocks from the rest. Tool results are persisted
+        # as their own ``toolResult`` rows (role normalized at the write
+        # boundary) so the conversation-detail "ToolResult" filter finds them.
+        # Previously they were buried inside the assistant row's metadata, which
+        # made the filter always return "no messages" for remote sessions.
+        tool_result_blocks = [b for b in blocks if b.get("type") == "tool_result"]
+        non_tool_blocks = [b for b in blocks if b.get("type") != "tool_result"]
+
+        for block in tool_result_blocks:
+            tr_content = self._render_tool_result_content(block)
+            if not tr_content:
+                continue
+            tr_metadata = {"content_blocks": [block]} if block else None
+            self._session_manager.add_message(
+                session_id=session_id,
+                role=normalize_message_role("toolResult"),
+                content=tr_content,
+                metadata=tr_metadata,
+            )
+            self._save_to_daily_messages(session_id, "toolResult", tr_content)
+
         if text.strip():
             metadata = {}
-            if blocks:
-                metadata["content_blocks"] = blocks
+            if non_tool_blocks:
+                metadata["content_blocks"] = non_tool_blocks
             self._session_manager.add_message(
                 session_id=session_id,
                 role="assistant",
@@ -750,6 +771,33 @@ class RemoteSessionManager:
                 metadata=metadata if metadata else None,
             )
             self._save_to_daily_messages(session_id, "assistant", text)
+
+    @staticmethod
+    def _render_tool_result_content(block: dict) -> str:
+        """Render a tool_result content block into a displayable string.
+
+        Tool result blocks (Anthropic streaming format) carry their payload
+        under ``content`` as either a string or a list of typed parts. We
+        extract the readable text so the stored message has useful content
+        beyond the structured metadata.
+        """
+        content = block.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts: list[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text = part.get("text", "")
+                        if text:
+                            parts.append(text)
+                    elif part.get("content") and isinstance(part["content"], str):
+                        parts.append(part["content"])
+                elif isinstance(part, str):
+                    parts.append(part)
+            return "\n".join(p for p in parts if p).strip()
+        return ""
 
     def process_usage_report(
         self, session_id: str, tokens: dict[str, int], requests: int = 1
