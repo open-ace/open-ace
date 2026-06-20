@@ -46,27 +46,25 @@ def test_zcode_adapter_maps_yolo_correctly():
     assert args[idx + 1] == "yolo"
 
 
-def test_zcode_dev_phase_uses_yolo_mode():
-    """Dev/test phase (permission_mode=auto-edit) must use yolo mode — no
-    approval prompts that would stall in autonomous mode."""
+def test_zcode_mode_resolution_dev_uses_yolo():
+    """Dev/test phase (permission_mode=auto-edit) must resolve to yolo."""
 
     def fake_build(sid, path, model, permission_mode=None, **kw):
-        return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
+        return ["node", "/e.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
 
     captured = _run_zcode_with_mock(permission_mode="auto-edit", fake_build=fake_build)
-    assert captured["mode"] == "yolo", f"Dev phase should use yolo, got {captured['mode']}"
+    assert captured["mode"] == "yolo", f"Dev should resolve to yolo, got {captured['mode']}"
 
 
-def test_zcode_planning_phase_uses_plan_mode():
-    """Planning phase (permission_mode=plan) must use plan mode — preserves the
-    #761 read-only boundary. The orchestrator's _zcode_planning_mode() forces
-    'plan' for zcode planning calls regardless of workflow setting."""
+def test_zcode_mode_resolution_planning_uses_plan():
+    """Planning phase (permission_mode=plan) must resolve to plan — session/setMode
+    in ZCodeAppServerSession.start() applies it after session/create."""
 
     def fake_build(sid, path, model, permission_mode=None, **kw):
-        return ["node", "/fake/engine.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
+        return ["node", "/e.cjs", "app-server", "--cwd", path, "--mode", permission_mode]
 
     captured = _run_zcode_with_mock(permission_mode="plan", fake_build=fake_build)
-    assert captured["mode"] == "plan", f"Planning phase should use plan, got {captured['mode']}"
+    assert captured["mode"] == "plan", f"Planning should resolve to plan, got {captured['mode']}"
 
 
 def test_zcode_planning_mode_helper():
