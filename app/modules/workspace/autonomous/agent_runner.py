@@ -1010,23 +1010,15 @@ class AutonomousAgentRunner:
         adapter = get_adapter(cli_tool)
 
         env = dict(os.environ)
-        # Resolve the ZCode --mode here (single source of truth). The
-        # orchestrator passes open-ace permission modes; planning calls use
-        # _zcode_planning_mode() which forces "plan" for zcode. Here we
-        # map any open-ace mode to a safe zcode mode:
-        #   plan  → plan (read-only, safe for unattended planning)
-        #   yolo  → yolo (fully autonomous, no approval prompts)
-        #   other → yolo (safe default; edit/build stall on tool-approval-request)
+        # Resolve the ZCode session mode. The --mode CLI flag is ignored by
+        # app-server (verified: sessions always start in "build" mode regardless
+        # of the flag). The mode is set via session/setMode protocol call in
+        # ZCodeAppServerSession.start() after session/create.
         #
-        # Note: build_start_args → _map_permission_mode will run again, but
-        # plan/yolo pass through unchanged. This double-resolution is harmless
-        # but intentional: this layer picks the autonomous-safe mode, the
-        # adapter layer handles the CLI flag format.
-        #
-        # Warning: zcode has an "auto" mode in its enum, but it is NOT mapped
-        # here — if open-ace sends permission_mode="auto", it falls to the
-        # "yolo" default, which is safe. Do NOT map "auto" → "build" here
-        # (build stalls on non-read-only tools in autonomous mode).
+        # Planning/review phases pass permission_mode="plan" (from
+        # _zcode_planning_mode helper) → read-only.
+        # Dev/test phases pass "auto-edit" → yolo (fully autonomous).
+        # build/edit modes stall on tool-approval-request — never use them.
         zcode_mode = permission_mode if permission_mode in ("plan", "yolo") else "yolo"
         cmd = adapter.build_start_args(
             resume_session_id if (resume and resume_session_id) else session_id,
@@ -1065,10 +1057,10 @@ class AutonomousAgentRunner:
             usage_callback=collector.on_usage,
             permission_callback=lambda sid, req: collector.on_permission(sid, req),
             model=model,
-            permission_mode=permission_mode,
+            permission_mode=zcode_mode,
             env=env,
         )
-        zc_session.allowed_tools = []  # planning restriction handled by --mode
+        zc_session.allowed_tools = []
 
         # Register PID + wrap into a _LocalSession-compatible tracker so the
         # orchestrator's stop/pause/cancel can reach the process.

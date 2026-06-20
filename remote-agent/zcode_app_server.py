@@ -171,8 +171,74 @@ class ZCodeAppServerSession:
             self._cli_session_id = result["session"].get("sessionId")
 
         if not self._cli_session_id:
-            logger.error("ZCode session/create returned no sessionId for %s", self.session_id[:8])
+            logger.error(
+                "ZCode session/create returned no sessionId for %s: %s",
+                self.session_id[:8],
+                result,
+            )
             return False
+
+        # Set the session mode via protocol. The --mode CLI flag is ignored
+        # by app-server (sessions always start in "build" mode). build mode
+        # auto-approves read-only tools but stalls on write tools
+        # (tool-approval-request with no human to answer). session/setMode
+        # is the only reliable way to control permission behavior.
+        # Verified against zcode 0.14.5: session/setMode {sessionId, mode}
+        # immediately changes the session's tool-gate without approval prompts.
+        if self.permission_mode:
+            setmode_result = self._request(
+                "session/setMode",
+                {"sessionId": self._cli_session_id, "mode": self.permission_mode},
+                timeout=10.0,
+            )
+            if not setmode_result or "error" in setmode_result:
+                logger.warning(
+                    "ZCode session/setMode(%s) failed for %s — "
+                    "session will run in default build mode: %s",
+                    self.permission_mode,
+                    self.session_id[:8],
+                    setmode_result,
+                )
+            else:
+                logger.info(
+                    "ZCode session mode set to %s for %s",
+                    self.permission_mode,
+                    self.session_id[:8],
+                )
+
+        # On resumed sessions, the model from the prior session may be stale
+        # (ZCODE_RUNTIME_MODEL_UNAVAILABLE). Re-set the model explicitly so
+        # session/send doesn't reject with "model unavailable".
+        # session/setModel expects {modelId, providerId} format.
+        if resumed and self.model:
+            # Parse "glm-5.2" or "zai/glm-5.2" into {modelId, providerId}
+            model_str = self.model
+            if "/" in model_str:
+                provider_id, model_id = model_str.split("/", 1)
+            else:
+                provider_id, model_id = "zai", model_str
+            setmodel_result = self._request(
+                "session/setModel",
+                {
+                    "sessionId": self._cli_session_id,
+                    "model": {"modelId": model_id, "providerId": provider_id},
+                },
+                timeout=10.0,
+            )
+            if not setmodel_result or "error" in setmodel_result:
+                logger.warning(
+                    "ZCode session/setModel(%s) failed for %s: %s",
+                    self.model,
+                    self.session_id[:8],
+                    setmodel_result,
+                )
+            else:
+                logger.info(
+                    "ZCode session model set to %s for %s",
+                    self.model,
+                    self.session_id[:8],
+                )
+
         self._created.set()
         logger.info(
             "ZCode session ready for %s (cli session: %s, resumed=%s)",
@@ -180,6 +246,86 @@ class ZCodeAppServerSession:
             self._cli_session_id[:8],
             resumed,
         )
+        return True
+
+    def _recreate_fresh_session(self) -> bool:
+        """Create a fresh session (no resume) when the resumed session is
+        unusable (e.g. stale model binding). Re-applies setMode + setModel.
+        Returns True if the new session is ready for session/send.
+
+        Must be called from the turn worker thread (before
+        ``_drain_events_until_idle``). The new session has no conversation
+        history, so prior context is lost — callers that can surface this to
+        the user (e.g. ``_run_turn``) emit a visible warning after fallback.
+        ``_cli_session_id`` is mutated under ``_lock`` because the reader
+        thread and ``stop()`` read it concurrently.
+        """
+        workspace_param = {
+            "workspacePath": self.project_path,
+            "workspaceKey": self.project_path,
+        }
+        result = self._request("session/create", {"workspace": workspace_param}, timeout=20.0)
+        session_obj = result.get("session") if isinstance(result, dict) else None
+        if not (session_obj and session_obj.get("sessionId")):
+            logger.error("ZCode fallback session/create failed for %s", self.session_id[:8])
+            return False
+        with self._lock:
+            self._cli_session_id = session_obj["sessionId"]
+            # Reset dedup/seq state so events from the fresh session are not
+            # dropped as duplicates of the poisoned session's stream. This
+            # mirrors the reset at the top of _run_turn; it is repeated here
+            # because the new session's event seq restarts from 0 and the
+            # poisoned session's accumulated _last_event_seq must be cleared.
+            self._last_event_seq = 0
+            self._prior_event_hashes = set()
+            self._current_event_hashes = set()
+        logger.info(
+            "ZCode fresh session created for %s (cli session: %s) — prior context lost",
+            self.session_id[:8],
+            session_obj["sessionId"][:8],
+        )
+
+        # Re-apply mode and model on the fresh session. A setMode failure here
+        # leaves the session in build mode (write tools stall), so warn rather
+        # than silently succeed.
+        if self.permission_mode:
+            setmode_result = self._request(
+                "session/setMode",
+                {"sessionId": self._cli_session_id, "mode": self.permission_mode},
+                timeout=10.0,
+            )
+            if not setmode_result or "error" in setmode_result:
+                logger.warning(
+                    "ZCode fresh session/setMode(%s) failed for %s: %s",
+                    self.permission_mode,
+                    self.session_id[:8],
+                    setmode_result,
+                )
+        if self.model:
+            # Always bind the model here, even though start() only binds on
+            # `resumed` sessions. The fresh session was created precisely
+            # because the old session's model binding was unavailable; leaving
+            # it unbound would re-trip MODEL_UNAVAILABLE on the next send.
+            model_str = self.model
+            if "/" in model_str:
+                provider_id, model_id = model_str.split("/", 1)
+            else:
+                provider_id, model_id = "zai", model_str
+            setmodel_result = self._request(
+                "session/setModel",
+                {
+                    "sessionId": self._cli_session_id,
+                    "model": {"modelId": model_id, "providerId": provider_id},
+                },
+                timeout=10.0,
+            )
+            if not setmodel_result or "error" in setmodel_result:
+                logger.warning(
+                    "ZCode fresh session/setModel(%s) failed for %s: %s",
+                    self.model,
+                    self.session_id[:8],
+                    setmodel_result,
+                )
         return True
 
     def start_readers(self) -> None:  # noqa: D401 - parity with SessionProcess API
@@ -240,6 +386,64 @@ class ZCodeAppServerSession:
                 {"sessionId": self._cli_session_id, "content": content},
                 timeout=30.0,
             )
+            # If the model is unavailable on a resumed session, create a fresh
+            # session and retry. This happens when the resumed session's model
+            # binding is stale (ZCODE_RUNTIME_MODEL_UNAVAILABLE) and
+            # session/setModel didn't fix it (the session itself is polluted).
+            if isinstance(send_result, dict) and "error" in send_result:
+                err_code = ""
+                err_data = send_result.get("error", {}).get("data", {})
+                if isinstance(err_data, dict):
+                    err_code = err_data.get("code", "")
+                if err_code == "ZCODE_RUNTIME_MODEL_UNAVAILABLE":
+                    logger.warning(
+                        "ZCode session/send failed with MODEL_UNAVAILABLE for %s — "
+                        "creating fresh session and retrying",
+                        self.session_id[:8],
+                    )
+                    if self._recreate_fresh_session():
+                        # Surface the context loss to the orchestrator layer so
+                        # the resulting plan/dev is understood to be produced
+                        # without prior conversation history.
+                        self.output_callback(
+                            self.session_id,
+                            json.dumps(
+                                {
+                                    "type": "warning",
+                                    "data": {
+                                        "message": (
+                                            "Resumed ZCode session was unavailable; "
+                                            "retried in a fresh session without prior context."
+                                        )
+                                    },
+                                }
+                            ),
+                            "stderr",
+                            False,
+                        )
+                        send_result = self._request(
+                            "session/send",
+                            {"sessionId": self._cli_session_id, "content": content},
+                            timeout=30.0,
+                        )
+                        # If the fresh session *also* hits MODEL_UNAVAILABLE,
+                        # this is an account/config-level problem (not single
+                        # session pollution). Flag it distinctly so ops can
+                        # tell it apart from an ordinary send rejection.
+                        if isinstance(send_result, dict) and "error" in send_result:
+                            retry_data = send_result.get("error", {}).get("data", {})
+                            retry_code = (
+                                retry_data.get("code", "") if isinstance(retry_data, dict) else ""
+                            )
+                            if retry_code == "ZCODE_RUNTIME_MODEL_UNAVAILABLE":
+                                logger.error(
+                                    "ZCode MODEL_UNAVAILABLE persists on fresh session "
+                                    "for %s — model %s likely unavailable at account level, "
+                                    "not session pollution",
+                                    self.session_id[:8],
+                                    self.model,
+                                )
+
             if not send_result or not send_result.get("accepted"):
                 # Surface send failures (e.g. model unavailable) to the user via
                 # the error stream rather than failing silently.
@@ -532,7 +736,10 @@ class ZCodeAppServerSession:
             logger.warning(
                 "ZCode request %s errored for %s: %s", method, self.session_id[:8], holder["error"]
             )
-            return None
+            # Return the error dict (not None) so callers can inspect the error
+            # code and decide whether to retry with a different strategy (e.g.
+            # MODEL_UNAVAILABLE → fresh session).
+            return {"error": holder["error"]}
         return holder.get("result")
 
     # ------------------------------------------------------------------ #

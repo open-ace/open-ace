@@ -145,8 +145,11 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 }
 
 # Maximum time (seconds) for a single planning agent call.
-# Normal planning should complete in a few minutes; this caps runaway agents.
-PLANNING_TIMEOUT = 600
+# ZCode+GLM planning involves multiple model round-trips and subagent spawns
+# that can take 10-15 min for complex issues. 600s was too tight — planning
+# succeeded only ~30% of the time. 1800s gives the agent enough headroom
+# while still capping runaway agents.
+PLANNING_TIMEOUT = 1800
 
 
 def _zcode_planning_mode(wf: dict) -> str:
