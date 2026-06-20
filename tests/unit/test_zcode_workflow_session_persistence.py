@@ -243,6 +243,50 @@ def test_run_zcode_appserver_error_path_creates_session(env, monkeypatch):
     assert row is not None, "failed session should still be visible in the list"
 
 
+def test_run_agent_task_pre_dispatch_failure_creates_session(env, monkeypatch):
+    """Regression: a failure before _run_zcode_appserver dispatches (e.g.
+    adapter/executable resolution) must still leave a visible row. Previously,
+    skipping the uuid pre-create for app-server tools made such failures
+    invisible. The run_agent_task outer-except now creates the row under uuid."""
+    session_manager_mod = _load_session_manager()
+    runner, agent_runner_mod = _make_runner(session_manager_mod, env)
+
+    # Force _run_local to fail before dispatch: get_adapter raises.
+    remote_agent_dir = str(_REPO_ROOT / "remote-agent")
+    if remote_agent_dir not in sys.path:
+        sys.path.insert(0, remote_agent_dir)
+    cli_adapters_mod = types.ModuleType("cli_adapters")
+
+    def _boom(name):
+        raise RuntimeError("adapter not found")
+
+    cli_adapters_mod.get_adapter = _boom
+    monkeypatch.setitem(sys.modules, "cli_adapters", cli_adapters_mod)
+
+    result = runner.run_agent_task(
+        workflow_id="wf_pre",
+        cli_tool="zcode",
+        model="GLM-5.2",
+        project_path="/tmp/repo",
+        prompt="do the thing",
+        workspace_type="local",
+        permission_mode="yolo",
+        session_id="uuid-pre-dispatch",
+        user_id=1,
+    )
+
+    assert result.success is False
+    # The uuid row must exist so the failed run is visible in the session list.
+    conn = sqlite3.connect(str(env))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT session_id, status FROM agent_sessions WHERE session_id = ?",
+        ("uuid-pre-dispatch",),
+    ).fetchone()
+    conn.close()
+    assert row is not None, "pre-dispatch failure should still create a visible session row"
+
+
 # --------------------------------------------------------------------------- #
 # add_message succeeds when the row exists under the CLI id (the core invariant)
 # --------------------------------------------------------------------------- #

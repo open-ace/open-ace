@@ -653,6 +653,22 @@ class AutonomousAgentRunner:
 
         except Exception as e:
             logger.error("Agent task failed: %s", e)
+            # For tools that defer row creation (app-server tools), a failure
+            # before _run_zcode_appserver ran (e.g. adapter/executable not
+            # found) leaves no agent_sessions row. Create one under the uuid so
+            # the failed run stays visible. Claude (uses_sidebar_session) is
+            # excluded — its row is created under the CLI id inside _run_local,
+            # and pre-create tools already have their row from the block above.
+            # App-server tools only run locally, so guard on workspace_type too.
+            if creates_session_late and not uses_sidebar_session and workspace_type == "local":
+                self._create_workflow_session(
+                    session_id,
+                    workflow_id,
+                    cli_tool,
+                    user_id,
+                    project_path,
+                    workspace_type,
+                )
             return AgentTaskResult(
                 session_id="" if uses_sidebar_session else session_id,
                 tracking_session_id=session_id,
@@ -926,6 +942,36 @@ class AutonomousAgentRunner:
             event_log=session.event_log,
         )
 
+    def _create_workflow_session(
+        self,
+        sid: str,
+        workflow_id: str,
+        cli_tool: str,
+        user_id: int | None,
+        project_path: str,
+        workspace_type: str,
+    ) -> None:
+        """Create the agent_sessions wrapper row for an autonomous workflow run.
+
+        Centralizes the kwargs so the success, error, and pre-dispatch paths
+        can't silently diverge. create_session is idempotent.
+        """
+        if not self.session_manager or not sid:
+            return
+        try:
+            self.session_manager.create_session(
+                session_id=sid,
+                session_type="workflow",
+                title=f"Autonomous: {workflow_id[:8]}",
+                tool_name=cli_tool,
+                user_id=user_id,
+                project_path=project_path,
+                workspace_type=workspace_type,
+                context={"workflow_id": workflow_id},
+            )
+        except Exception as e:
+            logger.warning("Failed to create workflow session record: %s", e)
+
     def _run_zcode_appserver(
         self,
         session_id: str,
@@ -1073,20 +1119,14 @@ class AutonomousAgentRunner:
             # session-exists check pass during _persist_local_session_messages
             # and keeps milestone/session_messages keys aligned — mirroring
             # Claude's _ensure_sidebar_session. create_session is idempotent.
-            if self.session_manager and zc_session._cli_session_id:
-                try:
-                    self.session_manager.create_session(
-                        session_id=zc_session._cli_session_id,
-                        session_type="workflow",
-                        title=f"Autonomous: {workflow_id[:8]}",
-                        tool_name=cli_tool,
-                        user_id=user_id,
-                        project_path=project_path,
-                        workspace_type=workspace_type,
-                        context={"workflow_id": workflow_id},
-                    )
-                except Exception as e:
-                    logger.warning("Failed to create zcode session record: %s", e)
+            self._create_workflow_session(
+                zc_session._cli_session_id,
+                workflow_id,
+                cli_tool,
+                user_id,
+                project_path,
+                workspace_type,
+            )
 
             if not zc_session.send_message(prompt):
                 raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
@@ -1097,20 +1137,14 @@ class AutonomousAgentRunner:
             # in which case no wrapper row exists yet. Create one under whatever
             # id we have so the failed session is still visible in the list.
             err_sid = zc_session._cli_session_id or session_id
-            if self.session_manager and err_sid:
-                try:
-                    self.session_manager.create_session(
-                        session_id=err_sid,
-                        session_type="workflow",
-                        title=f"Autonomous: {workflow_id[:8]}",
-                        tool_name=cli_tool,
-                        user_id=user_id,
-                        project_path=project_path,
-                        workspace_type=workspace_type,
-                        context={"workflow_id": workflow_id},
-                    )
-                except Exception as ce:
-                    logger.warning("Failed to create zcode error session record: %s", ce)
+            self._create_workflow_session(
+                err_sid,
+                workflow_id,
+                cli_tool,
+                user_id,
+                project_path,
+                workspace_type,
+            )
             return AgentTaskResult(
                 session_id=err_sid,
                 tracking_session_id=session_id,
