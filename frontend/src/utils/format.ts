@@ -146,6 +146,24 @@ export function formatRelativeTime(
 }
 
 /**
+ * Strip a known CLI tool prefix from a session id and return a short slice
+ * for display in the session list.
+ *
+ * Claude/Codex/Qwen store bare UUIDs (e.g. "399519bd-..."), but ZCode stores
+ * "sess_<uuid>" — a naive slice(0, 4) would show "sess" for every ZCode
+ * session. We strip the "sess_" prefix first so all tools display the same
+ * 4-char UUID prefix. The full id is never mutated, only the display value.
+ *
+ * @param sessionId - Full session id (may be undefined)
+ * @param length - Number of characters to show (default 4)
+ */
+export function displaySessionId(sessionId: string | undefined | null, length: number = 4): string {
+  if (!sessionId) return '';
+  const stripped = sessionId.startsWith('sess_') ? sessionId.slice(5) : sessionId;
+  return stripped.slice(0, length);
+}
+
+/**
  * Format bytes to human-readable size
  */
 export function formatBytes(bytes: number, decimals: number = 2): string {

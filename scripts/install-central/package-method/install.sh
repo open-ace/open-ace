@@ -1726,6 +1726,8 @@ configure_sudoers() {
     # Get fetch_claude.py and fetch_openclaw.py paths
     local fetch_claude_path="$install_dir/scripts/fetch_claude.py"
     local fetch_openclaw_path="$install_dir/scripts/fetch_openclaw.py"
+    local fetch_codex_path="$install_dir/scripts/fetch_codex.py"
+    local fetch_zcode_path="$install_dir/scripts/fetch_zcode.py"
 
     # Build sudoers content with all fetch scripts
     local fetch_sudoers=""
@@ -1743,6 +1745,16 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $fetch_claude_path *"
         fetch_sudoers="$fetch_sudoers
 # Allow $run_user to run fetch_openclaw.py as root for multi-user data collection
 $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $fetch_openclaw_path *"
+    fi
+    if [ -f "$fetch_codex_path" ]; then
+        fetch_sudoers="$fetch_sudoers
+# Allow $run_user to run fetch_codex.py as root for multi-user data collection
+$run_user ALL=(root) NOPASSWD: /usr/bin/python3 $fetch_codex_path *"
+    fi
+    if [ -f "$fetch_zcode_path" ]; then
+        fetch_sudoers="$fetch_sudoers
+# Allow $run_user to run fetch_zcode.py as root for multi-user data collection
+$run_user ALL=(root) NOPASSWD: /usr/bin/python3 $fetch_zcode_path *"
     fi
 
     # Add /usr/local/bin/qwen-code-webui rule if it exists (Node.js v20+ may be installed there)

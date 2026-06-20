@@ -199,6 +199,31 @@ def run_fetch_scripts():
                 logger.error(f"Error running codex fetch script: {e}")
                 results["codex"] = {"success": False, "error": "Internal server error"}
 
+        # Run fetch_zcode.py to scan all users' ZCode CLI databases.
+        # ZCode stores sessions in ~/.zcode/cli/db/db.sqlite (not JSONL), so this
+        # is the only path by which local ZCode sessions reach the session list.
+        zcode_script = os.path.join(project_root, "scripts", "fetch_zcode.py")
+        if os.path.exists(zcode_script):
+            try:
+                result = _run_subprocess(
+                    _build_cmd(
+                        zcode_script,
+                        ["--days", "1", "--multi-user", "--recent", "--config", config_path],
+                    ),
+                    timeout=600,
+                    cwd=project_root,
+                )
+                results["zcode"] = {
+                    "success": result.returncode == 0,
+                    "output": result.stdout[-1000:] if result.stdout else "",
+                    "error": result.stderr[-500:] if result.stderr else None,
+                }
+            except subprocess.TimeoutExpired:
+                results["zcode"] = {"success": False, "error": "Timeout after 10 minutes"}
+            except Exception as e:
+                logger.error(f"Error running zcode fetch script: {e}")
+                results["zcode"] = {"success": False, "error": "Internal server error"}
+
         with _fetch_lock:
             _fetch_status["last_run"] = datetime.now().isoformat()
             _fetch_status["last_result"] = results

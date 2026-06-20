@@ -13,7 +13,7 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { useSessions, useSession, useRestoreSession } from '@/hooks';
 import { Loading, EmptyState, Modal, SessionDetailContent } from '@/components/common';
-import { formatRelativeTime } from '@/utils';
+import { formatRelativeTime, displaySessionId } from '@/utils';
 import { NewSessionModal } from './NewSessionModal';
 import type { AgentSession } from '@/api/sessions';
 
@@ -152,7 +152,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
       const sessionDate = new Date(session.updated_at ?? session.created_at ?? now);
       const sessionItem: SessionItem = {
         id: session.session_id,
-        title: session.title ?? `Session ${session.session_id.slice(0, 8)}`,
+        title: session.title ?? `Session ${displaySessionId(session.session_id, 8)}`,
         tool: session.tool_name ?? 'unknown',
         time: formatRelativeTime(session.updated_at ?? session.created_at ?? '', {
           justNow: t('justNow', language),
@@ -228,7 +228,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
             key={session.session_id}
             className="session-list-collapsed-item"
             onClick={() => handleSessionClick(session.session_id)}
-            title={session.title ?? `Session ${session.session_id.slice(0, 8)}`}
+            title={session.title ?? `Session ${displaySessionId(session.session_id, 8)}`}
           >
             <i className="bi bi-chat-dots" />
           </button>
@@ -326,7 +326,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         isOpen={showDetailModal}
         onClose={handleCloseModal}
         title={(() => {
-          const sessionIdShort = sessionDetail?.data?.session_id?.slice(0, 8) ?? '';
+          const sessionIdShort = displaySessionId(sessionDetail?.data?.session_id, 8) ?? '';
           const sessionTitle = sessionDetail?.data?.title ?? '';
           // Check if title is meaningful (not just a default pattern like "qwen - 994f805a")
           const isDefaultTitle =
@@ -394,12 +394,12 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
                 ) : session.workspace_type === 'remote' ? (
                   <i
                     className="bi bi-cloud-fill text-primary me-1"
-                    title={`Remote: ${session.machine_name ?? session.id.slice(0, 8)}`}
+                    title={`Remote: ${session.machine_name ?? displaySessionId(session.id, 8)}`}
                   />
                 ) : (
                   <i className="bi bi-laptop text-success me-1" title="Local" />
                 )}
-                {session.id.slice(0, 4)}
+                {displaySessionId(session.id, 4)}
               </span>
               <span className="session-time text-muted">{session.time}</span>
               <span className="session-requests text-muted">

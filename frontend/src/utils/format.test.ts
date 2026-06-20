@@ -13,6 +13,7 @@ import {
   formatBytes,
   formatDuration,
   formatChartDate,
+  displaySessionId,
 } from './format';
 
 describe('formatTokens', () => {
@@ -261,5 +262,29 @@ describe('formatChartDate', () => {
     expect(formatChartDate('', 'en')).toBe('-');
     expect(formatChartDate(undefined, 'en')).toBe('-');
     expect(formatChartDate('not-a-date', 'en')).toBe('-');
+  });
+});
+
+describe('displaySessionId', () => {
+  it('strips the sess_ prefix before slicing', () => {
+    // ZCode session id — must show the UUID prefix, not "sess"
+    expect(displaySessionId('sess_2a277802-3956-44cd-bf3d-d540eac924ba', 4)).toBe('2a27');
+    expect(displaySessionId('sess_2a277802-3956-44cd-bf3d-d540eac924ba', 8)).toBe('2a277802');
+  });
+
+  it('slices bare UUIDs unchanged (claude/codex/qwen)', () => {
+    expect(displaySessionId('399519bd-2425-4377-bd2b-206cf6bbcc5e', 4)).toBe('3995');
+    expect(displaySessionId('019edfd8-79fe-7423-8ce1-31117e13a10e', 4)).toBe('019e');
+  });
+
+  it('handles missing/empty input', () => {
+    expect(displaySessionId(undefined)).toBe('');
+    expect(displaySessionId(null)).toBe('');
+    expect(displaySessionId('')).toBe('');
+  });
+
+  it('does not strip a bare id that merely starts with "sess_" elsewhere', () => {
+    // Only strips a leading "sess_" prefix; an id without it is sliced as-is.
+    expect(displaySessionId('session-abc', 4)).toBe('sess');
   });
 });

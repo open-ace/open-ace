@@ -14,6 +14,7 @@ export {
   formatBytes,
   formatDuration,
   formatChartDate,
+  displaySessionId,
 } from './format';
 export {
   getDefaultDateRange,
