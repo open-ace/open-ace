@@ -287,6 +287,64 @@ def test_run_agent_task_pre_dispatch_failure_creates_session(env, monkeypatch):
     assert row is not None, "pre-dispatch failure should still create a visible session row"
 
 
+def test_run_zcode_appserver_unexpected_error_no_duplicate_row(env, monkeypatch):
+    """Edge case: a non-ZCodeSessionError raised AFTER the CLI-id row is created
+    (e.g. unexpected error in wait_turn) must not escape to run_agent_task's
+    outer except and create a SECOND row under the uuid. The broadened inner
+    except catches it, reuses the err_sid (CLI id), and create_session's
+    idempotency means no duplicate."""
+    session_manager_mod = _load_session_manager()
+    runner, agent_runner_mod = _make_runner(session_manager_mod, env)
+
+    fake_process = MagicMock()
+    monkeypatch.setattr(agent_runner_mod.subprocess, "Popen", lambda *a, **k: fake_process)
+
+    fake_adapter = MagicMock()
+    fake_adapter.build_start_args.return_value = ["zcode", "--app-server"]
+    fake_adapter.supports_stdin_input.return_value = False
+
+    remote_agent_dir = str(_REPO_ROOT / "remote-agent")
+    if remote_agent_dir not in sys.path:
+        sys.path.insert(0, remote_agent_dir)
+    cli_adapters_mod = types.ModuleType("cli_adapters")
+    cli_adapters_mod.get_adapter = lambda name: fake_adapter
+    monkeypatch.setitem(sys.modules, "cli_adapters", cli_adapters_mod)
+
+    # wait_turn raises a generic error AFTER session/create + row creation.
+    class _UnexpectedErrorSession(_StubZCodeSession):
+        def wait_turn(self, timeout=None):
+            raise RuntimeError("unexpected SDK crash")
+
+    zcode_app_mod = types.ModuleType("zcode_app_server")
+    zcode_app_mod.ZCodeAppServerSession = _UnexpectedErrorSession
+    monkeypatch.setitem(sys.modules, "zcode_app_server", zcode_app_mod)
+
+    result = runner._run_zcode_appserver(
+        session_id="uuid-wrapper-id",
+        cli_tool="zcode",
+        model="GLM-5.2",
+        project_path="/tmp/repo",
+        prompt="do the thing",
+        permission_mode="yolo",
+        timeout=60,
+        workflow_id="wf_edge",
+        user_id=1,
+        workspace_type="local",
+    )
+
+    assert result.success is False
+    # Only ONE row should exist — the CLI-id row. No empty uuid duplicate.
+    conn = sqlite3.connect(str(env))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT session_id FROM agent_sessions WHERE session_id IN (?, ?)",
+        ("sess_cli_abc123", "uuid-wrapper-id"),
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1, f"expected 1 row, got {[r['session_id'] for r in rows]}"
+    assert rows[0]["session_id"] == "sess_cli_abc123"
+
+
 # --------------------------------------------------------------------------- #
 # add_message succeeds when the row exists under the CLI id (the core invariant)
 # --------------------------------------------------------------------------- #

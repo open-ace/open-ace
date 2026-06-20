@@ -1132,10 +1132,16 @@ class AutonomousAgentRunner:
                 raise ZCodeSessionError(zc_session.last_send_error or "ZCode session/send failed")
 
             completed = zc_session.wait_turn(timeout=timeout)
-        except ZCodeSessionError as e:
-            # session/create may have failed before _cli_session_id was known,
-            # in which case no wrapper row exists yet. Create one under whatever
-            # id we have so the failed session is still visible in the list.
+        except Exception as e:
+            # Catch ALL exceptions (not just ZCodeSessionError) so that any
+            # failure after session/create — including unexpected errors in
+            # send_message/wait_turn — takes this single error path and returns
+            # from here. This prevents a non-ZCodeSessionError from escaping to
+            # run_agent_task's outer except, which would create a SECOND row
+            # under the uuid (duplicate of the CLI-id row created above). The
+            # row-creation under err_sid below is idempotent, so if the CLI-id
+            # row already exists this is a harmless no-op.
+            logger.warning("ZCode app-server task failed: %s", e)
             err_sid = zc_session._cli_session_id or session_id
             self._create_workflow_session(
                 err_sid,
