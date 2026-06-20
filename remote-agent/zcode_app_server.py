@@ -103,6 +103,9 @@ class ZCodeAppServerSession:
         # Set = no turn in progress (idle); cleared while a turn runs.
         self._turn_done = threading.Event()
         self._turn_done.set()
+        # Wall-clock budget for draining events in a single turn. Set by
+        # send_message from the caller's timeout; defaults to _TURN_TIMEOUT.
+        self._turn_timeout: float = _TURN_TIMEOUT
         self._worker: threading.Thread | None = None
         self.last_send_error: str | None = None
 
@@ -339,7 +342,7 @@ class ZCodeAppServerSession:
     # Sending a user turn
     # ------------------------------------------------------------------ #
 
-    def send_message(self, content: str) -> bool:
+    def send_message(self, content: str, timeout: float = _TURN_TIMEOUT) -> bool:
         """Send a user message and return immediately (non-blocking).
 
         ``session/send`` is asynchronous. We dispatch it on a dedicated worker
@@ -347,6 +350,10 @@ class ZCodeAppServerSession:
         blocked - heartbeats and other commands (stop/pause/permission) keep
         flowing while the turn runs. The worker streams assistant events through
         the existing callbacks and signals completion via ``_turn_done``.
+
+        *timeout* is the wall-clock budget for the worker to drain events from
+        this turn (passed through to ``_run_turn``). It should match the
+        ``wait_turn`` timeout so the worker does not give up before the caller.
         """
         if not self._cli_session_id or not self.is_running:
             self.last_send_error = "ZCode session is not active"
@@ -360,6 +367,7 @@ class ZCodeAppServerSession:
 
         self.last_send_error = None
         self._turn_done.clear()
+        self._turn_timeout = timeout
         self._worker = threading.Thread(
             target=self._run_turn,
             args=(content,),
@@ -463,7 +471,7 @@ class ZCodeAppServerSession:
                     False,
                 )
                 return
-            self._drain_events_until_idle(_TURN_TIMEOUT)
+            self._drain_events_until_idle(self._turn_timeout)
             self._report_usage()
         except Exception:  # noqa: BLE001
             logger.exception("ZCode turn failed for %s", self.session_id[:8])
