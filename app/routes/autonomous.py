@@ -1031,6 +1031,12 @@ def fork_milestone(workflow_id, milestone_id):
 
     # Optionally pause the original workflow
     if pause_original:
+        # Suspend the running agent subprocess (SIGSTOP) BEFORE flipping the
+        # DB status. Without this the orchestrator thread currently inside
+        # _run_agent() keeps running — advance() only checks status at entry,
+        # not mid-phase — so the "paused" workflow would continue dev→test→PR
+        # to completion despite being forked. Mirrors pause_workflow()'s order.
+        _pause_running_task(workflow_id)
         _get_repo().update_workflow(
             workflow_id,
             {
