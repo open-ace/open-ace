@@ -3,7 +3,7 @@
  */
 
 import { apiClient } from './client';
-import type { Message, MessageFilters } from '@/types';
+import type { Message, MessageFilters, MessageRole } from '@/types';
 
 // Backend message format (matches API response)
 interface BackendMessage {
@@ -45,11 +45,11 @@ interface BackendMessagesResponse {
 /**
  * Transform backend message to frontend message format
  */
-function transformMessage(backendMsg: BackendMessage): Message {
+export function transformMessage(backendMsg: BackendMessage): Message {
   return {
     id: String(backendMsg.id),
     session_id: backendMsg.agent_session_id,
-    role: backendMsg.role as 'user' | 'assistant' | 'system',
+    role: backendMsg.role as MessageRole,
     content: backendMsg.content,
     tokens: backendMsg.tokens_used,
     input_tokens: backendMsg.input_tokens,
@@ -102,7 +102,7 @@ export interface ConversationMessage {
   sender_name: string;
   sender_id: string;
   date: string;
-  role: string;
+  role: MessageRole;
   content: string;
   tokens_used: number;
   input_tokens: number;

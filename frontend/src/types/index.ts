@@ -56,11 +56,24 @@ export interface TrendDataPoint {
   tokens: number;
 }
 
+// Message role - single source of truth for role string literals.
+// Backend stores tool messages with role="tool" (agent_runner.py), so the
+// frontend must use the same literal. The constant object keeps the value
+// in sync with the type union and prevents the role-string drift bug from
+// recurring.
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
+export const MessageRole = {
+  USER: 'user',
+  ASSISTANT: 'assistant',
+  SYSTEM: 'system',
+  TOOL: 'tool',
+} as const;
+
 // Message types
 export interface Message {
   id: string;
   session_id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: MessageRole;
   content: string;
   tokens?: number;
   input_tokens?: number;

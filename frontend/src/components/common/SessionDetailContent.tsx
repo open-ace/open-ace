@@ -105,7 +105,7 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
         return t('messageRoleAssistant', language);
       case 'system':
         return t('messageRoleSystem', language);
-      case 'toolResult':
+      case 'tool':
         return t('messageRoleToolResult', language);
       default:
         return role;

@@ -648,7 +648,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
         return 'bi-robot';
       case 'system':
         return 'bi-gear-fill';
-      case 'toolResult':
+      case 'tool':
         return 'bi-wrench';
       default:
         return 'bi-chat-dots';
@@ -663,7 +663,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
         return 'bg-success';
       case 'system':
         return 'bg-secondary';
-      case 'toolResult':
+      case 'tool':
         return 'bg-info';
       default:
         return 'bg-secondary';
@@ -787,7 +787,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       if (msg.role === 'user') {
         lastUserTime = msgTime;
         lastUserIndex = index;
-      } else if ((msg.role === 'assistant' || msg.role === 'toolResult') && lastUserTime) {
+      } else if ((msg.role === 'assistant' || msg.role === 'tool') && lastUserTime) {
         const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
         if (latency > 0) {
           latencies.push({
@@ -836,7 +836,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       user: 0,
       assistant: 0,
       system: 0,
-      toolResult: 0,
+      tool: 0,
       totalTokens: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
@@ -846,7 +846,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       if (msg.role === 'user') stats.user++;
       else if (msg.role === 'assistant') stats.assistant++;
       else if (msg.role === 'system') stats.system++;
-      else if (msg.role === 'toolResult') stats.toolResult++;
+      else if (msg.role === 'tool') stats.tool++;
       stats.totalTokens += msg.tokens_used ?? 0;
       stats.totalInputTokens += msg.input_tokens ?? 0;
       stats.totalOutputTokens += msg.output_tokens ?? 0;
@@ -861,7 +861,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
     { value: 'user', label: t('messageRoleUser', language) },
     { value: 'assistant', label: t('messageRoleAssistant', language) },
     { value: 'system', label: t('messageRoleSystem', language) },
-    { value: 'toolResult', label: t('messageRoleToolResult', language) },
+    { value: 'tool', label: t('messageRoleToolResult', language) },
   ];
 
   return (
@@ -907,11 +907,11 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                   </span>
                 </div>
               )}
-              {messageStats.toolResult > 0 && (
+              {messageStats.tool > 0 && (
                 <div className="col-auto">
                   <span className="badge bg-info me-1">
                     <i className="bi bi-wrench me-1" />
-                    Tool: {messageStats.toolResult}
+                    Tool: {messageStats.tool}
                   </span>
                 </div>
               )}

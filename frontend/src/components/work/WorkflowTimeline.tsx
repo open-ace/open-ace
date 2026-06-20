@@ -2067,7 +2067,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                           return t('messageRoleAssistant', language);
                         case 'system':
                           return t('messageRoleSystem', language);
-                        case 'toolResult':
+                        case 'tool':
                           return t('messageRoleToolResult', language);
                         default:
                           return msg.role;
