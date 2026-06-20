@@ -691,14 +691,20 @@ class WebUIManager:
             except OSError as e:
                 logger.warning(f"Failed to chown log dir: {e}")
 
-        # Ensure PATH is complete and includes all necessary directories.
-        # This fixes spawn ENOENT issues where the node executable cannot be
-        # found (Issue #1083). PATH is the correct mechanism for resolving the
-        # `node` binary. NODE_PATH is intentionally NOT set: it controls Node
-        # *module* resolution (a list of directories, not a binary path), so
-        # pointing it at an executable was semantically wrong and could only
-        # interfere with module lookup.
-        child_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+        # Ensure PATH can resolve the `node` binary while preserving the host's
+        # inherited PATH. Prepend the standard system directories so Docker
+        # (node in /usr/bin) keeps resolving (Issue #1083), then append the
+        # inherited PATH so host-installed binaries are still found — e.g.
+        # /opt/homebrew/bin on Apple Silicon macOS, where Homebrew installs
+        # node. NODE_PATH is intentionally NOT set: it controls Node *module*
+        # resolution (a list of directories, not a binary path), so pointing it
+        # at an executable was semantically wrong and could only interfere with
+        # module lookup.
+        _system_dirs = "/usr/local/bin:/usr/bin:/bin"
+        _inherited_path = child_env.get("PATH", "")
+        child_env["PATH"] = (
+            _system_dirs + ":" + _inherited_path if _inherited_path else _system_dirs
+        )
 
         # Build command based on platform
         if webui_dir:
