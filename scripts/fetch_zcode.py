@@ -161,25 +161,26 @@ def process_zcode_session(
     )
 
     messages: list[dict[str, Any]] = []
+    # Collect distinct dates (from message timestamps) and request count
+    # (assistant turns). Token totals are authoritative session-level values
+    # from the turn_usage table (session.total_input_tokens /
+    # total_output_tokens); per-message ``data.tokens`` is sparse, so we do NOT
+    # sum it (see review feedback — that path under-counts). Tokens are
+    # attributed to the session's dominant date below and injected into the
+    # first assistant message for agent_sessions (codex pattern).
+    session_dates: set[str] = set()
+    assistant_dates: set[str] = set()
     for msg in session.messages:
         ts = msg.get("timestamp")
         date_key = _ms_to_date(_iso_to_ms(ts)) if ts else "unknown"
-
-        usage = msg.get("usage") or {}
-        input_t = int(usage.get("input_tokens", 0) or 0)
-        output_t = int(usage.get("output_tokens", 0) or 0)
-        total_t = input_t + output_t
+        session_dates.add(date_key)
         role = msg.get("role", "")
+        if role == "assistant":
+            assistant_dates.add(date_key)
 
         model = msg.get("model")
         if model:
             daily[date_key]["models_used"].add(model)
-
-        daily[date_key]["prompt_tokens"] += input_t
-        daily[date_key]["candidates_tokens"] += output_t
-        daily[date_key]["total_tokens"] += total_t
-        if role == "assistant":
-            daily[date_key]["request_count"] += 1
 
         content_blocks = msg.get("content_blocks")
         messages.append(
@@ -196,9 +197,11 @@ def process_zcode_session(
                     {"session_id": session_id, "role": role, "model": model},
                     ensure_ascii=False,
                 ),
-                "tokens_used": total_t,
-                "input_tokens": input_t,
-                "output_tokens": output_t,
+                # Per-message tokens left at 0; session totals are injected
+                # into the first assistant message below.
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
                 "model": model,
                 "timestamp": ts,
                 "sender_id": system_account or "zcode_user",
@@ -209,7 +212,46 @@ def process_zcode_session(
             }
         )
 
+    # Attribute the authoritative session-level token totals to the dominant
+    # date (the date with the most messages; ties broken by recency). This
+    # keeps daily_usage aligned with the session totals rather than fragmenting
+    # sparse per-message numbers.
+    total_input = int(getattr(session, "total_input_tokens", 0) or 0)
+    total_output = int(getattr(session, "total_output_tokens", 0) or 0)
+    total_tokens = total_input + total_output
+    dominant_date = _dominant_date(session_dates, messages)
+    daily[dominant_date]["prompt_tokens"] += total_input
+    daily[dominant_date]["candidates_tokens"] += total_output
+    daily[dominant_date]["total_tokens"] += total_tokens
+    daily[dominant_date]["request_count"] += len(assistant_dates)
+
+    # Inject session-level totals into the first assistant message so
+    # update_agent_sessions_stats records the real total_tokens (codex pattern,
+    # fetch_codex.py:648-654).
+    if total_tokens > 0:
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                msg["tokens_used"] = total_tokens
+                msg["input_tokens"] = total_input
+                msg["output_tokens"] = total_output
+                break
+
     return daily, messages, session.project_path
+
+
+def _dominant_date(dates: set[str], messages: list[dict[str, Any]]) -> str:
+    """Pick the date with the most messages, ties broken by recency."""
+    if not dates:
+        return "unknown"
+    counts: dict[str, int] = defaultdict(int)
+    last_ts: dict[str, str] = {}
+    for msg in messages:
+        d = msg.get("date", "unknown")
+        counts[d] += 1
+        ts = msg.get("timestamp") or ""
+        if ts >= last_ts.get(d, ""):
+            last_ts[d] = ts
+    return max(counts, key=lambda d: (counts[d], last_ts.get(d, "")))
 
 
 def _iso_to_ms(ts: Optional[str]) -> Optional[int]:
@@ -506,7 +548,10 @@ def _iter_candidate_sessions(db_path: Path, days: int, recent: bool) -> list[tup
     if days > 0:
         cutoff_ms = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
     if recent:
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Use local midnight to match the sibling fetch scripts
+        # (fetch_codex.py:594-598 uses local-naive midnight), so --recent syncs
+        # align with the user's notion of "today" rather than UTC rollover.
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff_ms = max(cutoff_ms, int(today_start.timestamp() * 1000))
 
     candidates: list[tuple[str, int]] = []

@@ -122,6 +122,19 @@ def _insert_zcode_message(
     conn.close()
 
 
+def _insert_turn_usage(
+    db_path: Path, session_id: str, turn_id: str, input_t: int, output_t: int
+) -> None:
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO turn_usage (session_id, turn_id, input_tokens, output_tokens) "
+        "VALUES (?, ?, ?, ?)",
+        (session_id, turn_id, input_t, output_t),
+    )
+    conn.commit()
+    conn.close()
+
+
 def _init_dest_schema(db_path: Path) -> None:
     """Create the destination tables fetch_zcode writes to (minimal subset)."""
     conn = sqlite3.connect(str(db_path))
@@ -246,6 +259,10 @@ def test_process_zcode_session_returns_messages_and_project(fetch_mod, tmp_path)
         {"role": "assistant", "modelID": "GLM-5.2", "tokens": {"input": 100, "output": 10}},
         parts=[{"type": "text", "text": "hi there"}],
     )
+    # Authoritative session-level tokens come from turn_usage, NOT the sparse
+    # per-message data.tokens above. Seed a turn_usage row with different
+    # numbers to prove the session totals win.
+    _insert_turn_usage(src_db, sid, "turn_1", input_t=250, output_t=30)
 
     daily, messages, project = fetch_mod.process_zcode_session(sid, src_db, "localhost", None)
 
@@ -255,14 +272,18 @@ def test_process_zcode_session_returns_messages_and_project(fetch_mod, tmp_path)
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "hello world"
     assert messages[0]["agent_session_id"] == sid
+    # Per-message tokens are 0; session totals injected into first assistant msg.
+    assert messages[0]["tokens_used"] == 0
     assert messages[1]["role"] == "assistant"
-    assert messages[1]["input_tokens"] == 100
-    assert messages[1]["output_tokens"] == 10
-    assert messages[1]["tokens_used"] == 110
-    # daily aggregates
+    assert messages[1]["input_tokens"] == 250
+    assert messages[1]["output_tokens"] == 30
+    assert messages[1]["tokens_used"] == 280
+    # daily aggregates use session totals (250 input + 30 output = 280)
     assert len(daily) == 1
     only_date = next(iter(daily))
-    assert daily[only_date]["total_tokens"] == 110
+    assert daily[only_date]["prompt_tokens"] == 250
+    assert daily[only_date]["candidates_tokens"] == 30
+    assert daily[only_date]["total_tokens"] == 280
     assert daily[only_date]["request_count"] == 1
 
 
