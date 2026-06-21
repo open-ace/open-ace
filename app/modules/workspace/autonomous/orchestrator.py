@@ -958,6 +958,10 @@ class AutonomousOrchestrator:
             field = SESSION_LINE_FIELDS.get(session_line)
             if field:
                 self._update_workflow({field: result.session_id})
+                # Keep the in-memory wf dict in sync so the next _resolve_session_line
+                # call in the same phase (e.g. planning → finalize) sees the updated
+                # session id and resumes it instead of creating a new session.
+                wf[field] = result.session_id
 
         # Transient API error retry (429 / 5xx / overload) — exponential
         # backoff, max 30 minutes total. Interruptible sleep (cancel check
