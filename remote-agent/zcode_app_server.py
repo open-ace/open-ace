@@ -177,7 +177,7 @@ class ZCodeAppServerSession:
             "models": [{"modelId": model_id}],
         }
         if api_key:
-            provider["apiKey"] = api_key
+            provider["apiKey"] = {"source": "inline", "value": api_key}
         return {
             "revision": "0",
             "generatedAt": int(time.time() * 1000),

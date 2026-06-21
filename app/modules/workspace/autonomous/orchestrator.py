@@ -860,11 +860,23 @@ class AutonomousOrchestrator:
         main/review/test: if the workflow already stores that line's real CLI
         session id, resume it (--resume); otherwise mint a fresh tracking id
         (first call on that line). fresh/unknown: brand-new session, no resume.
+
+        Reads from the wf dict first, then falls back to a fresh DB query.
+        The DB fallback is critical: _run_agent updates the session line in the
+        DB, but the in-memory wf dict may be stale if it was read before the
+        update (e.g. _do_planning reads wf once at entry, then planning's
+        _run_agent writes to DB; finalize needs the updated value).
         """
         field = SESSION_LINE_FIELDS.get(session_line)
         if not field:
             return str(uuid.uuid4()), None, False
         existing = ((wf or {}).get(field) or "").strip()
+        # Fallback to DB if the in-memory wf dict doesn't have the session id.
+        # This handles the case where a prior _run_agent in the same phase
+        # updated the DB but the in-memory wf dict wasn't refreshed.
+        if not existing:
+            fresh = self.workflow or {}
+            existing = (fresh.get(field) or "").strip()
         if existing:
             return str(uuid.uuid4()), existing, True
         return str(uuid.uuid4()), None, False
