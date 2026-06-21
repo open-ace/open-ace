@@ -357,6 +357,7 @@ def api_change_password():
             username=username,
             resource_type="user",
             resource_id=str(user_id),
+            resource_name=username,
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent", ""),
         )

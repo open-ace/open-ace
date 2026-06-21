@@ -7,13 +7,18 @@ import { apiClient } from './client';
 // Types
 export interface AuditLog {
   id: number;
-  user_id: number;
-  username?: string;
+  user_id: number | null;
+  username?: string | null;
   action: string;
+  severity: string;
   resource_type: string;
-  resource_id: string;
+  resource_id: string | null;
   details: Record<string, unknown>;
-  ip_address?: string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  session_id?: string | null;
+  success: boolean;
+  error_message?: string | null;
   timestamp: string;
 }
 

@@ -296,6 +296,8 @@ export const translations: Record<Language, Translations> = {
     resourceAgentToken: 'Agent Token',
     resourceRemoteMachine: 'Remote Machine',
     resourceData: 'Data',
+    resourceSession: 'Session',
+    resourceUser: 'User',
 
     // Content Filter
     filterRules: 'Filter Rules',
@@ -1734,6 +1736,8 @@ export const translations: Record<Language, Translations> = {
     resourceAgentToken: '代理令牌',
     resourceRemoteMachine: '远程机器',
     resourceData: '数据',
+    resourceSession: '会话',
+    resourceUser: '用户',
 
     // Content Filter
     filterRules: '过滤规则',
@@ -3231,6 +3235,8 @@ export const translations: Record<Language, Translations> = {
     resourceAgentToken: 'エージェントトークン',
     resourceRemoteMachine: 'リモートマシン',
     resourceData: 'データ',
+    resourceSession: 'セッション',
+    resourceUser: 'ユーザー',
 
     // Audit Analysis
     securityScore: 'セキュリティスコア',
@@ -4349,6 +4355,8 @@ export const translations: Record<Language, Translations> = {
     resourceAgentToken: '에이전트 토큰',
     resourceRemoteMachine: '원격 머신',
     resourceData: '데이터',
+    resourceSession: '세션',
+    resourceUser: '사용자',
 
     // Audit Analysis
     securityScore: '보안 점수',

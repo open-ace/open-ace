@@ -197,6 +197,7 @@ def generate_report():
                 user_id=g.user_id,
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
+                resource_name=report_type,
                 details={
                     "report_type": report_type,
                     "format": output_format,
@@ -228,6 +229,7 @@ def generate_report():
                 user_id=g.user_id,
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
+                resource_name=report_type,
                 details={
                     "report_type": report_type,
                     "format": output_format,

@@ -140,13 +140,20 @@ export interface QuotaUsage {
 }
 
 export interface AuditLog {
-  id: string;
-  user_id: string;
-  action: string;
-  resource: string;
-  details: Record<string, unknown>;
+  id: number | string;
   timestamp: string;
-  ip_address?: string;
+  user_id: number | string | null;
+  username: string | null;
+  action: string;
+  severity: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string | null;
+  session_id: string | null;
+  success: boolean;
+  error_message: string | null;
 }
 
 // Governance types
