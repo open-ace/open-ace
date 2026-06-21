@@ -8,10 +8,20 @@ import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { formatDateTime } from '@/utils';
+import { formatDateTime, getDefaultDateRange } from '@/utils';
 import type { AuditLogFilters } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
+// Default audit-log filter window: the last 7 days. Used both on initial
+// load and after Reset so the page always queries a bounded range instead
+// of an unbounded one (issue #838). 7 days balances coverage and payload
+// size for an audit trail.
+const AUDIT_LOG_DEFAULT_RANGE_DAYS = 7;
+
+const getDefaultAuditFilters = (): AuditLogFilters => {
+  const { start, end } = getDefaultDateRange(AUDIT_LOG_DEFAULT_RANGE_DAYS);
+  return { start_date: start, end_date: end };
+};
 
 const ACTION_COLORS: Record<string, BadgeVariant> = {
   // Authentication
@@ -55,7 +65,7 @@ const ACTION_COLORS: Record<string, BadgeVariant> = {
 
 export const AuditLog: React.FC = () => {
   const language = useLanguage();
-  const [filters, setFilters] = useState<AuditLogFilters>({});
+  const [filters, setFilters] = useState<AuditLogFilters>(getDefaultAuditFilters);
   const [page, setPage] = useState(1);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useAuditLogs({
@@ -131,12 +141,20 @@ export const AuditLog: React.FC = () => {
   );
 
   const handleFilterChange = (key: keyof AuditLogFilters, value: string) => {
-    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value || undefined };
+      // Clear an out-of-order end date, mirroring Messages.tsx, so the
+      // range stays valid as the user edits the date inputs.
+      if (next.start_date && next.end_date && next.end_date < next.start_date) {
+        next.end_date = undefined;
+      }
+      return next;
+    });
     setPage(1);
   };
 
   const handleReset = () => {
-    setFilters({});
+    setFilters(getDefaultAuditFilters());
     setPage(1);
   };
 
