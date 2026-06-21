@@ -11,7 +11,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
 import { useQuotaUsage, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
-import { t } from '@/i18n';
+import { t, type Language } from '@/i18n';
 import {
   Card,
   StatCard,
@@ -37,24 +37,24 @@ import {
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
-const TYPE_OPTIONS = [
-  { value: '', label: 'All Types' },
-  { value: 'quota', label: 'Quota' },
-  { value: 'system', label: 'System' },
-  { value: 'security', label: 'Security' },
+const getTypeOptions = (language: Language) => [
+  { value: '', label: t('allTypes', language) },
+  { value: 'quota', label: t('quota', language) },
+  { value: 'system', label: t('system', language) },
+  { value: 'security', label: t('security', language) },
 ];
 
-const SEVERITY_OPTIONS = [
-  { value: '', label: 'All Severities' },
-  { value: 'critical', label: 'Critical' },
-  { value: 'warning', label: 'Warning' },
-  { value: 'info', label: 'Info' },
+const getSeverityOptions = (language: Language) => [
+  { value: '', label: t('allSeverities', language) },
+  { value: 'critical', label: t('critical', language) },
+  { value: 'warning', label: t('warning', language) },
+  { value: 'info', label: t('info', language) },
 ];
 
-const READ_OPTIONS = [
-  { value: '', label: 'All' },
-  { value: 'unread', label: 'Unread' },
-  { value: 'read', label: 'Read' },
+const getReadOptions = (language: Language) => [
+  { value: '', label: t('all', language) },
+  { value: 'unread', label: t('unread', language) },
+  { value: 'read', label: t('read', language) },
 ];
 
 type TabType = 'quota' | 'alerts';
@@ -408,7 +408,7 @@ export const QuotaAlerts: React.FC = () => {
                         <td>{alert.title}</td>
                         <td>
                           <Badge variant={getSeverityVariant(alert.severity)}>
-                            {alert.severity}
+                            {t(alert.severity, language)}
                           </Badge>
                         </td>
                         <td>
@@ -735,19 +735,27 @@ export const QuotaAlerts: React.FC = () => {
           <div className="row g-3">
             <div className="col-md-3">
               <label className="form-label">{t('alertType', language)}</label>
-              <Select options={TYPE_OPTIONS} value={typeFilter} onChange={setTypeFilter} />
+              <Select
+                options={getTypeOptions(language)}
+                value={typeFilter}
+                onChange={setTypeFilter}
+              />
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('severity', language)}</label>
               <Select
-                options={SEVERITY_OPTIONS}
+                options={getSeverityOptions(language)}
                 value={severityFilter}
                 onChange={setSeverityFilter}
               />
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('readStatus', language)}</label>
-              <Select options={READ_OPTIONS} value={readFilter} onChange={setReadFilter} />
+              <Select
+                options={getReadOptions(language)}
+                value={readFilter}
+                onChange={setReadFilter}
+              />
             </div>
             <div className="col-md-3 d-flex align-items-end">
               <Button variant="secondary" size="sm" onClick={fetchAlerts}>
@@ -795,10 +803,14 @@ export const QuotaAlerts: React.FC = () => {
                         </span>
                       </td>
                       <td>
-                        <Badge variant={getTypeVariant(alert.type)}>{alert.type}</Badge>
+                        <Badge variant={getTypeVariant(alert.type)}>
+                          {t(alert.type, language)}
+                        </Badge>
                       </td>
                       <td>
-                        <Badge variant={getSeverityVariant(alert.severity)}>{alert.severity}</Badge>
+                        <Badge variant={getSeverityVariant(alert.severity)}>
+                          {t(alert.severity, language)}
+                        </Badge>
                       </td>
                       <td>
                         <small className="text-muted">{formatDateTime(alert.created_at)}</small>
@@ -916,9 +928,9 @@ export const QuotaAlerts: React.FC = () => {
                 <label className="form-label">{t('minSeverity', language)}</label>
                 <Select
                   options={[
-                    { value: 'info', label: 'Info' },
-                    { value: 'warning', label: 'Warning' },
-                    { value: 'critical', label: 'Critical' },
+                    { value: 'info', label: t('info', language) },
+                    { value: 'warning', label: t('warning', language) },
+                    { value: 'critical', label: t('critical', language) },
                   ]}
                   value={preferences.min_severity}
                   onChange={(value) =>
