@@ -266,6 +266,23 @@ def _extract_final_response_text(event_log: list[dict], fallback_text: str = "")
     return fallback_text.strip()
 
 
+def _extract_visible_response_text(event_log: list[dict], fallback_text: str = "") -> str:
+    """Return all visible assistant turns, excluding hidden/tool payloads.
+
+    This preserves structured tags like ``TL;DR:`` or ``CI_STATUS:`` even when
+    the agent emits them before a trailing tool call or short final ack turn.
+    """
+
+    assistant_turns: list[str] = [
+        event.get("text", "").strip()
+        for event in _coalesce_assistant_events(event_log)
+        if event.get("type") == "assistant" and event.get("text", "").strip()
+    ]
+    if assistant_turns:
+        return "\n\n".join(assistant_turns)
+    return fallback_text.strip()
+
+
 class _ZcodeResultCollector:
     """Collects assistant text, tool calls, and token usage from ZCode app-server.
 
@@ -1023,7 +1040,7 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id="",
                 tracking_session_id=session_id,
-                response_text=_extract_final_response_text(
+                response_text=_extract_visible_response_text(
                     session.event_log, session.assistant_text
                 ),
                 total_tokens=session.total_tokens,
@@ -1040,7 +1057,7 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id=resolved_session_id,
                 tracking_session_id=session_id,
-                response_text=_extract_final_response_text(
+                response_text=_extract_visible_response_text(
                     session.event_log, session.assistant_text
                 ),
                 total_tokens=session.total_tokens,
@@ -1056,7 +1073,7 @@ class AutonomousAgentRunner:
         return AgentTaskResult(
             session_id=resolved_session_id,
             tracking_session_id=session_id,
-            response_text=_extract_final_response_text(session.event_log, session.assistant_text),
+            response_text=_extract_visible_response_text(session.event_log, session.assistant_text),
             total_tokens=session.total_tokens,
             total_input_tokens=session.total_input_tokens,
             total_output_tokens=session.total_output_tokens,
@@ -1289,7 +1306,7 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id=cli_sid,
                 tracking_session_id=session_id,
-                response_text=_extract_final_response_text(
+                response_text=_extract_visible_response_text(
                     collector.event_log, collector.assistant_text
                 ),
                 total_tokens=collector.total_tokens,
@@ -1305,7 +1322,7 @@ class AutonomousAgentRunner:
         return AgentTaskResult(
             session_id=cli_sid,
             tracking_session_id=session_id,
-            response_text=_extract_final_response_text(
+            response_text=_extract_visible_response_text(
                 collector.event_log, collector.assistant_text
             ),
             total_tokens=collector.total_tokens,
@@ -1553,7 +1570,7 @@ class AutonomousAgentRunner:
                         return AgentTaskResult(
                             session_id=session_id,
                             tracking_session_id=session_id,
-                            response_text=_extract_final_response_text(assistant_events),
+                            response_text=_extract_visible_response_text(assistant_events),
                             messages=messages,
                             total_tokens=session_data.get("total_tokens", 0),
                             total_input_tokens=session_data.get("total_input_tokens", 0),
