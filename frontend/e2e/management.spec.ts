@@ -48,7 +48,10 @@ test.describe('User Management', () => {
     await waitForApp(page);
 
     // The "Add User" button should be visible in the header area
-    const addButton = page.locator('.user-management button').filter({ hasText: /add|添加/i }).first();
+    const addButton = page
+      .locator('.user-management button')
+      .filter({ hasText: /add|添加/i })
+      .first();
     await expect(addButton).toBeVisible({ timeout: 10000 });
   });
 });
@@ -78,12 +81,64 @@ test.describe('Quota & Alerts', () => {
     const tabs = page.locator('.quota-alerts .nav-tabs .nav-link');
 
     // Click alerts tab (second tab)
-    if (await tabs.count() > 1) {
+    if ((await tabs.count()) > 1) {
       await tabs.nth(1).click();
       await page.waitForLoadState('networkidle');
 
       // Verify alerts tab is active
       await expect(tabs.nth(1)).toHaveClass(/active/);
+    }
+  });
+
+  test('quota tab should not show alert rules overview card', async ({ page }) => {
+    await page.goto('/manage/quota');
+    await waitForApp(page);
+
+    const container = page.locator('.quota-alerts');
+    const tabs = container.locator('.nav-tabs .nav-link');
+
+    // Anchor the default active tab is quota to remove implicit dependency
+    await expect(tabs.nth(0)).toHaveClass(/active/);
+
+    // The misplaced "Alert Rules" overview card must no longer render on the quota tab
+    await expect(container.locator('.alert-rules-list')).toHaveCount(0);
+
+    // No alert-rules card title should be present
+    const alertRulesTitle = container
+      .locator('.card-title, .card .card-header')
+      .filter({ hasText: /alert rules|告警规则/i });
+    await expect(alertRulesTitle).toHaveCount(0);
+
+    // No "no alerts" empty state on the quota tab (quota empty state is "no quota data" instead)
+    const noAlertsState = container
+      .locator('.empty-state')
+      .filter({ hasText: /no alerts found|暂无告警/i });
+    await expect(noAlertsState).toHaveCount(0);
+  });
+
+  test('alerts tab should still render alert management content', async ({ page }) => {
+    await page.goto('/manage/quota');
+    await waitForApp(page);
+
+    const container = page.locator('.quota-alerts');
+    const tabs = container.locator('.nav-tabs .nav-link');
+
+    // Switch to alerts tab (second tab)
+    if ((await tabs.count()) > 1) {
+      await tabs.nth(1).click();
+      await page.waitForLoadState('networkidle');
+      await expect(tabs.nth(1)).toHaveClass(/active/);
+
+      // Alert statistics StatCards should be visible (the comprehensive alert management)
+      const statCards = container.locator('.stat-card');
+      await expect(statCards.first()).toBeVisible({ timeout: 10000 });
+
+      // Either the alert list table or an empty state should be present (tolerant of zero alerts)
+      const table = container.locator('table.table');
+      const emptyState = container.locator('.empty-state');
+      const hasTable = await table.isVisible().catch(() => false);
+      const hasEmpty = await emptyState.isVisible().catch(() => false);
+      expect(hasTable || hasEmpty).toBeTruthy();
     }
   });
 });
@@ -169,15 +224,23 @@ test.describe('Security Center', () => {
     await waitForApp(page);
 
     // Switch to settings tab if not already active
-    const settingsTab = page.locator('.security-center .nav-tabs .nav-link').filter({ hasText: /setting|配置/i }).first();
+    const settingsTab = page
+      .locator('.security-center .nav-tabs .nav-link')
+      .filter({ hasText: /setting|配置/i })
+      .first();
     if (await settingsTab.isVisible()) {
       await settingsTab.click();
       await page.waitForLoadState('networkidle');
     }
 
     // Look for form inputs (session timeout, password policy, etc.)
-    const formInputs = page.locator('.security-center input[type="number"], .security-center input[type="text"]');
-    const hasInputs = await formInputs.first().isVisible({ timeout: 5000 }).catch(() => false);
+    const formInputs = page.locator(
+      '.security-center input[type="number"], .security-center input[type="text"]'
+    );
+    const hasInputs = await formInputs
+      .first()
+      .isVisible({ timeout: 5000 })
+      .catch(() => false);
     expect(typeof hasInputs).toBe('boolean');
   });
 });
