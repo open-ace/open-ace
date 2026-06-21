@@ -127,6 +127,47 @@ class ZCodeAppServerSession:
     def is_running(self) -> bool:
         return self.process.returncode is None
 
+    # Built-in provider baseURLs. zcode does not expose these through the
+    # model catalog (source="builtin"), so we maintain them here. Only the
+    # providers we actually use for autonomous workflows need entries.
+    _PROVIDER_BASE_URLS = {
+        "zai": "https://api.z.ai/api/anthropic",
+        "bigmodel": "https://open.bigmodel.cn/api/anthropic",
+    }
+
+    def _build_runtime_model(self) -> dict | None:
+        """Build a runtimeModel payload for session/resume.
+
+        This forces zcode's resume handler to call B7 → apt, which clears the
+        restoreWarning that would otherwise make session/send reject every
+        message with ZCODE_RUNTIME_MODEL_UNAVAILABLE. Returns None when the
+        model string cannot be parsed (caller skips the runtimeModel param).
+        """
+        if not self.model:
+            return None
+        model_str = self.model
+        if "/" in model_str:
+            provider_id, model_id = model_str.split("/", 1)
+        else:
+            provider_id, model_id = "zai", model_str
+        base_url = self._PROVIDER_BASE_URLS.get(provider_id)
+        if not base_url:
+            logger.warning("Unknown provider %s — cannot build runtimeModel baseURL", provider_id)
+            return None
+        return {
+            "revision": "0",
+            "generatedAt": int(time.time() * 1000),
+            "model": {"providerId": provider_id, "modelId": model_id},
+            "provider": {
+                "providerId": provider_id,
+                "kind": "openai-compatible",
+                "apiFormat": "anthropic-messages",
+                "source": "builtin",
+                "baseURL": base_url,
+                "models": [{"modelId": model_id}],
+            },
+        }
+
     def start(
         self,
         model: str | None = None,
@@ -148,40 +189,24 @@ class ZCodeAppServerSession:
         workspace_param = {"workspacePath": workspace, "workspaceKey": workspace}
         resumed = False
 
-        # Initialize the workspace model catalog BEFORE session/resume.
-        # Each agent task spawns a fresh app-server process whose
-        # workspaceModelCatalogs is empty. session/resume checks whether the
-        # session's historical model is in the catalog (_Er in zcode.cjs); if
-        # the catalog is empty the check fails and the session is flagged with
-        # ZCODE_RUNTIME_MODEL_UNAVAILABLE, making session/send reject every
-        # message. The native ZCode app avoids this because it is a long-lived
-        # process whose catalog is already populated. workspace/readState builds
-        # the catalog (r1 in zcode.cjs) so the resume model-availability check
-        # passes. Only needed before resume; session/create does not look up a
-        # historical model.
         if resume_session_id:
-            ws_result = self._request(
-                "workspace/readState",
-                {"workspace": workspace_param},
-                timeout=30.0,
-            )
-            if not ws_result or "error" in ws_result:
-                logger.warning(
-                    "ZCode workspace/readState failed for %s: %s — "
-                    "session/resume may hit MODEL_UNAVAILABLE",
-                    self.session_id[:8],
-                    ws_result,
-                )
-            else:
-                logger.info(
-                    "ZCode workspace state initialized for %s",
-                    self.session_id[:8],
-                )
-
-        if resume_session_id:
+            # Pass runtimeModel so zcode's session/resume handler calls B7,
+            # which clears restoreWarning (ZCODE_RUNTIME_MODEL_UNAVAILABLE).
+            # Without this, the resumed session is flagged unavailable because
+            # a fresh app-server process has an empty workspaceModelCatalogs;
+            # session/send then rejects every message. The runtimeModel must
+            # carry the provider baseURL (e.g. https://api.z.ai/api/anthropic
+            # for zai) — builtin providers don't expose it via the catalog.
+            resume_params = {
+                "sessionId": resume_session_id,
+                "workspace": workspace_param,
+            }
+            runtime_model = self._build_runtime_model()
+            if runtime_model:
+                resume_params["runtimeModel"] = runtime_model
             result = self._request(
                 "session/resume",
-                {"sessionId": resume_session_id, "workspace": workspace_param},
+                resume_params,
                 timeout=20.0,
             )
             # Both create and resume return a `session` envelope; the resumed id
