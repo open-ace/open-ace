@@ -333,6 +333,31 @@ def test_collector_ignores_non_json():
     assert len(c.event_log) == 0  # non-JSON is silently dropped
 
 
+def test_extract_final_response_text_uses_last_visible_turn():
+    from app.modules.workspace.autonomous.agent_runner import _extract_final_response_text
+
+    event_log = [
+        {"type": "assistant", "text": "Let me inspect. "},
+        {"type": "tool_use", "tool_name": "Read", "tool_input": {"file_path": "a.py"}},
+        {"type": "assistant", "text": "## Final Review\n"},
+        {"type": "assistant", "text": "Looks good."},
+    ]
+    assert _extract_final_response_text(event_log) == "## Final Review\nLooks good."
+
+
+def test_extract_visible_response_text_preserves_all_visible_turns():
+    from app.modules.workspace.autonomous.agent_runner import _extract_visible_response_text
+
+    event_log = [
+        {"type": "assistant", "text": "Applied fix\nCI_STATUS: pre-existing"},
+        {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "git push"}},
+        {"type": "assistant", "text": "Done."},
+    ]
+    assert _extract_visible_response_text(event_log) == (
+        "Applied fix\nCI_STATUS: pre-existing\n\nDone."
+    )
+
+
 # ── ZCode session failure cleanup ─────────────────────────────────────────
 
 

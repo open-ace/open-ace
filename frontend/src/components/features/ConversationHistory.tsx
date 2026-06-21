@@ -38,6 +38,21 @@ import type { ConversationHistory as ConversationHistoryType } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
 
+// Canonical tool-result role. The backend normalizes variant spellings
+// (toolResult / tool_result) to this value at the write boundary, and the
+// historical-data migration backfills existing rows. The helper accepts both
+// the canonical "tool" and the legacy "toolResult" so messages written before
+// the normalization landed (or before the migration runs) still match.
+const TOOL_ROLE = 'tool';
+
+/**
+ * Returns true when a message role represents a tool-result message.
+ * Accepts the canonical ``tool`` role as well as the legacy ``toolResult``
+ * spelling so the UI degrades gracefully during the normalization/migration
+ * transition window (pre-migration rows may still carry the old value).
+ */
+const isToolRole = (role: string): boolean => role === TOOL_ROLE || role === 'toolResult';
+
 // Column definitions
 interface ColumnDef {
   key: string;
@@ -648,6 +663,8 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
         return 'bi-robot';
       case 'system':
         return 'bi-gear-fill';
+      // Canonical tool role plus legacy "toolResult" spelling (pre-migration rows)
+      case 'tool':
       case 'toolResult':
         return 'bi-wrench';
       default:
@@ -663,6 +680,8 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
         return 'bg-success';
       case 'system':
         return 'bg-secondary';
+      // Canonical tool role plus legacy "toolResult" spelling (pre-migration rows)
+      case 'tool':
       case 'toolResult':
         return 'bg-info';
       default:
@@ -770,6 +789,9 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   const filteredMessages = useMemo(() => {
     if (!messages) return [];
     if (roleFilter === 'all') return messages;
+    // The tool filter must match both the canonical "tool" role and the legacy
+    // "toolResult" spelling so pre-migration rows are still found.
+    if (roleFilter === TOOL_ROLE) return messages.filter((msg) => isToolRole(msg.role));
     return messages.filter((msg) => msg.role === roleFilter);
   }, [messages, roleFilter]);
 
@@ -787,7 +809,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       if (msg.role === 'user') {
         lastUserTime = msgTime;
         lastUserIndex = index;
-      } else if ((msg.role === 'assistant' || msg.role === 'toolResult') && lastUserTime) {
+      } else if ((msg.role === 'assistant' || isToolRole(msg.role)) && lastUserTime) {
         const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
         if (latency > 0) {
           latencies.push({
@@ -846,7 +868,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       if (msg.role === 'user') stats.user++;
       else if (msg.role === 'assistant') stats.assistant++;
       else if (msg.role === 'system') stats.system++;
-      else if (msg.role === 'toolResult') stats.toolResult++;
+      else if (isToolRole(msg.role)) stats.toolResult++;
       stats.totalTokens += msg.tokens_used ?? 0;
       stats.totalInputTokens += msg.input_tokens ?? 0;
       stats.totalOutputTokens += msg.output_tokens ?? 0;
@@ -855,13 +877,15 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
     return stats;
   }, [messages]);
 
-  // Role filter options
+  // Role filter options. The tool option value is the canonical "tool" role
+  // (what the backend now stores); the filter logic accepts both "tool" and
+  // the legacy "toolResult" spelling via isToolRole so pre-migration rows match.
   const roleFilterOptions = [
     { value: 'all', label: t('all', language) },
     { value: 'user', label: t('messageRoleUser', language) },
     { value: 'assistant', label: t('messageRoleAssistant', language) },
     { value: 'system', label: t('messageRoleSystem', language) },
-    { value: 'toolResult', label: t('messageRoleToolResult', language) },
+    { value: TOOL_ROLE, label: t('messageRoleToolResult', language) },
   ];
 
   return (

@@ -351,6 +351,35 @@ def test_start_resumes_when_session_sessionid_present(zcode_session_cls):
     assert sess._cli_session_id == "sess_resumed_xyz"
 
 
+def test_runtime_model_api_key_uses_protocol_credential_shape(
+    zcode_session_cls, tmp_path, monkeypatch
+):
+    """runtimeModel.provider.apiKey must be an object accepted by ZCode Protocol.
+
+    ZCode 0.14.5 rejects a bare string with:
+    runtimeModel.provider.apiKey expected object, received string. That makes
+    session/resume fail and the runner fall back to session/create, losing the
+    workflow's intended main/review/test resume context.
+    """
+    config_path = tmp_path / ".zcode" / "cli" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        json.dumps({"provider": {"zai": {"options": {"apiKey": "key-123"}}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    sess = _make_session(zcode_session_cls, {})
+    sess.model = "glm-5.2"
+
+    runtime_model = sess._build_runtime_model()
+
+    assert runtime_model["provider"]["apiKey"] == {
+        "source": "inline",
+        "value": "key-123",
+    }
+
+
 def test_start_falls_back_to_create_when_resume_lacks_session(zcode_session_cls):
     """If resume response lacks session.sessionId, fall back to session/create."""
     requests = {
