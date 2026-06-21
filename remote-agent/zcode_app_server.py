@@ -751,10 +751,24 @@ class ZCodeAppServerSession:
                 self.output_callback(self.session_id, "", "stdout", True)
 
     def _handle_message(self, msg: dict[str, Any]) -> None:
-        """Route a parsed message: response (has id) vs notification (no id)."""
+        """Route a parsed message: response (has id) vs notification (no id).
+
+        Also handles server→client requests (messages with both ``id`` and
+        ``method``): these require a response back on stdin. The key case is
+        ``interaction/requestUserInput`` (triggered by the AskUserQuestion tool
+        in plan mode). In an unattended workflow nobody is present to answer,
+        so we auto-decline with a clear reason — the agent receives the deny
+        decision and proceeds using its own judgment instead of stalling
+        forever waiting for input that never arrives.
+        """
         msg_id = msg.get("id")
+        method = msg.get("method")
+        if msg_id is not None and method is not None:
+            # Server→client request: respond automatically.
+            self._handle_server_request(msg_id, method, msg.get("params", {}))
+            return
         if msg_id is not None:
-            # Response to a pending request.
+            # Response to a pending request we sent.
             with self._lock:
                 holder = self._pending.pop(msg_id, None)
             if holder is not None:
@@ -765,11 +779,57 @@ class ZCodeAppServerSession:
                 holder["event"].set()
             return
         # Notification (no id): forward as a live event if it carries state.
-        method = msg.get("method", "")
-        params = msg.get("params", {}) or {}
         if method == "state.updated":
             # Inject as an event-like dict so _forward_one_event handles it.
-            self._forward_one_event({"type": "state.updated", "payload": params})
+            self._forward_one_event({"type": "state.updated", "payload": msg.get("params", {})})
+
+    def _handle_server_request(self, msg_id: str, method: str, params: dict[str, Any]) -> None:
+        """Auto-respond to server→client requests in unattended mode."""
+        if method == "interaction/requestUserInput":
+            # AskUserQuestion (or similar) is waiting for a human answer.
+            # Decline so the agent knows to proceed with its own judgment.
+            logger.info(
+                "ZCode interaction/requestUserInput auto-declined for %s "
+                "(unattended workflow) — agent should proceed with best judgment",
+                self.session_id[:8],
+            )
+            self._send_response(
+                msg_id,
+                {
+                    "action": "decline",
+                    "reason": (
+                        "This is an unattended autonomous workflow. No human is "
+                        "available to answer. Use your best judgment and proceed."
+                    ),
+                },
+            )
+            return
+        # Unknown server request: respond with a generic error so it doesn't
+        # hang forever.
+        logger.warning("ZCode unhandled server request %s for %s", method, self.session_id[:8])
+        self._send_response(
+            msg_id,
+            None,
+            error={
+                "code": -32601,
+                "message": f"Unhandled server request: {method}",
+            },
+        )
+
+    def _send_response(self, msg_id: str, result: Any, error: dict[str, Any] | None = None) -> None:
+        """Write a server→client response back to the app-server stdin."""
+        if not self.is_running:
+            return
+        msg: dict[str, Any] = {"id": msg_id}
+        if error is not None:
+            msg["error"] = error
+        else:
+            msg["result"] = result
+        try:
+            self.process.stdin.write(json.dumps(msg) + "\n")
+            self.process.stdin.flush()
+        except (OSError, BrokenPipeError):
+            logger.debug("ZCode stdin write failed for %s", self.session_id[:8])
 
     def _request(
         self, method: str, params: dict[str, Any], timeout: float = 30.0
