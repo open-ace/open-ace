@@ -552,6 +552,27 @@ class TestStdoutParsing:
         assert "Real content" in session.assistant_text
         assert len(session.output_lines) == 1  # Only the non-empty JSON line
 
+    def test_parse_assistant_stringified_thinking_json_is_hidden(self):
+        """Stringified thinking/tool JSON must not pollute assistant_text."""
+        session = self._run_read_stdout(
+            [
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": '[{"type":"thinking","thinking":"internal scratchpad"}]'
+                        },
+                    }
+                ),
+                json.dumps({"type": "assistant", "message": {"content": "Final answer"}}),
+                "",
+            ]
+        )
+        assert session.assistant_text == "Final answer"
+        assert [e["text"] for e in session.event_log if e.get("type") == "assistant"] == [
+            "Final answer"
+        ]
+
 
 class TestStopSession:
     """Tests for stop_session."""
@@ -610,14 +631,37 @@ class TestPersistLocalSessionMessages:
         assert sm.add_message.call_count == 2
         first_call = sm.add_message.call_args_list[0].kwargs
         assert first_call["session_id"] == "sess-1"
-        assert first_call["role"] == "assistant"
-        assert first_call["model"] == "claude-sonnet"
-        assert first_call["metadata"] == {"message_id": "msg-123"}
-
-        second_call = sm.add_message.call_args_list[1].kwargs
-        assert second_call["session_id"] == "sess-1"
-        assert second_call["role"] == "tool"
-        assert second_call["metadata"] == {
+        assert first_call["role"] == "tool"
+        assert first_call["metadata"] == {
             "tool_name": "Read",
             "tool_use_id": "tool-456",
         }
+
+        second_call = sm.add_message.call_args_list[1].kwargs
+        assert second_call["session_id"] == "sess-1"
+        assert second_call["role"] == "assistant"
+        assert second_call["model"] == "claude-sonnet"
+        assert second_call["metadata"] == {"message_id": "msg-123"}
+
+    def test_event_log_persists_only_final_assistant_turn(self):
+        sm = MagicMock()
+        runner = AutonomousAgentRunner(session_manager=sm)
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        result = AgentTaskResult(
+            event_log=[
+                {"type": "assistant", "text": "Let me inspect the codebase. "},
+                {"type": "tool_use", "tool_name": "Read", "tool_input": {"file_path": "a.py"}},
+                {"type": "assistant", "text": "## Final Plan\n"},
+                {"type": "assistant", "text": "1. Fix the bug"},
+            ]
+        )
+
+        runner._persist_local_session_messages("sess-1", result)
+
+        assert sm.add_message.call_count == 2
+        first_call = sm.add_message.call_args_list[0].kwargs
+        assert first_call["role"] == "tool"
+        second_call = sm.add_message.call_args_list[1].kwargs
+        assert second_call["role"] == "assistant"
+        assert second_call["content"] == "## Final Plan\n1. Fix the bug"

@@ -148,6 +148,36 @@ def test_collector_keeps_normal_assistant_text():
     assert "## Plan: Fix the bug" in c.assistant_text
 
 
+def test_collector_extracts_plan_from_leaked_plan_json():
+    """A leaked {"plan": "..."} blob should become the final visible plan."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    c.on_output(
+        "sid",
+        '{"type":"assistant","message":{"content":"{\\"plan\\":\\"## Final Plan\\\\n1. Fix bug\\"}"}}',
+        "stdout",
+        False,
+    )
+    assert c.assistant_text == "## Final Plan\n1. Fix bug"
+    assert c.event_log[-1]["text"] == "## Final Plan\n1. Fix bug"
+
+
+def test_collector_hides_child_agent_prompt_json():
+    """Child-agent prompt payloads must not show up as assistant prose."""
+    from app.modules.workspace.autonomous.agent_runner import _ZcodeResultCollector
+
+    c = _ZcodeResultCollector()
+    c.on_output(
+        "sid",
+        '{"type":"assistant","message":{"content":"{\\"description\\":\\"Find bug\\",\\"prompt\\":\\"inspect files\\"}"}}',
+        "stdout",
+        False,
+    )
+    assert c.assistant_text == ""
+    assert c.event_log == []
+
+
 def test_looks_like_tool_json_helper():
     """The _looks_like_tool_json helper correctly classifies text.
 
@@ -159,10 +189,12 @@ def test_looks_like_tool_json_helper():
     assert _looks_like_tool_json('{"command": "ls /tmp"}')
     assert _looks_like_tool_json('{"tool": "Read", "file_path": "/tmp/a.py"}')
     assert _looks_like_tool_json('{"subagent_type": "Explore", "prompt": "..."}')
+    assert _looks_like_tool_json('{"description": "Find role filter", "prompt": "inspect files"}')
 
     # NOT tool JSON: valid JSON but no tool keys at top level
     assert not _looks_like_tool_json('{"type": "assistant"}')
     assert not _looks_like_tool_json('{"name": "Write"}')
+    assert not _looks_like_tool_json('{"plan": "## Final Plan"}')
 
     # NOT tool JSON: prose that happens to contain JSON-like text
     assert not _looks_like_tool_json("## Implementation Plan")

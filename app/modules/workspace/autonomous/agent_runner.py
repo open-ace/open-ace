@@ -131,7 +131,19 @@ class _LocalSession:
 # Top-level keys that indicate a JSON object is a leaked tool-call blob
 # rather than genuine assistant prose. ZCode sometimes streams tool
 # invocations as text content before emitting a structured tool.* event.
-_TOOL_JSON_KEYS = frozenset({"tool", "command", "subagent_type", "file_path"})
+_TOOL_JSON_KEYS = frozenset(
+    {
+        "tool",
+        "command",
+        "subagent_type",
+        "file_path",
+        # ZCode sometimes leaks child-agent invocation payloads as assistant
+        # text; those arrive as {"description": "...", "prompt": "..."}.
+        "description",
+        "prompt",
+    }
+)
+_NON_VISIBLE_BLOCK_TYPES = frozenset({"thinking", "tool_use", "tool_result", "reasoning"})
 
 
 def _looks_like_tool_json(text: str) -> bool:
@@ -149,6 +161,109 @@ def _looks_like_tool_json(text: str) -> bool:
     except (json.JSONDecodeError, ValueError):
         return False
     return isinstance(obj, dict) and any(k in obj for k in _TOOL_JSON_KEYS)
+
+
+def _extract_visible_text(content: Any) -> str:
+    """Extract user-visible assistant text from mixed protocol payloads.
+
+    Handles three common autonomous-runner payload shapes:
+
+    - Claude/OpenAI-style content blocks: ``[{"type":"text","text":"..."}]``
+    - Stringified JSON arrays/objects leaked through assistant content
+      (e.g. Claude ``thinking`` / ``tool_use`` blocks)
+    - ZCode leaked plan/tool objects, where ``{"plan":"..."}`` should render
+      as the final plan text while tool-call payloads should be hidden.
+    """
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            text = _extract_visible_text(item)
+            if text:
+                parts.append(text)
+        return "".join(parts)
+
+    if isinstance(content, dict):
+        block_type = content.get("type")
+        if block_type in _NON_VISIBLE_BLOCK_TYPES:
+            return ""
+        text_value = content.get("text")
+        if block_type == "text" and isinstance(text_value, str):
+            return text_value
+        plan_value = content.get("plan")
+        if isinstance(plan_value, str):
+            return plan_value
+        if any(k in content for k in _TOOL_JSON_KEYS):
+            return ""
+        if "content" in content:
+            return _extract_visible_text(content.get("content"))
+        if isinstance(text_value, str):
+            return text_value
+        return ""
+
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                return content
+            return _extract_visible_text(parsed)
+        return content
+
+    return ""
+
+
+def _coalesce_assistant_events(event_log: list[dict]) -> list[dict]:
+    """Merge adjacent assistant deltas into turn-sized assistant messages."""
+
+    merged: list[dict] = []
+    current_assistant: dict | None = None
+
+    for event in event_log or []:
+        if event.get("type") == "assistant":
+            text = event.get("text", "")
+            if not text:
+                continue
+            if current_assistant is None:
+                current_assistant = {
+                    "type": "assistant",
+                    "text": text,
+                    "message_id": event.get("message_id"),
+                    "model": event.get("model"),
+                }
+            else:
+                current_assistant["text"] += text
+                if event.get("message_id"):
+                    current_assistant["message_id"] = event.get("message_id")
+                if event.get("model"):
+                    current_assistant["model"] = event.get("model")
+            continue
+
+        if current_assistant is not None:
+            merged.append(current_assistant)
+            current_assistant = None
+
+        if event.get("type") == "tool_use":
+            merged.append(event)
+
+    if current_assistant is not None:
+        merged.append(current_assistant)
+
+    return merged
+
+
+def _extract_final_response_text(event_log: list[dict], fallback_text: str = "") -> str:
+    """Return the last user-visible assistant turn from an event log."""
+
+    assistant_turns: list[str] = [
+        event.get("text", "").strip()
+        for event in _coalesce_assistant_events(event_log)
+        if event.get("type") == "assistant" and event.get("text", "").strip()
+    ]
+    if assistant_turns:
+        return assistant_turns[-1]
+    return fallback_text.strip()
 
 
 class _ZcodeResultCollector:
@@ -200,13 +315,7 @@ class _ZcodeResultCollector:
         # Assistant text delta (from model.streaming → {"type":"assistant",...})
         if msg_type == "assistant":
             content = parsed.get("message", {}).get("content", "")
-            text = ""
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text += block.get("text", "")
-            elif isinstance(content, str):
-                text = content
+            text = _extract_visible_text(content)
             # Filter out leaked tool-call JSON: ZCode sometimes streams tool
             # invocations as text content before emitting a structured tool.*
             # event. These look like raw JSON with tool/command markers and
@@ -914,7 +1023,9 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id="",
                 tracking_session_id=session_id,
-                response_text=session.assistant_text,
+                response_text=_extract_final_response_text(
+                    session.event_log, session.assistant_text
+                ),
                 total_tokens=session.total_tokens,
                 total_input_tokens=session.total_input_tokens,
                 total_output_tokens=session.total_output_tokens,
@@ -929,7 +1040,9 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id=resolved_session_id,
                 tracking_session_id=session_id,
-                response_text=session.assistant_text,
+                response_text=_extract_final_response_text(
+                    session.event_log, session.assistant_text
+                ),
                 total_tokens=session.total_tokens,
                 total_input_tokens=session.total_input_tokens,
                 total_output_tokens=session.total_output_tokens,
@@ -943,7 +1056,7 @@ class AutonomousAgentRunner:
         return AgentTaskResult(
             session_id=resolved_session_id,
             tracking_session_id=session_id,
-            response_text=session.assistant_text,
+            response_text=_extract_final_response_text(session.event_log, session.assistant_text),
             total_tokens=session.total_tokens,
             total_input_tokens=session.total_input_tokens,
             total_output_tokens=session.total_output_tokens,
@@ -1176,7 +1289,9 @@ class AutonomousAgentRunner:
             return AgentTaskResult(
                 session_id=cli_sid,
                 tracking_session_id=session_id,
-                response_text=collector.assistant_text,
+                response_text=_extract_final_response_text(
+                    collector.event_log, collector.assistant_text
+                ),
                 total_tokens=collector.total_tokens,
                 total_input_tokens=collector.input_tokens,
                 total_output_tokens=collector.output_tokens,
@@ -1190,7 +1305,9 @@ class AutonomousAgentRunner:
         return AgentTaskResult(
             session_id=cli_sid,
             tracking_session_id=session_id,
-            response_text=collector.assistant_text,
+            response_text=_extract_final_response_text(
+                collector.event_log, collector.assistant_text
+            ),
             total_tokens=collector.total_tokens,
             total_input_tokens=collector.input_tokens,
             total_output_tokens=collector.output_tokens,
@@ -1426,15 +1543,17 @@ class AutonomousAgentRunner:
                             messages = self.session_manager.get_messages(session_id) or []
 
                         # Extract assistant text
-                        assistant_text = ""
+                        assistant_events: list[dict] = []
                         for msg in messages:
                             if msg.get("role") == "assistant":
-                                assistant_text += msg.get("content", "")
+                                text = _extract_visible_text(msg.get("content", ""))
+                                if text:
+                                    assistant_events.append({"type": "assistant", "text": text})
 
                         return AgentTaskResult(
                             session_id=session_id,
                             tracking_session_id=session_id,
-                            response_text=assistant_text,
+                            response_text=_extract_final_response_text(assistant_events),
                             messages=messages,
                             total_tokens=session_data.get("total_tokens", 0),
                             total_input_tokens=session_data.get("total_input_tokens", 0),
@@ -1470,12 +1589,15 @@ class AutonomousAgentRunner:
     def _persist_local_session_messages(
         self, session_id: str, result: AgentTaskResult, milestone_id: str = ""
     ) -> None:
-        """Write agent conversation to session_messages preserving order.
+        """Write workflow-visible messages to ``session_messages``.
 
-        Uses the ordered event_log from _LocalSession to maintain the actual
-        interleaving (assistant -> tool_use -> assistant -> ...).
-        Falls back to separate assistant_text + tool_calls if event_log is empty
-        (e.g. remote sessions or legacy code path).
+        Autonomous workflow detail views should show the final assistant output
+        for a phase, not every streamed delta / hidden reasoning fragment. We
+        therefore persist all tool-use events but collapse assistant deltas down
+        to the last visible assistant turn.
+
+        Falls back to separate ``response_text`` + ``tool_calls`` if event_log
+        is empty (e.g. remote sessions or legacy code path).
 
         Called after the agent task finishes, before the session status is
         updated.  Errors are caught by the caller and do not affect the
@@ -1486,21 +1608,11 @@ class AutonomousAgentRunner:
         # increment_session_usage at finish time; counting here too would
         # double-count (#1003 / #1007 review).
         if result.event_log:
-            for event in result.event_log:
+            merged_events = _coalesce_assistant_events(result.event_log)
+            final_assistant = None
+            for event in merged_events:
                 if event.get("type") == "assistant":
-                    self.session_manager.add_message(
-                        session_id=session_id,
-                        milestone_id=milestone_id,
-                        role="assistant",
-                        content=event.get("text", ""),
-                        model=event.get("model"),
-                        metadata=(
-                            {"message_id": event.get("message_id")}
-                            if event.get("message_id")
-                            else None
-                        ),
-                        count_usage=False,
-                    )
+                    final_assistant = event
                 elif event.get("type") == "tool_use":
                     tool_input = event.get("tool_input", {})
                     self.session_manager.add_message(
@@ -1522,6 +1634,20 @@ class AutonomousAgentRunner:
                         },
                         count_usage=False,
                     )
+            if final_assistant:
+                self.session_manager.add_message(
+                    session_id=session_id,
+                    milestone_id=milestone_id,
+                    role="assistant",
+                    content=final_assistant.get("text", ""),
+                    model=final_assistant.get("model"),
+                    metadata=(
+                        {"message_id": final_assistant.get("message_id")}
+                        if final_assistant.get("message_id")
+                        else None
+                    ),
+                    count_usage=False,
+                )
                 # usage events are metadata-only, not persisted as messages
         else:
             # Fallback: write as single assistant + individual tool messages
@@ -1612,15 +1738,9 @@ class AutonomousAgentRunner:
                         msg = parsed.get("message", {})
                         content = msg.get("content", "")
                         message_id = msg.get("id")
-                        text_delta = ""
-                        if isinstance(content, list):
-                            for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
-                                    text_delta = block.get("text", "")
-                                    session.assistant_text += text_delta
-                        elif isinstance(content, str):
-                            text_delta = content
-                            session.assistant_text += content
+                        text_delta = _extract_visible_text(content)
+                        if text_delta:
+                            session.assistant_text += text_delta
                         # Record in event log for ordered message persistence
                         if text_delta:
                             session.event_log.append(
