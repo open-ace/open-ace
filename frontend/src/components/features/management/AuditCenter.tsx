@@ -26,7 +26,7 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
-import { formatDateTime, createMatcherConfig } from '@/utils';
+import { formatDate, formatDateTime, createMatcherConfig } from '@/utils';
 import {
   complianceApi,
   type AuditPattern,
@@ -55,6 +55,19 @@ type AuditLog = {
 };
 
 const ITEMS_PER_PAGE = 20;
+// Default audit-log filter window: the last 7 days. Used both on initial
+// load and after Reset so the page always queries a bounded range instead
+// of an unbounded one (issue #838). Mirrors the Messages page, which
+// defaults startDate/endDate to today.
+const DEFAULT_FILTER_RANGE_DAYS = 7;
+
+const getDefaultAuditFilters = (): AuditLogFilters => ({
+  start_date: formatDate(
+    new Date(Date.now() - DEFAULT_FILTER_RANGE_DAYS * 24 * 60 * 60 * 1000),
+    'iso'
+  ),
+  end_date: formatDate(new Date(), 'iso'),
+});
 
 const ACTION_COLORS: Record<string, BadgeVariant> = {
   login: 'primary',
@@ -81,7 +94,7 @@ export const AuditCenter: React.FC = () => {
   });
 
   // --- Audit Log State ---
-  const [filters, setFilters] = useState<AuditLogFilters>({});
+  const [filters, setFilters] = useState<AuditLogFilters>(getDefaultAuditFilters);
   const [page, setPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
@@ -202,7 +215,7 @@ export const AuditCenter: React.FC = () => {
   };
 
   const handleReset = () => {
-    setFilters({});
+    setFilters(getDefaultAuditFilters());
     setPage(1);
   };
 
