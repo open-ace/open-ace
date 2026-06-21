@@ -804,6 +804,22 @@ class ZCodeAppServerSession:
                 },
             )
             return
+        if method == "interaction/requestPermission":
+            # A tool call needs permission approval. In unattended mode there
+            # is no human to approve/deny — auto-allow so the agent can proceed.
+            # plan mode already restricts the tool set to read-only tools; if a
+            # permission request still fires (e.g. reading outside cwd), the
+            # safest option for an autonomous workflow is to allow it rather
+            # than stall the turn indefinitely.
+            tool_name = params.get("toolName", "?")
+            logger.info(
+                "ZCode interaction/requestPermission auto-allowed for %s "
+                "(tool=%s, unattended workflow)",
+                self.session_id[:8],
+                tool_name,
+            )
+            self._send_response(msg_id, {"decision": "allow"})
+            return
         # Unknown server request: respond with a generic error so it doesn't
         # hang forever.
         logger.warning("ZCode unhandled server request %s for %s", method, self.session_id[:8])
