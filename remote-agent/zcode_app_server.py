@@ -160,8 +160,7 @@ class ZCodeAppServerSession:
             "model": {"providerId": provider_id, "modelId": model_id},
             "provider": {
                 "providerId": provider_id,
-                "kind": "openai-compatible",
-                "apiFormat": "anthropic-messages",
+                "kind": "anthropic",
                 "source": "builtin",
                 "baseURL": base_url,
                 "models": [{"modelId": model_id}],
