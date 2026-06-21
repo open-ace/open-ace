@@ -25,6 +25,31 @@ from shared import config
 DB_DIR = config.DB_DIR
 DB_PATH = config.DB_PATH
 
+# Canonical message roles. Variant tool-result spellings (toolResult,
+# tool_result) collapse to ROLE_TOOL so conversations produced by different
+# write paths never split on role spelling downstream (e.g. the
+# conversation-detail role filter). Kept self-contained here because the
+# scripts package ships standalone and must not import from app/.
+ROLE_TOOL = "tool"
+_TOOL_ROLE_ALIASES = {"tool", "toolresult", "tool_result"}
+
+
+def normalize_message_role(role: Optional[str]) -> str:
+    """Normalize a message role to its canonical form.
+
+    Tool-result spellings (``toolResult``, ``tool_result``) collapse to the
+    canonical ``tool``. Other roles pass through stripped/lower-cased.
+    ``None``/blank input becomes ``"unknown"``. Matching is case- and
+    whitespace-insensitive.
+    """
+    if not role or not str(role).strip():
+        return "unknown"
+    cleaned = str(role).strip().lower()
+    if cleaned in _TOOL_ROLE_ALIASES:
+        return ROLE_TOOL
+    return cleaned
+
+
 # Cache for database URL
 _db_url_cache = None
 
@@ -832,6 +857,13 @@ def save_message(
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Normalize the role at the write boundary so variant tool-result
+    # spellings (toolResult / tool_result) collapse to the canonical "tool".
+    # Without this, conversations produced by the fetch scripts stored the
+    # OpenClaw-native "toolResult" while other paths stored "tool", and the
+    # conversation-detail role filter showed "no messages found" for one.
+    role = normalize_message_role(role)
+
     # Check if message already exists
     _execute(
         cursor,
@@ -1003,6 +1035,14 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 sender_id = msg.get("sender_id")
                 sender_name = msg.get("sender_name")
                 model = msg.get("model")
+
+                # Normalize the role at the write boundary (toolResult /
+                # tool_result -> tool) so variant spellings never reach the
+                # daily_messages role column. See normalize_message_role.
+                # In-place mutation is deliberate: both the ON-CONFLICT update
+                # branch and the insert-new branch below read msg["role"], so
+                # mutating once here covers both without a second pass.
+                msg["role"] = normalize_message_role(msg.get("role"))
 
                 # Check for existing message
                 key = (date, tool_name, host_name, message_id)
