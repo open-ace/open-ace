@@ -262,15 +262,11 @@ export const AuditCenter: React.FC = () => {
   // Accepts the broadest shape (both the API AuditLog and the local type) so
   // it works on rows from useAuditLogs without an unsafe cast.
   const getDetails = (log: { details: Record<string, unknown> | null }): Record<string, unknown> =>
-    log.details && typeof log.details === 'object'
-      ? (log.details as Record<string, unknown>)
-      : {};
+    log.details && typeof log.details === 'object' ? (log.details as Record<string, unknown>) : {};
 
   // Human-readable resource name (carried in details by the backend) for the
   // ID column tooltip; null when no name is available.
-  const getResourceName = (log: {
-    details: Record<string, unknown> | null;
-  }): string | null => {
+  const getResourceName = (log: { details: Record<string, unknown> | null }): string | null => {
     const name = getDetails(log).resource_name;
     return typeof name === 'string' && name ? name : null;
   };
