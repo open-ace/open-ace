@@ -34,6 +34,7 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { formatDateTime, formatTokens, formatToolName, copyToClipboard } from '@/utils';
+import { normalizeMessageRole, isToolRole, getRoleLabel } from '@/utils/roleMap';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
@@ -641,14 +642,14 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
       : msg.content;
 
   const getRoleIcon = (role: string) => {
-    switch (role) {
+    switch (normalizeMessageRole(role)) {
       case 'user':
         return 'bi-person-fill';
       case 'assistant':
         return 'bi-robot';
       case 'system':
         return 'bi-gear-fill';
-      case 'toolResult':
+      case 'tool':
         return 'bi-wrench';
       default:
         return 'bi-chat-dots';
@@ -656,14 +657,14 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
   };
 
   const getRoleBadgeClass = (role: string) => {
-    switch (role) {
+    switch (normalizeMessageRole(role)) {
       case 'user':
         return 'bg-primary';
       case 'assistant':
         return 'bg-success';
       case 'system':
         return 'bg-secondary';
-      case 'toolResult':
+      case 'tool':
         return 'bg-info';
       default:
         return 'bg-secondary';
@@ -681,7 +682,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
       <div className="d-flex justify-content-between align-items-start mb-2">
         <div className="d-flex align-items-center flex-wrap gap-2">
           <i className={cn('bi', getRoleIcon(msg.role))} />
-          <span className={cn('badge', getRoleBadgeClass(msg.role))}>{msg.role}</span>
+          <span className={cn('badge', getRoleBadgeClass(msg.role))}>{getRoleLabel(msg.role, language)}</span>
           {msg.sender_name && (
             <span className="text-muted small">
               <i className="bi bi-person me-1" />
@@ -766,7 +767,12 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const { data: messages, isLoading, isError } = useConversationTimeline(sessionId);
 
-  // Filter messages by role
+  // Filter messages by role.
+  //
+  // Messages arrive from the API boundary already normalized (the legacy
+  // 'toolResult' spelling is collapsed to 'tool'), so a plain equality check
+  // against the canonical filter value is correct. See utils/roleMap.ts and
+  // api/messages.ts::getConversationTimeline.
   const filteredMessages = useMemo(() => {
     if (!messages) return [];
     if (roleFilter === 'all') return messages;
@@ -784,15 +790,16 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
 
     messages.forEach((msg, index) => {
       const msgTime = new Date(msg.timestamp);
-      if (msg.role === 'user') {
+      const normalizedRole = normalizeMessageRole(msg.role);
+      if (normalizedRole === 'user') {
         lastUserTime = msgTime;
         lastUserIndex = index;
-      } else if ((msg.role === 'assistant' || msg.role === 'toolResult') && lastUserTime) {
+      } else if ((normalizedRole === 'assistant' || isToolRole(msg.role)) && lastUserTime) {
         const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
         if (latency > 0) {
           latencies.push({
             index: lastUserIndex + 1,
-            role: msg.role,
+            role: normalizedRole,
             latency: Math.round(latency * 100) / 100,
             timestamp: msg.timestamp,
           });
@@ -836,17 +843,20 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
       user: 0,
       assistant: 0,
       system: 0,
-      toolResult: 0,
+      // Canonical tool count — covers both the API-standard 'tool' role and the
+      // legacy 'toolResult' spelling, which are normalized at the data boundary.
+      tool: 0,
       totalTokens: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
     };
 
     messages.forEach((msg) => {
-      if (msg.role === 'user') stats.user++;
-      else if (msg.role === 'assistant') stats.assistant++;
-      else if (msg.role === 'system') stats.system++;
-      else if (msg.role === 'toolResult') stats.toolResult++;
+      const normalizedRole = normalizeMessageRole(msg.role);
+      if (normalizedRole === 'user') stats.user++;
+      else if (normalizedRole === 'assistant') stats.assistant++;
+      else if (normalizedRole === 'system') stats.system++;
+      else if (normalizedRole === 'tool') stats.tool++;
       stats.totalTokens += msg.tokens_used ?? 0;
       stats.totalInputTokens += msg.input_tokens ?? 0;
       stats.totalOutputTokens += msg.output_tokens ?? 0;
@@ -855,13 +865,17 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
     return stats;
   }, [messages]);
 
-  // Role filter options
+  // Role filter options.
+  //
+  // Values are the canonical normalized roles. The API boundary collapses the
+  // legacy 'toolResult' spelling into 'tool', so the filter value matches what
+  // the normalized messages carry.
   const roleFilterOptions = [
     { value: 'all', label: t('all', language) },
     { value: 'user', label: t('messageRoleUser', language) },
     { value: 'assistant', label: t('messageRoleAssistant', language) },
     { value: 'system', label: t('messageRoleSystem', language) },
-    { value: 'toolResult', label: t('messageRoleToolResult', language) },
+    { value: 'tool', label: t('messageRoleToolResult', language) },
   ];
 
   return (
@@ -907,11 +921,11 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                   </span>
                 </div>
               )}
-              {messageStats.toolResult > 0 && (
+              {messageStats.tool > 0 && (
                 <div className="col-auto">
                   <span className="badge bg-info me-1">
                     <i className="bi bi-wrench me-1" />
-                    Tool: {messageStats.toolResult}
+                    Tool: {messageStats.tool}
                   </span>
                 </div>
               )}
@@ -987,6 +1001,17 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                   filteredMessages.map((msg, index) => (
                     <MessageItem key={msg.id ?? index} msg={msg} language={language} />
                   ))
+                ) : roleFilter !== 'all' ? (
+                  // A specific role filter is active but matched nothing.
+                  // Distinguish this from a genuinely empty conversation so the
+                  // user understands the messages exist, just not for this role.
+                  <EmptyState
+                    icon="bi-chat-dots"
+                    title={t('noMatchingMessages', language)}
+                    description={t('noMatchingRoleMessages', language, {
+                      role: getRoleLabel(roleFilter, language),
+                    })}
+                  />
                 ) : (
                   <EmptyState icon="bi-chat-dots" title={t('noMessages', language)} />
                 )}

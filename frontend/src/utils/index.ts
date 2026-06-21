@@ -53,6 +53,15 @@ export { TOOL_DISPLAY_NAMES };
 
 export { copyToClipboard } from './clipboard';
 
+// Role normalization & display-label mapping (tool / toolResult reconciliation)
+export {
+  normalizeMessageRole,
+  isToolRole,
+  getRoleLabel,
+  type NormalizedMessageRole,
+  type RawMessageRole,
+} from './roleMap';
+
 // Query key utilities
 export {
   hashQueryKey,

@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './client';
+import { normalizeMessageRole } from '@/utils/roleMap';
 import type { Message, MessageFilters } from '@/types';
 
 // Backend message format (matches API response)
@@ -44,12 +45,17 @@ interface BackendMessagesResponse {
 
 /**
  * Transform backend message to frontend message format
+ *
+ * Role normalization happens here at the data boundary so components never see
+ * the legacy `'toolResult'` spelling written by the OpenClaw importer — it is
+ * collapsed to the API-standard `'tool'`. This is the single sanctioned place
+ * to coerce the raw role string.
  */
 function transformMessage(backendMsg: BackendMessage): Message {
   return {
     id: String(backendMsg.id),
     session_id: backendMsg.agent_session_id,
-    role: backendMsg.role as 'user' | 'assistant' | 'system',
+    role: normalizeMessageRole(backendMsg.role) as Message['role'],
     content: backendMsg.content,
     tokens: backendMsg.tokens_used,
     input_tokens: backendMsg.input_tokens,
@@ -217,9 +223,15 @@ export const messagesApi = {
 
   /**
    * Get conversation timeline (messages in a conversation)
+   *
+   * Roles are normalized at this boundary: the legacy `'toolResult'` spelling
+   * (written by the OpenClaw importer) is collapsed to the API-standard
+   * `'tool'` so the detail view and its role filter work against a single
+   * canonical value.
    */
   async getConversationTimeline(sessionId: string): Promise<ConversationMessage[]> {
-    return apiClient.get<ConversationMessage[]>(`/api/conversation-timeline/${sessionId}`);
+    const raw = await apiClient.get<ConversationMessage[]>(`/api/conversation-timeline/${sessionId}`);
+    return raw.map((msg) => ({ ...msg, role: normalizeMessageRole(msg.role) }));
   },
 
   /**

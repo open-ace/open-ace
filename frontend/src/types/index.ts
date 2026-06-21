@@ -60,7 +60,10 @@ export interface TrendDataPoint {
 export interface Message {
   id: string;
   session_id: string;
-  role: 'user' | 'assistant' | 'system';
+  // Canonical role values. The data boundary (`api/messages.ts`) normalizes the
+  // legacy OpenClaw spelling `'toolResult'` into the API-standard `'tool'`, so
+  // components only ever see the values listed here.
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   tokens?: number;
   input_tokens?: number;

@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.constants import MessageRole
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
@@ -1506,7 +1507,7 @@ class AutonomousAgentRunner:
                     self.session_manager.add_message(
                         session_id=session_id,
                         milestone_id=milestone_id,
-                        role="tool",
+                        role=MessageRole.TOOL,
                         content=(
                             json.dumps(tool_input)
                             if isinstance(tool_input, (dict, list))
@@ -1540,7 +1541,7 @@ class AutonomousAgentRunner:
                 self.session_manager.add_message(
                     session_id=session_id,
                     milestone_id=milestone_id,
-                    role="tool",
+                    role=MessageRole.TOOL,
                     content=(
                         json.dumps(tool_input)
                         if isinstance(tool_input, (dict, list))

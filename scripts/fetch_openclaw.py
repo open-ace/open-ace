@@ -33,6 +33,28 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
+# Make the app package importable so we can share the canonical message-role
+# constants with the autonomous runner. Falls back to local literals if the
+# package layout changes and app.constants is unavailable — the script stays
+# runnable standalone, just without the single-source-of-truth guarantee.
+try:
+    repo_root = os.path.dirname(script_dir)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from app.constants import MessageRole as _MessageRole, normalize_role as _normalize_role
+
+    TOOL_RESULT_ROLE = _MessageRole.TOOL
+
+    def _normalized_role(role):
+        return _normalize_role(role)
+
+except ImportError:  # pragma: no cover - exercised only with unusual layouts
+    _MessageRole = None  # type: ignore[assignment]
+    TOOL_RESULT_ROLE = "tool"
+
+    def _normalized_role(role):
+        return "tool" if role == "toolResult" else (role or "")
+
 import feishu_group_cache
 import feishu_user_cache
 import utils
@@ -1026,8 +1048,12 @@ def process_jsonl_file(
                         # Get message ID
                         message_id = msg.get("id") or entry.get("id") or entry.get("uuid")
                         if message_id:
-                            # Determine role from message role
-                            role = msg.get("role", "unknown")
+                            # Determine role from message role.
+                            # Normalize at the ingest boundary so the legacy
+                            # 'toolResult' spelling written by OpenClaw collapses
+                            # to the API-standard 'tool' — matching the
+                            # autonomous runner and the frontend role filter.
+                            role = _normalized_role(msg.get("role", "unknown"))
 
                             # Get content (returns tuple: content, sender_id, sender_name, message_source, conversation_label, group_subject, is_group_chat)
                             result = extract_content_from_entry(entry)
