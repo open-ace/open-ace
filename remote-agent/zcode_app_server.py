@@ -37,6 +37,7 @@ import subprocess
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,10 @@ class ZCodeAppServerSession:
         restoreWarning that would otherwise make session/send reject every
         message with ZCODE_RUNTIME_MODEL_UNAVAILABLE. Returns None when the
         model string cannot be parsed (caller skips the runtimeModel param).
+
+        The provider must include apiKey from ~/.zcode/cli/config.json —
+        runtimeModel replaces the config provider entirely, so omitting the
+        key causes "Model provider is missing an API key" on the first call.
         """
         if not self.model:
             return None
@@ -154,18 +159,42 @@ class ZCodeAppServerSession:
         if not base_url:
             logger.warning("Unknown provider %s — cannot build runtimeModel baseURL", provider_id)
             return None
+        # Read the API key from config.json so the runtimeModel provider is
+        # fully self-contained (zcode uses runtimeModel's provider in place of
+        # the config provider for resumed sessions).
+        api_key = self._read_provider_api_key(provider_id)
+        if not api_key:
+            logger.warning(
+                "No API key for provider %s in config.json — resumed session "
+                "may fail with 'missing an API key'",
+                provider_id,
+            )
+        provider: dict[str, Any] = {
+            "providerId": provider_id,
+            "kind": "anthropic",
+            "source": "builtin",
+            "baseURL": base_url,
+            "models": [{"modelId": model_id}],
+        }
+        if api_key:
+            provider["apiKey"] = api_key
         return {
             "revision": "0",
             "generatedAt": int(time.time() * 1000),
             "model": {"providerId": provider_id, "modelId": model_id},
-            "provider": {
-                "providerId": provider_id,
-                "kind": "anthropic",
-                "source": "builtin",
-                "baseURL": base_url,
-                "models": [{"modelId": model_id}],
-            },
+            "provider": provider,
         }
+
+    @staticmethod
+    def _read_provider_api_key(provider_id: str) -> str | None:
+        """Read a provider's API key from ~/.zcode/cli/config.json."""
+        try:
+            config_path = Path.home() / ".zcode" / "cli" / "config.json"
+            with config_path.open() as f:
+                config = json.load(f)
+            return config.get("provider", {}).get(provider_id, {}).get("options", {}).get("apiKey")
+        except (OSError, json.JSONDecodeError, KeyError):
+            return None
 
     def start(
         self,
