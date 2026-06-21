@@ -387,42 +387,6 @@ export const QuotaAlerts: React.FC = () => {
 
     return (
       <>
-        {/* Alert Rules Overview */}
-        <Card title={t('alertRules', language)} className="mb-4">
-          <div className="alert-rules-list">
-            {alerts.length === 0 ? (
-              <EmptyState icon="bi-bell" title={t('noAlerts', language)} />
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>{t('title', language)}</th>
-                      <th>{t('severity', language)}</th>
-                      <th>{t('time', language)}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {alerts.slice(0, 5).map((alert) => (
-                      <tr key={alert.id}>
-                        <td>{alert.title}</td>
-                        <td>
-                          <Badge variant={getSeverityVariant(alert.severity)}>
-                            {t(alert.severity, language)}
-                          </Badge>
-                        </td>
-                        <td>
-                          <small className="text-muted">{formatDateTime(alert.created_at)}</small>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </Card>
-
         {!quotaData || quotaData.length === 0 ? (
           <EmptyState icon="bi-sliders" title={t('noQuotaData', language)} />
         ) : (
@@ -961,6 +925,12 @@ export const QuotaAlerts: React.FC = () => {
             compact={true}
             showLastRefreshTime={true}
           />
+          {activeTab === 'quota' && unreadCount > 0 && (
+            <Button variant="outline-info" size="sm" onClick={() => setActiveTab('alerts')}>
+              <i className="bi bi-bell me-1" />
+              {t('viewAlerts', language, { count: unreadCount })}
+            </Button>
+          )}
           {activeTab === 'alerts' && (
             <>
               <Button variant="outline-secondary" size="sm" onClick={() => setShowPrefsModal(true)}>

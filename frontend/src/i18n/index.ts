@@ -744,7 +744,6 @@ export const translations: Record<Language, Translations> = {
 
     // Alert Management
     totalAlerts: 'Total Alerts',
-    alertRules: 'Alert Rules',
     unreadAlerts: 'Unread Alerts',
     criticalAlerts: 'Critical Alerts',
     unreadCount: 'Unread Count',
@@ -760,6 +759,7 @@ export const translations: Record<Language, Translations> = {
     minSeverity: 'Minimum Severity',
     notificationEmail: 'Notification Email',
     noAlerts: 'No alerts found',
+    viewAlerts: 'View Alerts ({count})',
     new: 'New',
     preferences: 'Preferences',
 
@@ -2168,7 +2168,6 @@ export const translations: Record<Language, Translations> = {
 
     // Alert Management
     totalAlerts: '总告警数',
-    alertRules: '告警规则',
     unreadAlerts: '未读告警',
     criticalAlerts: '严重告警',
     unreadCount: '未读数量',
@@ -2184,6 +2183,7 @@ export const translations: Record<Language, Translations> = {
     minSeverity: '最低严重程度',
     notificationEmail: '通知邮箱',
     noAlerts: '暂无告警',
+    viewAlerts: '查看告警（{count}）',
     new: '新',
     preferences: '偏好设置',
 
@@ -3585,8 +3585,7 @@ export const translations: Record<Language, Translations> = {
     tokenAccumulationWarning:
       'Token 数が累積的にカウントされているため膨張している可能性があります。コストと ROI の計算が不正確になる場合があります。',
     title: 'タイトル',
-    // alertRules は ROI 以外のアラート管理ページでも共有使用されるキーです。
-    alertRules: 'アラートルール',
+    viewAlerts: 'アラートを表示 ({count})',
     overallEfficiency: '全体効率',
     avgCostPerRequest: '平均コスト/リクエスト',
     avgTokensPerRequest: '平均 Token/リクエスト',
@@ -4709,8 +4708,7 @@ export const translations: Record<Language, Translations> = {
     tokenAccumulationWarning:
       'Token 수가 누적 집계되어 부풀려져 있을 수 있습니다. 비용과 ROI 계산이 부정확할 수 있습니다.',
     title: '제목',
-    // alertRules는 ROI 외 알림 관리 페이지에서도 공유 사용되는 키입니다.
-    alertRules: '알림 규칙',
+    viewAlerts: '알림 보기 ({count})',
     overallEfficiency: '전체 효율',
     avgCostPerRequest: '평균 비용/요청',
     avgTokensPerRequest: '평균 Token/요청',
