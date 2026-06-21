@@ -141,6 +141,29 @@ test.describe('Quota & Alerts', () => {
       expect(hasTable || hasEmpty).toBeTruthy();
     }
   });
+
+  test('view-alerts hint button should navigate to alerts tab when present', async ({ page }) => {
+    await page.goto('/manage/quota');
+    await waitForApp(page);
+
+    const container = page.locator('.quota-alerts');
+    const tabs = container.locator('.nav-tabs .nav-link');
+    await expect(tabs.nth(0)).toHaveClass(/active/);
+
+    // The hint button only renders on the quota tab when there are unread alerts.
+    // Tolerant of zero-alert environments: assert navigation when visible, absence otherwise.
+    const hintButton = container
+      .locator('button')
+      .filter({ hasText: /view alerts|查看告警|アラートを表示|알림 보기/i });
+
+    if (await hintButton.isVisible().catch(() => false)) {
+      await hintButton.click();
+      await page.waitForLoadState('networkidle');
+      await expect(tabs.nth(1)).toHaveClass(/active/);
+    } else {
+      await expect(hintButton).toHaveCount(0);
+    }
+  });
 });
 
 test.describe('Audit Center', () => {
