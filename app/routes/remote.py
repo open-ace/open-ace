@@ -1561,6 +1561,14 @@ def agent_message():
                     if not content or len(content) > MAX_RAW_CONTENT_LENGTH:
                         continue
 
+                    # Normalize the role so variant tool-result spellings
+                    # (toolResult / tool_result) collapse to the canonical
+                    # "tool" before being written to daily_messages. This path
+                    # writes directly and bypasses message_repo.save_message.
+                    from app.utils.roles import normalize_message_role
+
+                    role = normalize_message_role(role)
+
                     input_tokens = usage.get("input_tokens", 0) if isinstance(usage, dict) else 0
                     output_tokens = usage.get("output_tokens", 0) if isinstance(usage, dict) else 0
                     tokens_used = input_tokens + output_tokens

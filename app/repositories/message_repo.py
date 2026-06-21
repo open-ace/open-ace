@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from app.repositories.database import Database, escape_like
 from app.utils.cache import cached
+from app.utils.roles import normalize_message_role
 from app.utils.senders import is_valid_sender
 from app.utils.tool_names import normalize_tool_name
 
@@ -60,7 +61,9 @@ class MessageRepository:
             date: Date string (YYYY-MM-DD).
             tool_name: Name of the tool.
             message_id: Unique message identifier.
-            role: Message role (user, assistant, system).
+            role: Message role (user, assistant, system, tool). Variant
+                tool-result spellings (toolResult, tool_result) are normalized
+                to ``tool`` at the write boundary.
             host_name: Host name.
             parent_id: Parent message ID.
             content: Message content.
@@ -88,6 +91,13 @@ class MessageRepository:
         # QWEN, ...) can never split downstream aggregates (daily_stats,
         # hourly_stats, ROI cost-breakdown) into duplicate slices.
         tool_name = normalize_tool_name(tool_name)
+
+        # Normalize the message role at the write boundary so variant
+        # tool-result spellings (toolResult / tool_result) collapse to the
+        # canonical ``tool``. Without this, conversations produced by different
+        # write paths stored different role values and the conversation-detail
+        # role filter showed "no messages found" for one of them.
+        role = normalize_message_role(role)
 
         if is_postgresql():
             self.db.execute(
