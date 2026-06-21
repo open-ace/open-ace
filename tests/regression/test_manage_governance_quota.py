@@ -92,21 +92,24 @@ def test_alert_rules_list():
             assert legacy_alert_rules.count() == 0, "配额 Tab 不应再显示告警规则概览卡片"
 
             # 先点击 Alerts tab
-            try:
-                alerts_tab = page.locator("button.nav-link").filter(has_text="Alert")
-                if alerts_tab.count() > 0:
-                    alerts_tab.click()
-                    page.wait_for_timeout(1000)
-            except Exception:
-                pass
+            alerts_tab = page.locator("button.nav-link").filter(has_text="Alert")
+            assert alerts_tab.count() > 0, "应有 Alerts 标签页入口"
+            alerts_tab.click()
+            # 等待告警统计卡片渲染（Alerts Tab 独有内容），同时确认切换生效
+            page.wait_for_selector(".stat-card", timeout=5000)
+
+            # 显式确认已切到 Alerts tab，避免切换失败时配额 Tab 的 .card 兜底蒙混通过
+            assert alerts_tab.first.evaluate(
+                "el => el.classList.contains('active')"
+            ), "应已切到 Alerts 标签页"
 
             # Alerts Tab 应渲染告警统计卡片或告警列表/空状态
+            # 注意：不使用 .card 兜底，因为配额 Tab 也渲染 .card，会掩盖切换失败
             alert_selectors = [
                 ".stat-card",
                 "table",
                 ".empty-state",
                 ".no-data",
-                ".card",
             ]
             assert check_element_exists(
                 page, alert_selectors
