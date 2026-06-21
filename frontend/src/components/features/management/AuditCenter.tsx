@@ -62,7 +62,10 @@ const ITEMS_PER_PAGE = 20;
 const DEFAULT_FILTER_RANGE_DAYS = 7;
 
 const getDefaultAuditFilters = (): AuditLogFilters => ({
-  start_date: formatDate(new Date(Date.now() - DEFAULT_FILTER_RANGE_DAYS * 24 * 60 * 60 * 1000), 'iso'),
+  start_date: formatDate(
+    new Date(Date.now() - DEFAULT_FILTER_RANGE_DAYS * 24 * 60 * 60 * 1000),
+    'iso'
+  ),
   end_date: formatDate(new Date(), 'iso'),
 });
 
