@@ -297,6 +297,7 @@ def test_audit_log_filter():
 
             if option_count > 1:
                 second_option_value = options.nth(1).get_attribute("value")
+                second_option_label = options.nth(1).inner_text().strip()
                 if second_option_value:
                     resource_select.select_option(value=second_option_value)
                     page.wait_for_timeout(2000)
@@ -305,13 +306,20 @@ def test_audit_log_filter():
                     # Verify all table rows have the selected resource_type
                     rows = page.locator("table tbody tr")
                     if rows.count() > 0:
-                        # Resource type column is 4th (index 3)
-                        first_row_rt = rows.first.locator("td").nth(3).inner_text()
+                        # Resource type column is 4th (index 3). It renders the
+                        # localized label (and historically the raw code), so
+                        # accept an exact label match or either substring
+                        # direction on the value.
+                        first_row_rt = rows.first.locator("td").nth(3).inner_text().strip()
+                        col_matches = (
+                            (bool(second_option_label) and first_row_rt == second_option_label)
+                            or second_option_value in first_row_rt.lower()
+                            or first_row_rt.lower() in second_option_value
+                        )
                         check(
                             "Resource type filter applied to table",
-                            second_option_value in first_row_rt.lower()
-                            or first_row_rt.lower() in second_option_value,
-                            f"(selected={second_option_value}, row_rt={first_row_rt})",
+                            col_matches,
+                            f"(selected={second_option_value}, label='{second_option_label}', row_rt='{first_row_rt}')",
                         )
                     else:
                         check("Table has rows after resource filter", False, "- no rows")

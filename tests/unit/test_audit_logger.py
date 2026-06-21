@@ -1,5 +1,6 @@
 """Unit tests for AuditLogger module."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -317,3 +318,172 @@ class TestAuditLogger:
     def test_audit_severity_enum(self):
         assert AuditSeverity.INFO.value == "info"
         assert AuditSeverity.CRITICAL.value == "critical"
+
+    # --- helpers for the resource_id / details tests below ---
+
+    def _wire(self, mock_db):
+        """Wire a mock connection/cursor onto mock_db for log()/cleanup tests."""
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+        mock_db.connection.return_value = mock_conn
+        return mock_cursor, mock_conn
+
+    def _row(self, **overrides):
+        """Build a fetch_all row dict, mirroring the audit_logs column shape."""
+        base = {
+            "id": 1,
+            "action": "login",
+            "username": "admin",
+            "severity": "info",
+            "user_id": 1,
+            "timestamp": "2026-01-01T00:00:00",
+            "resource_type": "",
+            "resource_id": None,
+            "details": "{}",
+            "ip_address": None,
+            "user_agent": None,
+            "session_id": None,
+            "success": True,
+            "error_message": None,
+        }
+        base.update(overrides)
+        return base
+
+    # --- _parse_details: 4-state normalization (E0) ---
+
+    def test_parse_details_none_is_empty_dict(self):
+        assert AuditLog._parse_details(None) == {}
+
+    def test_parse_details_empty_string_is_empty_dict(self):
+        assert AuditLog._parse_details("") == {}
+        assert AuditLog._parse_details("   ") == {}
+
+    def test_parse_details_dict_passes_through(self):
+        d = {"resource_name": "admin", "k": 1}
+        assert AuditLog._parse_details(d) is d
+
+    def test_parse_details_json_string_is_parsed(self):
+        parsed = AuditLog._parse_details('{"resource_name": "admin"}')
+        assert parsed == {"resource_name": "admin"}
+
+    def test_parse_details_corrupted_string_is_empty(self):
+        # Legacy/seed rows that aren't valid JSON must not raise.
+        assert AuditLog._parse_details("Action performed by admin") == {}
+        assert AuditLog._parse_details("not json {") == {}
+
+    def test_parse_details_non_object_json_is_empty(self):
+        # Valid JSON but not an object -> not usable as details -> empty dict.
+        assert AuditLog._parse_details("[1, 2, 3]") == {}
+        assert AuditLog._parse_details('"a string"') == {}
+        assert AuditLog._parse_details("123") == {}
+
+    def test_parse_details_unexpected_type_is_empty(self):
+        assert AuditLog._parse_details(12345) == {}
+        assert AuditLog._parse_details(["a", "b"]) == {}
+
+    # --- resource_name injection + merge contract (E1) ---
+
+    def test_log_with_resource_name_injects_into_details(self):
+        logger, mock_db = self._make_logger()
+        mock_cursor, _ = self._wire(mock_db)
+        logger.log(
+            action="quota_alert",
+            user_id=1,
+            username="admin",
+            resource_type="quota_alert",
+            resource_id="1001",
+            resource_name="Quota alert #1001",
+        )
+        params = mock_cursor.execute.call_args[0][1]
+        merged = json.loads(params[7])  # details is the 8th INSERT column
+        assert merged["resource_name"] == "Quota alert #1001"
+
+    def test_log_resource_name_does_not_clobber_caller_details(self):
+        """Caller-supplied details take precedence over resource_name (setdefault)."""
+        logger, mock_db = self._make_logger()
+        mock_cursor, _ = self._wire(mock_db)
+        logger.log(
+            action="system_config_change",
+            user_id=1,
+            username="admin",
+            resource_type="filter_rule",
+            resource_id="5",
+            details={"resource_name": "caller-name", "action": "create"},
+            resource_name="auto-name",
+        )
+        params = mock_cursor.execute.call_args[0][1]
+        merged = json.loads(params[7])
+        assert merged["resource_name"] == "caller-name"  # caller wins
+        assert merged["action"] == "create"
+
+    def test_log_without_resource_name_does_not_mutate_details(self):
+        logger, mock_db = self._make_logger()
+        mock_cursor, _ = self._wire(mock_db)
+        original = {"action": "login"}
+        logger.log(action="login", user_id=1, username="admin", details=original)
+        assert original == {"action": "login"}  # caller dict untouched
+        params = mock_cursor.execute.call_args[0][1]
+        assert json.loads(params[7]) == {"action": "login"}
+
+    def test_log_action_with_resource_name(self):
+        logger, mock_db = self._make_logger()
+        mock_cursor, _ = self._wire(mock_db)
+        logger.log_action(
+            AuditAction.USER_PASSWORD_CHANGE,
+            user_id=1,
+            username="admin",
+            resource_type="user",
+            resource_id="1",
+            resource_name="admin",
+        )
+        params = mock_cursor.execute.call_args[0][1]
+        assert params[3] == "user_password_change"  # action column
+        assert json.loads(params[7])["resource_name"] == "admin"
+
+    # --- details read-back through from_dict (E0 end-to-end) ---
+
+    def test_from_dict_parses_resource_name_from_details(self):
+        log = AuditLog.from_dict(
+            self._row(
+                resource_type="filter_rule",
+                resource_id="5",
+                details='{"resource_name": "Rule #5", "action": "delete"}',
+            )
+        )
+        assert log.details == {"resource_name": "Rule #5", "action": "delete"}
+        assert log.resource_id == "5"
+
+    # --- CSV export: resource_name column (E3) ---
+
+    def test_export_logs_csv_has_resource_name_column(self):
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_all.return_value = [self._row()]
+        output = logger.export_logs(format="csv")
+        header = output.strip().splitlines()[0].split(",")
+        assert "resource_name" in header
+
+    def test_export_logs_csv_includes_resource_name_value(self):
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_all.return_value = [
+            self._row(
+                resource_type="filter_rule",
+                resource_id="5",
+                details='{"resource_name": "Rule #5", "action": "delete"}',
+            )
+        ]
+        output = logger.export_logs(format="csv")
+        data_line = output.strip().splitlines()[1]
+        assert data_line.endswith(",Rule #5")
+
+    def test_export_logs_csv_resource_name_empty_when_missing(self):
+        logger, mock_db = self._make_logger()
+        mock_db.fetch_all.return_value = [
+            self._row(resource_type="session", resource_id=None, details="{}")
+        ]
+        output = logger.export_logs(format="csv")
+        data_line = output.strip().splitlines()[1]
+        assert data_line.endswith(",")  # last column blank
+        assert "Rule" not in data_line

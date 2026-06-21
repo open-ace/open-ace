@@ -1038,6 +1038,7 @@ def agent_register():
             severity="info",
             resource_type="remote_machine",
             resource_id=machine_id,
+            resource_name=machine_name,
             details={
                 "machine_id": machine_id,
                 "machine_name": machine_name,
@@ -1178,6 +1179,11 @@ def agent_message():
                 severity="info",
                 resource_type="remote_machine",
                 resource_id=machine_id,
+                resource_name=(
+                    (machine.get("name") or machine.get("machine_name") or machine_id)
+                    if machine
+                    else machine_id
+                ),
                 details={
                     "machine_id": machine_id,
                     "previous_status": getattr(g, "_previous_status", "unknown"),

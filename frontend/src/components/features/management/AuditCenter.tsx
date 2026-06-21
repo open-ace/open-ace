@@ -78,6 +78,28 @@ const ACTION_COLORS: Record<string, BadgeVariant> = {
   view: 'info',
 };
 
+// Map backend resource_type codes to i18n keys for human-readable display.
+// Mirrors resourceTypeOptions; a new resource type must add an entry here, in
+// resourceTypeOptions, and in i18n (en/zh/ja/ko). Codes reflect the backend's
+// real set — never synthesize ids like "<type>_1".
+const RESOURCE_TYPE_LABELS: Record<string, string> = {
+  audit_logs: 'resourceAuditLogs',
+  quota_alert: 'resourceQuotaAlert',
+  content: 'resourceContent',
+  content_filter: 'resourceContentFilter',
+  filter_rule: 'resourceFilterRule',
+  security_settings: 'resourceSecuritySettings',
+  analytics_report: 'resourceAnalyticsReport',
+  analytics: 'resourceAnalytics',
+  ai_agent_settings: 'resourceAiAgentSettings',
+  compliance_report: 'resourceComplianceReport',
+  agent_token: 'resourceAgentToken',
+  remote_machine: 'resourceRemoteMachine',
+  data: 'resourceData',
+  session: 'resourceSession',
+  user: 'resourceUser',
+};
+
 type TabType = 'log' | 'analysis';
 
 export const AuditCenter: React.FC = () => {
@@ -200,11 +222,21 @@ export const AuditCenter: React.FC = () => {
   const resourceTypeOptions = useMemo(
     () => [
       { value: '', label: t('allResourceTypes', language) },
-      { value: 'user', label: 'User' },
-      { value: 'session', label: 'Session' },
-      { value: 'message', label: 'Message' },
-      { value: 'quota', label: 'Quota' },
-      { value: 'settings', label: 'Settings' },
+      { value: 'audit_logs', label: t('resourceAuditLogs', language) },
+      { value: 'quota_alert', label: t('resourceQuotaAlert', language) },
+      { value: 'content', label: t('resourceContent', language) },
+      { value: 'content_filter', label: t('resourceContentFilter', language) },
+      { value: 'filter_rule', label: t('resourceFilterRule', language) },
+      { value: 'security_settings', label: t('resourceSecuritySettings', language) },
+      { value: 'analytics_report', label: t('resourceAnalyticsReport', language) },
+      { value: 'analytics', label: t('resourceAnalytics', language) },
+      { value: 'ai_agent_settings', label: t('resourceAiAgentSettings', language) },
+      { value: 'compliance_report', label: t('resourceComplianceReport', language) },
+      { value: 'agent_token', label: t('resourceAgentToken', language) },
+      { value: 'remote_machine', label: t('resourceRemoteMachine', language) },
+      { value: 'data', label: t('resourceData', language) },
+      { value: 'session', label: t('resourceSession', language) },
+      { value: 'user', label: t('resourceUser', language) },
     ],
     [language]
   );
@@ -217,6 +249,26 @@ export const AuditCenter: React.FC = () => {
   const handleReset = () => {
     setFilters(getDefaultAuditFilters());
     setPage(1);
+  };
+
+  // Localized resource-type label, falling back to the raw code.
+  const renderResourceType = (code: string | null | undefined): string => {
+    if (!code) return '-';
+    const key = RESOURCE_TYPE_LABELS[code];
+    return key ? t(key, language) : code;
+  };
+
+  // details is normalized to an object by the backend; guard legacy rows.
+  // Accepts the broadest shape (both the API AuditLog and the local type) so
+  // it works on rows from useAuditLogs without an unsafe cast.
+  const getDetails = (log: { details: Record<string, unknown> | null }): Record<string, unknown> =>
+    log.details && typeof log.details === 'object' ? (log.details as Record<string, unknown>) : {};
+
+  // Human-readable resource name (carried in details by the backend) for the
+  // ID column tooltip; null when no name is available.
+  const getResourceName = (log: { details: Record<string, unknown> | null }): string | null => {
+    const name = getDetails(log).resource_name;
+    return typeof name === 'string' && name ? name : null;
   };
 
   // --- Analysis Chart Data ---
@@ -365,9 +417,13 @@ export const AuditCenter: React.FC = () => {
                           {log.action}
                         </Badge>
                       </td>
-                      <td>{log.resource_type}</td>
+                      <td>{renderResourceType(log.resource_type)}</td>
                       <td>
-                        <code>{log.resource_id}</code>
+                        {log.resource_id ? (
+                          <code title={getResourceName(log) ?? undefined}>{log.resource_id}</code>
+                        ) : (
+                          <span className="text-muted">-</span>
+                        )}
                       </td>
                       <td>
                         <small className="text-muted">{log.ip_address ?? '-'}</small>
@@ -472,7 +528,7 @@ export const AuditCenter: React.FC = () => {
                           </tr>
                           <tr>
                             <th>{t('resourceType', language)}</th>
-                            <td>{selectedLog.resource_type}</td>
+                            <td>{renderResourceType(selectedLog.resource_type)}</td>
                           </tr>
                           {selectedLog.resource_id && (
                             <tr>

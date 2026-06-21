@@ -3,6 +3,21 @@ Open ACE - Audit Logger Module
 
 Provides comprehensive audit logging for enterprise compliance and security.
 Records all user actions, system events, and data access for accountability.
+
+Resource conventions (governance audit logging):
+- resource_id is ALWAYS a real entity primary key (user_id, rule_id, alert_id,
+  machine_id, report_id, ...) or NULL. Never synthesize token prefixes, date
+  hashes, or config keys — synthesized values cannot be traced back to a row.
+- resource_name (human-readable) is injected into details["resource_name"] by
+  log()/log_action(); caller-supplied details take precedence over it. Reuse
+  an already-fetched entity for the name rather than issuing a second query
+  (audit logging must stay lightweight).
+- Operations with no single entity (login/logout/data_view/config singletons)
+  leave resource_id NULL; the UI renders "-". That is correct, not a defect.
+- details is persisted as JSON TEXT and always read back as a dict via
+  AuditLog._parse_details (the single parse point, called from from_dict). Do
+  NOT add audit_logs queries that bypass query()/from_dict — they would skip
+  parsing and surface details as a raw string.
 """
 
 import json
@@ -135,13 +150,48 @@ class AuditLog:
             severity=data.get("severity", "info"),
             resource_type=data.get("resource_type", ""),
             resource_id=data.get("resource_id"),
-            details=data.get("details", {}),
+            details=cls._parse_details(data.get("details")),
             ip_address=data.get("ip_address"),
             user_agent=data.get("user_agent"),
             session_id=data.get("session_id"),
             success=data.get("success", True),
             error_message=data.get("error_message"),
         )
+
+    @staticmethod
+    def _parse_details(value: Any) -> dict[str, Any]:
+        """Normalize the ``details`` column value to a dict.
+
+        ``details`` is persisted as JSON TEXT (written via ``json.dumps``).
+        Rows read back from the database may surface as ``None`` (SQL NULL),
+        an empty string, an already-parsed dict, a valid JSON string, or a
+        corrupted/non-JSON string (legacy seed data). Every form is coerced to
+        a dict without raising, so reads of historical data never break.
+
+        This is the single parse point for the column — all ``AuditLog``
+        objects are constructed via ``from_dict`` (called only by ``query``),
+        so every read path (governance API, exports, compliance reports)
+        benefits. Do not add ``audit_logs`` queries that bypass ``query``.
+        """
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return {}
+            try:
+                parsed = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("Unparseable audit log details, ignoring: %r", value)
+                return {}
+            if isinstance(parsed, dict):
+                return parsed
+            logger.warning("Audit log details JSON is not an object, ignoring: %r", value)
+            return {}
+        logger.warning("Unexpected audit log details type %s, ignoring", type(value).__name__)
+        return {}
 
 
 class AuditLogger:
@@ -179,6 +229,7 @@ class AuditLogger:
         session_id: Optional[str] = None,
         success: bool = True,
         error_message: Optional[str] = None,
+        resource_name: Optional[str] = None,
     ) -> bool:
         """
         Log an audit event.
@@ -196,11 +247,19 @@ class AuditLogger:
             session_id: Session identifier.
             success: Whether the action was successful.
             error_message: Error message if action failed.
+            resource_name: Human-readable name of the resource. Injected into
+                details["resource_name"] only when the caller has not already
+                set that key (caller-supplied details take precedence).
 
         Returns:
             bool: True if log was saved successfully.
         """
         try:
+            # Inject resource_name without clobbering caller-supplied details:
+            # shallow-merge with caller keys winning (setdefault).
+            if resource_name:
+                details = dict(details or {})
+                details.setdefault("resource_name", resource_name)
             details_json = json.dumps(details) if details else None
 
             with self.db.connection() as conn:
@@ -245,6 +304,7 @@ class AuditLogger:
         action: AuditAction,
         user_id: Optional[int] = None,
         username: Optional[str] = None,
+        resource_name: Optional[str] = None,
         **kwargs,
     ) -> bool:
         """
@@ -255,11 +315,18 @@ class AuditLogger:
             user_id: ID of the user.
             username: Username.
             **kwargs: Additional arguments passed to log().
+            resource_name: Human-readable resource name, injected into details.
 
         Returns:
             bool: True if successful.
         """
-        return self.log(action=action.value, user_id=user_id, username=username, **kwargs)
+        return self.log(
+            action=action.value,
+            user_id=user_id,
+            username=username,
+            resource_name=resource_name,
+            **kwargs,
+        )
 
     def query(
         self,
@@ -506,6 +573,7 @@ class AuditLogger:
                     "ip_address",
                     "success",
                     "error_message",
+                    "resource_name",
                 ]
             )
 
@@ -524,6 +592,11 @@ class AuditLogger:
                         log.ip_address or "",
                         log.success,
                         log.error_message or "",
+                        (
+                            log.details.get("resource_name", "")
+                            if isinstance(log.details, dict)
+                            else ""
+                        ),
                     ]
                 )
 

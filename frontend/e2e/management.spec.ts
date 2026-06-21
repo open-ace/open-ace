@@ -195,6 +195,59 @@ test.describe('Audit Center', () => {
     const hasCard = await card.isVisible().catch(() => false);
     expect(hasTable || hasCard).toBeTruthy();
   });
+
+  test('should translate the resource-type column (no raw snake_case codes)', async ({ page }) => {
+    await page.goto('/manage/audit');
+    await waitForApp(page);
+
+    const rows = page.locator('.audit-center table tbody tr');
+    const rowCount = await rows.count();
+    // Tolerant of an empty audit table (zero seeded logs).
+    if (rowCount === 0) return;
+
+    // Resource type is the 4th column (index 3). A localized label never
+    // contains an underscore, whereas a raw code (e.g. "remote_machine") does.
+    const text = (await rows.first().locator('td').nth(3).innerText()).trim();
+    expect(text === '-' || !text.includes('_')).toBeTruthy();
+  });
+
+  test('should render "-" for NULL resource_id and a value otherwise', async ({ page }) => {
+    await page.goto('/manage/audit');
+    await waitForApp(page);
+
+    const rows = page.locator('.audit-center table tbody tr');
+    const rowCount = await rows.count();
+    if (rowCount === 0) return;
+
+    // ID column is the 5th column (index 4). Each cell is either "-" (NULL)
+    // or a non-empty PK — never blank.
+    for (let i = 0; i < Math.min(rowCount, 5); i++) {
+      const text = (await rows.nth(i).locator('td').nth(4).innerText()).trim();
+      expect(text.length > 0).toBeTruthy();
+    }
+  });
+
+  test('should open details in a modal instead of window.alert', async ({ page }) => {
+    await page.goto('/manage/audit');
+    await waitForApp(page);
+
+    // The eye button only renders on rows that carry details.
+    const eyeButton = page.locator('.audit-center table tbody tr .bi-eye').first();
+    if (!(await eyeButton.isVisible().catch(() => false))) return;
+
+    await eyeButton.click();
+
+    // Modal body shows the JSON details (contains an opening brace).
+    const modalBody = page.locator('.modal-body pre').first();
+    await expect(modalBody).toBeVisible({ timeout: 5000 });
+    expect((await modalBody.innerText()).includes('{')).toBeTruthy();
+
+    // Close via the header close button and confirm the modal is gone.
+    const closeBtn = page.locator('.modal-header .btn-close').first();
+    await expect(closeBtn).toBeVisible();
+    await closeBtn.click();
+    await expect(modalBody).toHaveCount(0);
+  });
 });
 
 test.describe('Compliance Management', () => {

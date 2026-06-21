@@ -239,6 +239,7 @@ def api_acknowledge_alert(alert_id):
             username=g.user.get("username"),
             resource_type="quota_alert",
             resource_id=str(alert_id),
+            resource_name=f"Quota alert #{alert_id}",
             details={"action": "acknowledged"},
             **client_info,
         )
@@ -404,6 +405,7 @@ def api_create_filter_rule():
             username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
+            resource_name=pattern,
             details={"action": "create", "pattern": pattern, "type": rule_type},
             **client_info,
         )
@@ -439,6 +441,7 @@ def api_update_filter_rule(rule_id):
             username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
+            resource_name=data.get("pattern") or f"Rule #{rule_id}",
             details={"action": "update", "changes": data},
             **client_info,
         )
@@ -464,6 +467,7 @@ def api_delete_filter_rule(rule_id):
             username=g.user.get("username"),
             resource_type="filter_rule",
             resource_id=str(rule_id),
+            resource_name=f"Rule #{rule_id}",
             details={"action": "delete"},
             **client_info,
         )

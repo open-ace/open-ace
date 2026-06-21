@@ -9,6 +9,7 @@ Populates empty tables with sample data so all management pages show content:
 - Hourly stats (aggregated from daily_usage)
 """
 
+import json
 import os
 import random
 import sys
@@ -19,6 +20,7 @@ sys.path.insert(0, project_root)
 
 from app import create_app
 from app.repositories.database import (
+    adapt_boolean_value,
     adapt_sql,
     get_connection,
     get_param_placeholder,
@@ -45,28 +47,103 @@ def seed_audit_logs(conn):
         (88, "regular_user"),
     ]
 
-    actions = [
-        ("login", "info", "auth", "User logged in"),
-        ("login_failed", "warning", "auth", "Failed login attempt"),
-        ("logout", "info", "auth", "User logged out"),
-        ("user_create", "info", "user", "Created new user"),
-        ("user_update", "info", "user", "Updated user profile"),
-        ("user_delete", "warning", "user", "Deleted user"),
-        ("role_change", "warning", "user", "Changed user role"),
-        ("password_change", "info", "auth", "Password changed"),
-        ("config_update", "info", "system", "Updated system configuration"),
-        ("project_create", "info", "project", "Created new project"),
-        ("project_delete", "warning", "project", "Deleted project"),
-        ("session_start", "info", "session", "Started AI session"),
-        ("session_end", "info", "session", "Ended AI session"),
-        ("api_key_create", "info", "api_key", "Created API key"),
-        ("api_key_revoke", "warning", "api_key", "Revoked API key"),
-        ("quota_update", "info", "quota", "Updated user quota"),
-        ("report_generate", "info", "report", "Generated compliance report"),
-        ("data_export", "info", "data", "Exported data"),
-        ("filter_rule_create", "info", "content_filter", "Created filter rule"),
-        ("security_settings_update", "warning", "system", "Updated security settings"),
+    # Each template: (action, severity, resource_type, resource_id, details).
+    # resource_id is a REAL entity PK or None (no stable entity). details is a
+    # JSON-serializable dict; PK-bearing (A-class) rows carry a human-readable
+    # "resource_name" so the audit table is self-explanatory and the UI can
+    # surface it as a tooltip. resource_type values mirror the backend's real
+    # set (see AuditLog RESOURCE_TYPE_LABELS on the frontend) — never synthesize
+    # ids like "<type>_1". B-class rows (no entity) leave resource_id None and
+    # the UI renders "-".
+    event_templates = [
+        # B-class — no single entity, resource_id is None
+        ("login", "info", "session", None, {}),
+        ("login_failed", "warning", "session", None, {}),
+        ("logout", "info", "session", None, {}),
+        ("data_view", "info", "analytics_report", None, {"days": 30}),
+        ("data_export", "info", "analytics", None, {"format": "csv"}),
+        (
+            "system_config_change",
+            "info",
+            "ai_agent_settings",
+            None,
+            {"action": "update", "keys": ["ai_github_token"]},
+        ),
+        (
+            "system_config_change",
+            "warning",
+            "security_settings",
+            None,
+            {"action": "update", "keys": ["session_timeout"]},
+        ),
+        (
+            "content_blocked",
+            "warning",
+            "content",
+            None,
+            {"risk_level": "high", "matched_rules": ["Password Exposure"]},
+        ),
+        ("agent_auth_failure", "warning", "agent_token", None, {}),
+        # A-class — real PK with a readable resource_name (details non-empty)
+        ("user_password_change", "info", "user", "1", {"resource_name": "admin"}),
+        (
+            "quota_alert",
+            "warning",
+            "quota_alert",
+            "1001",
+            {"action": "acknowledged", "resource_name": "Quota alert #1001"},
+        ),
+        (
+            "system_config_change",
+            "info",
+            "filter_rule",
+            "5",
+            {
+                "action": "create",
+                "pattern": r"\bpassword\b",
+                "type": "keyword",
+                "resource_name": r"\bpassword\b",
+            },
+        ),
+        (
+            "system_config_change",
+            "warning",
+            "filter_rule",
+            "5",
+            {"action": "delete", "resource_name": "Rule #5"},
+        ),
+        (
+            "generate_report",
+            "info",
+            "compliance_report",
+            "RPT-2026-001",
+            {"report_type": "security", "format": "html", "resource_name": "security"},
+        ),
+        (
+            "agent_register",
+            "info",
+            "remote_machine",
+            "mac-001",
+            {"machine_name": "build-node-1", "resource_name": "build-node-1"},
+        ),
+        (
+            "agent_token_rotate",
+            "info",
+            "remote_machine",
+            "mac-001",
+            {"machine_id": "mac-001"},
+        ),
+        (
+            "agent_reconnect",
+            "info",
+            "remote_machine",
+            "mac-002",
+            {"machine_name": "gpu-box", "resource_name": "gpu-box"},
+        ),
     ]
+
+    # Actions that represent a failed operation (success flag = 0).
+    failed_actions = {"login_failed", "agent_auth_failure"}
 
     ips = ["192.168.1.100", "192.168.1.101", "10.0.0.50", "192.168.64.4"]
 
@@ -77,10 +154,14 @@ def seed_audit_logs(conn):
         hours_ago = random.randint(0, 23)
         ts = now - timedelta(days=days_ago, hours=hours_ago)
         user_id, username = random.choice(users)
-        action, severity, resource_type, _ = random.choice(actions)
+        action, severity, resource_type, resource_id, details = random.choice(event_templates)
         ip = random.choice(ips)
-        success = 1 if action != "login_failed" else random.choice([0, 1])
-        detail = f"Action performed by {username}"
+        success = action not in failed_actions
+
+        # Serialize details as a JSON object; stamp the acting user for context.
+        detail_obj = dict(details)
+        detail_obj.setdefault("actor", username)
+        details_json = json.dumps(detail_obj)
 
         logs.append(
             (
@@ -90,12 +171,12 @@ def seed_audit_logs(conn):
                 action,
                 severity,
                 resource_type,
-                resource_type + "_1",
-                detail,
+                resource_id,
+                details_json,
                 ip,
                 "Mozilla/5.0",
-                "sess_" + str(i),
-                success,
+                f"sess_{i}",
+                adapt_boolean_value(success),
                 None,
             )
         )
