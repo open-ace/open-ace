@@ -986,6 +986,9 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 # Normalize the role at the write boundary (toolResult /
                 # tool_result -> tool) so variant spellings never reach the
                 # daily_messages role column. See normalize_message_role.
+                # In-place mutation is deliberate: both the ON-CONFLICT update
+                # branch and the insert-new branch below read msg["role"], so
+                # mutating once here covers both without a second pass.
                 msg["role"] = normalize_message_role(msg.get("role"))
 
                 # Check for existing message

@@ -272,3 +272,57 @@ class TestSharedDbWriteBoundary:
         assert self._fetch_role(db_path, "b1") == "tool"
         assert self._fetch_role(db_path, "b2") == "tool"
         assert self._fetch_role(db_path, "b3") == "user"
+
+
+class TestRoleNormalizationParity:
+    """There are two normalize_message_role implementations that must stay in
+    lockstep: ``app/utils/roles.py`` (app write paths) and
+    ``scripts/shared/db.py`` (fetch-script write paths). The scripts package
+    ships standalone and cannot import from app/, so the duplication is
+    intentional. This parity guard locks them together: if a future alias (or
+    the ``"unknown"`` fallback) is added to one and not the other, the
+    conversation-detail role-filter bug silently recurs for one write path.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load_shared_db(self):
+        import importlib
+        import os
+        import sys
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        scripts_dir = os.path.join(repo_root, "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        # Cache on the instance so parametrized cases reuse the import.
+        self._shared_db = importlib.import_module("shared.db")
+        yield
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            None,
+            "",
+            "   ",
+            "tool",
+            "Tool",
+            "TOOL",
+            " tool ",
+            "toolResult",
+            "ToolResult",
+            "tool_result",
+            "TOOL_RESULT",
+            "user",
+            "USER",
+            " Assistant ",
+            "system",
+            "developer",
+            "ToolUser",
+        ],
+    )
+    def test_app_and_shared_implementations_agree(self, raw):
+        app_result = normalize_message_role(raw)
+        shared_result = self._shared_db.normalize_message_role(raw)
+        assert app_result == shared_result, (
+            f"role normalization drift for {raw!r}: " f"app={app_result!r} shared={shared_result!r}"
+        )
