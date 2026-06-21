@@ -6,10 +6,10 @@ import React, { useState, useMemo } from 'react';
 import { useAuditLogs } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState, Badge, Modal } from '@/components/common';
+import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, getDefaultDateRange } from '@/utils';
-import type { AuditLogFilters, AuditLog as AuditLogType } from '@/api/governance';
+import type { AuditLogFilters } from '@/api';
 
 const ITEMS_PER_PAGE = 20;
 // Default audit-log filter window: the last 7 days. Used both on initial
@@ -21,27 +21,6 @@ const AUDIT_LOG_DEFAULT_RANGE_DAYS = 7;
 const getDefaultAuditFilters = (): AuditLogFilters => {
   const { start, end } = getDefaultDateRange(AUDIT_LOG_DEFAULT_RANGE_DAYS);
   return { start_date: start, end_date: end };
-};
-
-// Map backend resource_type codes to i18n keys for human-readable display.
-// Mirrors the resourceTypeOptions values; a new resource type must add an
-// entry here, in resourceTypeOptions, and in i18n (en/zh/ja/ko).
-const RESOURCE_TYPE_LABELS: Record<string, string> = {
-  audit_logs: 'resourceAuditLogs',
-  quota_alert: 'resourceQuotaAlert',
-  content: 'resourceContent',
-  content_filter: 'resourceContentFilter',
-  filter_rule: 'resourceFilterRule',
-  security_settings: 'resourceSecuritySettings',
-  analytics_report: 'resourceAnalyticsReport',
-  analytics: 'resourceAnalytics',
-  ai_agent_settings: 'resourceAiAgentSettings',
-  compliance_report: 'resourceComplianceReport',
-  agent_token: 'resourceAgentToken',
-  remote_machine: 'resourceRemoteMachine',
-  data: 'resourceData',
-  session: 'resourceSession',
-  user: 'resourceUser',
 };
 
 const ACTION_COLORS: Record<string, BadgeVariant> = {
@@ -88,7 +67,6 @@ export const AuditLog: React.FC = () => {
   const language = useLanguage();
   const [filters, setFilters] = useState<AuditLogFilters>(getDefaultAuditFilters);
   const [page, setPage] = useState(1);
-  const [selectedLog, setSelectedLog] = useState<AuditLogType | null>(null);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useAuditLogs({
     ...filters,
@@ -158,8 +136,6 @@ export const AuditLog: React.FC = () => {
       { value: 'agent_token', label: t('resourceAgentToken', language) },
       { value: 'remote_machine', label: t('resourceRemoteMachine', language) },
       { value: 'data', label: t('resourceData', language) },
-      { value: 'session', label: t('resourceSession', language) },
-      { value: 'user', label: t('resourceUser', language) },
     ],
     [language]
   );
@@ -180,25 +156,6 @@ export const AuditLog: React.FC = () => {
   const handleReset = () => {
     setFilters(getDefaultAuditFilters());
     setPage(1);
-  };
-
-  // Render a localized resource-type label, falling back to the raw code.
-  const renderResourceType = (code: string | null | undefined): string => {
-    if (!code) return '-';
-    const key = RESOURCE_TYPE_LABELS[code];
-    return key ? t(key, language) : code;
-  };
-
-  // details is normalized to an object by the backend, but guard defensively
-  // against legacy/malformed rows so Object.keys never degrades.
-  const getDetails = (log: AuditLogType): Record<string, unknown> =>
-    log.details && typeof log.details === 'object' ? (log.details as Record<string, unknown>) : {};
-
-  const hasDetails = (log: AuditLogType): boolean => Object.keys(getDetails(log)).length > 0;
-
-  const getResourceName = (log: AuditLogType): string | null => {
-    const name = getDetails(log).resource_name;
-    return typeof name === 'string' && name ? name : null;
   };
 
   if (isError) {
@@ -304,23 +261,18 @@ export const AuditLog: React.FC = () => {
                     <td>
                       <Badge variant={ACTION_COLORS[log.action] ?? 'secondary'}>{log.action}</Badge>
                     </td>
-                    <td>{renderResourceType(log.resource_type)}</td>
+                    <td>{log.resource_type}</td>
                     <td>
-                      {log.resource_id ? (
-                        <code title={getResourceName(log) ?? undefined}>{log.resource_id}</code>
-                      ) : (
-                        <span className="text-muted">-</span>
-                      )}
+                      <code>{log.resource_id}</code>
                     </td>
                     <td>
                       <small className="text-muted">{log.ip_address ?? '-'}</small>
                     </td>
                     <td>
-                      {hasDetails(log) && (
+                      {log.details && Object.keys(log.details).length > 0 && (
                         <button
                           className="btn btn-link btn-sm p-0"
-                          onClick={() => setSelectedLog(log)}
-                          title={t('tableDetails', language)}
+                          onClick={() => window.alert(JSON.stringify(log.details, null, 2))}
                         >
                           <i className="bi bi-eye" />
                         </button>
@@ -371,29 +323,6 @@ export const AuditLog: React.FC = () => {
           )}
         </>
       )}
-
-      {/* Details viewer (replaces window.alert) */}
-      <Modal
-        isOpen={selectedLog !== null}
-        onClose={() => setSelectedLog(null)}
-        title={
-          selectedLog
-            ? `${renderResourceType(selectedLog.resource_type)}${
-                selectedLog.resource_id ? ` · ${selectedLog.resource_id}` : ''
-              }`
-            : ''
-        }
-        size="lg"
-      >
-        {selectedLog && (
-          <pre
-            className="mb-0"
-            style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-          >
-            {JSON.stringify(selectedLog.details, null, 2)}
-          </pre>
-        )}
-      </Modal>
     </div>
   );
 };
