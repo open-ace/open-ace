@@ -638,8 +638,13 @@ class AutonomousOrchestrator:
         if not text:
             return ""
         cleaned = cls._clean_agent_text(text)
+        # The trailing ``\b`` is intentionally only inside the ``Let me``
+        # alternative: putting it after the whole group would break the
+        # ``I need to:`` alternative (``:`` is a non-word char, so a ``\b``
+        # after it never matches when followed by whitespace/newline, leaving
+        # that preamble line un-stripped — a real dead-alternative bug).
         cleaned = re.sub(
-            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:)\b.*$",
+            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:).*$",
             "",
             cleaned,
         )
