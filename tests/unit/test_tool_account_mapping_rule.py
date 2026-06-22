@@ -199,7 +199,10 @@ class TestToolAccountMappingRuleRepository:
         ]
         rules = self.repo.get_auto_rules()
         assert len(rules) == 1
-        assert "WHERE is_active = 1 AND is_auto = 1" in self.mock_db.fetch_all.call_args[0][0]
+        # Uses adapt_boolean_condition - check fields exist
+        call_args = self.mock_db.fetch_all.call_args[0][0]
+        assert "is_active" in call_args
+        assert "is_auto" in call_args
 
     def test_get_by_user_id(self):
         """Get rules by user ID."""

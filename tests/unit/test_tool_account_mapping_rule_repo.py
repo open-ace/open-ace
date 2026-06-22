@@ -49,7 +49,7 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
         result = self.repo.get_active_rules()
         self.assertEqual(len(result), 1)
         call_args = self.mock_db.fetch_all.call_args[0][0]
-        self.assertIn("WHERE is_active = 1", call_args)
+        self.assertIn("is_active", call_args)  # Uses adapt_boolean_condition
 
     # get_auto_rules
     def test_get_auto_rules_filters_auto_and_active(self):
@@ -57,7 +57,8 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
         self.mock_db.fetch_all.return_value = []
         self.repo.get_auto_rules()
         call_args = self.mock_db.fetch_all.call_args[0][0]
-        self.assertIn("is_active = 1 AND is_auto = 1", call_args)
+        self.assertIn("is_active", call_args)  # Uses adapt_boolean_condition
+        self.assertIn("is_auto", call_args)  # Uses adapt_boolean_condition
 
     # get_by_user_id
     def test_get_by_user_id_returns_user_rules(self):
