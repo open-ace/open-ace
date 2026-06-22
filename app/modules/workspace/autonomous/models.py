@@ -24,7 +24,9 @@ class AutonomousWorkflow:
     workflow_id: str = ""
     user_id: Optional[int] = None
     title: str = ""
-    status: str = "pending"  # queued|pending|preparing|planning|developing|pr_review|reporting|waiting|merging|completed|failed|cancelled|paused
+    status: str = (
+        "pending"  # queued|pending|preparing|planning|developing|pr_review|reporting|waiting|merging|completed|failed|cancelled|paused
+    )
     requirements_text: str = ""
     requirements_issue_url: str = ""
     project_path: str = ""
