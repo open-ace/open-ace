@@ -53,6 +53,83 @@ const TOOL_ROLE = 'tool';
  */
 const isToolRole = (role: string): boolean => role === TOOL_ROLE || role === 'toolResult';
 
+/**
+ * Truncate message content to a short preview for the latency table / chart
+ * labels. Collapses whitespace and appends an ellipsis when truncated.
+ */
+const PREVIEW_LENGTH = 40;
+export function truncatePreview(content: string): string {
+  if (!content) return '';
+  const collapsed = content.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= PREVIEW_LENGTH) return collapsed;
+  return collapsed.substring(0, PREVIEW_LENGTH) + '…';
+}
+
+/** Minimal shape needed by the latency calculator. */
+export interface LatencyMessage {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+/** One row of computed latency data. */
+export interface LatencyDatum {
+  /** 1-based position of the triggering user message */
+  index: number;
+  /** 1-based position of the responding message (the jump target) */
+  responseIndex: number;
+  role: string;
+  latency: number;
+  timestamp: string;
+  /** response message content, for the preview column */
+  content: string;
+  /** triggering user message content, for secondary identification */
+  userContent: string;
+}
+
+/**
+ * Compute per-response latency from a chronologically ordered message list.
+ * For each user message followed by an assistant/tool response, records the
+ * delay (seconds), the user message position (`index`) and the response message
+ * position (`responseIndex`). Only the first response after a user message is
+ * paired (existing behavior); subsequent responses are not paired.
+ *
+ * Exported for unit testing.
+ */
+export function computeLatencyData(messages: LatencyMessage[]): LatencyDatum[] {
+  if (!messages || messages.length < 2) return [];
+
+  const latencies: LatencyDatum[] = [];
+  let lastUserTime: Date | null = null;
+  let lastUserIndex = 0;
+  let lastUserContent = '';
+
+  messages.forEach((msg, index) => {
+    const msgTime = new Date(msg.timestamp);
+    if (msg.role === 'user') {
+      lastUserTime = msgTime;
+      lastUserIndex = index;
+      lastUserContent = msg.content;
+    } else if ((msg.role === 'assistant' || isToolRole(msg.role)) && lastUserTime) {
+      const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
+      if (latency > 0) {
+        latencies.push({
+          index: lastUserIndex + 1,
+          responseIndex: index + 1,
+          role: msg.role,
+          latency: Math.round(latency * 100) / 100,
+          timestamp: msg.timestamp,
+          content: msg.content,
+          userContent: lastUserContent,
+        });
+      }
+      lastUserTime = null;
+    }
+  });
+
+  return latencies;
+}
+
 // Column definitions
 interface ColumnDef {
   key: string;
@@ -623,7 +700,7 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
 /**
  * Conversation Detail Modal Component
  */
-interface ConversationDetailModalProps {
+export interface ConversationDetailModalProps {
   sessionId: string;
   language: Language;
   onClose: () => void;
@@ -643,9 +720,23 @@ interface MessageItemProps {
     sender_name?: string;
   };
   language: Language;
+  // 1-based position of this message in the full (unfiltered) message list.
+  // Shown as a "#序号" badge so the latency-table index can be matched by eye.
+  messageNumber?: number;
+  // When true, the card is visually highlighted (e.g. after jumping from the
+  // latency table). The highlight fades out via a CSS animation.
+  isHighlighted?: boolean;
+  // Ref callback so the parent can scroll the item into view.
+  itemRef?: (el: HTMLDivElement | null) => void;
 }
 
-const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
+const MessageItem: React.FC<MessageItemProps> = ({
+  msg,
+  language,
+  messageNumber,
+  isHighlighted,
+  itemRef,
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const MAX_CONTENT_LENGTH = 500;
 
@@ -691,14 +782,24 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
 
   return (
     <div
+      ref={itemRef}
       className={cn(
         'message-item mb-3 p-3 rounded',
-        msg.role === 'user' ? 'bg-light' : 'bg-white border'
+        msg.role === 'user' ? 'bg-light' : 'bg-white border',
+        isHighlighted && 'message-highlighted'
       )}
     >
       {/* Header: Role, Sender, Model, Time */}
       <div className="d-flex justify-content-between align-items-start mb-2">
         <div className="d-flex align-items-center flex-wrap gap-2">
+          {messageNumber !== undefined && (
+            <span
+              className="badge bg-secondary message-number-badge"
+              title={t('messageNumberTitle', language)}
+            >
+              #{messageNumber}
+            </span>
+          )}
           <i className={cn('bi', getRoleIcon(msg.role))} />
           <span className={cn('badge', getRoleBadgeClass(msg.role))}>{msg.role}</span>
           {msg.sender_name && (
@@ -776,7 +877,10 @@ const MessageItem: React.FC<MessageItemProps> = ({ msg, language }) => {
   );
 };
 
-const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
+// Memoized so highlighting a single message does not re-render the whole list.
+const MemoizedMessageItem = React.memo(MessageItem);
+
+export const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   sessionId,
   language,
   onClose,
@@ -784,6 +888,14 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   const [activeTab, setActiveTab] = useState<'timeline' | 'latency'>('timeline');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const { data: messages, isLoading, isError } = useConversationTimeline(sessionId);
+  // Index (0-based, into the full messages array) of the message to scroll to
+  // and highlight after switching to the timeline tab. Null when idle.
+  const [highlightedMessageIndex, setHighlightedMessageIndex] = useState<number | null>(null);
+  // Refs to each rendered message card, keyed by the full-array index.
+  const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // Ref to the scrollable message-list container so we can set scrollTop directly
+  // (scrollIntoView can mis-scroll inside a nested modal scroll context).
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   // Filter messages by role
   const filteredMessages = useMemo(() => {
@@ -796,34 +908,17 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
   }, [messages, roleFilter]);
 
   // Calculate latency data from messages
-  const latencyData = useMemo(() => {
-    if (!messages || messages.length < 2) return [];
+  const latencyData = useMemo(() => computeLatencyData(messages ?? []), [messages]);
 
-    const latencies: Array<{ index: number; role: string; latency: number; timestamp: string }> =
-      [];
-    let lastUserTime: Date | null = null;
-    let lastUserIndex = 0;
-
-    messages.forEach((msg, index) => {
-      const msgTime = new Date(msg.timestamp);
-      if (msg.role === 'user') {
-        lastUserTime = msgTime;
-        lastUserIndex = index;
-      } else if ((msg.role === 'assistant' || isToolRole(msg.role)) && lastUserTime) {
-        const latency = (msgTime.getTime() - lastUserTime.getTime()) / 1000; // seconds
-        if (latency > 0) {
-          latencies.push({
-            index: lastUserIndex + 1,
-            role: msg.role,
-            latency: Math.round(latency * 100) / 100,
-            timestamp: msg.timestamp,
-          });
-        }
-        lastUserTime = null;
-      }
+  // Map message id -> full-array index (0-based). Lets the timeline look up a
+  // message's sequence number even while rendering a filtered subset, without an
+  // O(n) indexOf scan per row.
+  const idToFullIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    messages?.forEach((msg, index) => {
+      if (msg.id !== undefined) map.set(msg.id, index);
     });
-
-    return latencies;
+    return map;
   }, [messages]);
 
   // Calculate latency statistics
@@ -887,6 +982,45 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
     { value: 'system', label: t('messageRoleSystem', language) },
     { value: TOOL_ROLE, label: t('messageRoleToolResult', language) },
   ];
+
+  // Jump to a message (by 0-based full-array index) from the latency table:
+  // make sure the target is visible (reset filter), switch to the timeline tab
+  // and request a scroll + highlight. The actual DOM scroll happens in the
+  // effect below once the filtered list has re-rendered.
+  const handleMessageIndexClick = (fullIndex0Based: number) => {
+    if (!messages || fullIndex0Based < 0 || fullIndex0Based >= messages.length) return;
+    setHighlightedMessageIndex(fullIndex0Based);
+    // Reset the role filter so the target message is guaranteed to be rendered
+    // (it may otherwise be hidden by an active filter).
+    setRoleFilter('all');
+    setActiveTab('timeline');
+  };
+
+  // After the timeline tab is shown (and the filtered list re-rendered), scroll
+  // the highlighted message into view. We use two rAFs to wait for the DOM to
+  // settle after the tab/filter switch, and scroll the container directly to
+  // avoid scrollIntoView mis-scrolling the whole modal body.
+  useEffect(() => {
+    if (highlightedMessageIndex === null) return;
+    if (activeTab !== 'timeline') return;
+
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => {
+        const el = messageRefs.current.get(highlightedMessageIndex);
+        const container = messageListRef.current;
+        if (el && container) {
+          // Scroll the message roughly into the middle of the visible area.
+          const offset = el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2;
+          container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [highlightedMessageIndex, activeTab, filteredMessages]);
 
   return (
     <Modal
@@ -1004,13 +1138,32 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
 
               {/* Message List */}
               <div
+                ref={messageListRef}
                 className="conversation-messages"
                 style={{ maxHeight: '500px', overflowY: 'auto' }}
               >
                 {filteredMessages.length > 0 ? (
-                  filteredMessages.map((msg, index) => (
-                    <MessageItem key={msg.id ?? index} msg={msg} language={language} />
-                  ))
+                  filteredMessages.map((msg) => {
+                    // Resolve the message's position in the FULL (unfiltered)
+                    // list so the displayed "#序号" matches the latency-table
+                    // index regardless of the active role filter.
+                    const fullIndex = msg.id !== undefined ? idToFullIndex.get(msg.id) : undefined;
+                    return (
+                      <MemoizedMessageItem
+                        key={msg.id ?? fullIndex}
+                        msg={msg}
+                        language={language}
+                        messageNumber={fullIndex !== undefined ? fullIndex + 1 : undefined}
+                        isHighlighted={highlightedMessageIndex === fullIndex}
+                        itemRef={(el) => {
+                          if (fullIndex !== undefined) {
+                            if (el) messageRefs.current.set(fullIndex, el);
+                            else messageRefs.current.delete(fullIndex);
+                          }
+                        }}
+                      />
+                    );
+                  })
                 ) : (
                   <EmptyState icon="bi-chat-dots" title={t('noMessages', language)} />
                 )}
@@ -1068,7 +1221,7 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
 
                   {/* Latency Chart */}
                   <LineChart
-                    labels={latencyData.map((d) => `#${d.index}`)}
+                    labels={latencyData.map((d) => `#${d.index} · ${truncatePreview(d.content)}`)}
                     datasets={[
                       {
                         label: t('latency', language) + ' (s)',
@@ -1092,17 +1245,39 @@ const ConversationDetailModal: React.FC<ConversationDetailModalProps> = ({
                       <table className="table table-sm table-hover">
                         <thead>
                           <tr>
-                            <th>#</th>
-                            <th>{t('messageIndex', language)}</th>
+                            <th title={t('sequenceNumberTitle', language)}>
+                              {t('sequenceNumber', language)}
+                            </th>
+                            <th title={t('messageIndexTitle', language)}>
+                              {t('messageIndex', language)}
+                            </th>
+                            <th>{t('messagePreview', language)}</th>
                             <th>{t('latency', language)} (s)</th>
                             <th>{t('timestamp', language)}</th>
                           </tr>
                         </thead>
                         <tbody>
                           {latencyData.map((d, i) => (
-                            <tr key={i}>
-                              <td>{i + 1}</td>
-                              <td>#{d.index}</td>
+                            <tr
+                              key={i}
+                              className="latency-row"
+                              style={{ cursor: 'pointer' }}
+                              title={t('clickToLocate', language)}
+                              onClick={() => handleMessageIndexClick(d.responseIndex - 1)}
+                            >
+                              <td className="text-muted">{i + 1}</td>
+                              <td>
+                                <span className="fw-bold">#{d.index}</span>
+                                <span className="text-muted mx-1">→</span>
+                                <span className="badge bg-secondary">#{d.responseIndex}</span>
+                              </td>
+                              <td
+                                className="text-truncate"
+                                style={{ maxWidth: '220px' }}
+                                title={d.content}
+                              >
+                                <small>{truncatePreview(d.content)}</small>
+                              </td>
                               <td>
                                 <span
                                   className={cn(

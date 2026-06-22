@@ -625,12 +625,26 @@ class AutonomousOrchestrator:
 
     @classmethod
     def _sanitize_artifact_text(cls, text: str) -> str:
-        """Drop leaked process/JSON noise and collapse repeated adjacent blocks."""
+        """Drop leaked process/JSON noise and collapse repeated adjacent blocks.
+
+        The two ``re.sub`` passes below are BEST-EFFORT heuristics, not precise
+        filters: they strip lines that look like leaked agent preamble
+        ("Let me…", "I need to:") and single-line tool-call JSON. They can
+        false-positive on legitimate prose containing those prefixes. This is an
+        acceptable tradeoff for cleaning common model leakage; if precision
+        becomes important, prefer a structured boundary (e.g. agent-emitted
+        visible-output delimiters) over this regex blocklist.
+        """
         if not text:
             return ""
         cleaned = cls._clean_agent_text(text)
+        # The trailing ``\b`` is intentionally only inside the ``Let me``
+        # alternative: putting it after the whole group would break the
+        # ``I need to:`` alternative (``:`` is a non-word char, so a ``\b``
+        # after it never matches when followed by whitespace/newline, leaving
+        # that preamble line un-stripped — a real dead-alternative bug).
         cleaned = re.sub(
-            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:)\b.*$",
+            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:).*$",
             "",
             cleaned,
         )
