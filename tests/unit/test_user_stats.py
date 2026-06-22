@@ -71,6 +71,19 @@ CREATE TABLE agent_sessions (
     total_input_tokens INTEGER DEFAULT 0,
     total_output_tokens INTEGER DEFAULT 0
 );
+
+CREATE TABLE session_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT,
+    tokens_used INTEGER DEFAULT 0,
+    model TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT,
+    milestone_id TEXT DEFAULT '',
+    source TEXT DEFAULT ''
+);
 """
 
 
