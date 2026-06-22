@@ -1184,7 +1184,9 @@ class TestGetMilestoneSession:
         data = resp.get_json()
         assert data["success"] is True
         assert data["session"]["session_id"] == "sess-123"
-        mock_sm.get_session.assert_called_once_with("sess-123", include_messages=True)
+        mock_sm.get_session.assert_called_once_with(
+            "sess-123", include_messages=True, message_milestone_id="ms-1"
+        )
 
     def test_get_session_no_session_id(self, client):
         """Returns null session when milestone has no session_id."""

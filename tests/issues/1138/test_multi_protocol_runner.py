@@ -358,6 +358,27 @@ def test_extract_visible_response_text_preserves_all_visible_turns():
     )
 
 
+def test_build_agent_task_result_separates_final_text_from_visible_text():
+    from app.modules.workspace.autonomous.agent_runner import _build_agent_task_result
+
+    result = _build_agent_task_result(
+        session_id="sess-1",
+        tracking_session_id="track-1",
+        event_log=[
+            {"type": "assistant", "text": "Applied fix\nCI_STATUS: pre-existing"},
+            {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "git push"}},
+            {"type": "assistant", "text": "## Final Summary\nDone."},
+        ],
+        success=True,
+    )
+
+    assert result.response_text == "## Final Summary\nDone."
+    assert result.visible_response_text == (
+        "Applied fix\nCI_STATUS: pre-existing\n\n## Final Summary\nDone."
+    )
+    assert result.structured_tags["ci_status"] == "pre-existing"
+
+
 # ── ZCode session failure cleanup ─────────────────────────────────────────
 
 

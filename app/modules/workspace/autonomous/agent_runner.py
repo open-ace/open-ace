@@ -12,6 +12,7 @@ remote execution.
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -144,6 +145,11 @@ _TOOL_JSON_KEYS = frozenset(
     }
 )
 _NON_VISIBLE_BLOCK_TYPES = frozenset({"thinking", "tool_use", "tool_result", "reasoning"})
+_STRUCTURED_TAG_PATTERNS = {
+    "tldr": re.compile(r"^\s*TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE),
+    "test_status": re.compile(r"^\s*TEST_STATUS:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE),
+    "ci_status": re.compile(r"^\s*CI_STATUS:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE),
+}
 
 
 def _looks_like_tool_json(text: str) -> bool:
@@ -281,6 +287,55 @@ def _extract_visible_response_text(event_log: list[dict], fallback_text: str = "
     if assistant_turns:
         return "\n\n".join(assistant_turns)
     return fallback_text.strip()
+
+
+def _extract_structured_response_tags(text: str) -> dict[str, str]:
+    """Extract structured status tags from assistant-visible text."""
+    if not text:
+        return {}
+    tags: dict[str, str] = {}
+    for key, pattern in _STRUCTURED_TAG_PATTERNS.items():
+        match = pattern.search(text)
+        if match:
+            tags[key] = match.group(1).strip()
+    return tags
+
+
+def _build_agent_task_result(
+    *,
+    session_id: str,
+    tracking_session_id: str,
+    event_log: list[dict] | None = None,
+    fallback_text: str = "",
+    total_tokens: int = 0,
+    total_input_tokens: int = 0,
+    total_output_tokens: int = 0,
+    request_count: int = 0,
+    tool_calls: list | None = None,
+    success: bool = False,
+    error: str | None = None,
+    messages: list | None = None,
+) -> AgentTaskResult:
+    """Build a task result with both final-output and visible-text views."""
+    normalized_event_log = event_log or []
+    visible_text = _extract_visible_response_text(normalized_event_log, fallback_text)
+    final_text = _extract_final_response_text(normalized_event_log, fallback_text)
+    return AgentTaskResult(
+        session_id=session_id,
+        tracking_session_id=tracking_session_id,
+        response_text=final_text,
+        visible_response_text=visible_text,
+        structured_tags=_extract_structured_response_tags(visible_text),
+        messages=messages or [],
+        total_tokens=total_tokens,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        request_count=request_count,
+        tool_calls=tool_calls or [],
+        success=success,
+        error=error,
+        event_log=normalized_event_log,
+    )
 
 
 class _ZcodeResultCollector:
@@ -1037,12 +1092,11 @@ class AutonomousAgentRunner:
             else session_id
         )
         if self._uses_sidebar_session_source(cli_tool, workspace_type) and not resolved_session_id:
-            return AgentTaskResult(
+            return _build_agent_task_result(
                 session_id="",
                 tracking_session_id=session_id,
-                response_text=_extract_visible_response_text(
-                    session.event_log, session.assistant_text
-                ),
+                event_log=session.event_log,
+                fallback_text=session.assistant_text,
                 total_tokens=session.total_tokens,
                 total_input_tokens=session.total_input_tokens,
                 total_output_tokens=session.total_output_tokens,
@@ -1050,16 +1104,14 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error="Failed to detect Claude sidebar session JSONL for autonomous task",
-                event_log=session.event_log,
             )
 
         if not completed:
-            return AgentTaskResult(
+            return _build_agent_task_result(
                 session_id=resolved_session_id,
                 tracking_session_id=session_id,
-                response_text=_extract_visible_response_text(
-                    session.event_log, session.assistant_text
-                ),
+                event_log=session.event_log,
+                fallback_text=session.assistant_text,
                 total_tokens=session.total_tokens,
                 total_input_tokens=session.total_input_tokens,
                 total_output_tokens=session.total_output_tokens,
@@ -1067,13 +1119,13 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
-                event_log=session.event_log,
             )
 
-        return AgentTaskResult(
+        return _build_agent_task_result(
             session_id=resolved_session_id,
             tracking_session_id=session_id,
-            response_text=_extract_visible_response_text(session.event_log, session.assistant_text),
+            event_log=session.event_log,
+            fallback_text=session.assistant_text,
             total_tokens=session.total_tokens,
             total_input_tokens=session.total_input_tokens,
             total_output_tokens=session.total_output_tokens,
@@ -1081,7 +1133,6 @@ class AutonomousAgentRunner:
             tool_calls=session.tool_calls,
             success=session.error is None,
             error=session.error,
-            event_log=session.event_log,
         )
 
     def _create_workflow_session(
@@ -1303,12 +1354,11 @@ class AutonomousAgentRunner:
 
         cli_sid = zc_session._cli_session_id or session_id
         if not completed:
-            return AgentTaskResult(
+            return _build_agent_task_result(
                 session_id=cli_sid,
                 tracking_session_id=session_id,
-                response_text=_extract_visible_response_text(
-                    collector.event_log, collector.assistant_text
-                ),
+                event_log=collector.event_log,
+                fallback_text=collector.assistant_text,
                 total_tokens=collector.total_tokens,
                 total_input_tokens=collector.input_tokens,
                 total_output_tokens=collector.output_tokens,
@@ -1316,15 +1366,13 @@ class AutonomousAgentRunner:
                 tool_calls=collector.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
-                event_log=collector.event_log,
             )
 
-        return AgentTaskResult(
+        return _build_agent_task_result(
             session_id=cli_sid,
             tracking_session_id=session_id,
-            response_text=_extract_visible_response_text(
-                collector.event_log, collector.assistant_text
-            ),
+            event_log=collector.event_log,
+            fallback_text=collector.assistant_text,
             total_tokens=collector.total_tokens,
             total_input_tokens=collector.input_tokens,
             total_output_tokens=collector.output_tokens,
@@ -1332,7 +1380,6 @@ class AutonomousAgentRunner:
             tool_calls=collector.tool_calls,
             success=collector.error is None,
             error=collector.error,
-            event_log=collector.event_log,
         )
 
     def _run_single_shot(
@@ -1443,17 +1490,17 @@ class AutonomousAgentRunner:
         if not success:
             error = stderr_text or f"Command exited with code {proc.returncode}"
 
-        return AgentTaskResult(
+        return _build_agent_task_result(
             session_id=session_id,
             tracking_session_id=session_id,
-            response_text=response_text.strip(),
+            event_log=event_log,
+            fallback_text=response_text.strip(),
             total_tokens=total_tokens,
             total_input_tokens=input_tokens,
             total_output_tokens=output_tokens,
             request_count=1,
             success=success,
             error=error,
-            event_log=event_log,
         )
 
     @staticmethod
@@ -1567,10 +1614,10 @@ class AutonomousAgentRunner:
                                 if text:
                                     assistant_events.append({"type": "assistant", "text": text})
 
-                        return AgentTaskResult(
+                        return _build_agent_task_result(
                             session_id=session_id,
                             tracking_session_id=session_id,
-                            response_text=_extract_visible_response_text(assistant_events),
+                            event_log=assistant_events,
                             messages=messages,
                             total_tokens=session_data.get("total_tokens", 0),
                             total_input_tokens=session_data.get("total_input_tokens", 0),
@@ -1635,6 +1682,7 @@ class AutonomousAgentRunner:
                     self.session_manager.add_message(
                         session_id=session_id,
                         milestone_id=milestone_id,
+                        source="workflow_local",
                         role="tool",
                         content=(
                             json.dumps(tool_input)
@@ -1655,6 +1703,7 @@ class AutonomousAgentRunner:
                 self.session_manager.add_message(
                     session_id=session_id,
                     milestone_id=milestone_id,
+                    source="workflow_local",
                     role="assistant",
                     content=final_assistant.get("text", ""),
                     model=final_assistant.get("model"),
@@ -1672,6 +1721,7 @@ class AutonomousAgentRunner:
                 self.session_manager.add_message(
                     session_id=session_id,
                     milestone_id=milestone_id,
+                    source="workflow_local",
                     role="assistant",
                     content=result.response_text,
                     count_usage=False,
@@ -1683,6 +1733,7 @@ class AutonomousAgentRunner:
                 self.session_manager.add_message(
                     session_id=session_id,
                     milestone_id=milestone_id,
+                    source="workflow_local",
                     role="tool",
                     content=(
                         json.dumps(tool_input)
