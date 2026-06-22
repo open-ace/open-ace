@@ -235,3 +235,18 @@ export function formatChartDate(
     ...(options.dayOnly ? {} : { month: 'short' }),
   });
 }
+
+/**
+ * Extract a short display form from a session ID.
+ *
+ * Session IDs often have a prefix like 'sess_' followed by a UUID or hex.
+ * This function strips known prefixes and returns the first `length` chars.
+ *
+ * @param sessionId - Full session id (may be undefined)
+ * @param length - Number of characters to show (default 4)
+ */
+export function displaySessionId(sessionId: string | undefined | null, length: number = 4): string {
+  if (!sessionId) return '';
+  const stripped = sessionId.startsWith('sess_') ? sessionId.slice(5) : sessionId;
+  return stripped.slice(0, length);
+}

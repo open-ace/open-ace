@@ -2610,9 +2610,7 @@ link[rel='dns-prefetch'] {
   color: #f8fafc;
   line-height: 1.4;
   margin-bottom: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .session-tooltip-preview {
