@@ -47,7 +47,7 @@ class ToolAccountAutoMappingService:
         """Get cached user dict (keyed by user_id) for N+1 optimization."""
         if self._users_cache is None:
             users = self.get_all_users()
-            self._users_cache = {user.id: user for user in users}
+            self._users_cache = {user.id: user for user in users if user.id is not None}
         return self._users_cache
 
     def get_all_users(self) -> list[User]:
@@ -95,6 +95,10 @@ class ToolAccountAutoMappingService:
         system_account = parts[0] if parts else None
 
         for user in users:
+            # Skip users without valid id
+            if user.id is None:
+                continue
+
             # Match 1: system_account exactly matches username
             if system_account and system_account.lower() == user.username.lower():
                 return AutoMappingResult(
@@ -324,14 +328,14 @@ class ToolAccountAutoMappingService:
         mapped = self.mapping_repo.get_all()
 
         # Count unmapped by inferred tool type
-        unmapped_by_tool = {}
+        unmapped_by_tool: dict[str, int] = {}
         for account in unmapped:
             tool_account = account.get("sender_name", "")
             tool_type = self._infer_tool_type(tool_account) or "unknown"
             unmapped_by_tool[tool_type] = unmapped_by_tool.get(tool_type, 0) + 1
 
         # Count mapped by tool type
-        mapped_by_tool = {}
+        mapped_by_tool: dict[str, int] = {}
         for mapping in mapped:
             tool_type = mapping.tool_type or "unknown"
             mapped_by_tool[tool_type] = mapped_by_tool.get(tool_type, 0) + 1
