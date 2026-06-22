@@ -392,11 +392,22 @@ def update_agent_sessions_stats(messages: list) -> int:
         for session_id, stats in session_stats.items():
             try:
                 check_sql = (
-                    f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
+                    f"SELECT id, user_id, session_type FROM agent_sessions "
+                    f"WHERE session_id = {placeholder}"
                 )
                 _execute(cursor, check_sql, (session_id,))
                 session_row = cursor.fetchone()
                 _is_new_session = False
+
+                session_type = ""
+                if session_row:
+                    session_type = (
+                        session_row["session_type"]
+                        if isinstance(session_row, dict) or hasattr(session_row, "keys")
+                        else session_row[2]
+                    ) or ""
+                if session_type == "workflow":
+                    continue
 
                 if not session_row:
                     first_msg = stats["messages"][0] if stats["messages"] else {}
@@ -494,8 +505,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                         if not existing:
                             insert_sql = f"""
                                 INSERT INTO session_messages
-                                (session_id, role, content, tokens_used, model, timestamp, metadata)
-                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                (session_id, role, content, tokens_used, model, timestamp, metadata, source)
+                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
                             """
                             metadata = {
                                 "message_id": msg_id,
@@ -513,6 +524,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                                     msg.get("model"),
                                     timestamp,
                                     json.dumps(metadata, ensure_ascii=False),
+                                    "zcode_fetch",
                                 ),
                             )
                             messages_inserted += 1
@@ -633,6 +645,41 @@ def fetch_and_save(
         label = system_account or "current user"
         print(f"\nProcessing ZCode DB for {label}: {db_path}")
         candidates = _iter_candidate_sessions(db_path, days, recent)
+        if candidates:
+            try:
+                from shared.db import _execute, _placeholder, get_connection
+
+                # Pre-filter workflow-backed session_ids before any usage or
+                # transcript aggregation. This keeps imported desktop sessions
+                # from inflating per-day usage when the same workflow is already
+                # persisted by the app itself.
+                conn = get_connection()
+                cursor = conn.cursor()
+                try:
+                    placeholder = _placeholder()
+                    candidate_ids = [sid for sid, _ in candidates]
+                    placeholders = ",".join([placeholder] * len(candidate_ids))
+                    _execute(
+                        cursor,
+                        "SELECT session_id FROM agent_sessions "
+                        f"WHERE session_type = {placeholder} AND session_id IN ({placeholders})",
+                        ("workflow", *candidate_ids),
+                    )
+                    workflow_ids = {
+                        row["session_id"] if isinstance(row, dict) else row[0]
+                        for row in cursor.fetchall()
+                    }
+                finally:
+                    cursor.close()
+                    conn.close()
+                if workflow_ids:
+                    candidates = [(sid, ts) for sid, ts in candidates if sid not in workflow_ids]
+                    print(
+                        "  Skipping workflow-backed sessions: "
+                        f"{len(workflow_ids)} filtered before usage/message sync"
+                    )
+            except Exception as e:
+                print(f"  Warning: failed to pre-filter workflow sessions: {e}")
         print(f"  Found {len(candidates)} candidate session(s)")
 
         for session_id, _updated_ms in candidates:
@@ -652,6 +699,56 @@ def fetch_and_save(
             all_messages.extend(messages)
 
     print(f"\nProcessed {total_sessions} sessions, {len(all_messages)} messages")
+
+    if all_messages:
+        workflow_session_ids: set[str] = set()
+        try:
+            from shared.db import _execute, _placeholder, get_connection
+
+            # Keep a second transcript-level filter even after candidate
+            # pre-filtering. It protects against partial/failed pre-filter
+            # queries, concurrent rows added while scanning, and any messages
+            # that arrive from helper paths not sourced from ``candidates``.
+            candidate_ids = sorted(
+                {
+                    str(m.get("agent_session_id", "")).strip()
+                    for m in all_messages
+                    if m.get("agent_session_id")
+                }
+            )
+            if candidate_ids:
+                conn = get_connection()
+                cursor = conn.cursor()
+                try:
+                    placeholder = _placeholder()
+                    placeholders = ",".join([placeholder] * len(candidate_ids))
+                    _execute(
+                        cursor,
+                        "SELECT session_id FROM agent_sessions "
+                        f"WHERE session_type = {placeholder} AND session_id IN ({placeholders})",
+                        ("workflow", *candidate_ids),
+                    )
+                    workflow_session_ids = {
+                        row["session_id"] if isinstance(row, dict) else row[0]
+                        for row in cursor.fetchall()
+                    }
+                finally:
+                    cursor.close()
+                    conn.close()
+        except Exception as e:
+            print(f"Warning: Failed to detect workflow-backed ZCode sessions: {e}")
+
+        if workflow_session_ids:
+            before = len(all_messages)
+            all_messages = [
+                msg
+                for msg in all_messages
+                if msg.get("agent_session_id") not in workflow_session_ids
+            ]
+            print(
+                "Skipped workflow-backed ZCode sessions from transcript sync: "
+                f"{len(workflow_session_ids)} session(s), {before - len(all_messages)} message(s)"
+            )
 
     # Save daily_usage.
     saved = 0

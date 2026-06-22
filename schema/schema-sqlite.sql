@@ -366,7 +366,9 @@ CREATE TABLE session_messages (
  tokens_used integer DEFAULT 0,
  model text,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- metadata text
+ metadata text,
+ milestone_id text DEFAULT '',
+ source text DEFAULT ''
 );
 
 CREATE TABLE sessions (

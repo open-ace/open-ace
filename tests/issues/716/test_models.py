@@ -242,6 +242,8 @@ class TestAgentTaskResult:
         assert r.session_id == ""
         assert r.tracking_session_id == ""
         assert r.response_text == ""
+        assert r.visible_response_text == ""
+        assert r.structured_tags == {}
         assert r.success is False
         assert r.error is None
         assert r.total_tokens == 0
@@ -254,6 +256,8 @@ class TestAgentTaskResult:
             session_id="sess-1",
             tracking_session_id="track-1",
             response_text="Done",
+            visible_response_text="Working...\n\nDone",
+            structured_tags={"tldr": "done"},
             total_tokens=500,
             total_input_tokens=300,
             total_output_tokens=200,
@@ -262,6 +266,8 @@ class TestAgentTaskResult:
         )
         assert r.success is True
         assert r.tracking_session_id == "track-1"
+        assert r.visible_response_text == "Working...\n\nDone"
+        assert r.structured_tags["tldr"] == "done"
         assert r.total_tokens == 500
         assert r.request_count == 3
 

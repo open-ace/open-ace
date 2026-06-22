@@ -617,6 +617,83 @@ class AutonomousOrchestrator:
         return match.group(1).strip()[:200] if match else ""
 
     @staticmethod
+    def _artifact_visible_text(result: Optional[AgentTaskResult]) -> str:
+        """Return all user-visible assistant turns for a task result."""
+        if not result:
+            return ""
+        return (getattr(result, "visible_response_text", "") or result.response_text or "").strip()
+
+    @classmethod
+    def _sanitize_artifact_text(cls, text: str) -> str:
+        """Drop leaked process/JSON noise and collapse repeated adjacent blocks.
+
+        The two ``re.sub`` passes below are BEST-EFFORT heuristics, not precise
+        filters: they strip lines that look like leaked agent preamble
+        ("Let me…", "I need to:") and single-line tool-call JSON. They can
+        false-positive on legitimate prose containing those prefixes. This is an
+        acceptable tradeoff for cleaning common model leakage; if precision
+        becomes important, prefer a structured boundary (e.g. agent-emitted
+        visible-output delimiters) over this regex blocklist.
+        """
+        if not text:
+            return ""
+        cleaned = cls._clean_agent_text(text)
+        # The trailing ``\b`` is intentionally only inside the ``Let me``
+        # alternative: putting it after the whole group would break the
+        # ``I need to:`` alternative (``:`` is a non-word char, so a ``\b``
+        # after it never matches when followed by whitespace/newline, leaving
+        # that preamble line un-stripped — a real dead-alternative bug).
+        cleaned = re.sub(
+            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:).*$",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(
+            r'(?im)^\s*\{.*"(description|prompt|tool|command|subagent_type|file_path)".*\}\s*$',
+            "",
+            cleaned,
+        )
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned) if p.strip()]
+        deduped: list[str] = []
+        last_norm = ""
+        for paragraph in paragraphs:
+            norm = re.sub(r"\s+", " ", paragraph)
+            if norm == last_norm:
+                continue
+            deduped.append(paragraph)
+            last_norm = norm
+        return "\n\n".join(deduped).strip()
+
+    @classmethod
+    def _artifact_text(cls, result: Optional[AgentTaskResult]) -> str:
+        """Return the milestone/comment artifact text for a task result."""
+        if not result:
+            return ""
+        primary = (result.response_text or "").strip()
+        if primary:
+            return cls._sanitize_artifact_text(primary)
+        return cls._sanitize_artifact_text(cls._artifact_visible_text(result))
+
+    @classmethod
+    def _artifact_tldr(cls, result: Optional[AgentTaskResult]) -> str:
+        """Prefer structured/extracted TL;DR over raw string slicing."""
+        if not result:
+            return ""
+        structured = getattr(result, "structured_tags", {}) or {}
+        if structured.get("tldr"):
+            return structured["tldr"][:200]
+        return cls._extract_tldr(cls._artifact_visible_text(result) or result.response_text or "")
+
+    @staticmethod
+    def _artifact_status_tag(result: Optional[AgentTaskResult], key: str) -> str:
+        """Read structured status tags extracted by the runner."""
+        if not result:
+            return ""
+        structured = getattr(result, "structured_tags", {}) or {}
+        value = structured.get(key, "")
+        return value.strip() if isinstance(value, str) else ""
+
+    @staticmethod
     def _build_progress_report_tldr(
         dev_round: int,
         diff_stats: dict,
@@ -1086,6 +1163,8 @@ class AutonomousOrchestrator:
             result.error or f"Transient API error not resolved after retries: {err_snippet}"
         )
         result.response_text = ""  # don't let callers store the error body
+        result.visible_response_text = ""
+        result.structured_tags = {}
 
     def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
         """Write this call's token/request increment to its milestone."""
@@ -1605,14 +1684,14 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(result)
 
         # Store plan
-        plan_text = result.response_text or ""
+        plan_text = self._artifact_text(result)
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
             {
                 "status": "completed" if result.success else "failed",
                 "plan_content": plan_text,
                 "result_summary": plan_text[:200],
-                "tldr": self._extract_tldr(plan_text),
+                "tldr": self._artifact_tldr(result),
                 "session_id": result.session_id,
                 "error_message": result.error or "",
             },
@@ -1635,7 +1714,7 @@ class AutonomousOrchestrator:
                     {
                         "timeout": planning_timeout,
                         "tokens_used": result.total_tokens,
-                        "partial_plan": (result.response_text or "")[:500],
+                        "partial_plan": (self._artifact_visible_text(result) or plan_text)[:500],
                     },
                 )
             else:
@@ -1649,7 +1728,7 @@ class AutonomousOrchestrator:
             self._post_github_comment(
                 gh,
                 issue_number,
-                f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_agent_text(plan_text)}",
+                f"## 📋 Implementation Plan (Round {round_num})\n\n{plan_text}",
                 context="plan",
             )
 
@@ -1694,7 +1773,7 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(review_result)
 
-        review_text = review_result.response_text or ""
+        review_text = self._artifact_text(review_result)
 
         # Detect empty review output (agent produced no meaningful content)
         if not review_text.strip():
@@ -1714,7 +1793,7 @@ class AutonomousOrchestrator:
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "result_summary": review_text[:200],
-                "tldr": self._extract_tldr(review_text),
+                "tldr": self._artifact_tldr(review_result),
                 "review_session_id": review_result.session_id,
             },
         )
@@ -1724,7 +1803,7 @@ class AutonomousOrchestrator:
             self._post_github_comment(
                 gh,
                 issue_number,
-                f"## 🔍 Plan Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                f"## 🔍 Plan Review (Round {round_num})\n\n{review_text}",
                 context="plan-review",
             )
 
@@ -1800,11 +1879,10 @@ class AutonomousOrchestrator:
                     milestone_id=plan_final_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(finalize_result)
-                if finalize_result.success and finalize_result.response_text:
-                    final_plan = finalize_result.response_text
+                if finalize_result.success:
+                    final_plan = self._artifact_text(finalize_result) or final_plan
 
-            # Clean up agent intro text (e.g. "我来分析代码库...")
-            final_plan = self._clean_agent_text(final_plan)
+            final_plan = self._sanitize_artifact_text(final_plan)
 
             # Record the authoritative final plan on the milestone. When the
             # review carried no suggestions, the existing plan is the final plan
@@ -2051,10 +2129,8 @@ class AutonomousOrchestrator:
                     {
                         "status": "failed",
                         "session_id": result.session_id,
-                        "result_summary": (
-                            result.response_text[:300] if result.response_text else ""
-                        ),
-                        "tldr": self._extract_tldr(result.response_text),
+                        "result_summary": self._artifact_text(result)[:300],
+                        "tldr": self._artifact_tldr(result),
                         "error_message": "Agent produced no code changes (commit SHA unchanged)",
                     },
                 )
@@ -2071,8 +2147,8 @@ class AutonomousOrchestrator:
             {
                 "status": "completed" if result.success else "failed",
                 "session_id": result.session_id,
-                "result_summary": result.response_text[:300] if result.response_text else "",
-                "tldr": self._extract_tldr(result.response_text),
+                "result_summary": self._artifact_text(result)[:300],
+                "tldr": self._artifact_tldr(result),
                 "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                 "diff_stats": json.dumps(diff_stats),
                 "error_message": result.error or "",
@@ -2171,18 +2247,20 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(test_result)
 
+        test_summary = self._artifact_text(test_result)
+        test_visible_text = self._artifact_visible_text(test_result)
         self.repo.update_milestone(
             test_ms.get("milestone_id", ""),
             {
                 "status": "completed" if test_result.success else "failed",
                 "session_id": test_result.session_id,
-                "result_summary": (test_result.response_text if test_result.response_text else ""),
-                "tldr": self._extract_tldr(test_result.response_text),
+                "result_summary": test_summary,
+                "tldr": self._artifact_tldr(test_result),
             },
         )
 
         # Detect if tests were actually skipped (agent couldn't run them)
-        test_response_text = test_result.response_text or ""
+        test_response_text = test_visible_text or test_summary
         _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
         _skipped_keywords = [
             "pytest 未安装",
@@ -2213,8 +2291,10 @@ class AutonomousOrchestrator:
             "test",
         ]
         has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
+        test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
-            any(m in test_response_text for m in _skipped_markers)
+            test_status_tag == "skipped"
+            or any(m in test_response_text for m in _skipped_markers)
             or (test_result.success and has_skip_keyword)
             or (test_result.success and not has_test_result)
         )
@@ -2222,7 +2302,6 @@ class AutonomousOrchestrator:
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
-            test_summary = self._clean_agent_text(test_response_text)
             if tests_actually_skipped:
                 status_line = "⚠️ Tests were not actually run — see details below"
             elif test_result.success:
@@ -2297,7 +2376,7 @@ class AutonomousOrchestrator:
                 return
 
         # Situation B: test agent succeeded but reported unfixable failures
-        test_response = test_result.response_text or ""
+        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
         _unfixable_marker = "[UNFIXABLE]"
         has_unfixable = _unfixable_marker in test_response
         if not has_unfixable:
@@ -2574,14 +2653,14 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(review_result)
 
-        review_text = review_result.response_text or ""
+        review_text = self._artifact_text(review_result)
         self.repo.update_milestone(
             review_ms.get("milestone_id", ""),
             {
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "review_session_id": review_result.session_id,
-                "tldr": self._extract_tldr(review_text),
+                "tldr": self._artifact_tldr(review_result),
             },
         )
 
@@ -2590,7 +2669,7 @@ class AutonomousOrchestrator:
             self._post_github_comment(
                 gh,
                 pr_number,
-                f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                f"## 🔍 Code Review (Round {round_num})\n\n{review_text}",
                 is_pr=True,
                 context="code-review",
             )
@@ -2648,14 +2727,14 @@ class AutonomousOrchestrator:
                 milestone_id=summary_ms.get("milestone_id", ""),
             )
             self._accumulate_tokens(summary_result)
-            summary_text = self._clean_agent_text(summary_result.response_text or "")
+            summary_text = self._artifact_text(summary_result)
             self.repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
                 {
                     "status": "completed" if summary_result.success else "failed",
                     "review_content": summary_text,
                     "result_summary": summary_text[:200],
-                    "tldr": self._extract_tldr(summary_text),
+                    "tldr": self._artifact_tldr(summary_result),
                 },
             )
 
@@ -2780,14 +2859,15 @@ class AutonomousOrchestrator:
                     "session_id": fix_result.session_id,
                     "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                     "diff_stats": json.dumps(diff_stats),
-                    "tldr": self._extract_tldr(fix_result.response_text or ""),
+                    "result_summary": self._artifact_text(fix_result)[:200],
+                    "tldr": self._artifact_tldr(fix_result),
                 },
             )
 
             if pr_number:
                 # Extract fix summary from agent response in full; GitHub comments
                 # render long content fine (capped by _post_github_comment if huge).
-                fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                fix_summary = self._artifact_text(fix_result)
                 comment = (
                     f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
                     f"### Changes Made\n{fix_summary}\n\n"
@@ -2795,8 +2875,14 @@ class AutonomousOrchestrator:
                 if commit_sha:
                     comment += f"- Commit: `{commit_sha[:8]}`\n"
                 # Note pre-existing CI failures if fix agent identified them.
-                if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
-                    comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
+                if self._artifact_status_tag(
+                    fix_result, "ci_status"
+                ).lower() == "pre-existing" or self._is_pre_existing_ci_failure(
+                    self._artifact_visible_text(fix_result)
+                ):
+                    comment += (
+                        "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
+                    )
                 self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
 
     # ── Phase: Report ───────────────────────────────────────────────
@@ -3309,7 +3395,7 @@ class AutonomousOrchestrator:
                     milestone_id=conflict_ms.get("milestone_id", ""),
                 )
                 self._accumulate_tokens(result)
-                response_text = result.response_text or ""
+                response_text = self._artifact_text(result)
                 self.repo.update_milestone(
                     conflict_ms.get("milestone_id", ""),
                     {
@@ -3317,7 +3403,7 @@ class AutonomousOrchestrator:
                         "session_id": result.session_id,
                         "error_message": result.error or "",
                         "result_summary": response_text,
-                        "tldr": self._extract_tldr(response_text),
+                        "tldr": self._artifact_tldr(result),
                     },
                 )
 

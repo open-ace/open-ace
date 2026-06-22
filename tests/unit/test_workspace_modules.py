@@ -220,6 +220,43 @@ class TestSessionManager:
         assert retrieved is not None
         assert retrieved.session_id == created.session_id
 
+    def test_get_session_filters_messages_by_milestone(self, session_manager):
+        """Milestone session detail only returns messages tagged to that milestone."""
+        created = session_manager.create_session(tool_name="qwen")
+        conn = session_manager._get_connection()
+        try:
+            conn.cursor().execute("ALTER TABLE session_messages ADD COLUMN source TEXT DEFAULT ''")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        finally:
+            conn.close()
+        session_manager.add_message(
+            created.session_id,
+            role="assistant",
+            content="message A",
+            milestone_id="ms-a",
+            source="workflow_local",
+        )
+        session_manager.add_message(
+            created.session_id,
+            role="assistant",
+            content="message B",
+            milestone_id="ms-b",
+            source="workflow_local",
+        )
+
+        retrieved = session_manager.get_session(
+            created.session_id,
+            include_messages=True,
+            message_milestone_id="ms-a",
+        )
+
+        assert retrieved is not None
+        assert len(retrieved.messages) == 1
+        assert retrieved.messages[0].content == "message A"
+        assert retrieved.messages[0].source == "workflow_local"
+
     def test_complete_session(self, session_manager):
         """Test completing a session."""
         session = session_manager.create_session(tool_name="claude")

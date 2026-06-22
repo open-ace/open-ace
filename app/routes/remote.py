@@ -1604,6 +1604,7 @@ def agent_message():
                             tokens_used=tokens_used,
                             model=msg_model,
                             metadata=metadata,
+                            source="remote_sync",
                         )
                     except Exception as e:
                         logger.debug("Failed to add session_message: %s", e)

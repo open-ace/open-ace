@@ -45,6 +45,10 @@ services:
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
+      # SSH credentials for remote host access (optional, uncomment if needed)
+      # SECURITY WARNING: Mounting SSH keys exposes private keys to container processes
+      # Recommend using dedicated SSH keys with restricted commands in authorized_keys
+      # - ~/.ssh:/root/.ssh:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
       interval: 30s
