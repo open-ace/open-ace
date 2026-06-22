@@ -61,6 +61,7 @@ def _make_agent() -> RemoteAgent:
     agent._vscode_processes = {}
     agent._vscode_tokens = {}
     agent._vscode_ports = {}
+    agent._vscode_passwords = {}
 
     return agent
 
@@ -1003,3 +1004,98 @@ class TestRunGit:
         assert stdout == ""
         assert "oops" in stderr
         assert success is False
+
+
+class TestGetReachableHostname:
+    """Tests for RemoteAgent._get_reachable_hostname.
+
+    Issue #672: When VPN is active, socket.connect returns VPN IP which may not
+    be reachable from the browser. Configured hostname should take priority.
+    """
+
+    def test_configured_hostname_takes_priority_over_detected_ip(self):
+        """Configured hostname should be used instead of auto-detected IP."""
+        agent = _make_agent()
+        agent.config.hostname = "192.168.1.100"  # Configured LAN IP
+
+        # Even if socket.connect would return a different IP (VPN IP scenario)
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("192.168.255.10", 0)  # VPN IP
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        # Should return configured hostname, NOT the VPN IP
+        assert result == "192.168.1.100"
+        # socket.connect should NOT be called when hostname is configured
+        mock_sock.connect.assert_not_called()
+
+    def test_localhost_is_ignored_and_ip_detected(self):
+        """'localhost' should be treated as not configured, IP detection kicks in."""
+        agent = _make_agent()
+        agent.config.hostname = "localhost"
+
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("192.168.1.50", 0)
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        assert result == "192.168.1.50"
+        mock_sock.connect.assert_called_once()
+
+    def test_no_hostname_uses_detected_ip(self):
+        """No hostname configured -> auto-detect IP via socket.connect."""
+        agent = _make_agent()
+        agent.config.hostname = None
+
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("10.0.0.5", 0)
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        assert result == "10.0.0.5"
+        mock_sock.connect.assert_called_once_with(("8.8.8.8", 80))
+
+    def test_socket_failure_fallback_to_localhost(self):
+        """If socket.connect fails, fallback to 127.0.0.1."""
+        agent = _make_agent()
+        agent.config.hostname = None
+
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.connect.side_effect = OSError("Network unreachable")
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        assert result == "127.0.0.1"
+
+    def test_empty_string_hostname_uses_detected_ip(self):
+        """Empty string hostname should be treated as not configured."""
+        agent = _make_agent()
+        agent.config.hostname = ""
+
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("172.16.0.1", 0)
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        assert result == "172.16.0.1"
+        mock_sock.connect.assert_called_once()

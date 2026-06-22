@@ -1808,7 +1808,13 @@ class RemoteAgent:
 
     def _get_reachable_hostname(self) -> str:
         """Get a hostname/IP that the browser can use to reach this machine."""
-        # Prefer IP address (hostname may not be resolvable from browser)
+        # Prefer configured hostname if set and not localhost (fixes VPN IP issue)
+        # When VPN is active, socket.connect returns VPN IP which may not be
+        # reachable from the browser. User-configured hostname takes priority.
+        hostname = self.config.hostname
+        if hostname and hostname != "localhost":
+            return hostname
+        # Fall back to auto-detected IP address
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
@@ -1816,10 +1822,6 @@ class RemoteAgent:
                 return ip
         except Exception:
             pass
-        # Fall back to configured hostname
-        hostname = self.config.hostname
-        if hostname and hostname != "localhost":
-            return hostname
         return "127.0.0.1"
 
     def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
