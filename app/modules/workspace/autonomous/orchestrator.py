@@ -630,7 +630,7 @@ class AutonomousOrchestrator:
             return ""
         cleaned = cls._clean_agent_text(text)
         cleaned = re.sub(
-            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:)\b.*$",
+            r"(?im)^\s*(The user wants me to|user wants me to)\b.*$",
             "",
             cleaned,
         )

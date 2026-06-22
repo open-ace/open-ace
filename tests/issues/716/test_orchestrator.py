@@ -485,6 +485,26 @@ class TestOrchestratorPlanning:
         assert "The user wants me" not in posted_body
         assert '"description":"find tests"' not in posted_body
 
+    def test_sanitize_artifact_text_preserves_legitimate_final_output_prefixes(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        sanitized = AutonomousOrchestrator._sanitize_artifact_text(
+            "Let me summarize the changes:\n1. Fix session filtering\n2. Add regression coverage"
+        )
+
+        assert sanitized == (
+            "Let me summarize the changes:\n1. Fix session filtering\n2. Add regression coverage"
+        )
+
+    def test_sanitize_artifact_text_strips_user_wants_me_leakage(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        sanitized = AutonomousOrchestrator._sanitize_artifact_text(
+            "The user wants me to inspect the codebase.\n\n## Final Plan\n1. Fix the filter mapping"
+        )
+
+        assert sanitized == "## Final Plan\n1. Fix the filter mapping"
+
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_planning_max_rounds_forces_transition(self, mock_gh_cls):
         wf = _make_workflow(current_phase="planning", current_round=2, max_plan_rounds=3)

@@ -649,6 +649,10 @@ def fetch_and_save(
             try:
                 from shared.db import _execute, _placeholder, get_connection
 
+                # Pre-filter workflow-backed session_ids before any usage or
+                # transcript aggregation. This keeps imported desktop sessions
+                # from inflating per-day usage when the same workflow is already
+                # persisted by the app itself.
                 conn = get_connection()
                 cursor = conn.cursor()
                 try:
@@ -701,6 +705,10 @@ def fetch_and_save(
         try:
             from shared.db import _execute, _placeholder, get_connection
 
+            # Keep a second transcript-level filter even after candidate
+            # pre-filtering. It protects against partial/failed pre-filter
+            # queries, concurrent rows added while scanning, and any messages
+            # that arrive from helper paths not sourced from ``candidates``.
             candidate_ids = sorted(
                 {
                     str(m.get("agent_session_id", "")).strip()
