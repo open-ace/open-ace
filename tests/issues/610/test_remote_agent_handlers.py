@@ -1099,3 +1099,75 @@ class TestGetReachableHostname:
 
         assert result == "172.16.0.1"
         mock_sock.connect.assert_called_once()
+
+
+class TestIsValidHostname:
+    """Tests for RemoteAgent._is_valid_hostname.
+
+    Issue #672: Validate hostname format to prevent invalid configuration.
+    """
+
+    def test_valid_ipv4_address(self):
+        """Valid IPv4 address should pass validation."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("192.168.1.100") is True
+        assert agent._is_valid_hostname("10.0.0.1") is True
+        assert agent._is_valid_hostname("127.0.0.1") is True
+
+    def test_valid_ipv6_address(self):
+        """Valid IPv6 address should pass validation."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("::1") is True
+        assert agent._is_valid_hostname("fe80::1") is True
+        assert agent._is_valid_hostname("2001:db8::1") is True
+
+    def test_valid_hostname(self):
+        """Valid hostname should pass validation."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("example.com") is True
+        assert agent._is_valid_hostname("my-host.local") is True
+        assert agent._is_valid_hostname("server01") is True
+
+    def test_invalid_hostname_with_special_chars(self):
+        """Hostname with invalid characters should fail."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("host@name") is False
+        assert agent._is_valid_hostname("host name") is False
+        assert agent._is_valid_hostname("host!name") is False
+
+    def test_invalid_hostname_leading_hyphen(self):
+        """Hostname with leading hyphen should fail."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("-hostname") is False
+
+    def test_invalid_hostname_trailing_hyphen(self):
+        """Hostname with trailing hyphen should fail."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("hostname-") is False
+
+    def test_empty_string_fails(self):
+        """Empty string should fail validation."""
+        agent = _make_agent()
+        assert agent._is_valid_hostname("") is False
+
+
+class TestGetReachableHostnameWithValidation:
+    """Tests for _get_reachable_hostname with format validation (Issue #672 Minor fix)."""
+
+    def test_invalid_hostname_falls_back_to_ip_detection(self):
+        """Invalid hostname format should fall back to IP detection."""
+        agent = _make_agent()
+        agent.config.hostname = "invalid@hostname"  # Invalid format
+
+        with patch("agent.socket.socket") as mock_socket_class:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("192.168.1.50", 0)
+            mock_socket_class.return_value = mock_sock
+
+            result = agent._get_reachable_hostname()
+
+        # Should return auto-detected IP, NOT invalid hostname
+        assert result == "192.168.1.50"
+        mock_sock.connect.assert_called_once()

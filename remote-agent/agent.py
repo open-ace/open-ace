@@ -1813,16 +1813,50 @@ class RemoteAgent:
         # reachable from the browser. User-configured hostname takes priority.
         hostname = self.config.hostname
         if hostname and hostname != "localhost":
-            return hostname
+            # Validate hostname format (IP address or valid hostname)
+            if self._is_valid_hostname(hostname):
+                logger.debug("Using configured hostname: %s", hostname)
+                return hostname
+            else:
+                logger.warning(
+                    "Configured hostname '%s' is not a valid IP or hostname format, "
+                    "falling back to auto-detection",
+                    hostname,
+                )
         # Fall back to auto-detected IP address
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
                 ip = s.getsockname()[0]
+                logger.debug("Auto-detected IP address: %s", ip)
                 return ip
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to auto-detect IP address: %s", e)
+        logger.debug("Using fallback hostname: 127.0.0.1")
         return "127.0.0.1"
+
+    def _is_valid_hostname(self, hostname: str) -> bool:
+        """Validate hostname format (IP address or valid hostname)."""
+        # Check if it's a valid IP address (IPv4 or IPv6)
+        try:
+            socket.inet_pton(socket.AF_INET, hostname)
+            return True
+        except OSError:
+            pass
+        try:
+            socket.inet_pton(socket.AF_INET6, hostname)
+            return True
+        except OSError:
+            pass
+        # Check if it's a valid hostname (RFC 1123)
+        import re
+
+        # Hostname: 1-253 chars, alphanumeric and hyphens, no leading/trailing hyphens
+        hostname_pattern = re.compile(
+            r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+            r"(\.[A-Za-z0-9-]{1,63}(?<!-))*$"
+        )
+        return bool(hostname_pattern.match(hostname))
 
     def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
         """
