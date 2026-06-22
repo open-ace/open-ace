@@ -10,6 +10,7 @@ from typing import Any, Optional, cast
 
 from app.models.project import Project, ProjectDailyStats, ProjectStats, UserProject
 from app.repositories.database import Database, adapt_boolean_value
+from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -491,14 +492,8 @@ class ProjectRepository:
             total_tokens=int(result.get("total_tokens", 0) or 0),
             total_requests=int(result.get("total_requests", 0) or 0),
             total_duration_seconds=int(result.get("total_duration_seconds", 0) or 0),
-            first_access=(
-                datetime.fromisoformat(result["first_access"])
-                if result.get("first_access")
-                else None
-            ),
-            last_access=(
-                datetime.fromisoformat(result["last_access"]) if result.get("last_access") else None
-            ),
+            first_access=parse_db_datetime(result.get("first_access")),
+            last_access=parse_db_datetime(result.get("last_access")),
             user_stats=user_stats,
         )
 
@@ -536,13 +531,7 @@ class ProjectRepository:
             user_stats = self.get_project_users(project_id)
 
             def parse_datetime(value):
-                if value is None:
-                    return None
-                if isinstance(value, datetime):
-                    return value
-                if isinstance(value, str):
-                    return datetime.fromisoformat(value)
-                return None
+                return parse_db_datetime(value)
 
             stats_list.append(
                 ProjectStats(

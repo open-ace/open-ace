@@ -12,6 +12,7 @@ from typing import Any, Optional, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
 from app.repositories.database import Database
+from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +20,11 @@ logger = logging.getLogger(__name__)
 def _parse_datetime(value: Any) -> Optional[datetime]:
     """Parse datetime value from database.
 
-    PostgreSQL returns datetime objects directly, while SQLite returns strings.
-    This helper handles both cases.
+    Delegates to the shared :func:`parse_db_datetime` helper which handles both
+    PostgreSQL (datetime objects and space-separated textual timestamps with
+    variable fractional seconds) and SQLite (ISO 8601 strings) outputs.
     """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        return datetime.fromisoformat(value)
-    return None
+    return parse_db_datetime(value)
 
 
 class TenantRepository:

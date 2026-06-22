@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from app.utils.helpers import parse_db_datetime
+
 
 @dataclass
 class Project:
@@ -42,13 +44,7 @@ class Project:
         """Create from dictionary."""
 
         def parse_datetime(value):
-            if value is None:
-                return None
-            if isinstance(value, datetime):
-                return value
-            if isinstance(value, str):
-                return datetime.fromisoformat(value)
-            return None
+            return parse_db_datetime(value)
 
         return cls(
             id=data.get("id"),
@@ -107,13 +103,7 @@ class UserProject:
         """Create from dictionary."""
 
         def parse_datetime(value):
-            if value is None:
-                return None
-            if isinstance(value, datetime):
-                return value
-            if isinstance(value, str):
-                return datetime.fromisoformat(value)
-            return None
+            return parse_db_datetime(value)
 
         return cls(
             id=data.get("id"),
