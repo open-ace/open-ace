@@ -110,7 +110,7 @@ class UserDailyStatsAggregator:
                                    COALESCE(SUM(dm.output_tokens), 0) as output_tokens
                             FROM daily_messages dm
                             WHERE dm.date >= %s AND dm.date <= %s
-                              AND dm.sender_name LIKE %s
+                              AND dm.sender_name LIKE %s  -- escape_like used in params
                               AND dm.role = 'assistant'
                               AND (agent_session_id IS NULL OR agent_session_id = '')
                             GROUP BY dm.date::date
