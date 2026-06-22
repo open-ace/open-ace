@@ -724,24 +724,43 @@ class WebUIManager:
             ]
             cwd = webui_dir
         elif self._platform in ("linux", "darwin"):
-            # Linux/macOS: use sudo -u for global executable
-            # Environment variables are passed via sudoers env_keep configuration
-            cmd = [
-                "sudo",
-                "-u",
-                system_account,
-                webui_cmd,
-                "--port",
-                str(port),
-                "--host",
-                "0.0.0.0",
-                "--token-secret",
-                self.config.token_secret,
-                "--quota-check-enabled",
-                "--openace-api-url",
-                openace_api_url,
-            ]
-            cwd = None
+            # Linux/macOS: Check if current user is already the target user
+            # If so, skip sudo to avoid NoNewPrivileges restriction in systemd
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            if current_user == system_account:
+                # Already running as target user, execute directly
+                cmd = [
+                    webui_cmd,
+                    "--port",
+                    str(port),
+                    "--host",
+                    "0.0.0.0",
+                    "--token-secret",
+                    self.config.token_secret,
+                    "--quota-check-enabled",
+                    "--openace-api-url",
+                    openace_api_url,
+                ]
+                cwd = None
+            else:
+                # Different user: use sudo -u for global executable
+                # Environment variables are passed via sudoers env_keep configuration
+                cmd = [
+                    "sudo",
+                    "-u",
+                    system_account,
+                    webui_cmd,
+                    "--port",
+                    str(port),
+                    "--host",
+                    "0.0.0.0",
+                    "--token-secret",
+                    self.config.token_secret,
+                    "--quota-check-enabled",
+                    "--openace-api-url",
+                    openace_api_url,
+                ]
+                cwd = None
         else:
             # Other platforms: direct execution (no user switching)
             cmd = [
