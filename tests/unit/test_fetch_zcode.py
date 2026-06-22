@@ -171,7 +171,8 @@ def _init_dest_schema(db_path: Path) -> None:
             tokens_used INTEGER DEFAULT 0,
             model TEXT,
             timestamp TEXT,
-            metadata TEXT
+            metadata TEXT,
+            source TEXT DEFAULT ''
         );
         CREATE TABLE daily_usage (
             date TEXT,
@@ -420,10 +421,12 @@ def test_update_agent_sessions_stats_inserts_session_and_messages(fetch_mod, tmp
     assert row["user_id"] == 1
 
     msg_rows = conn.execute(
-        "SELECT role FROM session_messages WHERE session_id = ? ORDER BY role", ("sess_new1",)
+        "SELECT role, source FROM session_messages WHERE session_id = ? ORDER BY role",
+        ("sess_new1",),
     ).fetchall()
     roles = {r["role"] for r in msg_rows}
     assert roles == {"user", "assistant"}
+    assert {r["source"] for r in msg_rows} == {"zcode_fetch"}
     conn.close()
 
 
@@ -459,6 +462,53 @@ def test_update_agent_sessions_stats_idempotent(fetch_mod, tmp_path):
     ).fetchone()[0]
     conn.close()
     assert count == 1
+
+
+def test_update_agent_sessions_stats_skips_existing_workflow_session(fetch_mod, tmp_path):
+    """Fetcher must not backfill raw transcript rows into workflow-owned sessions."""
+    ts_iso = datetime.now(timezone.utc).isoformat()
+    dest_db = tmp_path / "dest.sqlite"
+    conn = sqlite3.connect(str(dest_db))
+    conn.execute(
+        """
+        INSERT INTO agent_sessions
+        (session_id, session_type, title, tool_name, host_name, user_id, status, project_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("sess_workflow", "workflow", "wf", "zcode", "localhost", 1, "completed", "/repo"),
+    )
+    conn.commit()
+    conn.close()
+
+    messages = [
+        {
+            "date": "2026-06-20",
+            "tool_name": "zcode",
+            "host_name": "localhost",
+            "message_id": "m1",
+            "role": "assistant",
+            "content": "raw sync content",
+            "content_blocks": None,
+            "tokens_used": 10,
+            "input_tokens": 6,
+            "output_tokens": 4,
+            "model": "GLM-5.2",
+            "timestamp": ts_iso,
+            "sender_name": "rhuang-host-zcode",
+            "agent_session_id": "sess_workflow",
+            "project_path": "/repo",
+        },
+    ]
+
+    updated = fetch_mod.update_agent_sessions_stats(messages)
+    assert updated == 0
+
+    conn = sqlite3.connect(str(dest_db))
+    count = conn.execute(
+        "SELECT COUNT(*) FROM session_messages WHERE session_id = ?", ("sess_workflow",)
+    ).fetchone()[0]
+    conn.close()
+    assert count == 0
 
 
 # --------------------------------------------------------------------------- #

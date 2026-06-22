@@ -438,6 +438,54 @@ class TestOrchestratorPlanning:
         assert round_updates[0][0][1]["current_round"] == 1
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_planning_uses_final_artifact_not_visible_transcript(self, mock_gh_cls):
+        wf = _make_workflow(
+            current_phase="planning",
+            current_round=0,
+            max_plan_rounds=1,
+            github_issue_number=42,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh_cls.return_value = mock_gh
+
+        plan_result = AgentTaskResult(
+            session_id="sess-plan",
+            response_text="## Final Plan\n1. Fix the filter mapping\n2. Add regression tests",
+            visible_response_text=(
+                "The user wants me to inspect the codebase.\n\n"
+                '{"description":"find tests","prompt":"..."}\n\n'
+                "## Final Plan\n1. Fix the filter mapping\n2. Add regression tests"
+            ),
+            structured_tags={"tldr": "修复过滤并补测试"},
+            total_tokens=100,
+            total_input_tokens=50,
+            total_output_tokens=50,
+            success=True,
+        )
+        review_result = _make_agent_result(text="方案通过审查。")
+        orch._runner = MagicMock()
+        orch._runner.run_agent_task.side_effect = [plan_result, review_result]
+        orch._gh = mock_gh
+
+        orch._do_planning(wf)
+
+        plan_updates = [
+            call[0][1]
+            for call in mock_repo.update_milestone.call_args_list
+            if "plan_content" in call[0][1]
+        ]
+        assert plan_updates
+        assert plan_updates[0]["plan_content"] == (
+            "## Final Plan\n1. Fix the filter mapping\n2. Add regression tests"
+        )
+        assert plan_updates[0]["tldr"] == "修复过滤并补测试"
+        posted_body = mock_gh.add_issue_comment.call_args_list[0][0][1]
+        assert "The user wants me" not in posted_body
+        assert '"description":"find tests"' not in posted_body
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_planning_max_rounds_forces_transition(self, mock_gh_cls):
         wf = _make_workflow(current_phase="planning", current_round=2, max_plan_rounds=3)
         orch, mock_repo = self._make_orchestrator(wf)

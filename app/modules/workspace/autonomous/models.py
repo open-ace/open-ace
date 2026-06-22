@@ -339,6 +339,8 @@ class AgentTaskResult:
     session_id: str = ""
     tracking_session_id: str = ""
     response_text: str = ""
+    visible_response_text: str = ""
+    structured_tags: dict = field(default_factory=dict)
     messages: list = field(default_factory=list)
     total_tokens: int = 0
     total_input_tokens: int = 0
