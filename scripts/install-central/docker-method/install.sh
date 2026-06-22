@@ -60,7 +60,8 @@ QWEN_ENABLED="${QWEN_ENABLED:-true}"
 
 # SSH configuration for remote host access (Issue #1122)
 SSH_ENABLED="${SSH_ENABLED:-no}"
-SSH_MOUNT_SOURCE="${SSH_MOUNT_SOURCE:-/home/$RUN_USER/.ssh}"
+# SSH_MOUNT_SOURCE: Use current user's .ssh directory (not RUN_USER which is container user)
+SSH_MOUNT_SOURCE="${SSH_MOUNT_SOURCE:-$HOME/.ssh}"
 
 # ============================================================================
 # Helper Functions
@@ -393,21 +394,21 @@ select_docker_image_source() {
 # Check if SSH keys exist for RUN_USER
 check_ssh_keys() {
     local ssh_dir="/home/$RUN_USER/.ssh"
-    
+
     if [ ! -d "$ssh_dir" ]; then
         print_warning "未找到 SSH 密钥目录: $ssh_dir"
         return 1
     fi
-    
+
     local key_files=("id_rsa" "id_ed25519" "id_ecdsa")
     local found_keys=""
-    
+
     for key in "${key_files[@]}"; do
         if [ -f "$ssh_dir/$key" ]; then
             found_keys="$found_keys $key"
         fi
     done
-    
+
     if [ -n "$found_keys" ]; then
         print_success "检测到 SSH 密钥: $found_keys"
         return 0
@@ -421,12 +422,12 @@ check_ssh_keys() {
 check_known_hosts() {
     local ssh_dir="/home/$RUN_USER/.ssh"
     local known_hosts_file="$ssh_dir/known_hosts"
-    
+
     if [ ! -f "$known_hosts_file" ]; then
         print_warning "未找到 known_hosts 文件"
         return 1
     fi
-    
+
     print_success "检测到 known_hosts 文件"
     return 0
 }
@@ -434,20 +435,20 @@ check_known_hosts() {
 # Prompt for SSH configuration
 prompt_ssh_config() {
     print_header "SSH 远程访问配置"
-    
+
     # Fix: NON_INTERACTIVE mode must set default value
     if [ "$NON_INTERACTIVE" = true ]; then
         SSH_ENABLED="${SSH_ENABLED:-no}"
         return
     fi
-    
+
     # Check SSH keys
     if ! check_ssh_keys; then
         print_info "如需 SSH 远程访问，请先为用户 '$RUN_USER' 配置 SSH 密钥"
         SSH_ENABLED="no"
         return
     fi
-    
+
     echo ""
     echo "SSH 远程访问允许容器内的 AI 连接到外部主机（如实验室节点）。"
     echo ""
@@ -455,13 +456,13 @@ prompt_ssh_config() {
     echo "    - 挂载 SSH 密钥会将私钥暴露给容器内所有进程"
     echo "    - 建议使用专用 SSH 密钥（而非个人常用密钥）"
     echo ""
-    
+
     prompt_yesno "是否启用 SSH 远程访问功能?" "n" SSH_ENABLED
-    
+
     if [ "$SSH_ENABLED" = "yes" ]; then
         print_info "SSH 远程访问已启用"
         print_info "密钥挂载路径: $SSH_MOUNT_SOURCE -> /root/.ssh"
-        
+
         # Check known_hosts
         if check_known_hosts; then
             print_success "known_hosts 文件将一同挂载"
@@ -477,7 +478,7 @@ prompt_ssh_config() {
 # Check existing SSH config in docker-compose.yml (for upgrade mode)
 check_existing_ssh_config() {
     local compose_file="$DEPLOY_DIR/docker-compose.yml"
-    
+
     if [ -f "$compose_file" ]; then
         if grep -q "/root/.ssh" "$compose_file"; then
             print_info "检测到现有 SSH 密钥挂载配置"
