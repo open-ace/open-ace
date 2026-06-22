@@ -50,7 +50,7 @@ class TestPersistSessionMessagesWithEventLog:
         return AgentTaskResult(**defaults)
 
     def test_event_log_preserves_interleaving_order(self):
-        """Messages are written in the order they occurred in event_log."""
+        """Tool uses keep order, assistant output collapses to the final visible turn."""
         runner = self._make_runner()
         result = self._make_result(
             response_text="Reading file, then editing it.",
@@ -69,16 +69,14 @@ class TestPersistSessionMessagesWithEventLog:
         runner._persist_local_session_messages("sess-1", result)
 
         calls = runner.session_manager.add_message.call_args_list
-        assert len(calls) == 4
-        # Verify order: assistant, tool, assistant, tool
-        assert calls[0].kwargs["role"] == "assistant"
-        assert "read the file" in calls[0].kwargs["content"]
+        assert len(calls) == 3
+        assert calls[0].kwargs["role"] == "tool"
+        assert calls[0].kwargs["metadata"]["tool_name"] == "Read"
         assert calls[1].kwargs["role"] == "tool"
-        assert calls[1].kwargs["metadata"]["tool_name"] == "Read"
+        assert calls[1].kwargs["metadata"]["tool_name"] == "Edit"
         assert calls[2].kwargs["role"] == "assistant"
-        assert "edit it" in calls[2].kwargs["content"]
-        assert calls[3].kwargs["role"] == "tool"
-        assert calls[3].kwargs["metadata"]["tool_name"] == "Edit"
+        assert "Now I will edit it." in calls[2].kwargs["content"]
+        assert calls[2].kwargs["source"] == "workflow_local"
 
     def test_tool_input_serialized_as_json(self):
         """Tool input dict is serialized to JSON in content field."""
@@ -95,6 +93,7 @@ class TestPersistSessionMessagesWithEventLog:
         content = call.kwargs["content"]
         parsed = json.loads(content)
         assert parsed["command"] == "git add -A"
+        assert call.kwargs["source"] == "workflow_local"
 
     def test_fallback_without_event_log(self):
         """When event_log is empty, falls back to response_text + tool_calls."""
@@ -113,6 +112,7 @@ class TestPersistSessionMessagesWithEventLog:
         assert len(calls) == 2
         assert calls[0].kwargs["role"] == "assistant"
         assert calls[0].kwargs["content"] == "I made changes."
+        assert calls[0].kwargs["source"] == "workflow_local"
         assert calls[1].kwargs["role"] == "tool"
 
     def test_no_messages_when_empty(self):
@@ -138,8 +138,9 @@ class TestPersistSessionMessagesWithEventLog:
         runner._persist_local_session_messages("sess-1", result)
 
         calls = runner.session_manager.add_message.call_args_list
-        assert len(calls) == 2  # Only 2 assistant messages, usage skipped
-        assert all(c.kwargs["role"] == "assistant" for c in calls)
+        assert len(calls) == 1  # Only the final assistant turn survives
+        assert calls[0].kwargs["role"] == "assistant"
+        assert calls[0].kwargs["content"] == "Done."
 
 
 class TestReadStdoutPopulatesEventLog:

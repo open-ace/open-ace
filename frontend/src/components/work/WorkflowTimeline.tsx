@@ -1560,6 +1560,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   {workflow.cli_tool}
                 </span>
               )}
+              {workflow.model && (
+                <span className="timeline-chip timeline-chip--neutral">
+                  <i className="bi bi-cpu me-1"></i>
+                  {workflow.model}
+                </span>
+              )}
               {definitionSnapshot && (
                 <button
                   type="button"
@@ -1635,6 +1641,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <span className="timeline-chip timeline-chip--info">
                   <i className="bi bi-diagram-3 me-1"></i>
                   {t('autoForkedWorkflows', language)} ({forks.length})
+                </span>
+              )}
+              {workflow.dev_round > 1 && (
+                <span className="timeline-chip timeline-chip--neutral">
+                  <i className="bi bi-arrow-repeat me-1"></i>R{workflow.dev_round}
                 </span>
               )}
             </div>
@@ -1745,12 +1756,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               {workflowPhaseLabel}
             </span>
           </div>
-          {workflow.model && (
-            <div className="timeline-meta-item">
-              <span className="timeline-meta-item__label">{t('autoModel', language)}</span>
-              <span className="timeline-meta-item__value">{workflow.model}</span>
-            </div>
-          )}
           <div className="timeline-meta-item timeline-meta-item--start">
             <span className="timeline-meta-item__label">{t('autoStartTime', language)}</span>
             <span className="timeline-meta-item__value">
@@ -1771,12 +1776,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             <span className="timeline-meta-item__label">{t('totalRequests', language)}</span>
             <span className="timeline-meta-item__value">{workflow.total_requests}</span>
           </div>
-          {workflow.dev_round > 1 && (
-            <div className="timeline-meta-item">
-              <span className="timeline-meta-item__label">{t('autoDevRoundLabel', language)}</span>
-              <span className="timeline-meta-item__value">{workflow.dev_round}</span>
-            </div>
-          )}
         </div>
 
         <div className="timeline-output-rail">

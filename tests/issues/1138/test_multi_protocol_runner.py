@@ -358,6 +358,57 @@ def test_extract_visible_response_text_preserves_all_visible_turns():
     )
 
 
+def test_build_agent_task_result_separates_final_text_from_visible_text():
+    from app.modules.workspace.autonomous.agent_runner import _build_agent_task_result
+
+    result = _build_agent_task_result(
+        session_id="sess-1",
+        tracking_session_id="track-1",
+        event_log=[
+            {"type": "assistant", "text": "Applied fix\nCI_STATUS: pre-existing"},
+            {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "git push"}},
+            {"type": "assistant", "text": "## Final Summary\nDone."},
+        ],
+        success=True,
+    )
+
+    assert result.response_text == "## Final Summary\nDone."
+    assert result.visible_response_text == (
+        "Applied fix\nCI_STATUS: pre-existing\n\n## Final Summary\nDone."
+    )
+    assert result.structured_tags["ci_status"] == "pre-existing"
+
+
+def test_build_agent_task_result_uses_last_structured_status_tag():
+    from app.modules.workspace.autonomous.agent_runner import _build_agent_task_result
+
+    result = _build_agent_task_result(
+        session_id="sess-2",
+        tracking_session_id="track-2",
+        event_log=[
+            {"type": "assistant", "text": "Attempt 1\nTEST_STATUS: skipped"},
+            {"type": "tool_use", "tool_name": "Bash", "tool_input": {"command": "pytest"}},
+            {"type": "assistant", "text": "Retried\nTEST_STATUS: passed"},
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "rerun ci checks"},
+            },
+            {"type": "assistant", "text": "CI_STATUS: pre-existing"},
+            {
+                "type": "tool_use",
+                "tool_name": "Bash",
+                "tool_input": {"command": "fix ci"},
+            },
+            {"type": "assistant", "text": "CI_STATUS: fixed"},
+        ],
+        success=True,
+    )
+
+    assert result.structured_tags["test_status"] == "passed"
+    assert result.structured_tags["ci_status"] == "fixed"
+
+
 # ── ZCode session failure cleanup ─────────────────────────────────────────
 
 

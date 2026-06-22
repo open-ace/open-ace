@@ -393,6 +393,7 @@
 .timeline-state-banner__message {
   margin-top: 4px;
   color: var(--text-secondary);
+  font-size: 0.82rem;
   line-height: 1.55;
   word-break: break-word;
 }
@@ -402,6 +403,10 @@
   flex-wrap: wrap;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.timeline-state-banner__actions .timeline-inline-link {
+  font-size: 0.82rem;
 }
 
 .timeline-body {

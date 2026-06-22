@@ -20,6 +20,19 @@ from app.utils.tool_names import normalize_tool_name
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_text_value(text: Optional[str]) -> Optional[str]:
+    """Remove NUL / invalid UTF-8 surrogate data before persistence."""
+    if text is None:
+        return None
+    if "\x00" in text:
+        text = text.replace("\x00", "")
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="replace")
+
+
 # Parameter placeholder for SQL queries
 def _param() -> str:
     """Get the correct parameter placeholder for the current database."""
@@ -63,6 +76,7 @@ class SessionMessage:
     timestamp: Optional[datetime] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     milestone_id: str = ""
+    source: str = ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -76,6 +90,7 @@ class SessionMessage:
             "timestamp": _format_dt(self.timestamp),
             "metadata": self.metadata,
             "milestone_id": self.milestone_id,
+            "source": self.source,
         }
 
     @classmethod
@@ -91,6 +106,7 @@ class SessionMessage:
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else None,
             metadata=data.get("metadata", {}),
             milestone_id=data.get("milestone_id", ""),
+            source=data.get("source", ""),
         )
 
 
@@ -320,6 +336,7 @@ class SessionManager:
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 metadata TEXT,
                 milestone_id TEXT DEFAULT '',
+                source TEXT DEFAULT '',
                 FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
             )
         """
@@ -383,6 +400,11 @@ class SessionManager:
         # Add milestone_id column to session_messages if not present (migration 061)
         try:
             cursor.execute("ALTER TABLE session_messages ADD COLUMN milestone_id TEXT DEFAULT ''")
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE session_messages ADD COLUMN source TEXT DEFAULT ''")
         except Exception:
             pass  # Column already exists
 
@@ -516,7 +538,10 @@ class SessionManager:
         return session
 
     def get_session(
-        self, session_id: str, include_messages: bool = False
+        self,
+        session_id: str,
+        include_messages: bool = False,
+        message_milestone_id: Optional[str] = None,
     ) -> Optional[AgentSession]:
         """
         Get a session by ID.
@@ -524,6 +549,7 @@ class SessionManager:
         Args:
             session_id: Session ID to retrieve.
             include_messages: Whether to include messages.
+            message_milestone_id: Optional milestone filter for session messages.
 
         Returns:
             AgentSession or None if not found.
@@ -541,14 +567,16 @@ class SessionManager:
         session = self._row_to_session(row)
 
         if include_messages:
-            cursor.execute(
-                f"""
+            query = f"""
                 SELECT * FROM session_messages
                 WHERE session_id = {_param()}
-                ORDER BY timestamp ASC
-            """,
-                (session_id,),
-            )
+            """
+            params: list[Any] = [session_id]
+            if message_milestone_id is not None:
+                query += f" AND milestone_id = {_param()}"
+                params.append(message_milestone_id)
+            query += " ORDER BY timestamp ASC"
+            cursor.execute(query, params)
             message_rows = cursor.fetchall()
             session.messages = [self._row_to_message(msg_row) for msg_row in message_rows]
 
@@ -734,7 +762,11 @@ class SessionManager:
         return success
 
     def get_messages(
-        self, session_id: str, limit: Optional[int] = None, before_id: Optional[int] = None
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+        before_id: Optional[int] = None,
+        milestone_id: Optional[str] = None,
     ) -> list[SessionMessage]:
         """
         Get messages for a session.
@@ -743,6 +775,7 @@ class SessionManager:
             session_id: Session ID.
             limit: Optional limit on number of messages.
             before_id: Get messages before this ID.
+            milestone_id: Optional milestone filter.
 
         Returns:
             List of SessionMessage objects.
@@ -752,6 +785,10 @@ class SessionManager:
 
         query = f"SELECT * FROM session_messages WHERE session_id = {_param()}"
         params: list[Any] = [session_id]
+
+        if milestone_id is not None:
+            query += f" AND milestone_id = {_param()}"
+            params.append(milestone_id)
 
         if before_id:
             query += f" AND id < {_param()}"
@@ -778,6 +815,7 @@ class SessionManager:
         model: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
         milestone_id: str = "",
+        source: str = "",
         count_usage: bool = True,
     ) -> Optional[SessionMessage]:
         """
@@ -790,6 +828,7 @@ class SessionManager:
             tokens_used: Tokens consumed by this message.
             model: Optional model name.
             metadata: Optional metadata dict.
+            source: Message source tag for downstream filtering.
             count_usage: When True (default), accumulate request_count (assistant
                 messages) and total_tokens on the session. Autonomous local runs
                 pass False because the agent runner owns those counters via
@@ -815,17 +854,19 @@ class SessionManager:
         message = SessionMessage(
             session_id=session_id,
             role=role,
-            content=content,
+            content=_sanitize_text_value(content) or "",
             tokens_used=tokens_used,
             model=model,
             timestamp=now,
             metadata=metadata or {},
+            source=source,
         )
 
         cursor.execute(
             f"""
-            INSERT INTO session_messages (session_id, role, content, tokens_used, model, timestamp, metadata, milestone_id)
-            VALUES ({_params(8)})
+            INSERT INTO session_messages
+            (session_id, role, content, tokens_used, model, timestamp, metadata, milestone_id, source)
+            VALUES ({_params(9)})
         """,
             (
                 message.session_id,
@@ -834,8 +875,9 @@ class SessionManager:
                 message.tokens_used,
                 message.model,
                 message.timestamp.isoformat() if message.timestamp else None,
-                json.dumps(message.metadata),
+                _sanitize_text_value(json.dumps(message.metadata)),
                 milestone_id,
+                source,
             ),
         )
 
@@ -1321,6 +1363,7 @@ class SessionManager:
             timestamp=parse_datetime(get_value("timestamp")),
             metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
             milestone_id=get_value("milestone_id") or "",
+            source=get_value("source") or "",
         )
 
 
@@ -1362,6 +1405,8 @@ def get_ddl_statements() -> list[str]:
             model TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             metadata TEXT,
+            milestone_id TEXT DEFAULT '',
+            source TEXT DEFAULT '',
             FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
         )
         """,
