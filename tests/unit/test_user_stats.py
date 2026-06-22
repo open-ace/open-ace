@@ -44,6 +44,7 @@ CREATE TABLE daily_messages (
     output_tokens INTEGER DEFAULT 0,
     sender_name TEXT,
     model TEXT,
+    message_source TEXT,
     agent_session_id TEXT
 );
 
@@ -130,11 +131,20 @@ def temp_db(tmp_path):
         date_str = (today - timedelta(days=day_offset)).strftime("%Y-%m-%d")
         conn.execute(
             """
-            INSERT INTO agent_sessions (session_id, user_id, created_at, request_count, total_tokens, total_input_tokens, total_output_tokens)
-            VALUES (?, 1, ?, 5, 500, 400, 100)
+            INSERT INTO agent_sessions (session_id, user_id, created_at, request_count, total_tokens, total_input_tokens, total_output_tokens, workspace_type)
+            VALUES (?, 1, ?, 5, 500, 400, 100, 'local')
         """,
             (f"session-alice-{day_offset}", f"{date_str} 10:00:00"),
         )
+        # Insert session_messages for each session (5 assistant messages per session)
+        for i in range(5):
+            conn.execute(
+                """
+                INSERT INTO session_messages (session_id, role, tokens_used)
+                VALUES (?, 'assistant', 100)
+            """,
+                (f"session-alice-{day_offset}",),
+            )
     conn.commit()
     conn.close()
     return db_path
