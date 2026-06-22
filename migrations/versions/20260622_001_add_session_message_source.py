@@ -3,7 +3,7 @@
 Separates workflow-local persisted messages from transcript sync/fetch rows so
 autonomous milestone/session detail views can filter raw importer data.
 
-Revision ID: 20260622_001_session_message_source
+Revision ID: 064_add_session_msg_source
 Revises: 7bcf07ee658e
 Create Date: 2026-06-22
 """
@@ -13,7 +13,7 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260622_001_session_message_source"
+revision: str = "064_add_session_msg_source"
 down_revision: Union[str, None] = "7bcf07ee658e"
 branch_labels = None
 depends_on = None

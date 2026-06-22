@@ -2496,6 +2496,23 @@ upgrade_deployment() {
         fi
     fi
 
+    # 5.6. Check alembic_version table before recreating container (Issue #1192)
+    # This detects legacy databases that were initialized with schema.sql but
+    # alembic stamp failed silently. We need to fix this after container restart.
+    print_info "检查数据库 migration 状态..."
+    local alembic_exists=""
+    alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$alembic_exists" = "1" ]; then
+        print_success "alembic_version 表存在，migration 系统正常"
+        export ALEMBIC_VERSION_EXISTS="yes"
+    else
+        print_warning "alembic_version 表不存在"
+        print_info "数据库可能是旧版本升级，需要在容器重启后执行 alembic stamp head"
+        export ALEMBIC_VERSION_EXISTS="no"
+    fi
+
     # 6. Recreate only open-ace container (PostgreSQL not restarted)
     print_info "重建 open-ace 容器..."
     docker compose up -d --force-recreate open-ace
@@ -2523,6 +2540,26 @@ upgrade_deployment() {
 
     if [ $attempt -gt $max_attempts ]; then
         print_warning "应用启动中，请稍后检查状态"
+    fi
+
+    # 7. Fix alembic_version if missing (Issue #1192)
+    # For legacy databases initialized with schema.sql, alembic stamp may have failed.
+    # The docker-entrypoint.sh handles this automatically, but we verify here.
+    if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
+        print_info "验证 alembic stamp 是否已由 entrypoint 自动修复..."
+        local alembic_fixed=""
+        alembic_fixed=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+            "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
+
+        if [ "$alembic_fixed" = "1" ]; then
+            print_success "alembic_version 表已自动创建"
+        else
+            print_warning "alembic_version 表仍然缺失，尝试手动修复..."
+            docker compose exec -T open-ace alembic stamp head 2>&1 || {
+                print_error "alembic stamp head 失败，请检查日志"
+                print_info "可能需要手动执行: docker compose exec open-ace alembic stamp head"
+            }
+        fi
     fi
 
     return 0
