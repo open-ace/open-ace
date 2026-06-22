@@ -26,7 +26,7 @@ interface MappingRulesEditorProps {
 export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
   userId,
   username,
-  onChange
+  onChange,
 }) => {
   const language = useLanguage();
   const [rules, setRules] = useState<MappingRule[]>([]);
@@ -73,11 +73,7 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
       onChange?.();
     } catch (err) {
       console.error('Failed to generate default rules:', err);
-      toast.error(
-        language === 'zh'
-          ? '生成默认规则失败'
-          : 'Failed to generate default rules'
-      );
+      toast.error(language === 'zh' ? '生成默认规则失败' : 'Failed to generate default rules');
     } finally {
       setIsGenerating(false);
     }
@@ -174,9 +170,7 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
                 >
                   {rule.pattern}
                 </span>
-                <small className="text-light">
-                  ({getMatchTypeDisplay(rule.match_type)})
-                </small>
+                <small className="text-light">({getMatchTypeDisplay(rule.match_type)})</small>
                 <button
                   type="button"
                   className="btn-close btn-close-white ms-1"
@@ -237,16 +231,14 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
           }}
         >
           <div className="mb-3">
-            <label className="form-label">
-              {language === 'zh' ? '匹配模式' : 'Pattern'}
-            </label>
+            <label className="form-label">{language === 'zh' ? '匹配模式' : 'Pattern'}</label>
             <TextInput
               value={newRule.pattern}
               onChange={(value) => setNewRule({ ...newRule, pattern: value })}
               placeholder={
                 language === 'zh'
-                  ? `例如: ${username || 'user'}-* (匹配用户名开头的账号)`
-                  : `e.g., ${username || 'user'}-*`
+                  ? `例如: ${username ?? 'user'}-* (匹配用户名开头的账号)`
+                  : `e.g., ${username ?? 'user'}-*`
               }
             />
             <small className="text-muted">
@@ -257,9 +249,7 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
           </div>
 
           <div className="mb-3">
-            <label className="form-label">
-              {language === 'zh' ? '匹配类型' : 'Match Type'}
-            </label>
+            <label className="form-label">{language === 'zh' ? '匹配类型' : 'Match Type'}</label>
             <select
               className="form-select"
               value={newRule.match_type}
@@ -274,16 +264,12 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
           </div>
 
           <div className="mb-3">
-            <label className="form-label">
-              {language === 'zh' ? '优先级' : 'Priority'}
-            </label>
+            <label className="form-label">{language === 'zh' ? '优先级' : 'Priority'}</label>
             <input
               type="number"
               className="form-control"
               value={newRule.priority}
-              onChange={(e) =>
-                setNewRule({ ...newRule, priority: parseInt(e.target.value) || 0 })
-              }
+              onChange={(e) => setNewRule({ ...newRule, priority: parseInt(e.target.value) || 0 })}
               min={0}
               max={100}
             />
@@ -295,9 +281,7 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
           </div>
 
           <div className="mb-3">
-            <label className="form-label">
-              {language === 'zh' ? '描述' : 'Description'}
-            </label>
+            <label className="form-label">{language === 'zh' ? '描述' : 'Description'}</label>
             <TextInput
               value={newRule.description}
               onChange={(value) => setNewRule({ ...newRule, description: value })}

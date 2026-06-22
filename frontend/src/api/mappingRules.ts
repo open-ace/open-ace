@@ -103,9 +103,7 @@ export const mappingRulesApi = {
   },
 
   async generateDefaultRules(userId: number): Promise<MappingRule[]> {
-    return apiClient.post<MappingRule[]>(
-      `/mapping-rules/user/${userId}/generate-default`
-    );
+    return apiClient.post<MappingRule[]>(`/mapping-rules/user/${userId}/generate-default`);
   },
 
   async getMappingStats(): Promise<MappingStats> {
@@ -126,10 +124,7 @@ export const mappingRulesApi = {
     }>('/mapping-rules/auto-map', { dry_run: dryRun });
   },
 
-  async testMatch(
-    toolAccount: string,
-    toolType?: string
-  ): Promise<MatchTestResult> {
+  async testMatch(toolAccount: string, toolType?: string): Promise<MatchTestResult> {
     return apiClient.post<MatchTestResult>('/mapping-rules/test-match', {
       tool_account: toolAccount,
       tool_type: toolType,
@@ -152,10 +147,11 @@ export const mappingRulesApi = {
     toolType?: string,
     description?: string
   ): Promise<ToolAccount> {
-    return apiClient.post<ToolAccount>(
-      `/unmapped-accounts/${encodeURIComponent(senderName)}/map`,
-      { user_id: userId, tool_type: toolType, description }
-    );
+    return apiClient.post<ToolAccount>(`/unmapped-accounts/${encodeURIComponent(senderName)}/map`, {
+      user_id: userId,
+      tool_type: toolType,
+      description,
+    });
   },
 };
 
