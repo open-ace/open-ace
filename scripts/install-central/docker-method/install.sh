@@ -58,6 +58,10 @@ OPENCLAW_PORT="${OPENCLAW_PORT:-}"
 CLAUDE_ENABLED="${CLAUDE_ENABLED:-true}"
 QWEN_ENABLED="${QWEN_ENABLED:-true}"
 
+# SSH configuration for remote host access (Issue #1122)
+SSH_ENABLED="${SSH_ENABLED:-no}"
+SSH_MOUNT_SOURCE="${SSH_MOUNT_SOURCE:-/home/$RUN_USER/.ssh}"
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -380,6 +384,109 @@ select_docker_image_source() {
             fi
             ;;
     esac
+}
+
+# ============================================================================
+# SSH Configuration Functions (Issue #1122)
+# ============================================================================
+
+# Check if SSH keys exist for RUN_USER
+check_ssh_keys() {
+    local ssh_dir="/home/$RUN_USER/.ssh"
+    
+    if [ ! -d "$ssh_dir" ]; then
+        print_warning "未找到 SSH 密钥目录: $ssh_dir"
+        return 1
+    fi
+    
+    local key_files=("id_rsa" "id_ed25519" "id_ecdsa")
+    local found_keys=""
+    
+    for key in "${key_files[@]}"; do
+        if [ -f "$ssh_dir/$key" ]; then
+            found_keys="$found_keys $key"
+        fi
+    done
+    
+    if [ -n "$found_keys" ]; then
+        print_success "检测到 SSH 密钥: $found_keys"
+        return 0
+    else
+        print_warning "未检测到 SSH 私钥文件 (id_rsa, id_ed25519, etc.)"
+        return 1
+    fi
+}
+
+# Check known_hosts for target hosts
+check_known_hosts() {
+    local ssh_dir="/home/$RUN_USER/.ssh"
+    local known_hosts_file="$ssh_dir/known_hosts"
+    
+    if [ ! -f "$known_hosts_file" ]; then
+        print_warning "未找到 known_hosts 文件"
+        return 1
+    fi
+    
+    print_success "检测到 known_hosts 文件"
+    return 0
+}
+
+# Prompt for SSH configuration
+prompt_ssh_config() {
+    print_header "SSH 远程访问配置"
+    
+    # Fix: NON_INTERACTIVE mode must set default value
+    if [ "$NON_INTERACTIVE" = true ]; then
+        SSH_ENABLED="${SSH_ENABLED:-no}"
+        return
+    fi
+    
+    # Check SSH keys
+    if ! check_ssh_keys; then
+        print_info "如需 SSH 远程访问，请先为用户 '$RUN_USER' 配置 SSH 密钥"
+        SSH_ENABLED="no"
+        return
+    fi
+    
+    echo ""
+    echo "SSH 远程访问允许容器内的 AI 连接到外部主机（如实验室节点）。"
+    echo ""
+    echo "⚠️  安全警告："
+    echo "    - 挂载 SSH 密钥会将私钥暴露给容器内所有进程"
+    echo "    - 建议使用专用 SSH 密钥（而非个人常用密钥）"
+    echo ""
+    
+    prompt_yesno "是否启用 SSH 远程访问功能?" "n" SSH_ENABLED
+    
+    if [ "$SSH_ENABLED" = "yes" ]; then
+        print_info "SSH 远程访问已启用"
+        print_info "密钥挂载路径: $SSH_MOUNT_SOURCE -> /root/.ssh"
+        
+        # Check known_hosts
+        if check_known_hosts; then
+            print_success "known_hosts 文件将一同挂载"
+        else
+            print_warning "未检测到 known_hosts，首次连接需手动确认主机指纹"
+            print_info "建议预先配置: ssh-keyscan -H <目标主机IP> >> /home/$RUN_USER/.ssh/known_hosts"
+        fi
+    else
+        print_info "SSH 远程访问未启用"
+    fi
+}
+
+# Check existing SSH config in docker-compose.yml (for upgrade mode)
+check_existing_ssh_config() {
+    local compose_file="$DEPLOY_DIR/docker-compose.yml"
+    
+    if [ -f "$compose_file" ]; then
+        if grep -q "/root/.ssh" "$compose_file"; then
+            print_info "检测到现有 SSH 密钥挂载配置"
+            SSH_ENABLED="yes"
+            return 0
+        fi
+    fi
+    SSH_ENABLED="no"
+    return 1
 }
 
 # ============================================================================
@@ -2212,6 +2319,9 @@ read_existing_config() {
         RUN_USER_UID=$(id -u "$RUN_USER")
     fi
 
+    # Check existing SSH config (Issue #1122)
+    check_existing_ssh_config
+
     return 0
 }
 
@@ -2714,6 +2824,13 @@ create_docker_compose() {
       - ./workspace:/workspace"
     print_info "  - 映射 workspace 目录"
 
+    # SSH key mount for remote host access (Issue #1122)
+    if [ "$SSH_ENABLED" = "yes" ]; then
+        volumes_section="$volumes_section
+      - $SSH_MOUNT_SOURCE:/root/.ssh:ro"
+        print_info "  - 映射 SSH 密钥目录: $SSH_MOUNT_SOURCE"
+    fi
+
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
     cat > "$compose_file" << EOF
@@ -2811,6 +2928,7 @@ WORKSPACE_IDLE_TIMEOUT=$WORKSPACE_IDLE_TIMEOUT
 OPENCLAW_ENABLED=$OPENCLAW_ENABLED
 OPENCLAW_GATEWAY_URL=$OPENCLAW_GATEWAY_URL
 OPENCLAW_PORT=$OPENCLAW_PORT
+SSH_ENABLED=$SSH_ENABLED
 EOF
 
     chmod 600 "$env_file"
@@ -3269,6 +3387,9 @@ if [ "$NON_INTERACTIVE" = false ]; then
     echo -e "${BLUE}=== 数据库设置 ===${NC}"
     prompt_input "数据库用户" "$DB_USER" DB_USER
     prompt_input "数据库名称" "$DB_NAME" DB_NAME
+
+    # SSH configuration (Issue #1122)
+    prompt_ssh_config
 
     echo ""
     echo -e "${BLUE}=== 工具配置 ===${NC}"
