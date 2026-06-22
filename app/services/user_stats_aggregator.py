@@ -98,7 +98,7 @@ class UserDailyStatsAggregator:
                 cursor = conn.cursor()
                 if is_postgresql():
                     # Combine data from daily_messages (non-Session) and agent_sessions (Session)
-                    # Filters must match get_combined_usage() for data consistency
+                    # Filters must match get_combined_usage() for data consistency (Issue #1063)
                     cursor.execute(
                         """
                         WITH daily_stats AS (
@@ -168,7 +168,7 @@ class UserDailyStatsAggregator:
                 else:
                     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     # SQLite: Combine data from daily_messages and agent_sessions
-                    # Filters must match get_combined_usage() for data consistency
+                    # Filters must match get_combined_usage() for data consistency (Issue #1063)
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO user_daily_stats
