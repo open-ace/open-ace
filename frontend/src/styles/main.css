@@ -184,20 +184,17 @@
 }
 
 .assist-docs,
-.assist-tools,
 .assist-prompts {
   background-color: var(--bg-secondary);
 }
 
 .assist-docs .assist-item,
-.assist-tools .assist-item,
 .assist-prompts .assist-item {
   background-color: var(--bg-tertiary);
   border-color: var(--border-color);
 }
 
 .assist-docs .assist-item-clickable,
-.assist-tools .assist-item-clickable,
 .assist-prompts .assist-item-clickable {
   color: var(--text-primary);
   background-color: transparent;
@@ -205,7 +202,6 @@
 }
 
 .assist-docs .assist-item-clickable:hover,
-.assist-tools .assist-item-clickable:hover,
 .assist-prompts .assist-item-clickable:hover {
   background-color: var(--bg-tertiary);
   color: var(--color-primary);
