@@ -366,9 +366,10 @@ class Database:
         conn = self.get_connection()
         try:
             yield conn
-        except Exception:
+        except Exception as e:
             # Rollback on error to clean up aborted transaction
             if self._is_postgresql:
+                logger.warning(f"Rolling back transaction due to error: {e}")
                 with suppress(Exception):
                     conn.rollback()
             raise
@@ -387,6 +388,9 @@ class Database:
                     pass  # Keep should_rollback = True as fallback
 
                 if should_rollback:
+                    logger.debug(
+                        "Rolling back uncommitted transaction before returning connection to pool"
+                    )
                     with suppress(Exception):
                         conn.rollback()
 

@@ -11,7 +11,7 @@ Tests the transaction handling logic including:
 
 import sqlite3
 from contextlib import suppress
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -39,7 +39,9 @@ class TestDatabaseConnectionSQLite:
         # Verify table was created
         with sqlite_db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test_table'")
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='test_table'"
+            )
             result = cursor.fetchone()
             assert result is not None
             assert result[0] == "test_table"
@@ -64,7 +66,7 @@ class TestDatabaseConnectionSQLite:
         with sqlite_db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM test_table")
-            result = cursor.fetchall()
+            _ = cursor.fetchall()
             # SQLite behavior: changes may persist without explicit commit
             # depending on connection settings
 
@@ -125,8 +127,9 @@ class TestDatabaseConnectionPostgreSQL:
 
     def test_connection_normal_with_commit_calls_no_rollback(self):
         """Test normal execution with explicit commit should NOT call rollback in finally."""
-        from app.repositories.database import Database
         from psycopg2.extensions import TRANSACTION_STATUS_IDLE
+
+        from app.repositories.database import Database
 
         mock_conn = MagicMock()
         mock_conn.rollback = Mock()
@@ -138,7 +141,7 @@ class TestDatabaseConnectionPostgreSQL:
         db = Database(db_url="postgresql://test:test@localhost/test")
 
         with patch.object(db, "get_connection", return_value=mock_conn):
-            with patch("app.repositories.database.release_postgresql_connection") as mock_release:
+            with patch("app.repositories.database.release_postgresql_connection"):
                 with db.connection() as conn:
                     conn.commit()
 
@@ -154,8 +157,9 @@ class TestDatabaseConnectionPostgreSQL:
 
     def test_connection_normal_without_commit_calls_rollback(self):
         """Test normal execution without commit should call rollback in finally."""
-        from app.repositories.database import Database
         from psycopg2.extensions import TRANSACTION_STATUS_ACTIVE
+
+        from app.repositories.database import Database
 
         mock_conn = MagicMock()
         mock_conn.rollback = Mock()
@@ -167,7 +171,7 @@ class TestDatabaseConnectionPostgreSQL:
         db = Database(db_url="postgresql://test:test@localhost/test")
 
         with patch.object(db, "get_connection", return_value=mock_conn):
-            with patch("app.repositories.database.release_postgresql_connection") as mock_release:
+            with patch("app.repositories.database.release_postgresql_connection"):
                 with db.connection() as conn:
                     # Do some work but don't commit
                     cursor = conn.cursor()
@@ -181,8 +185,9 @@ class TestDatabaseConnectionPostgreSQL:
 
     def test_connection_with_exception_calls_rollback(self):
         """Test that exception triggers rollback in except block."""
-        from app.repositories.database import Database
         from psycopg2.extensions import TRANSACTION_STATUS_IDLE
+
+        from app.repositories.database import Database
 
         mock_conn = MagicMock()
         mock_conn.rollback = Mock()
@@ -193,9 +198,9 @@ class TestDatabaseConnectionPostgreSQL:
         db = Database(db_url="postgresql://test:test@localhost/test")
 
         with patch.object(db, "get_connection", return_value=mock_conn):
-            with patch("app.repositories.database.release_postgresql_connection") as mock_release:
+            with patch("app.repositories.database.release_postgresql_connection"):
                 with pytest.raises(ValueError):
-                    with db.connection() as conn:
+                    with db.connection() as _conn:
                         raise ValueError("Test exception")
 
         # Verify rollback was called in except block
@@ -245,7 +250,7 @@ class TestDatabaseConnectionPostgreSQL:
         with patch.object(db, "get_connection", return_value=mock_conn):
             with patch("app.repositories.database.release_postgresql_connection") as mock_release:
                 # Should not raise, even though rollback fails
-                with db.connection() as conn:
+                with db.connection() as _conn:
                     # No commit, so transaction is active
                     pass
 
@@ -271,7 +276,7 @@ class TestDatabaseConnectionEdgeCases:
 
         with patch.object(db, "get_connection", return_value=mock_conn):
             with patch("app.repositories.database.release_postgresql_connection") as mock_release:
-                with db.connection() as conn:
+                with db.connection() as _conn:
                     pass
 
                 # Should fallback to rollback when info check fails
