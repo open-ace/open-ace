@@ -360,11 +360,14 @@ class Database:
         conn = self.get_connection()
         try:
             yield conn
-        finally:
+        except Exception:
+            # Only rollback on error - if caller committed successfully, don't rollback
             if self._is_postgresql:
-                # Rollback any aborted transaction before returning to pool
                 with suppress(Exception):
                     conn.rollback()
+            raise
+        finally:
+            if self._is_postgresql:
                 release_postgresql_connection(conn)
             else:
                 conn.close()
