@@ -2,12 +2,13 @@
 Unit tests for ToolAccountMappingRule model and repository.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.models.tool_account_mapping_rule import (
-    ToolAccountMappingRule,
     MatchType,
+    ToolAccountMappingRule,
 )
 from app.repositories.tool_account_mapping_rule_repo import (
     ToolAccountMappingRuleRepository,
@@ -246,9 +247,7 @@ class TestToolAccountMappingRuleRepository:
     def test_update(self):
         """Update a rule."""
         self.mock_db.execute.return_value = 1
-        self.mock_db.fetch_one.return_value = self._row(
-            id=1, pattern="updated-*", priority=20
-        )
+        self.mock_db.fetch_one.return_value = self._row(id=1, pattern="updated-*", priority=20)
         rule = self.repo.update(id=1, pattern="updated-*", priority=20)
         assert rule is not None
         assert rule.pattern == "updated-*"
@@ -262,7 +261,7 @@ class TestToolAccountMappingRuleRepository:
 
     def test_batch_create_for_user(self):
         """Batch create rules for a user."""
-        with patch.object(self.repo, 'create') as mock_create:
+        with patch.object(self.repo, "create") as mock_create:
             mock_create.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="bob-*", match_type="prefix"),
@@ -272,6 +271,6 @@ class TestToolAccountMappingRuleRepository:
                 rules=[
                     {"pattern": "alice-*", "match_type": "prefix"},
                     {"pattern": "bob-*", "match_type": "prefix"},
-                ]
+                ],
             )
             assert len(rules) == 2

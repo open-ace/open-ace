@@ -2,14 +2,15 @@
 Unit tests for ToolAccountAutoMappingService.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from app.services.tool_account_auto_mapping_service import (
-    ToolAccountAutoMappingService,
-    AutoMappingResult,
-)
+import pytest
+
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+from app.services.tool_account_auto_mapping_service import (
+    AutoMappingResult,
+    ToolAccountAutoMappingService,
+)
 
 
 class TestToolAccountAutoMappingService:
@@ -23,8 +24,20 @@ class TestToolAccountAutoMappingService:
     def test_get_all_users(self):
         """Get all active users with auto_mapping enabled."""
         self.mock_db.fetch_all.return_value = [
-            {"id": 1, "username": "alice", "email": "alice@example.com", "role": "user", "is_active": 1},
-            {"id": 2, "username": "bob", "email": "bob@example.com", "role": "user", "is_active": 1},
+            {
+                "id": 1,
+                "username": "alice",
+                "email": "alice@example.com",
+                "role": "user",
+                "is_active": 1,
+            },
+            {
+                "id": 2,
+                "username": "bob",
+                "email": "bob@example.com",
+                "role": "user",
+                "is_active": 1,
+            },
         ]
         users = self.service.get_all_users()
         assert len(users) == 2
@@ -36,8 +49,7 @@ class TestToolAccountAutoMappingService:
             {"id": 1, "username": "alice", "email": "alice@example.com"},
         ]
         result = self.service.try_match_by_username_or_email(
-            tool_account="alice-macbook-qwen",
-            users=self.service.get_all_users()
+            tool_account="alice-macbook-qwen", users=self.service.get_all_users()
         )
         assert result is not None
         assert result.user_id == 1
@@ -51,8 +63,7 @@ class TestToolAccountAutoMappingService:
         ]
         # system_account = "alice" from "alice-mac-qwen"
         result = self.service.try_match_by_username_or_email(
-            tool_account="alice-mac-qwen",
-            users=self.service.get_all_users()
+            tool_account="alice-mac-qwen", users=self.service.get_all_users()
         )
         assert result is not None
         assert result.user_id == 1
@@ -64,8 +75,7 @@ class TestToolAccountAutoMappingService:
             {"id": 1, "username": "alice", "email": "alice@example.com"},
         ]
         result = self.service.try_match_by_username_or_email(
-            tool_account="myalice-qwen",
-            users=self.service.get_all_users()
+            tool_account="myalice-qwen", users=self.service.get_all_users()
         )
         assert result is not None
         assert result.user_id == 1
@@ -77,8 +87,7 @@ class TestToolAccountAutoMappingService:
             {"id": 1, "username": "user1", "email": "alice@example.com"},
         ]
         result = self.service.try_match_by_username_or_email(
-            tool_account="testalice-qwen",
-            users=self.service.get_all_users()
+            tool_account="testalice-qwen", users=self.service.get_all_users()
         )
         assert result is not None
         assert result.user_id == 1
@@ -90,8 +99,7 @@ class TestToolAccountAutoMappingService:
             {"id": 1, "username": "alice", "email": "alice@example.com"},
         ]
         result = self.service.try_match_by_username_or_email(
-            tool_account="bob-server-qwen",
-            users=self.service.get_all_users()
+            tool_account="bob-server-qwen", users=self.service.get_all_users()
         )
         assert result is None
 
@@ -106,9 +114,7 @@ class TestToolAccountAutoMappingService:
             is_active=True,
         )
 
-        with patch.object(
-            self.service.rule_repo, 'get_auto_rules', return_value=[rule]
-        ):
+        with patch.object(self.service.rule_repo, "get_auto_rules", return_value=[rule]):
             self.mock_db.fetch_one.return_value = {"username": "developer"}
             result = self.service.try_match_by_rules(tool_account="dev-server-qwen")
             assert result is not None
@@ -128,9 +134,7 @@ class TestToolAccountAutoMappingService:
             is_active=True,
         )
 
-        with patch.object(
-            self.service.rule_repo, 'get_auto_rules', return_value=[rule]
-        ):
+        with patch.object(self.service.rule_repo, "get_auto_rules", return_value=[rule]):
             self.mock_db.fetch_one.return_value = {"username": "developer"}
 
             # Should match with matching tool_type
@@ -160,8 +164,8 @@ class TestToolAccountAutoMappingService:
             is_active=True,
         )
 
-        with patch.object(self.service.rule_repo, 'get_auto_rules', return_value=[rule]):
-            with patch.object(self.service.mapping_repo, 'get_by_tool_account', return_value=None):
+        with patch.object(self.service.rule_repo, "get_auto_rules", return_value=[rule]):
+            with patch.object(self.service.mapping_repo, "get_by_tool_account", return_value=None):
                 self.mock_db.fetch_all.return_value = [
                     {"id": 1, "username": "alice", "email": "alice@example.com"},
                 ]
@@ -178,8 +182,8 @@ class TestToolAccountAutoMappingService:
         """Skip already mapped accounts."""
         with patch.object(
             self.service.mapping_repo,
-            'get_by_tool_account',
-            return_value=MagicMock()  # Existing mapping
+            "get_by_tool_account",
+            return_value=MagicMock(),  # Existing mapping
         ):
             result = self.service.auto_map_account("alice-mac-qwen")
             assert result is None
@@ -189,10 +193,10 @@ class TestToolAccountAutoMappingService:
         # Use different email prefix to get 3 rules
         self.mock_db.fetch_one.return_value = {
             "username": "alice",
-            "email": "alicewang@example.com"  # Different prefix from username
+            "email": "alicewang@example.com",  # Different prefix from username
         }
 
-        with patch.object(self.service.rule_repo, 'create') as mock_create:
+        with patch.object(self.service.rule_repo, "create") as mock_create:
             mock_create.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="alicewang-*", match_type="prefix"),
@@ -208,10 +212,10 @@ class TestToolAccountAutoMappingService:
         """Create default rules when email prefix equals username."""
         self.mock_db.fetch_one.return_value = {
             "username": "alice",
-            "email": "alice@example.com"  # Same prefix as username
+            "email": "alice@example.com",  # Same prefix as username
         }
 
-        with patch.object(self.service.rule_repo, 'create') as mock_create:
+        with patch.object(self.service.rule_repo, "create") as mock_create:
             mock_create.side_effect = [
                 ToolAccountMappingRule(id=1, user_id=5, pattern="alice-*", match_type="prefix"),
                 ToolAccountMappingRule(id=2, user_id=5, pattern="*alice*", match_type="contains"),

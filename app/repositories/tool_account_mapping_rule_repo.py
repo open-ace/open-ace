@@ -92,7 +92,16 @@ class ToolAccountMappingRuleRepository:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
 
-        params = (user_id, pattern, match_type, tool_type, priority, is_auto, is_active, description)
+        params = (
+            user_id,
+            pattern,
+            match_type,
+            tool_type,
+            priority,
+            is_auto,
+            is_active,
+            description,
+        )
 
         try:
             if is_postgresql():
@@ -102,7 +111,7 @@ class ToolAccountMappingRuleRepository:
                 row = self.db.fetch_one(
                     "SELECT * FROM tool_account_mapping_rules "
                     "WHERE user_id = ? AND pattern = ? AND match_type = ?",
-                    (user_id, pattern, match_type)
+                    (user_id, pattern, match_type),
                 )
             return self._row_to_model(row) if row else None
         except Exception as e:
@@ -161,7 +170,7 @@ class ToolAccountMappingRuleRepository:
         if is_postgresql():
             query = f"""
                 UPDATE tool_account_mapping_rules
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE id = %s
                 RETURNING *
             """
@@ -169,7 +178,7 @@ class ToolAccountMappingRuleRepository:
         else:
             query = f"""
                 UPDATE tool_account_mapping_rules
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE id = ?
             """
             self.db.execute(query, tuple(params))
@@ -203,7 +212,9 @@ class ToolAccountMappingRuleRepository:
             updated_at=row.get("updated_at"),
         )
 
-    def batch_create_for_user(self, user_id: int, rules: list[dict]) -> list[ToolAccountMappingRule]:
+    def batch_create_for_user(
+        self, user_id: int, rules: list[dict]
+    ) -> list[ToolAccountMappingRule]:
         """Batch create rules for a user."""
         results = []
         for rule in rules:

@@ -5,12 +5,12 @@ Open ACE - Unit tests for Tool Account Auto Mapping Service
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.services.tool_account_auto_mapping_service import (
-    ToolAccountAutoMappingService,
-    AutoMappingResult,
-)
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
+from app.services.tool_account_auto_mapping_service import (
+    AutoMappingResult,
+    ToolAccountAutoMappingService,
+)
 
 
 class TestToolAccountAutoMappingService(unittest.TestCase):
@@ -143,8 +143,13 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
         """Test rule with tool_type constraint only matches that tool."""
         mock_rule_repo = MagicMock()
         rule = ToolAccountMappingRule(
-            id=1, user_id=5, pattern="alice-*", match_type="prefix",
-            tool_type="qwen", is_active=True, is_auto=True
+            id=1,
+            user_id=5,
+            pattern="alice-*",
+            match_type="prefix",
+            tool_type="qwen",
+            is_active=True,
+            is_auto=True,
         )
         mock_rule_repo.get_auto_rules.return_value = [rule]
         self.service.rule_repo = mock_rule_repo
@@ -178,8 +183,13 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
 
         mock_rule_repo = MagicMock()
         rule = ToolAccountMappingRule(
-            id=1, user_id=5, pattern="alice-*", match_type="prefix", priority=10,
-            is_active=True, is_auto=True
+            id=1,
+            user_id=5,
+            pattern="alice-*",
+            match_type="prefix",
+            priority=10,
+            is_active=True,
+            is_auto=True,
         )
         mock_rule_repo.get_auto_rules.return_value = [rule]
         self.service.rule_repo = mock_rule_repo
@@ -201,10 +211,7 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
     # create_default_rules_for_user
     def test_create_default_rules_creates_three_rules(self):
         """Test create_default_rules creates username prefix, email prefix, and contains rules."""
-        self.mock_db.fetch_one.return_value = {
-            "username": "alice",
-            "email": "alice@example.com"
-        }
+        self.mock_db.fetch_one.return_value = {"username": "alice", "email": "alice@example.com"}
 
         mock_rule_repo = MagicMock()
         mock_rule_repo.create.side_effect = [
@@ -224,7 +231,7 @@ class TestToolAccountAutoMappingService(unittest.TestCase):
         """Test create_default_rules creates separate email rule when different."""
         self.mock_db.fetch_one.return_value = {
             "username": "alice.chen",
-            "email": "alice@example.com"  # Different prefix
+            "email": "alice@example.com",  # Different prefix
         }
 
         mock_rule_repo = MagicMock()
@@ -299,8 +306,12 @@ class TestToolAccountMappingRule(unittest.TestCase):
     def test_tool_type_constraint(self):
         """Test tool_type constraint."""
         rule = ToolAccountMappingRule(
-            id=1, user_id=1, pattern="alice-*", match_type="prefix",
-            tool_type="qwen", is_active=True
+            id=1,
+            user_id=1,
+            pattern="alice-*",
+            match_type="prefix",
+            tool_type="qwen",
+            is_active=True,
         )
         # Should match for qwen
         self.assertTrue(rule.matches("alice-macbook-qwen", tool_type="qwen"))

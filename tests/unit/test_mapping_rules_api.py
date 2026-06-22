@@ -367,9 +367,7 @@ class TestUnmappedAccounts:
 
     @patch("app.routes.mapping_rules.UserToolAccountRepository")
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_get_unmapped_accounts_success(
-        self, mock_service_class, mock_repo_class, admin_client
-    ):
+    def test_get_unmapped_accounts_success(self, mock_service_class, mock_repo_class, admin_client):
         """GET /api/unmapped-accounts should return list."""
         mock_repo = MagicMock()
         mock_repo.get_unmapped_tool_accounts.return_value = [

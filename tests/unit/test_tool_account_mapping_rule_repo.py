@@ -5,8 +5,8 @@ Open ACE - Unit tests for Tool Account Mapping Rule Repository
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 
 
 class TestToolAccountMappingRuleRepository(unittest.TestCase):
@@ -116,7 +116,7 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
     def test_update_no_changes_returns_existing(self):
         """Test update with no changes returns existing rule."""
         self.mock_db.fetch_one.return_value = self._row(id=1, pattern="test")
-        result = self.repo.update(id=1)
+        self.repo.update(id=1)
         # Should call get_by_id
         self.assertEqual(self.mock_db.fetch_one.call_count, 1)
 
@@ -146,7 +146,7 @@ class TestToolAccountMappingRuleRepository(unittest.TestCase):
                 rules=[
                     {"pattern": "a-*", "match_type": "prefix"},
                     {"pattern": "b-*", "match_type": "prefix"},
-                ]
+                ],
             )
             self.assertEqual(len(result), 2)
 
