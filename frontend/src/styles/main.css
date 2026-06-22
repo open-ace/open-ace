@@ -1285,6 +1285,38 @@ link[rel='dns-prefetch'] {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+/* Highlighted message: shown briefly after jumping from the latency table.
+   Pure-CSS animation so it fades out without extra React state churn. */
+.message-item.message-highlighted {
+  border-color: var(--color-warning, #ffc107);
+  box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.4);
+  animation: message-highlight-fade 3s ease-out forwards;
+}
+
+@keyframes message-highlight-fade {
+  0%,
+  60% {
+    background-color: rgba(255, 193, 7, 0.18);
+    box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* Small sequence-number badge shown on each message in the timeline so the
+   latency-table "message index" can be matched by eye. */
+.message-number-badge {
+  font-family: monospace;
+  font-size: 0.7rem;
+}
+
+/* Hover affordance for clickable latency rows. */
+table .latency-row:hover td {
+  background-color: rgba(0, 123, 255, 0.06);
+}
+
 /* Role-based border colors */
 .message-item.border-primary {
   border-left: 4px solid var(--color-primary);
