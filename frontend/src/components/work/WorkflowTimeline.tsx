@@ -1645,7 +1645,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
               {workflow.dev_round > 1 && (
                 <span className="timeline-chip timeline-chip--neutral">
-                  <i className="bi bi-arrow-repeat me-1"></i>R{workflow.dev_round}
+                  <i className="bi bi-arrow-repeat me-1"></i>
+                  {t('autoRoundLabel', language)} {workflow.dev_round}
                 </span>
               )}
             </div>

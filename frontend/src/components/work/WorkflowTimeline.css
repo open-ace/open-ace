@@ -295,7 +295,7 @@
 .timeline-progress-note__message {
   margin-top: 2px;
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-note);
   line-height: 1.55;
 }
 
@@ -348,7 +348,7 @@
   min-height: 38px;
   padding-inline: 0.9rem;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: var(--font-size-note);
 }
 
 .timeline-state-banner {
@@ -393,7 +393,7 @@
 .timeline-state-banner__message {
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-note);
   line-height: 1.55;
   word-break: break-word;
 }
@@ -406,7 +406,7 @@
 }
 
 .timeline-state-banner__actions .timeline-inline-link {
-  font-size: 0.82rem;
+  font-size: var(--font-size-note);
 }
 
 .timeline-body {
@@ -619,7 +619,7 @@
 .timeline-milestone-preview {
   margin: 8px 0 0;
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--font-size-note);
   line-height: 1.55;
 }
 
