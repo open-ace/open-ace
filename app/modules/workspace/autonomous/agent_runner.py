@@ -346,7 +346,11 @@ class _ZcodeResultCollector:
     the same data ``_LocalSession`` accumulates for Claude SDK sessions.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        activity_callback=None,
+        session_id_resolver=None,
+    ) -> None:
         self.assistant_text: str = ""
         self.tool_calls: list[dict] = []
         self.total_tokens: int = 0
@@ -360,6 +364,14 @@ class _ZcodeResultCollector:
         self._request_count_from_usage: bool = False
         self.event_log: list = []
         self.error: str | None = None
+        # Real-time activity forwarding. activity_callback mirrors what
+        # _LocalSession._read_stdout does for the Claude SDK path so the SSE
+        # stream (and the timeline's live AI activity panel) works for ZCode
+        # too. session_id_resolver returns the current best session id — the
+        # real CLI session id once session/create resolves, else the tracking
+        # uuid — because activity flows before persisted_session_id is set.
+        self._activity_callback = activity_callback
+        self._session_id_resolver = session_id_resolver or (lambda: "")
 
     def on_output(self, session_id: str, data: str, stream: str, done: bool) -> None:
         """Receive ZCode output_callback invocations.
@@ -404,6 +416,13 @@ class _ZcodeResultCollector:
                         "model": parsed.get("message", {}).get("model"),
                     }
                 )
+                # Forward to the live SSE activity stream (mirrors the Claude
+                # SDK path in _LocalSession._read_stdout).
+                if self._activity_callback:
+                    self._activity_callback(
+                        self._session_id_resolver(),
+                        {"type": "assistant", "text": text[:500]},
+                    )
 
         # Tool events: ZCode emits tool.<name> with data payload.
         # Normalize to the Claude SDK tool_use shape for persistence.
@@ -435,6 +454,15 @@ class _ZcodeResultCollector:
                     "tool_use_id": tool_id,
                 }
             )
+            if self._activity_callback:
+                self._activity_callback(
+                    self._session_id_resolver(),
+                    {
+                        "type": "tool_use",
+                        "tool_name": tool_name,
+                        "tool_input": str(tool_input)[:200],
+                    },
+                )
 
         elif msg_type == "error":
             err_data = parsed.get("data", {})
@@ -459,6 +487,17 @@ class _ZcodeResultCollector:
         if "model_requests" in usage:
             self.request_count = usage["model_requests"]
             self._request_count_from_usage = True
+        if self._activity_callback:
+            self._activity_callback(
+                self._session_id_resolver(),
+                {
+                    "type": "usage",
+                    "total_tokens": self.total_tokens,
+                    "total_input_tokens": self.input_tokens,
+                    "total_output_tokens": self.output_tokens,
+                    "request_count": self.request_count,
+                },
+            )
 
     def on_permission(self, session_id: str, control_request: dict) -> None:
         """Auto-approve all permission requests in autonomous mode.
@@ -1240,7 +1279,27 @@ class AutonomousAgentRunner:
                 error=f"Failed to start ZCode process: {e}",
             )
 
-        collector = _ZcodeResultCollector()
+        # Register PID + wrap into a _LocalSession-compatible tracker so the
+        # orchestrator's stop/pause/cancel can reach the process. Created
+        # before the collector so the collector's session_id_resolver can read
+        # the real CLI session id off the tracker once session/create resolves.
+        tracker = _LocalSession(
+            session_id=session_id,
+            process=process,
+            cli_tool=cli_tool,
+            project_path=project_path,
+            encoded_project_path=self._encode_project_path(project_path),
+            workflow_id=workflow_id,
+            user_id=user_id,
+            workspace_type=workspace_type,
+            started_at_epoch=time.time(),
+            milestone_id=milestone_id,
+        )
+
+        collector = _ZcodeResultCollector(
+            activity_callback=self._activity_callback,
+            session_id_resolver=lambda: tracker.persisted_session_id or tracker.session_id,
+        )
 
         zc_session = ZCodeAppServerSession(
             session_id=session_id,
@@ -1255,20 +1314,6 @@ class AutonomousAgentRunner:
         )
         zc_session.allowed_tools = []
 
-        # Register PID + wrap into a _LocalSession-compatible tracker so the
-        # orchestrator's stop/pause/cancel can reach the process.
-        tracker = _LocalSession(
-            session_id=session_id,
-            process=process,
-            cli_tool=cli_tool,
-            project_path=project_path,
-            encoded_project_path=self._encode_project_path(project_path),
-            workflow_id=workflow_id,
-            user_id=user_id,
-            workspace_type=workspace_type,
-            started_at_epoch=time.time(),
-            milestone_id=milestone_id,
-        )
         self._local_sessions[session_id] = tracker
         if self._on_pid_registered:
             try:
@@ -1296,6 +1341,17 @@ class AutonomousAgentRunner:
             tracker.cli_session_id = zc_session._cli_session_id
             tracker.persisted_session_id = zc_session._cli_session_id
             tracker.sdk_initialized.set()
+
+            # Emit session_resolved so the orchestrator links the real CLI
+            # session id to the in-progress milestone. The frontend matches
+            # live activity to a milestone by milestone.session_id, which this
+            # populates. Without it the activity panel stays empty even though
+            # events are flowing (#1194).
+            if self._activity_callback and zc_session._cli_session_id:
+                self._activity_callback(
+                    zc_session._cli_session_id,
+                    {"type": "session_resolved"},
+                )
 
             # Create the wrapper agent_sessions row under the REAL CLI session
             # id (not the uuid). run_agent_task skips the pre-create for

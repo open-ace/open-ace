@@ -1503,6 +1503,12 @@ class AutonomousOrchestrator:
                     body=requirements_text,
                 )
                 issue_number = issue_data.get("number")
+                # Persist the created issue number to the workflow so downstream
+                # phases (comment posting, timeline header badge, PR body "Closes
+                # #N") can resolve it. Mirrors the parsed-issue branch above.
+                # Without this, wf.github_issue_number stays NULL and every
+                # `wf.get("github_issue_number")` gate silently no-ops (#1194).
+                self._update_workflow({"github_issue_number": issue_number})
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",
