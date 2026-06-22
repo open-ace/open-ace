@@ -27,7 +27,6 @@ import {
 } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
-import { mappingRulesApi } from '@/api/mappingRules';
 import { createMatcherConfig } from '@/utils';
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 

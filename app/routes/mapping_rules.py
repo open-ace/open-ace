@@ -6,15 +6,16 @@ API endpoints for managing auto-mapping rules and viewing unmapped accounts.
 
 from flask import Blueprint, jsonify, request
 
+from app.auth.decorators import admin_required
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
-from app.services.tool_account_auto_mapping_service import ToolAccountAutoMappingService
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
-from app.repositories.database import Database
+from app.services.tool_account_auto_mapping_service import ToolAccountAutoMappingService
 
 mapping_rules_bp = Blueprint("mapping_rules_bp", __name__)
 
 
 @mapping_rules_bp.route("/api/mapping-rules", methods=["GET"])
+@admin_required
 def get_all_rules():
     """Get all mapping rules."""
     repo = ToolAccountMappingRuleRepository()
@@ -23,6 +24,7 @@ def get_all_rules():
 
 
 @mapping_rules_bp.route("/api/mapping-rules/user/<int:user_id>", methods=["GET"])
+@admin_required
 def get_user_rules(user_id: int):
     """Get mapping rules for a specific user."""
     repo = ToolAccountMappingRuleRepository()
@@ -31,6 +33,7 @@ def get_user_rules(user_id: int):
 
 
 @mapping_rules_bp.route("/api/mapping-rules", methods=["POST"])
+@admin_required
 def create_rule():
     """Create a new mapping rule."""
     data = request.get_json()
@@ -61,6 +64,7 @@ def create_rule():
 
 
 @mapping_rules_bp.route("/api/mapping-rules/<int:id>", methods=["PUT"])
+@admin_required
 def update_rule(id: int):
     """Update a mapping rule."""
     data = request.get_json()
@@ -87,6 +91,7 @@ def update_rule(id: int):
 
 
 @mapping_rules_bp.route("/api/mapping-rules/<int:id>", methods=["DELETE"])
+@admin_required
 def delete_rule(id: int):
     """Delete a mapping rule."""
     repo = ToolAccountMappingRuleRepository()
@@ -98,6 +103,7 @@ def delete_rule(id: int):
 
 
 @mapping_rules_bp.route("/api/mapping-rules/user/<int:user_id>/generate-default", methods=["POST"])
+@admin_required
 def generate_default_rules(user_id: int):
     """Generate default mapping rules for a user."""
     service = ToolAccountAutoMappingService()
@@ -106,6 +112,7 @@ def generate_default_rules(user_id: int):
 
 
 @mapping_rules_bp.route("/api/mapping-stats", methods=["GET"])
+@admin_required
 def get_mapping_stats():
     """Get mapping statistics."""
     service = ToolAccountAutoMappingService()
@@ -114,6 +121,7 @@ def get_mapping_stats():
 
 
 @mapping_rules_bp.route("/api/mapping-rules/auto-map", methods=["POST"])
+@admin_required
 def run_auto_mapping():
     """Run auto-mapping for all unmapped accounts."""
     data = request.get_json() or {}
@@ -131,6 +139,7 @@ def run_auto_mapping():
 
 
 @mapping_rules_bp.route("/api/mapping-rules/test-match", methods=["POST"])
+@admin_required
 def test_match():
     """Test if a tool_account matches any rules."""
     data = request.get_json()
@@ -157,6 +166,7 @@ def test_match():
 
 
 @mapping_rules_bp.route("/api/unmapped-accounts", methods=["GET"])
+@admin_required
 def get_unmapped_accounts():
     """Get list of unmapped tool accounts."""
     repo = UserToolAccountRepository()
@@ -173,6 +183,7 @@ def get_unmapped_accounts():
 
 
 @mapping_rules_bp.route("/api/unmapped-accounts/<sender_name>/suggest-mapping", methods=["GET"])
+@admin_required
 def suggest_mapping(sender_name: str):
     """Get suggested mapping for an unmapped account."""
     service = ToolAccountAutoMappingService()
@@ -190,6 +201,7 @@ def suggest_mapping(sender_name: str):
 
 
 @mapping_rules_bp.route("/api/unmapped-accounts/<sender_name>/map", methods=["POST"])
+@admin_required
 def manual_map_account(sender_name: str):
     """Manually map an unmapped account to a user."""
     data = request.get_json()

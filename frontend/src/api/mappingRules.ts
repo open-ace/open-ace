@@ -123,7 +123,7 @@ export const mappingRulesApi = {
       unmapped_count: number;
       mappings: AutoMappingResult[];
       dry_run: boolean;
-    }>('/mapping-rules/auto-map', { dry_run });
+    }>('/mapping-rules/auto-map', { dry_run: dryRun });
   },
 
   async testMatch(
@@ -160,4 +160,4 @@ export const mappingRulesApi = {
 };
 
 // Import ToolAccount type from toolAccounts.ts
-import { ToolAccount } from './toolAccounts';
+import type { ToolAccount } from './toolAccounts';

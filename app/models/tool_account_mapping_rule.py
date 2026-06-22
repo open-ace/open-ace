@@ -5,10 +5,14 @@ Model for automatic tool account mapping rules.
 Supports multiple match types: exact, prefix, suffix, contains, regex.
 """
 
+import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class MatchType(Enum):
@@ -19,6 +23,33 @@ class MatchType(Enum):
     SUFFIX = "suffix"  # 后缀匹配 (*pattern)
     CONTAINS = "contains"  # 包含匹配 (*pattern*)
     REGEX = "regex"  # 正则表达式匹配
+
+
+def validate_regex_pattern(pattern: str) -> tuple[bool, str]:
+    """
+    Validate regex pattern for ReDoS safety.
+
+    Args:
+        pattern: Regex pattern to validate.
+
+    Returns:
+        Tuple of (is_safe, error_message).
+    """
+    # Check for nested quantifiers (e.g., a+, a+)+, etc.
+    if re.search(r"\+.*\+", pattern) or re.search(r"\*.*\*", pattern):
+        return False, "Nested quantifiers not allowed (ReDoS risk)"
+
+    # Check for alternation with quantifiers (e.g., (a|b)+)
+    if re.search(r"\([^)]*\|[^)]*\)[+*]", pattern):
+        return False, "Alternation with quantifiers not allowed (ReDoS risk)"
+
+    # Validate it's a valid regex
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        return False, f"Invalid regex pattern: {e}"
+
+    return True, ""
 
 
 @dataclass
@@ -83,8 +114,6 @@ class ToolAccountMappingRule:
         if self.tool_type and tool_type and self.tool_type != tool_type:
             return False
 
-        import re
-
         pattern = self.pattern
 
         if self.match_type == "exact":
@@ -102,7 +131,11 @@ class ToolAccountMappingRule:
             regex_pattern = re.escape(pattern).replace(r"\*", ".*")
             return bool(re.search(regex_pattern, tool_account))
         elif self.match_type == "regex":
-            # Direct regex pattern
+            # Direct regex pattern - validate for ReDoS safety
+            is_safe, error = validate_regex_pattern(pattern)
+            if not is_safe:
+                logger.warning(f"Unsafe regex pattern blocked: {error}")
+                return False
             try:
                 return bool(re.match(pattern, tool_account))
             except re.error:
