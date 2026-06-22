@@ -130,12 +130,14 @@ def run_auto_mapping():
     service = ToolAccountAutoMappingService()
     results, still_unmapped = service.run_auto_mapping(dry_run=dry_run)
 
-    return jsonify({
-        "mapped_count": len(results),
-        "unmapped_count": len(still_unmapped),
-        "mappings": [r.__dict__ for r in results],
-        "dry_run": dry_run,
-    })
+    return jsonify(
+        {
+            "mapped_count": len(results),
+            "unmapped_count": len(still_unmapped),
+            "mappings": [r.__dict__ for r in results],
+            "dry_run": dry_run,
+        }
+    )
 
 
 @mapping_rules_bp.route("/api/mapping-rules/test-match", methods=["POST"])
@@ -154,13 +156,15 @@ def test_match():
     result = service.auto_map_account(tool_account, data.get("tool_type"))
 
     if result:
-        return jsonify({
-            "matched": True,
-            "user_id": result.user_id,
-            "username": result.username,
-            "matched_by": result.matched_by,
-            "rule_id": result.rule_id,
-        })
+        return jsonify(
+            {
+                "matched": True,
+                "user_id": result.user_id,
+                "username": result.username,
+                "matched_by": result.matched_by,
+                "rule_id": result.rule_id,
+            }
+        )
     else:
         return jsonify({"matched": False})
 
@@ -175,9 +179,7 @@ def get_unmapped_accounts():
     # Add inferred tool type
     service = ToolAccountAutoMappingService()
     for account in unmapped:
-        account["inferred_tool_type"] = service._infer_tool_type(
-            account.get("sender_name", "")
-        )
+        account["inferred_tool_type"] = service._infer_tool_type(account.get("sender_name", ""))
 
     return jsonify(unmapped)
 
@@ -190,12 +192,14 @@ def suggest_mapping(sender_name: str):
     result = service.auto_map_account(sender_name)
 
     if result:
-        return jsonify({
-            "suggested_user_id": result.user_id,
-            "suggested_username": result.username,
-            "matched_by": result.matched_by,
-            "rule_id": result.rule_id,
-        })
+        return jsonify(
+            {
+                "suggested_user_id": result.user_id,
+                "suggested_username": result.username,
+                "matched_by": result.matched_by,
+                "rule_id": result.rule_id,
+            }
+        )
     else:
         return jsonify({"suggestion": None})
 

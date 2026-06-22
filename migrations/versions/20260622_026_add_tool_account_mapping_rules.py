@@ -36,7 +36,9 @@ def upgrade():
     # Create tool_account_mapping_rules table
     table_args = [
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("pattern", sa.String(255), nullable=False),
         sa.Column("match_type", sa.String(20), nullable=False, server_default="exact"),
         sa.Column("tool_type", sa.String(50), nullable=True),
@@ -51,7 +53,9 @@ def upgrade():
     # Add unique constraint for (user_id, pattern, match_type)
     if is_postgresql:
         table_args.append(
-            sa.UniqueConstraint("user_id", "pattern", "match_type", name="uq_mapping_rule_user_pattern")
+            sa.UniqueConstraint(
+                "user_id", "pattern", "match_type", name="uq_mapping_rule_user_pattern"
+            )
         )
 
     op.create_table("tool_account_mapping_rules", *table_args)
@@ -59,17 +63,20 @@ def upgrade():
     if not is_postgresql:
         # SQLite: create unique constraint separately
         op.create_unique_constraint(
-            "uq_mapping_rule_user_pattern", "tool_account_mapping_rules", ["user_id", "pattern", "match_type"]
+            "uq_mapping_rule_user_pattern",
+            "tool_account_mapping_rules",
+            ["user_id", "pattern", "match_type"],
         )
 
     # Create indexes for efficient querying
     op.create_index("idx_mapping_rules_user_id", "tool_account_mapping_rules", ["user_id"])
-    op.create_index("idx_mapping_rules_active", "tool_account_mapping_rules", ["is_active", "priority"])
+    op.create_index(
+        "idx_mapping_rules_active", "tool_account_mapping_rules", ["is_active", "priority"]
+    )
 
     # Add auto_mapping_enabled column to users table (optional per-user setting)
     op.add_column(
-        "users",
-        sa.Column("auto_mapping_enabled", sa.Boolean(), nullable=True, server_default="1")
+        "users", sa.Column("auto_mapping_enabled", sa.Boolean(), nullable=True, server_default="1")
     )
 
 

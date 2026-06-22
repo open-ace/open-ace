@@ -837,7 +837,7 @@ class AnalysisService:
                     {
                         "type": "info",
                         "message": f"High concentration of usage on {top_tool}",
-                        "details": f"{top_tool} accounts for {top_usage/total_tokens*100:.1f}% of total tokens",
+                        "details": f"{top_tool} accounts for {top_usage / total_tokens * 100:.1f}% of total tokens",
                     }
                 )
 

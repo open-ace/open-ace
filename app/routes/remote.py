@@ -1445,7 +1445,7 @@ def agent_message():
             else:
                 session_id = claude_session_id
                 logger.warning(
-                    "session_sync: terminal_id=%s not found, " "fall back to claude_session_id=%s",
+                    "session_sync: terminal_id=%s not found, fall back to claude_session_id=%s",
                     terminal_id[:8],
                     claude_session_id[:8],
                 )

@@ -140,7 +140,7 @@ class UserToolAccountRepository:
         if is_postgresql():
             query = f"""
                 UPDATE user_tool_accounts
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE id = %s
                 RETURNING *
             """
@@ -148,7 +148,7 @@ class UserToolAccountRepository:
         else:
             query = f"""
                 UPDATE user_tool_accounts
-                SET {', '.join(updates)}
+                SET {", ".join(updates)}
                 WHERE id = ?
             """
             self.db.execute(query, tuple(params))

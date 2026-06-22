@@ -1869,7 +1869,7 @@ class AutonomousAgentRunner:
                                     },
                                 }
                                 logger.warning(
-                                    "Denied tool '%s' for session %s " "(not in allowed list)",
+                                    "Denied tool '%s' for session %s (not in allowed list)",
                                     tool_name,
                                     (session.persisted_session_id or session.session_id)[:8],
                                 )

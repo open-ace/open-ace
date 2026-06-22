@@ -527,7 +527,7 @@ class PromptLibrary:
             adapt_sql(
                 f"""
             SELECT * FROM prompt_templates
-            WHERE {adapt_boolean_condition('is_featured', True)} AND {adapt_boolean_condition('is_public', True)}
+            WHERE {adapt_boolean_condition("is_featured", True)} AND {adapt_boolean_condition("is_public", True)}
             ORDER BY use_count DESC
             LIMIT ?
         """
@@ -560,7 +560,7 @@ class PromptLibrary:
                     f"""
                     SELECT category, COUNT(*) as count
                     FROM prompt_templates
-                    WHERE (author_id = ? OR {adapt_boolean_condition('is_public', True)})
+                    WHERE (author_id = ? OR {adapt_boolean_condition("is_public", True)})
                     GROUP BY category
                     ORDER BY count DESC
                 """
@@ -574,7 +574,7 @@ class PromptLibrary:
                     f"""
                     SELECT category, COUNT(*) as count
                     FROM prompt_templates
-                    WHERE {adapt_boolean_condition('is_public', True)}
+                    WHERE {adapt_boolean_condition("is_public", True)}
                     GROUP BY category
                     ORDER BY count DESC
                 """
@@ -602,7 +602,7 @@ class PromptLibrary:
         cursor.execute(
             f"""
             SELECT tags FROM prompt_templates
-            WHERE {adapt_boolean_condition('is_public', True)} AND tags IS NOT NULL
+            WHERE {adapt_boolean_condition("is_public", True)} AND tags IS NOT NULL
         """
         )
 

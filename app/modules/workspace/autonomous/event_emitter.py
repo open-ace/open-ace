@@ -27,9 +27,9 @@ class AutonomousEventEmitter:
     _lock = threading.Lock()
 
     def __init__(self):
-        self._queues: dict[str, list[tuple[queue.Queue, float]]] = (
-            {}
-        )  # workflow_id -> [(queue, last_read_ts)]
+        self._queues: dict[
+            str, list[tuple[queue.Queue, float]]
+        ] = {}  # workflow_id -> [(queue, last_read_ts)]
         self._emit_lock = threading.Lock()
         self._cleanup_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()

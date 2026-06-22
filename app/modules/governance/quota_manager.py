@@ -440,7 +440,7 @@ class QuotaManager:
                         conn.commit()
 
                     logger.warning(
-                        f"Quota alert created: user={user_id}, type={alert_type}, {quota_type}={percentage*100:.1f}%"
+                        f"Quota alert created: user={user_id}, type={alert_type}, {quota_type}={percentage * 100:.1f}%"
                     )
 
                 except Exception as e:
@@ -661,9 +661,7 @@ class QuotaManager:
             WHERE user_id IN ({}) AND workspace_type = 'remote'
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
-        """.format(
-                ",".join(["?"] * len(user_ids))
-            ),
+        """.format(",".join(["?"] * len(user_ids))),
             tuple(user_ids) + (start_date, end_date),
         )
 
@@ -697,9 +695,7 @@ class QuotaManager:
                   AND (message_source IS NULL OR message_source != 'remote_workspace')
                   AND (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY sender_name
-            """.format(
-                    " OR ".join(sender_conditions)
-                ),
+            """.format(" OR ".join(sender_conditions)),
                 tuple(sender_params) + (start_date, end_date),
             )
 
@@ -710,7 +706,9 @@ class QuotaManager:
                     uid = user.get("id")
                     sa = user.get("system_account") or user.get("username", "")
                     if sa and sender_name.startswith(sa):
-                        existing: dict[str, int] = local_usage_lookup.get(uid, {"tokens": 0, "requests": 0})  # type: ignore[assignment]
+                        existing: dict[str, int] = local_usage_lookup.get(
+                            uid, {"tokens": 0, "requests": 0}
+                        )  # type: ignore[assignment]
                         local_usage_lookup[uid] = {  # type: ignore[assignment]
                             "tokens": existing["tokens"] + int(row["tokens"]),
                             "requests": existing["requests"] + int(row["requests"]),
@@ -723,9 +721,7 @@ class QuotaManager:
             SELECT * FROM quota_alerts
             WHERE user_id IN ({})
             ORDER BY created_at DESC
-        """.format(
-                ",".join(["?"] * len(user_ids))
-            ),
+        """.format(",".join(["?"] * len(user_ids))),
             tuple(user_ids),
         )
 
@@ -816,7 +812,7 @@ class QuotaManager:
                 adapt_sql(
                     f"""
                 SELECT * FROM quota_alerts
-                WHERE {adapt_boolean_condition('acknowledged', False)}
+                WHERE {adapt_boolean_condition("acknowledged", False)}
                 ORDER BY created_at DESC
                 LIMIT ?
             """
@@ -875,7 +871,7 @@ class QuotaManager:
                     adapt_sql(
                         f"""
                     DELETE FROM quota_alerts
-                    WHERE {adapt_boolean_condition('acknowledged', True)} AND created_at < ?
+                    WHERE {adapt_boolean_condition("acknowledged", True)} AND created_at < ?
                 """
                     ),
                     (cutoff,),

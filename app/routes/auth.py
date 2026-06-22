@@ -223,11 +223,11 @@ def _refresh_auth_session(token: str) -> Optional[int]:
         remaining = (expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
         threshold = timedelta(minutes=_AUTH_SESSION_REFRESH_THRESHOLD_MINUTES).total_seconds()
         logger.debug(
-            f"Session refresh check: remaining={remaining/60:.1f}min, threshold={threshold/60:.1f}min"
+            f"Session refresh check: remaining={remaining / 60:.1f}min, threshold={threshold / 60:.1f}min"
         )
         if remaining > threshold:
             logger.debug(
-                f"Session not refreshed: remaining ({remaining/60:.1f}min) > threshold ({threshold/60:.1f}min)"
+                f"Session not refreshed: remaining ({remaining / 60:.1f}min) > threshold ({threshold / 60:.1f}min)"
             )
             return None
 

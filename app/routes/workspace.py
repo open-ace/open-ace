@@ -444,7 +444,7 @@ def render_prompt(template_id):
         if missing:
             return (
                 jsonify(
-                    {"success": False, "error": f'Missing required variables: {", ".join(missing)}'}
+                    {"success": False, "error": f"Missing required variables: {', '.join(missing)}"}
                 ),
                 400,
             )

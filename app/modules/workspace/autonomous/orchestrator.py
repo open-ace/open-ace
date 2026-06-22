@@ -1863,8 +1863,7 @@ class AutonomousOrchestrator:
         # ── Development phase (skipped on test-only/skip retry) ──
         if test_retries > 0 or skip_retries > 0:
             logger.info(
-                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
-                "skipping development phase",
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, skipping development phase",
                 test_retries,
                 skip_retries,
                 dev_round,
@@ -2231,9 +2230,7 @@ class AutonomousOrchestrator:
             else:
                 status_line = "❌ Tests failed"
             test_comment = (
-                f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
-                f"{status_line}\n\n"
-                f"{test_summary}"
+                f"## 🧪 Test Results (Dev Round {dev_round})\n\n{status_line}\n\n{test_summary}"
             )
             self._post_github_comment(gh, issue_number, test_comment, context="test-results")
 
@@ -2799,9 +2796,7 @@ class AutonomousOrchestrator:
                     comment += f"- Commit: `{commit_sha[:8]}`\n"
                 # Note pre-existing CI failures if fix agent identified them.
                 if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
-                    comment += (
-                        "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
-                    )
+                    comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
                 self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
 
     # ── Phase: Report ───────────────────────────────────────────────

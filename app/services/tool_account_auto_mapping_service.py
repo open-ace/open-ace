@@ -15,7 +15,7 @@ from typing import Optional
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_condition
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
 
@@ -52,10 +52,11 @@ class ToolAccountAutoMappingService:
 
     def get_all_users(self) -> list[User]:
         """Get all active users with auto_mapping enabled."""
-        query = """
+        query = f"""
             SELECT id, username, email, role, is_active, auto_mapping_enabled
             FROM users
-            WHERE is_active = 1 AND (auto_mapping_enabled IS NULL OR auto_mapping_enabled = 1)
+            WHERE {adapt_boolean_condition('is_active', True)}
+              AND (auto_mapping_enabled IS NULL OR {adapt_boolean_condition('auto_mapping_enabled', True)})
         """
         rows = self.db.fetch_all(query)
         return [
@@ -210,15 +211,11 @@ class ToolAccountAutoMappingService:
         )
         if mapping:
             # Update daily_messages user_id
-            self.mapping_repo.update_daily_messages_user_id(
-                result.tool_account, result.user_id
-            )
+            self.mapping_repo.update_daily_messages_user_id(result.tool_account, result.user_id)
             return mapping.id
         return None
 
-    def run_auto_mapping(
-        self, dry_run: bool = False
-    ) -> tuple[list[AutoMappingResult], list[dict]]:
+    def run_auto_mapping(self, dry_run: bool = False) -> tuple[list[AutoMappingResult], list[dict]]:
         """
         Run auto-mapping for all unmapped tool accounts.
 
