@@ -6,13 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models.tool_account_mapping_rule import (
-    MatchType,
-    ToolAccountMappingRule,
-)
-from app.repositories.tool_account_mapping_rule_repo import (
-    ToolAccountMappingRuleRepository,
-)
+from app.models.tool_account_mapping_rule import MatchType, ToolAccountMappingRule
+from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 
 
 class TestToolAccountMappingRule:
