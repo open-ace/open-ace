@@ -267,7 +267,7 @@ class UsageRepository:
 
         query = f"""
             SELECT * FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY date DESC
         """
 
@@ -313,7 +313,7 @@ class UsageRepository:
 
         query = f"""
             SELECT * FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY date DESC
         """
 
@@ -467,7 +467,7 @@ class UsageRepository:
                 SUM(output_tokens) as output_tokens,
                 COUNT(*) as requests
             FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY date
             ORDER BY date ASC
         """
@@ -519,7 +519,7 @@ class UsageRepository:
                 tool_name,
                 SUM(total_tokens) as tokens
             FROM daily_stats
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY date, tool_name
             ORDER BY date ASC, tool_name ASC
         """
@@ -568,7 +568,7 @@ class UsageRepository:
         query = f"""
             SELECT SUM(request_count) as total_requests
             FROM daily_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
         """
 
         result = self.db.fetch_one(query, tuple(params))
@@ -600,7 +600,7 @@ class UsageRepository:
                 date,
                 SUM(request_count) as requests
             FROM daily_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY date
             ORDER BY date ASC
         """
@@ -652,7 +652,7 @@ class UsageRepository:
                 tool_name,
                 SUM(request_count) as requests
             FROM daily_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY date, tool_name
             ORDER BY date ASC, tool_name ASC
         """
@@ -704,7 +704,7 @@ class UsageRepository:
         total_query = f"""
             SELECT SUM(request_count) as total_requests
             FROM daily_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
         """
         total_result = self.db.fetch_one(total_query, tuple(params))
         total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
@@ -715,7 +715,7 @@ class UsageRepository:
                 tool_name,
                 SUM(request_count) as requests
             FROM daily_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY tool_name
             ORDER BY requests DESC
         """
@@ -927,7 +927,7 @@ class UsageRepository:
                 COUNT(*) as requests,
                 SUM(tokens_used) as tokens
             FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY date
             ORDER BY date ASC
         """
@@ -1051,7 +1051,7 @@ class UsageRepository:
                 COUNT(*) as requests,
                 SUM(tokens_used) as tokens
             FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             GROUP BY sender_name
             ORDER BY requests DESC
         """

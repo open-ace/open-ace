@@ -256,7 +256,7 @@ class MessageRepository:
 
         query = f"""
             SELECT * FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY timestamp DESC
         """
 
@@ -325,7 +325,7 @@ class MessageRepository:
 
         query = f"""
             SELECT * FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY date DESC, timestamp DESC
         """
 
@@ -1149,7 +1149,7 @@ class MessageRepository:
                 input_tokens,
                 output_tokens
             FROM daily_messages
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
         """
 
         return self.db.fetch_all(query, tuple(params))

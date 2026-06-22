@@ -200,6 +200,7 @@ def register_blueprints(app):
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
     from app.routes.insights import insights_bp
+    from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.messages import messages_bp
     from app.routes.pages import pages_bp
     from app.routes.projects import projects_bp
@@ -234,6 +235,7 @@ def register_blueprints(app):
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
+    app.register_blueprint(mapping_rules_bp)
     app.register_blueprint(projects_bp, url_prefix="/api")
     app.register_blueprint(insights_bp, url_prefix="/api")
     app.register_blueprint(remote_bp, url_prefix="/api/remote")

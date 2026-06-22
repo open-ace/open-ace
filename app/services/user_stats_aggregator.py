@@ -98,11 +98,14 @@ class UserDailyStatsAggregator:
                 cursor = conn.cursor()
                 if is_postgresql():
                     # Combine data from daily_messages (non-Session) and agent_sessions (Session)
-                    # This replaces the previous filter that excluded all agent_session_id data
+                    # Filters must match get_combined_usage() for data consistency
                     cursor.execute(
                         """
                         WITH daily_stats AS (
                             -- Non-Session data from daily_messages (filtered)
+                            -- Must match get_combined_usage filters:
+                            -- - message_source != 'remote_workspace' (exclude remote workspace messages)
+                            -- - agent_session_id IS NULL or empty (exclude WebUI session messages)
                             SELECT dm.date::date as date,
                                    COUNT(*) as requests,
                                    COALESCE(SUM(dm.tokens_used), 0) as tokens,
@@ -110,20 +113,27 @@ class UserDailyStatsAggregator:
                                    COALESCE(SUM(dm.output_tokens), 0) as output_tokens
                             FROM daily_messages dm
                             WHERE dm.date >= %s AND dm.date <= %s
-                              AND dm.sender_name LIKE %s
+                              AND dm.sender_name LIKE %s  -- escape_like used in params
                               AND dm.role = 'assistant'
+                              AND (message_source IS NULL OR message_source != 'remote_workspace')
                               AND (agent_session_id IS NULL OR agent_session_id = '')
                             GROUP BY dm.date::date
                         ),
                         session_stats AS (
                             -- Session data from agent_sessions
+                            -- Must match get_combined_usage filters:
+                            -- - workspace_type IN ('local', 'remote', 'terminal')
+                            -- - requests from session_messages subquery (not request_count field)
                             SELECT DATE(as2.created_at) as date,
-                                   COALESCE(as2.request_count, 0) as requests,
+                                   COALESCE((SELECT COUNT(*) FROM session_messages sm
+                                             WHERE sm.session_id = as2.session_id
+                                               AND sm.role = 'assistant'), 0) as requests,
                                    COALESCE(as2.total_tokens, 0) as tokens,
                                    COALESCE(as2.total_input_tokens, 0) as input_tokens,
                                    COALESCE(as2.total_output_tokens, 0) as output_tokens
                             FROM agent_sessions as2
                             WHERE as2.user_id = %s
+                              AND as2.workspace_type IN ('local', 'remote', 'terminal')
                               AND DATE(as2.created_at) >= %s AND DATE(as2.created_at) <= %s
                         ),
                         combined_stats AS (
@@ -158,7 +168,7 @@ class UserDailyStatsAggregator:
                 else:
                     now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
                     # SQLite: Combine data from daily_messages and agent_sessions
-                    # SQLite supports CTEs since 3.8.3 (2014), but use subqueries for compatibility
+                    # Filters must match get_combined_usage() for data consistency
                     cursor.execute(
                         """
                         INSERT OR REPLACE INTO user_daily_stats
@@ -173,6 +183,9 @@ class UserDailyStatsAggregator:
                             ?
                         FROM (
                             -- Non-Session data from daily_messages (filtered)
+                            -- Must match get_combined_usage filters:
+                            -- - message_source != 'remote_workspace' (exclude remote workspace messages)
+                            -- - agent_session_id IS NULL or empty (exclude WebUI session messages)
                             SELECT dm.date as date,
                                    COUNT(*) as requests,
                                    COALESCE(SUM(dm.tokens_used), 0) as tokens,
@@ -180,19 +193,26 @@ class UserDailyStatsAggregator:
                                    COALESCE(SUM(dm.output_tokens), 0) as output_tokens
                             FROM daily_messages dm
                             WHERE dm.date >= ? AND dm.date <= ?
-                              AND dm.sender_name LIKE ?
+                              AND dm.sender_name LIKE ?  -- escape_like used in params
                               AND dm.role = 'assistant'
+                              AND (message_source IS NULL OR message_source != 'remote_workspace')
                               AND (agent_session_id IS NULL OR agent_session_id = '')
                             GROUP BY dm.date
                             UNION ALL
                             -- Session data from agent_sessions
+                            -- Must match get_combined_usage filters:
+                            -- - workspace_type IN ('local', 'remote', 'terminal')
+                            -- - requests from session_messages subquery (not request_count field)
                             SELECT DATE(as2.created_at) as date,
-                                   COALESCE(as2.request_count, 0) as requests,
+                                   COALESCE((SELECT COUNT(*) FROM session_messages sm
+                                             WHERE sm.session_id = as2.session_id
+                                               AND sm.role = 'assistant'), 0) as requests,
                                    COALESCE(as2.total_tokens, 0) as tokens,
                                    COALESCE(as2.total_input_tokens, 0) as input_tokens,
                                    COALESCE(as2.total_output_tokens, 0) as output_tokens
                             FROM agent_sessions as2
                             WHERE as2.user_id = ?
+                              AND as2.workspace_type IN ('local', 'remote', 'terminal')
                               AND DATE(as2.created_at) >= ? AND DATE(as2.created_at) <= ?
                         ) combined
                         GROUP BY combined.date

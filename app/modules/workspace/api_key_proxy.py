@@ -551,7 +551,7 @@ class APIKeyProxyService:
         cursor.execute(
             f"""
             UPDATE api_key_store
-            SET {', '.join(updates)}
+            SET {", ".join(updates)}
             WHERE id = {_param()} AND tenant_id = {_param()}
         """,
             values,

@@ -435,7 +435,7 @@ class CostOptimizer:
                         suggestion_id="token_optimization_input",
                         suggestion_type=OptimizationType.TOKEN_OPTIMIZATION.value,
                         title="Optimize prompt efficiency",
-                        description=f"Output ratio is only {output_ratio*100:.1f}%. "
+                        description=f"Output ratio is only {output_ratio * 100:.1f}%. "
                         "Consider optimizing prompts to reduce input tokens.",
                         potential_savings=total_input * 0.00001 * 0.3,  # Estimate 30% reduction
                         priority=Priority.MEDIUM.value,
@@ -445,7 +445,7 @@ class CostOptimizer:
                             "Use prompt caching where available",
                         ],
                         params={
-                            "output_ratio": f"{output_ratio*100:.1f}",
+                            "output_ratio": f"{output_ratio * 100:.1f}",
                         },
                     )
                 )
@@ -722,7 +722,7 @@ class CostOptimizer:
                             "type": "high_model_concentration",
                             "params": {
                                 "top_model": top_model,
-                                "top_share": f"{top_share*100:.1f}",
+                                "top_share": f"{top_share * 100:.1f}",
                             },
                         }
                     )

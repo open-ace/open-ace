@@ -440,7 +440,7 @@ class QuotaManager:
                         conn.commit()
 
                     logger.warning(
-                        f"Quota alert created: user={user_id}, type={alert_type}, {quota_type}={percentage*100:.1f}%"
+                        f"Quota alert created: user={user_id}, type={alert_type}, {quota_type}={percentage * 100:.1f}%"
                     )
 
                 except Exception as e:
@@ -710,7 +710,9 @@ class QuotaManager:
                     uid = user.get("id")
                     sa = user.get("system_account") or user.get("username", "")
                     if sa and sender_name.startswith(sa):
-                        existing: dict[str, int] = local_usage_lookup.get(uid, {"tokens": 0, "requests": 0})  # type: ignore[assignment]
+                        existing: dict[str, int] = local_usage_lookup.get(
+                            uid, {"tokens": 0, "requests": 0}
+                        )  # type: ignore[assignment]
                         local_usage_lookup[uid] = {  # type: ignore[assignment]
                             "tokens": existing["tokens"] + int(row["tokens"]),
                             "requests": existing["requests"] + int(row["requests"]),
@@ -816,7 +818,7 @@ class QuotaManager:
                 adapt_sql(
                     f"""
                 SELECT * FROM quota_alerts
-                WHERE {adapt_boolean_condition('acknowledged', False)}
+                WHERE {adapt_boolean_condition("acknowledged", False)}
                 ORDER BY created_at DESC
                 LIMIT ?
             """
@@ -875,7 +877,7 @@ class QuotaManager:
                     adapt_sql(
                         f"""
                     DELETE FROM quota_alerts
-                    WHERE {adapt_boolean_condition('acknowledged', True)} AND created_at < ?
+                    WHERE {adapt_boolean_condition("acknowledged", True)} AND created_at < ?
                 """
                     ),
                     (cutoff,),

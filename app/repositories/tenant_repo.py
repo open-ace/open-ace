@@ -523,7 +523,7 @@ class TenantRepository:
 
         query = f"""
             SELECT * FROM tenant_usage
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY date DESC
             LIMIT ?
         """

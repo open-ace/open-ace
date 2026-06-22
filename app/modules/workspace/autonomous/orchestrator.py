@@ -1941,8 +1941,7 @@ class AutonomousOrchestrator:
         # ── Development phase (skipped on test-only/skip retry) ──
         if test_retries > 0 or skip_retries > 0:
             logger.info(
-                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
-                "skipping development phase",
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, skipping development phase",
                 test_retries,
                 skip_retries,
                 dev_round,
@@ -2310,9 +2309,7 @@ class AutonomousOrchestrator:
             else:
                 status_line = "❌ Tests failed"
             test_comment = (
-                f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
-                f"{status_line}\n\n"
-                f"{test_summary}"
+                f"## 🧪 Test Results (Dev Round {dev_round})\n\n{status_line}\n\n{test_summary}"
             )
             self._post_github_comment(gh, issue_number, test_comment, context="test-results")
 

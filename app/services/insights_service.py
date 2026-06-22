@@ -212,10 +212,10 @@ class InsightsService:
         """Build the user prompt with conversation data."""
         stats_summary = f"""## 用户对话统计（分析周期内）
 
-- 总会话数：{stats.get('total_conversations', 0)}
-- 总消息数：{stats.get('total_messages', 0)}
-- 总Token消耗：{stats.get('total_tokens', 0)}
-- 平均每会话消息数：{stats.get('avg_messages_per_conversation', 0)}
+- 总会话数：{stats.get("total_conversations", 0)}
+- 总消息数：{stats.get("total_messages", 0)}
+- 总Token消耗：{stats.get("total_tokens", 0)}
+- 平均每会话消息数：{stats.get("avg_messages_per_conversation", 0)}
 """
 
         conversations_text = "## 抽样对话内容\n\n"
