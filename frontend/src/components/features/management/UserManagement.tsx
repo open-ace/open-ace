@@ -26,6 +26,8 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
+import { MappingRulesEditor } from './MappingRulesEditor';
+import { mappingRulesApi } from '@/api/mappingRules';
 import { createMatcherConfig } from '@/utils';
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 
@@ -301,6 +303,7 @@ export const UserManagement: React.FC = () => {
                 <th>{t('tableEmail', language)}</th>
                 <th>{t('linuxAccount', language)}</th>
                 <th>{t('toolAccounts', language)}</th>
+                <th>{language === 'zh' ? '映射规则' : 'Mapping Rules'}</th>
                 <th>{t('tableRole', language)}</th>
                 <th>{t('tableStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
@@ -317,6 +320,13 @@ export const UserManagement: React.FC = () => {
                   <td>{user.system_account ?? '-'}</td>
                   <td>
                     <ToolAccountsEditor userId={user.id} onChange={() => refetch()} />
+                  </td>
+                  <td>
+                    <MappingRulesEditor
+                      userId={user.id}
+                      username={user.username}
+                      onChange={() => refetch()}
+                    />
                   </td>
                   <td>
                     <Badge variant={getRoleBadgeVariant(user.role)}>{user.role}</Badge>

@@ -210,6 +210,7 @@ def register_blueprints(app):
     from app.routes.smtp_config import smtp_config_bp
     from app.routes.sso import sso_bp
     from app.routes.tenant import tenant_bp
+    from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.tool_accounts import tool_accounts_bp
     from app.routes.upload import upload_bp
     from app.routes.usage import usage_bp
@@ -234,6 +235,7 @@ def register_blueprints(app):
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
+    app.register_blueprint(mapping_rules_bp)
     app.register_blueprint(projects_bp, url_prefix="/api")
     app.register_blueprint(insights_bp, url_prefix="/api")
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
