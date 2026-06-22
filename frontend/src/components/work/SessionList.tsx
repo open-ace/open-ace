@@ -399,7 +399,20 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
                 ) : (
                   <i className="bi bi-laptop text-success me-1" title="Local" />
                 )}
-                {displaySessionId(session.id, 4)}
+                {(() => {
+                  const sessionIdShort = displaySessionId(session.id, 4);
+                  const sessionIdFull = displaySessionId(session.id, 8);
+                  const sessionTitle = session.title ?? '';
+                  // Check if title is meaningful (not a default pattern like "qwen - 2a277802" or "Session 2a277802")
+                  const isDefaultTitle =
+                    sessionTitle.includes(sessionIdFull) ||
+                    sessionTitle.match(/^[a-z]+ - [a-f0-9]{8}$/i);
+                  // Format: "2a27（会话名字）" or just "2a27"
+                  if (sessionTitle && !isDefaultTitle) {
+                    return `${sessionIdShort}（${sessionTitle}）`;
+                  }
+                  return sessionIdShort;
+                })()}
               </span>
               <span className="session-time text-muted">{session.time}</span>
               <span className="session-requests text-muted">
