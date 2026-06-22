@@ -1957,7 +1957,7 @@ export const translations: Record<Language, Translations> = {
 
     // Usage Overview (Work Mode)
     myUsage: '我的用量',
-    daily: '每日',
+    daily: '今日',
     monthly: '每月',
     exceeded: '已超限',
     quotaExceeded: '配额已超限',
