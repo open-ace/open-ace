@@ -10,15 +10,14 @@ This service runs after data collection to auto-assign tool accounts to users.
 """
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Optional
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
 from app.models.user import User
+from app.repositories.database import Database
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
-from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +41,14 @@ class ToolAccountAutoMappingService:
         self.db = db or Database()
         self.rule_repo = ToolAccountMappingRuleRepository(db)
         self.mapping_repo = UserToolAccountRepository(db)
+        self._users_cache: Optional[dict[int, User]] = None  # Cache for N+1 optimization
+
+    def _get_users_cache(self) -> dict[int, User]:
+        """Get cached user dict (keyed by user_id) for N+1 optimization."""
+        if self._users_cache is None:
+            users = self.get_all_users()
+            self._users_cache = {user.id: user for user in users}
+        return self._users_cache
 
     def get_all_users(self) -> list[User]:
         """Get all active users with auto_mapping enabled."""
@@ -137,15 +144,16 @@ class ToolAccountAutoMappingService:
         Try to match tool_account using custom rules.
 
         Rules are checked in priority order (higher priority first).
+        Uses cached users to avoid N+1 queries.
         """
         rules = self.rule_repo.get_auto_rules()
+        users_cache = self._get_users_cache()  # Use cache instead of individual queries
 
         for rule in rules:
             if rule.matches(tool_account, tool_type):
-                # Get username for the matched user
-                query = "SELECT username FROM users WHERE id = ?"
-                row = self.db.fetch_one(query, (rule.user_id,))
-                username = row.get("username", "") if row else ""
+                # Get username from cache (no DB query)
+                user = users_cache.get(rule.user_id)
+                username = user.username if user else ""
 
                 return AutoMappingResult(
                     tool_account=tool_account,
@@ -216,6 +224,9 @@ class ToolAccountAutoMappingService:
         Returns:
             Tuple of (successful_mappings, remaining_unmapped)
         """
+        # Clear cache to ensure fresh user data
+        self._users_cache = None
+
         unmapped = self.get_unmapped_accounts()
         results = []
         still_unmapped = []
