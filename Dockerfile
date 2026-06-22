@@ -54,6 +54,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     gnupg \
     procps \
     openssh-client \
+    sshpass \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     # === Node.js Installation Verification (Issue #1006) ===
