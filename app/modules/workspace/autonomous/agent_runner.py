@@ -2107,3 +2107,32 @@ class AutonomousAgentRunner:
         except (ProcessLookupError, OSError) as e:
             logger.error("Failed to resume session %s: %s", session_id[:8], e)
             return False
+
+    def mark_session_paused_by_pid(self, pid: int) -> bool:
+        """Flag the in-memory session owning ``pid`` as paused.
+
+        The pause fallback paths (``_pause_running_task`` Strategy 2/3) send
+        SIGSTOP directly to a PID without going through :meth:`pause_session`,
+        so the session's ``_paused`` Event stays clear. ``_wait_for_completion``
+        then keeps counting the timeout budget and reaps the frozen process
+        once it elapses — surfacing as a paused workflow "auto-resuming". This
+        marks the matching session paused so the budget freezes correctly,
+        regardless of which path delivered the SIGSTOP.
+        """
+        for session in self._local_sessions.values():
+            if session.process and session.process.pid == pid:
+                session._paused.set()
+                return True
+        return False
+
+    def mark_session_resumed_by_pid(self, pid: int) -> bool:
+        """Clear the paused flag on the in-memory session owning ``pid``.
+
+        Mirror of :meth:`mark_session_paused_by_pid` for the resume fallback
+        paths, so ``_wait_for_completion`` unfreezes the deadline.
+        """
+        for session in self._local_sessions.values():
+            if session.process and session.process.pid == pid:
+                session._paused.clear()
+                return True
+        return False
