@@ -2852,6 +2852,8 @@ $ports_section
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
       - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
       - WORKSPACE_BASE_DIR=/workspace
+      # Data fetch: container runs as root, use venv Python (Issue #1121)
+      - FETCH_USE_SUDO=false
     volumes:
 $volumes_section
     depends_on:
