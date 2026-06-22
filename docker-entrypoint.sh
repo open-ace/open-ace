@@ -209,6 +209,50 @@ def create_system_user(username):
         subprocess.run(['chown', f'{username}:{username}', user_workspace], capture_output=True)
         print(f'  Created workspace directory: {user_workspace}')
 
+    # Sync SSH keys if mounted (Issue #1122)
+    sync_ssh_keys(username)
+
+
+def sync_ssh_keys(username):
+    \"\"\"Sync SSH keys from /root/.ssh to user's home directory.\"\"\"
+    import shutil
+    import stat
+
+    root_ssh = '/root/.ssh'
+    user_ssh = f'/home/{username}/.ssh'
+
+    # Skip if SSH keys not mounted
+    if not os.path.isdir(root_ssh):
+        return
+
+    # Check if root_ssh has any files
+    try:
+        files = os.listdir(root_ssh)
+        if not files:
+            return
+    except OSError:
+        return
+
+    # Create user's .ssh directory
+    os.makedirs(user_ssh, exist_ok=True)
+
+    # Copy SSH files
+    for filename in files:
+        src = os.path.join(root_ssh, filename)
+        dst = os.path.join(user_ssh, filename)
+
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+            # Private keys: 600, others: 644
+            if filename.startswith('id_') and not filename.endswith('.pub'):
+                os.chmod(dst, stat.S_IRUSR)
+            else:
+                os.chmod(dst, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+    # Set ownership
+    subprocess.run(['chown', '-R', f'{username}:{username}', user_ssh], capture_output=True)
+    print(f'  SSH keys synced to {user_ssh}')
+
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
