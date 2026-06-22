@@ -69,7 +69,8 @@ CREATE TABLE agent_sessions (
     request_count INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
     total_input_tokens INTEGER DEFAULT 0,
-    total_output_tokens INTEGER DEFAULT 0
+    total_output_tokens INTEGER DEFAULT 0,
+    workspace_type TEXT DEFAULT 'local'
 );
 
 CREATE TABLE session_messages (
