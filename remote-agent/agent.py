@@ -1853,8 +1853,7 @@ class RemoteAgent:
 
         # Hostname: 1-253 chars, alphanumeric and hyphens, no leading/trailing hyphens
         hostname_pattern = re.compile(
-            r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
-            r"(\.[A-Za-z0-9-]{1,63}(?<!-))*$"
+            r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)" r"(\.[A-Za-z0-9-]{1,63}(?<!-))*$"
         )
         return bool(hostname_pattern.match(hostname))
 
