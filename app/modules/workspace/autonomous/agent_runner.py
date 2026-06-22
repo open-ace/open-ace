@@ -295,9 +295,9 @@ def _extract_structured_response_tags(text: str) -> dict[str, str]:
         return {}
     tags: dict[str, str] = {}
     for key, pattern in _STRUCTURED_TAG_PATTERNS.items():
-        match = pattern.search(text)
-        if match:
-            tags[key] = match.group(1).strip()
+        matches = list(pattern.finditer(text))
+        if matches:
+            tags[key] = matches[-1].group(1).strip()
     return tags
 
 
