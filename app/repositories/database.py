@@ -356,15 +356,40 @@ class Database:
 
     @contextmanager
     def connection(self):
-        """Database connection context manager."""
+        """Database connection context manager.
+
+        Ensures:
+        - On exception: rollback is called to clean up aborted transaction
+        - On normal exit: if caller forgot to commit, rollback cleans up uncommitted transaction
+        - Connection is always returned to pool (PostgreSQL) or closed (SQLite)
+        """
         conn = self.get_connection()
         try:
             yield conn
-        finally:
+        except Exception:
+            # Rollback on error to clean up aborted transaction
             if self._is_postgresql:
-                # Rollback any aborted transaction before returning to pool
                 with suppress(Exception):
                     conn.rollback()
+            raise
+        finally:
+            if self._is_postgresql:
+                # Check transaction status before returning to pool
+                # This handles the case where caller forgot to commit
+                should_rollback = True
+                try:
+                    from psycopg2.extensions import TRANSACTION_STATUS_IDLE
+
+                    if hasattr(conn, "info") and hasattr(conn.info, "transaction_status"):
+                        if conn.info.transaction_status == TRANSACTION_STATUS_IDLE:
+                            should_rollback = False
+                except Exception:
+                    pass  # Keep should_rollback = True as fallback
+
+                if should_rollback:
+                    with suppress(Exception):
+                        conn.rollback()
+
                 release_postgresql_connection(conn)
             else:
                 conn.close()
