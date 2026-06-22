@@ -8,7 +8,7 @@ import logging
 from typing import Any, Optional
 
 from app.models.tool_account_mapping_rule import ToolAccountMappingRule
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_condition
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ class ToolAccountMappingRuleRepository:
 
     def get_active_rules(self) -> list[ToolAccountMappingRule]:
         """Get all active rules ordered by priority."""
-        query = """
+        query = f"""
             SELECT * FROM tool_account_mapping_rules
-            WHERE is_active = 1
+            WHERE {adapt_boolean_condition('is_active', True)}
             ORDER BY priority DESC, user_id, pattern
         """
         rows = self.db.fetch_all(query)
@@ -40,9 +40,10 @@ class ToolAccountMappingRuleRepository:
 
     def get_auto_rules(self) -> list[ToolAccountMappingRule]:
         """Get all rules that can be auto-applied."""
-        query = """
+        query = f"""
             SELECT * FROM tool_account_mapping_rules
-            WHERE is_active = 1 AND is_auto = 1
+            WHERE {adapt_boolean_condition('is_active', True)}
+              AND {adapt_boolean_condition('is_auto', True)}
             ORDER BY priority DESC, user_id, pattern
         """
         rows = self.db.fetch_all(query)

@@ -661,7 +661,9 @@ class QuotaManager:
             WHERE user_id IN ({}) AND workspace_type = 'remote'
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids) + (start_date, end_date),
         )
 
@@ -695,7 +697,9 @@ class QuotaManager:
                   AND (message_source IS NULL OR message_source != 'remote_workspace')
                   AND (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY sender_name
-            """.format(" OR ".join(sender_conditions)),
+            """.format(
+                    " OR ".join(sender_conditions)
+                ),
                 tuple(sender_params) + (start_date, end_date),
             )
 
@@ -721,7 +725,9 @@ class QuotaManager:
             SELECT * FROM quota_alerts
             WHERE user_id IN ({})
             ORDER BY created_at DESC
-        """.format(",".join(["?"] * len(user_ids))),
+        """.format(
+                ",".join(["?"] * len(user_ids))
+            ),
             tuple(user_ids),
         )
 

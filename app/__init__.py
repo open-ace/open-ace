@@ -200,6 +200,7 @@ def register_blueprints(app):
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
     from app.routes.insights import insights_bp
+    from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.messages import messages_bp
     from app.routes.pages import pages_bp
     from app.routes.projects import projects_bp
@@ -210,7 +211,6 @@ def register_blueprints(app):
     from app.routes.smtp_config import smtp_config_bp
     from app.routes.sso import sso_bp
     from app.routes.tenant import tenant_bp
-    from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.tool_accounts import tool_accounts_bp
     from app.routes.upload import upload_bp
     from app.routes.usage import usage_bp
