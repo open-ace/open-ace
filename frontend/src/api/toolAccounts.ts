@@ -43,19 +43,19 @@ export interface UserToolAccounts {
 // API
 export const toolAccountsApi = {
   async getAll(): Promise<Record<number, UserToolAccounts>> {
-    return apiClient.get<Record<number, UserToolAccounts>>('/tool-accounts');
+    return apiClient.get<Record<number, UserToolAccounts>>('/api/tool-accounts');
   },
 
   async getByUser(userId: number): Promise<ToolAccount[]> {
-    return apiClient.get<ToolAccount[]>(`/tool-accounts/user/${userId}`);
+    return apiClient.get<ToolAccount[]>(`/api/tool-accounts/user/${userId}`);
   },
 
   async getUnmapped(): Promise<UnmappedAccount[]> {
-    return apiClient.get<UnmappedAccount[]>('/tool-accounts/unmapped');
+    return apiClient.get<UnmappedAccount[]>('/api/tool-accounts/unmapped');
   },
 
   async getToolTypes(): Promise<ToolType[]> {
-    return apiClient.get<ToolType[]>('/tool-types');
+    return apiClient.get<ToolType[]>('/api/tool-types');
   },
 
   async create(data: {
@@ -65,7 +65,7 @@ export const toolAccountsApi = {
     description?: string;
   }): Promise<{ mapping: ToolAccount; updated_messages: number }> {
     return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>(
-      '/tool-accounts',
+      '/api/tool-accounts',
       data
     );
   },
@@ -79,11 +79,11 @@ export const toolAccountsApi = {
       description?: string;
     }
   ): Promise<ToolAccount> {
-    return apiClient.put<ToolAccount>(`/tool-accounts/${id}`, data);
+    return apiClient.put<ToolAccount>(`/api/tool-accounts/${id}`, data);
   },
 
   async delete(id: number): Promise<void> {
-    await apiClient.delete(`/tool-accounts/${id}`);
+    await apiClient.delete(`/api/tool-accounts/${id}`);
   },
 
   async batchCreate(
@@ -95,7 +95,7 @@ export const toolAccountsApi = {
     }>
   ): Promise<{ created_count: number; mappings: ToolAccount[] }> {
     return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(
-      `/tool-accounts/user/${userId}/batch`,
+      `/api/tool-accounts/user/${userId}/batch`,
       { tool_accounts: toolAccounts }
     );
   },

@@ -81,8 +81,16 @@ def logout_page():
 @public_endpoint
 def catch_all(path):
     """Serve React SPA for all other routes."""
-    # Don't catch API routes or static files - return 404 to let Flask handle
-    if path.startswith("api/") or path.startswith("static/"):
+    # Handle static files directly
+    if path.startswith("static/"):
+        static_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "static"
+        )
+        filename = path[7:]  # Remove "static/" prefix
+        return send_from_directory(static_dir, filename)
+
+    # Don't catch API routes - return 404 to let Flask handle
+    if path.startswith("api/"):
         from flask import abort
 
         abort(404)

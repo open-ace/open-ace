@@ -3,17 +3,12 @@
  * Provides offline support and caching for PWA
  */
 
-const CACHE_NAME = 'open-ace-v4';
-const STATIC_CACHE_NAME = 'open-ace-static-v4';
-const API_CACHE_NAME = 'open-ace-api-v4';
+const CACHE_NAME = 'open-ace-v5';
+const STATIC_CACHE_NAME = 'open-ace-static-v5';
+const API_CACHE_NAME = 'open-ace-api-v5';
 
 // Static assets to cache immediately
-const STATIC_ASSETS = [
-  '/',
-  '/app',
-  '/login',
-  '/static/js/dist/index.html',
-];
+const STATIC_ASSETS = ['/', '/app', '/login', '/static/js/dist/index.html'];
 
 // API endpoints to cache
 const API_PATTERNS = [
@@ -48,11 +43,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames
           .filter((name) => {
-            return (
-              name !== CACHE_NAME &&
-              name !== STATIC_CACHE_NAME &&
-              name !== API_CACHE_NAME
-            );
+            return name !== CACHE_NAME && name !== STATIC_CACHE_NAME && name !== API_CACHE_NAME;
           })
           .map((name) => {
             console.log('[SW] Deleting old cache:', name);
@@ -119,13 +110,10 @@ async function handleApiRequest(request) {
     }
 
     // Return error response
-    return new Response(
-      JSON.stringify({ error: 'Network error', offline: true }),
-      {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({ error: 'Network error', offline: true }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
 
