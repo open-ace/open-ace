@@ -2410,7 +2410,7 @@ detect_and_load_local_upgrade() {
             fi
             print_info "  [$i] ${valid_paths[$i]} (owner: $path_owner)"
         done
-        prompt_input "Select installation to upgrade [0-${#valid_paths[@]-1}]" "0" selection
+        prompt_input "Select installation to upgrade [0-$(( ${#valid_paths[@]} - 1 ))]" "0" selection
         if [ -n "$selection" ] && [ "$selection" -ge 0 ] && [ "$selection" -lt ${#valid_paths[@]} ]; then
             target_path="${valid_paths[$selection]}"
         else
