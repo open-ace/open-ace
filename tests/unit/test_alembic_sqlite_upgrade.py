@@ -3,13 +3,34 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 
 from scripts.shared import db as shared_db
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging_state():
+    """Alembic's command.upgrade reconfigures logging; restore handlers/levels
+    afterwards so later tests' caplog-based assertions are not affected."""
+    root = logging.getLogger()
+    saved_root_level = root.level
+    saved_root_handlers = root.handlers[:]
+    saved_alembic_level = logging.getLogger("alembic").level
+    yield
+    root.handlers[:] = saved_root_handlers
+    root.setLevel(saved_root_level)
+    logging.getLogger("alembic").setLevel(saved_alembic_level)
+    # Alembic's logging.config.fileConfig(disable_existing_loggers=True) disables
+    # every non-alembic logger; re-enable them so later tests' caplog works.
+    for logger in logging.Logger.manager.loggerDict.values():
+        if isinstance(logger, logging.Logger):
+            logger.disabled = False
 
 
 def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
