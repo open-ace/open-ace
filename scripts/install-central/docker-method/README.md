@@ -27,9 +27,10 @@ docker compose up -d --build
 容器首次启动时，`docker-entrypoint.sh` 会自动完成：
 
 1. 等待 PostgreSQL 就绪
-2. 检查数据库是否已初始化（通过 `users` 表判断）
-3. 如果未初始化：执行 `schema/schema-postgres.sql` → `alembic stamp head` → 创建默认管理员
-4. 如果已初始化：执行 `alembic upgrade head`（升级迁移）
+2. 检查数据库是否已存在应用 schema
+3. 对历史数据库先运行 `scripts/cutover_alembic_baseline.py`，必要时补齐正式 schema 并统一切换到 `baseline_2026_06_23`
+4. 执行 `alembic upgrade head`
+5. 对全新数据库创建默认管理员账号
 
 无需手动执行 SQL 或迁移命令。
 
