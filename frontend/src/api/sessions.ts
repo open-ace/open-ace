@@ -201,6 +201,11 @@ export const sessionsApi = {
       encoded_project_name: string;
       tool_name: string;
       url: string;
+      workspace_type?: string;
+      terminal_id?: string;
+      remote_machine_id?: string;
+      machine_name?: string;
+      cli_session_id?: string;
     };
     error?: string;
     // Issue #669: Process terminated status
@@ -218,6 +223,11 @@ export const sessionsApi = {
         encoded_project_name: string;
         tool_name: string;
         url: string;
+        workspace_type?: string;
+        terminal_id?: string;
+        remote_machine_id?: string;
+        machine_name?: string;
+        cli_session_id?: string;
       };
       error?: string;
       can_recreate?: boolean;
