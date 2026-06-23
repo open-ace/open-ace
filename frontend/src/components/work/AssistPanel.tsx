@@ -3,12 +3,10 @@
  *
  * Features:
  * - Quick access to prompts with search and category filter
- * - AI tools shortcuts
  * - Help documentation
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { usePrompts, usePromptCategories, useCopyPrompt } from '@/hooks';
@@ -67,15 +65,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     search: debouncedSearch || undefined,
   });
   const prompts = promptsData?.templates ?? [];
-
-  // AI Tools list
-  const aiTools = [
-    { id: 'openclaw', name: 'OpenClaw', icon: 'bi-robot', url: '/work?tool=openclaw' },
-    { id: 'claude', name: 'Claude', icon: 'bi-chat-square-text', url: '/work?tool=claude' },
-    { id: 'qwen', name: 'Qwen', icon: 'bi-stars', url: '/work?tool=qwen' },
-    { id: 'codex', name: 'Codex', icon: 'bi-cpu', url: '/work?tool=codex' },
-    { id: 'zcode', name: 'ZCode', icon: 'bi-terminal', url: '/work?tool=zcode' },
-  ];
 
   // Help documents - titles in different languages
   const helpDocs = [
@@ -289,22 +278,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
     </div>
   );
 
-  // Tools Tab Content
-  const ToolsContent = (
-    <div className="assist-tools">
-      <ul className="assist-items list-unstyled">
-        {aiTools.map((tool) => (
-          <li key={tool.id}>
-            <Link to={tool.url} className="assist-item assist-item-clickable">
-              <i className={`bi ${tool.icon} me-2`} />
-              <span>{tool.name}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-
   // Docs Tab Content
   const DocsContent = (
     <div className="assist-docs">
@@ -331,12 +304,6 @@ export const AssistPanel: React.FC<AssistPanelProps> = ({ collapsed = false }) =
       label: t('prompts', language),
       icon: <i className="bi bi-file-text" />,
       content: PromptsContent,
-    },
-    {
-      id: 'tools',
-      label: t('tools', language),
-      icon: <i className="bi bi-tools" />,
-      content: ToolsContent,
     },
     {
       id: 'docs',

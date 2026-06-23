@@ -4,6 +4,7 @@ Open ACE - Helper Utilities
 Common helper functions for the application.
 """
 
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -89,3 +90,39 @@ def get_date_range(days: int, end_date: Optional[str] = None) -> tuple:
 
     start = end - timedelta(days=days)
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def parse_db_datetime(value) -> Optional[datetime]:
+    """Parse a datetime value coming back from the database.
+
+    Handles ``datetime`` instances, ISO 8601 strings (``YYYY-MM-DDTHH:MM:SS``),
+    and PostgreSQL's default textual timestamp format. PostgreSQL emits a space
+    as the date/time separator (``YYYY-MM-DD HH:MM:SS``) and a variable number
+    of fractional-second digits, neither of which ``datetime.fromisoformat``
+    accepts on Python < 3.11. This helper normalises both so parsing is robust
+    across interpreter versions.
+
+    Args:
+        value: A ``datetime``, a string, or ``None``.
+
+    Returns:
+        Optional[datetime]: The parsed datetime, or ``None`` for null/unknown
+        inputs.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.replace("Z", "+00:00")
+        if len(normalized) >= 10 and normalized[10] == " ":
+            normalized = normalized[:10] + "T" + normalized[11:]
+        # Pad variable-length fractional seconds to a fixed 6 digits so that
+        # ``datetime.fromisoformat`` (Python < 3.11) can parse them.
+        normalized = re.sub(
+            r"\.(\d+)",
+            lambda m: "." + m.group(1).ljust(6, "0"),
+            normalized,
+        )
+        return datetime.fromisoformat(normalized)
+    return None

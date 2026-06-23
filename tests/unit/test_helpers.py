@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
-from app.utils.helpers import format_tokens, get_date_range, get_days_ago, get_today, parse_date
+from app.utils.helpers import (
+    format_tokens,
+    get_date_range,
+    get_days_ago,
+    get_today,
+    parse_date,
+    parse_db_datetime,
+)
 
 
 class TestFormatTokens:
@@ -152,3 +159,47 @@ class TestGetDateRange:
     def test_start_before_end(self):
         start, end = get_date_range(30)
         assert start < end
+
+
+class TestParseDbDatetime:
+    """Test parse_db_datetime function."""
+
+    def test_none_returns_none(self):
+        assert parse_db_datetime(None) is None
+
+    def test_non_string_non_datetime_returns_none(self):
+        assert parse_db_datetime(12345) is None
+        assert parse_db_datetime(["2026-01-15"]) is None
+
+    def test_datetime_object_returned_unchanged(self):
+        dt = datetime(2026, 1, 15, 10, 30, 0)
+        result = parse_db_datetime(dt)
+        assert result is dt
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("2026-01-15T10:00:00", datetime(2026, 1, 15, 10, 0, 0)),
+            ("2026-01-15 10:00:00", datetime(2026, 1, 15, 10, 0, 0)),
+            ("2026-01-15 10:00:00.1", datetime(2026, 1, 15, 10, 0, 0, 100000)),
+            ("2026-01-15 10:00:00.123", datetime(2026, 1, 15, 10, 0, 0, 123000)),
+            ("2026-01-15 10:00:00.123456", datetime(2026, 1, 15, 10, 0, 0, 123456)),
+            ("2026-01-15T10:00:00.123456", datetime(2026, 1, 15, 10, 0, 0, 123456)),
+        ],
+        ids=[
+            "sqlite_iso",
+            "postgres_space_separated",
+            "postgres_variable_fractional_single_digit",
+            "postgres_variable_fractional_three_digits",
+            "postgres_full_fractional",
+            "iso_with_fractional",
+        ],
+    )
+    def test_string_inputs(self, value, expected):
+        assert parse_db_datetime(value) == expected
+
+    def test_z_suffix_normalized(self):
+        result = parse_db_datetime("2026-01-15T10:00:00Z")
+        assert result is not None
+        assert result.tzinfo is not None
+        assert result.utcoffset() == timedelta(0)

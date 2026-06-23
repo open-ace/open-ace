@@ -4,7 +4,7 @@
  * Layout structure:
  * - Left: Session list
  * - Center: Main content (AI conversation)
- * - Right: Assist panel (prompts, tools, docs)
+ * - Right: Assist panel (prompts, docs)
  * - Bottom: Status bar
  *
  * Features:
