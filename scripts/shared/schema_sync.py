@@ -111,7 +111,9 @@ def _normalize_where_clause(value: str | None) -> str:
     normalized = normalized.replace(" IS FALSE", " = 0")
     normalized = normalized.replace(" IS TRUE", " = 1")
     normalized = normalized.replace("<>", "!=")
-    normalized = re.sub(r"\blength\s*\(\(([^)]+)\)\)", r"LENGTH(\1)", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"\blength\s*\(\(([^)]+)\)\)", r"LENGTH(\1)", normalized, flags=re.IGNORECASE
+    )
     normalized = re.sub(r"\blength\s*\(", "LENGTH(", normalized, flags=re.IGNORECASE)
     normalized = re.sub(
         r"(?<![A-Za-z0-9_])\((\w+)\)(?=\s*(?:!=|=|NOT LIKE|LIKE|IS\b))",
@@ -360,14 +362,10 @@ def compare_sqlite_snapshots(
             }
 
     unmatched_actual = {
-        name: index
-        for name, index in actual.indexes.items()
-        if name not in expected.indexes
+        name: index for name, index in actual.indexes.items() if name not in expected.indexes
     }
     unmatched_expected = {
-        name: index
-        for name, index in expected.indexes.items()
-        if name not in actual.indexes
+        name: index for name, index in expected.indexes.items() if name not in actual.indexes
     }
 
     actual_by_signature: dict[str, list[str]] = {}
@@ -469,7 +467,9 @@ def build_clean_postgres_schema(database_url: str, *, migrate: bool = True) -> s
     return clean_postgres_schema(dump_postgres_schema(database_url))
 
 
-def write_schema_snapshots(clean_postgres_sql: str, schema_dir: Path | None = None) -> tuple[Path, Path]:
+def write_schema_snapshots(
+    clean_postgres_sql: str, schema_dir: Path | None = None
+) -> tuple[Path, Path]:
     """Write PostgreSQL and SQLite schema snapshots to disk."""
     target_dir = schema_dir or (_project_root() / "schema")
     target_dir.mkdir(parents=True, exist_ok=True)

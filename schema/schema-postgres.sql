@@ -42,7 +42,8 @@ CREATE TABLE agent_sessions (
     request_count integer DEFAULT 0,
     workspace_type text DEFAULT 'local'::text,
     remote_machine_id text,
-    paused_at timestamp without time zone
+    paused_at timestamp without time zone,
+    cli_session_id text DEFAULT ''::text
 );
 
 CREATE SEQUENCE agent_sessions_id_seq
@@ -745,22 +746,22 @@ CREATE SEQUENCE session_messages_id_seq
 
 ALTER SEQUENCE session_messages_id_seq OWNED BY session_messages.id;
 CREATE MATERIALIZED VIEW session_stats AS
- SELECT agent_session_id AS session_id,
-    tool_name,
-    host_name,
-    sender_name,
-    max((sender_id)::text) AS sender_id,
-    max((date)::text) AS date,
+ SELECT daily_messages.agent_session_id AS session_id,
+    daily_messages.tool_name,
+    daily_messages.host_name,
+    daily_messages.sender_name,
+    max((daily_messages.sender_id)::text) AS sender_id,
+    max((daily_messages.date)::text) AS date,
     count(*) AS message_count,
-    sum(tokens_used) AS total_tokens,
-    sum(input_tokens) AS total_input_tokens,
-    sum(output_tokens) AS total_output_tokens,
-    min("timestamp") AS created_at,
-    max("timestamp") AS updated_at,
-    max(project_path) AS project_path
+    sum(daily_messages.tokens_used) AS total_tokens,
+    sum(daily_messages.input_tokens) AS total_input_tokens,
+    sum(daily_messages.output_tokens) AS total_output_tokens,
+    min(daily_messages."timestamp") AS created_at,
+    max(daily_messages."timestamp") AS updated_at,
+    max(daily_messages.project_path) AS project_path
    FROM daily_messages
-  WHERE (agent_session_id IS NOT NULL)
-  GROUP BY agent_session_id, tool_name, host_name, sender_name
+  WHERE (daily_messages.agent_session_id IS NOT NULL)
+  GROUP BY daily_messages.agent_session_id, daily_messages.tool_name, daily_messages.host_name, daily_messages.sender_name
   WITH NO DATA;
 
 CREATE TABLE sessions (
@@ -1969,8 +1970,14 @@ CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
 
-CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
+
+
+--
+--
+
+CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
+
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
 
 

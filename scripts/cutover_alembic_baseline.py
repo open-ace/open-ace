@@ -142,6 +142,24 @@ def ensure_session_messages_source_column(connection: sa.Connection) -> bool:
     return True
 
 
+def ensure_agent_sessions_cli_session_id(connection: sa.Connection) -> bool:
+    """Backfill agent_sessions.cli_session_id for legacy DBs (introduced by #1200)."""
+    if not table_exists(connection, "agent_sessions") or _column_exists(
+        connection, "agent_sessions", "cli_session_id"
+    ):
+        return False
+
+    if connection.dialect.name == "postgresql":
+        connection.exec_driver_sql(
+            "ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''::text"
+        )
+    else:
+        connection.exec_driver_sql(
+            "ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''"
+        )
+    return True
+
+
 def ensure_session_messages_transcript_columns(connection: sa.Connection) -> bool:
     """Add #1125/#1128 transcript columns to session_messages for legacy DBs.
 
@@ -390,6 +408,8 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
             actions.append("would backfill users.system_account")
         if not _column_exists(connection, "session_messages", "source"):
             actions.append("would backfill session_messages.source")
+        if not _column_exists(connection, "agent_sessions", "cli_session_id"):
+            actions.append("would backfill agent_sessions.cli_session_id")
         if not _column_exists(connection, "session_messages", "external_message_id"):
             actions.append("would add session_messages transcript columns (#1125/#1128)")
         if not _column_exists(connection, "users", "auto_mapping_enabled"):
@@ -405,6 +425,8 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
         actions.append("backfilled users.system_account")
     if ensure_session_messages_source_column(connection):
         actions.append("backfilled session_messages.source")
+    if ensure_agent_sessions_cli_session_id(connection):
+        actions.append("backfilled agent_sessions.cli_session_id")
     if ensure_session_messages_transcript_columns(connection):
         actions.append("added session_messages transcript columns (#1125/#1128)")
     if ensure_users_auto_mapping_enabled(connection):

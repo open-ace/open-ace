@@ -30,7 +30,8 @@ CREATE TABLE agent_sessions (
  request_count integer DEFAULT 0,
  workspace_type text DEFAULT 'local',
  remote_machine_id text,
- paused_at TIMESTAMP
+ paused_at TIMESTAMP,
+ cli_session_id text DEFAULT ''
 );
 
 CREATE TABLE agent_tokens (

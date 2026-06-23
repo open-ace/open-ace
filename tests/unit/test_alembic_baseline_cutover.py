@@ -19,8 +19,7 @@ from scripts.cutover_alembic_baseline import cutover_database
 
 def _postgres_server_binaries_available() -> bool:
     return all(
-        shutil.which(binary) is not None
-        for binary in ("initdb", "pg_ctl", "createdb", "psql")
+        shutil.which(binary) is not None for binary in ("initdb", "pg_ctl", "createdb", "psql")
     )
 
 
@@ -51,7 +50,19 @@ def _temporary_postgres_database(tmp_path):
     try:
         for _ in range(30):
             result = subprocess.run(
-                ["psql", "-h", "127.0.0.1", "-p", port, "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"],
+                [
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-p",
+                    port,
+                    "-U",
+                    "postgres",
+                    "-d",
+                    "postgres",
+                    "-c",
+                    "SELECT 1",
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -131,12 +142,13 @@ def test_cutover_stamps_legacy_sqlite_and_backfills_latest_baseline_artifacts(tm
                 )
             ).scalar()
             user_columns = {
-                row[1]
-                for row in connection.execute(sa.text("PRAGMA table_info(users)")).fetchall()
+                row[1] for row in connection.execute(sa.text("PRAGMA table_info(users)")).fetchall()
             }
             session_columns = {
                 row[1]
-                for row in connection.execute(sa.text("PRAGMA table_info(session_messages)")).fetchall()
+                for row in connection.execute(
+                    sa.text("PRAGMA table_info(session_messages)")
+                ).fetchall()
             }
     finally:
         engine.dispose()
@@ -245,12 +257,13 @@ def test_cutover_dry_run_reports_actions_without_mutating_schema(tmp_path):
             changed, actions = cutover_database(connection, dry_run=True)
             revision = read_current_revision(connection)
             user_columns = {
-                row[1]
-                for row in connection.execute(sa.text("PRAGMA table_info(users)")).fetchall()
+                row[1] for row in connection.execute(sa.text("PRAGMA table_info(users)")).fetchall()
             }
             session_columns = {
                 row[1]
-                for row in connection.execute(sa.text("PRAGMA table_info(session_messages)")).fetchall()
+                for row in connection.execute(
+                    sa.text("PRAGMA table_info(session_messages)")
+                ).fetchall()
             }
             has_compliance = connection.execute(
                 sa.text(
