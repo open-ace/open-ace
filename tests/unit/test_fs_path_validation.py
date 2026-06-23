@@ -102,16 +102,16 @@ class TestIsValidPath:
 
 
 class TestAdminWorkspaceBaseDirDefault:
-    """The duplicate get_workspace_base_dir in admin.py shares the default."""
+    """Admin.py imports from workspace.py, verify the import path."""
 
     def test_admin_unset_env_falls_back_to_home(self, monkeypatch):
         monkeypatch.delenv("WORKSPACE_BASE_DIR", raising=False)
-        from app.routes.admin import get_workspace_base_dir as admin_get
+        from app.utils.workspace import get_workspace_base_dir as workspace_get
 
-        assert admin_get() == str(Path.home())
+        assert workspace_get() == str(Path.home())
 
     def test_admin_explicit_env_overrides(self, monkeypatch):
         monkeypatch.setenv("WORKSPACE_BASE_DIR", "/workspace")
-        from app.routes.admin import get_workspace_base_dir as admin_get
+        from app.utils.workspace import get_workspace_base_dir as workspace_get
 
-        assert admin_get() == "/workspace"
+        assert workspace_get() == "/workspace"
