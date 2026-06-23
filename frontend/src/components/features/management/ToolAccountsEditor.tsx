@@ -6,18 +6,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Button, TextInput, Modal, Badge, useToast } from '@/components/common';
-import { toolAccountsApi, type ToolAccount, type UnmappedAccount } from '@/api/toolAccounts';
-
-// Hardcoded tool types (matches backend TOOL_TYPES)
-const TOOL_TYPES = [
-  { value: 'qwen', display: 'Qwen' },
-  { value: 'claude', display: 'Claude' },
-  { value: 'openclaw', display: 'Openclaw' },
-  { value: 'zcode', display: 'ZCode' },
-  { value: 'feishu', display: '飞书' },
-  { value: 'slack', display: 'Slack' },
-  { value: 'other', display: '其他' },
-];
+import {
+  toolAccountsApi,
+  type ToolAccount,
+  type UnmappedAccount,
+  type ToolType,
+} from '@/api/toolAccounts';
 
 interface ToolAccountsEditorProps {
   userId: number;
@@ -28,6 +22,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   const language = useLanguage();
   const [toolAccounts, setToolAccounts] = useState<ToolAccount[]>([]);
   const [unmappedAccounts, setUnmappedAccounts] = useState<UnmappedAccount[]>([]);
+  const [toolTypes, setToolTypes] = useState<ToolType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newAccount, setNewAccount] = useState({
@@ -44,12 +39,14 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [accounts, unmapped] = await Promise.all([
+      const [accounts, unmapped, types] = await Promise.all([
         toolAccountsApi.getByUser(userId),
         toolAccountsApi.getUnmapped(),
+        toolAccountsApi.getToolTypes(),
       ]);
       setToolAccounts(accounts);
       setUnmappedAccounts(unmapped);
+      setToolTypes(types);
     } catch (err) {
       console.error('Failed to load tool accounts:', err);
     } finally {
@@ -236,7 +233,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
               onChange={(e) => setNewAccount({ ...newAccount, tool_type: e.target.value })}
             >
               <option value="">-- Select --</option>
-              {TOOL_TYPES.map((type) => (
+              {toolTypes.map((type) => (
                 <option key={type.value} value={type.value}>
                   {type.display}
                 </option>
