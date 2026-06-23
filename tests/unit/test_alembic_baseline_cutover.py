@@ -196,6 +196,10 @@ def test_cutover_skips_active_revision_when_schema_complete(tmp_path):
             external_message_id TEXT DEFAULT '',
             content_blocks TEXT
         );
+        CREATE INDEX idx_session_messages_external_message_id
+        ON session_messages(session_id, external_message_id);
+        CREATE INDEX idx_session_messages_source
+        ON session_messages(session_id, source);
         CREATE TABLE tool_account_mapping_rules (id INTEGER PRIMARY KEY);
         CREATE TABLE compliance_reports (id INTEGER PRIMARY KEY);
         CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY);

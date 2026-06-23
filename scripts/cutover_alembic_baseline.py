@@ -96,6 +96,23 @@ def _column_exists(connection: sa.Connection, table_name: str, column_name: str)
     return any(row[1] == column_name for row in result)
 
 
+def _index_exists(connection: sa.Connection, table_name: str, index_name: str) -> bool:
+    if connection.dialect.name == "postgresql":
+        result = connection.execute(
+            sa.text(
+                "SELECT 1 FROM pg_indexes "
+                "WHERE schemaname = 'public' AND tablename = :table AND indexname = :index"
+            ),
+            {"table": table_name, "index": index_name},
+        )
+        return result.scalar() is not None
+    result = connection.execute(
+        sa.text("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :index"),
+        {"index": index_name},
+    )
+    return result.scalar() is not None
+
+
 def ensure_system_account_column(connection: sa.Connection) -> bool:
     """Backfill users.system_account for databases that missed migration 025."""
     if not table_exists(connection, "users") or _column_exists(
@@ -199,23 +216,29 @@ def ensure_session_messages_transcript_columns(connection: sa.Connection) -> boo
         changed = True
 
     if is_postgres:
-        connection.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id "
-            "ON session_messages USING btree (session_id, external_message_id)"
-        )
-        connection.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS idx_session_messages_source "
-            "ON session_messages USING btree (session_id, source)"
-        )
+        index_specs = [
+            (
+                "idx_session_messages_external_message_id",
+                "ON session_messages USING btree (session_id, external_message_id)",
+            ),
+            (
+                "idx_session_messages_source",
+                "ON session_messages USING btree (session_id, source)",
+            ),
+        ]
     else:
-        connection.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id "
-            "ON session_messages (session_id, external_message_id)"
-        )
-        connection.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS idx_session_messages_source "
-            "ON session_messages (session_id, source)"
-        )
+        index_specs = [
+            (
+                "idx_session_messages_external_message_id",
+                "ON session_messages (session_id, external_message_id)",
+            ),
+            ("idx_session_messages_source", "ON session_messages (session_id, source)"),
+        ]
+    for index_name, suffix in index_specs:
+        if _index_exists(connection, "session_messages", index_name):
+            continue
+        connection.exec_driver_sql(f"CREATE INDEX {index_name} {suffix}")
+        changed = True
     return changed
 
 
@@ -448,13 +471,17 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
         actions.append("created compliance_reports")
         changed = True
 
+    # PG formal-table integrity gate: applies to both legacy cutover and
+    # active-revision DBs. After backfill, any still-missing formal product
+    # table indicates a corrupted/incomplete baseline DB, so we still hard-fail.
+    missing_formal = _missing_formal_tables(connection)
+    if missing_formal:
+        raise RuntimeError(
+            "Formal baseline tables are still missing after cutover preparation: "
+            + ", ".join(missing_formal)
+        )
+
     if not on_active_revision:
-        missing_formal = _missing_formal_tables(connection)
-        if missing_formal:
-            raise RuntimeError(
-                "Formal baseline tables are still missing after cutover preparation: "
-                + ", ".join(missing_formal)
-            )
         stamp_revision(connection, BASELINE_REVISION)
         actions.append(f"stamped {BASELINE_REVISION}")
         return True, actions
