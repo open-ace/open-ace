@@ -1801,16 +1801,15 @@ class AutonomousOrchestrator:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        # `<=` (not `<`): max_plan_rounds counts review rounds, and a round
-        # whose review raised substantive feedback must be allowed to refine
-        # before finalizing — otherwise max_plan_rounds=1 finalizes immediately
-        # and the single review's feedback is silently dropped (the finalize
-        # refine only fires on APPROVING reviews, see _should_refine_plan).
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        # max_plan_rounds = exact number of review rounds. `round_num < max`
+        # (strict) so the loop runs rounds 1..max and the max-th review is the
+        # last — there is no (max+1)-th round. The last review's feedback is
+        # then acted on by one final plan_refined before plan_finalized (below),
+        # so the Nth review is never silently dropped.
+        needs_refinement = review_has_feedback and round_num < max_rounds
 
         if not needs_refinement:
-            # Planning complete — finalize the plan via the main session.
-            # Gather the latest plan and the last review round's feedback.
+            # Planning complete. Gather the latest plan and the last review.
             final_plan = ""
             last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
@@ -1826,10 +1825,59 @@ class AutonomousOrchestrator:
                 if final_plan and last_review:
                     break
 
-            # Always record a plan_finalized milestone before development so the
-            # timeline shows the authoritative final plan (regardless of how many
-            # review rounds were preset). The main session resumes to integrate
-            # the last review round's feedback when the review carried suggestions.
+            # Act on the LAST review's feedback with one final plan_refined (its
+            # own milestone), so the timeline shows review(N) -> plan_refined ->
+            # plan_finalized and the Nth review is never wasted. Skipped only
+            # when the last review purely approved (nothing to integrate).
+            if final_plan and (review_has_feedback or self._should_refine_plan(last_review)):
+                refine_ms = self._create_milestone(
+                    phase="planning",
+                    dev_round=dev_round,
+                    round_number=round_num,
+                    milestone_type="plan_refined",
+                    status="in_progress",
+                    title=f"Plan refine (final, round {round_num})",
+                )
+                refine_prompt = (
+                    PLANNING_CONTEXT + "请根据以下审查意见完善实现方案，输出最终的完整方案。"
+                    "直接输出方案，不要输出思考过程或引导文字。\n\n"
+                    f"## 当前方案\n{final_plan}\n\n"
+                    f"## 审查意见\n{last_review}\n\n"
+                    "重要约束：只输出高层设计方案和实现步骤描述，"
+                    "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
+                )
+                planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
+                refine_result = self._run_agent(
+                    wf=wf,
+                    workflow_id=self._workflow_id,
+                    cli_tool=wf.get("cli_tool", "claude-code"),
+                    model=wf.get("model", ""),
+                    project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                    prompt=refine_prompt,
+                    workspace_type=wf.get("workspace_type", "local"),
+                    remote_machine_id=wf.get("remote_machine_id"),
+                    permission_mode=_zcode_planning_mode(wf),
+                    allowed_tools=planning_allowed,
+                    timeout=PLANNING_TIMEOUT,
+                    session_line="main",
+                    milestone_id=refine_ms.get("milestone_id", ""),
+                )
+                self._accumulate_tokens(refine_result)
+                if refine_result.success:
+                    final_plan = self._artifact_text(refine_result) or final_plan
+                self.repo.update_milestone(
+                    refine_ms.get("milestone_id", ""),
+                    {
+                        "status": "completed" if refine_result.success else "failed",
+                        "plan_content": final_plan,
+                        "result_summary": final_plan[:200],
+                        "tldr": self._extract_tldr(final_plan),
+                    },
+                )
+
+            final_plan = self._sanitize_artifact_text(final_plan)
+
+            # Record the authoritative final plan.
             plan_final_ms = self._create_milestone(
                 phase="planning",
                 dev_round=dev_round,
@@ -1838,42 +1886,6 @@ class AutonomousOrchestrator:
                 status="in_progress",
                 title="Plan Finalized",
             )
-
-            if self._should_refine_plan(last_review) and final_plan:
-                finalize_prompt = (
-                    PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
-                    "请根据建议整合优化，输出最终方案。直接输出最终的完整方案，"
-                    "不要输出思考过程或其他引导文字。\n\n"
-                    f"## 已通过的方案\n{final_plan}\n\n"
-                    f"## 审查建议\n{last_review}\n\n"
-                    "重要约束：只输出高层设计方案和实现步骤描述，"
-                    "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
-                )
-                planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
-                finalize_result = self._run_agent(
-                    wf=wf,
-                    workflow_id=self._workflow_id,
-                    cli_tool=wf.get("cli_tool", "claude-code"),
-                    model=wf.get("model", ""),
-                    project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                    prompt=finalize_prompt,
-                    workspace_type=wf.get("workspace_type", "local"),
-                    remote_machine_id=wf.get("remote_machine_id"),
-                    permission_mode=_zcode_planning_mode(wf),
-                    allowed_tools=planning_allowed,
-                    timeout=PLANNING_TIMEOUT,
-                    session_line="main",
-                    milestone_id=plan_final_ms.get("milestone_id", ""),
-                )
-                self._accumulate_tokens(finalize_result)
-                if finalize_result.success:
-                    final_plan = self._artifact_text(finalize_result) or final_plan
-
-            final_plan = self._sanitize_artifact_text(final_plan)
-
-            # Record the authoritative final plan on the milestone. When the
-            # review carried no suggestions, the existing plan is the final plan
-            # and no agent call was made (phase usage stays zero).
             self.repo.update_milestone(
                 plan_final_ms.get("milestone_id", ""),
                 {
@@ -1891,12 +1903,6 @@ class AutonomousOrchestrator:
                     f"Plan review completed after {round_num} round(s).\n\n"
                     f"{final_plan}"
                 )
-                if self._should_show_review_warning(round_num, max_rounds, last_review):
-                    final_comment += (
-                        f"\n\n---\n\n"
-                        f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
-                        f"{last_review}"
-                    )
                 self._post_github_comment(gh, issue_number, final_comment, context="final-plan")
 
             # Plan finalized, move to development
@@ -2676,13 +2682,20 @@ class AutonomousOrchestrator:
 
         review_passed = self._review_is_approved(review_text, "代码审查通过")
 
-        # Decouple "round-1 review must be able to trigger a fix" from the total
-        # review-round cap, so max_pr_review_rounds matches its "PR 审查最大轮次"
-        # label (#1200 review). The cap is `round_num >= max_rounds AND round_num
-        # > 1`: round 1 is never the cap (a review with findings always gets a
-        # fix), but for max>=2 total reviews are capped at max — no stable +1
-        # round. max=1 -> r1 fix -> r2 report; max=2 -> r1 fix -> r2 report.
-        if review_passed or (round_num >= max_rounds and round_num > 1):
+        # Every review with findings gets a fix — including the cap round — so
+        # the last review's feedback is never silently dropped. Total reviews are
+        # capped at max_pr_review_rounds (matches the "PR 审查最大轮次" label):
+        # after the cap-round fix we go straight to summary/report instead of
+        # scheduling another review. So max=N -> review x N (each non-passing
+        # review, incl. the Nth, gets a pr_updated fix), then pr_review_summary;
+        # there is no (N+1)-th review.
+        at_cap = round_num >= max_rounds
+        if not review_passed:
+            self._apply_pr_review_fix(
+                wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
+            )
+
+        if review_passed or at_cap:
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback
@@ -2760,135 +2773,145 @@ class AutonomousOrchestrator:
                 }
             )
             self._emit("phase_change", {"phase": "report"})
-        else:
-            # Fix issues and continue to next round
-            fix_ms = self._create_milestone(
-                phase="pr_review",
-                dev_round=dev_round,
-                round_number=round_num,
-                milestone_type="pr_updated",
-                status="in_progress",
-                title=f"PR fixes round {round_num}",
+        # Under cap and not approved: the fix above already ran; fall through so
+        # the scheduler re-enters _do_pr_review for the next review round.
+
+    def _apply_pr_review_fix(
+        self,
+        wf: dict,
+        gh,
+        review_text: str,
+        round_num: int,
+        dev_round: int,
+        ci_failures: list,
+        pr_number,
+    ) -> None:
+        """Apply one round of code-review fixes (pr_updated milestone).
+
+        Runs for every non-passing review — including the cap round — so the
+        last review's feedback is never silently dropped (#1200 review).
+        """
+        fix_ms = self._create_milestone(
+            phase="pr_review",
+            dev_round=dev_round,
+            round_number=round_num,
+            milestone_type="pr_updated",
+            status="in_progress",
+            title=f"PR fixes round {round_num}",
+        )
+
+        fix_prompt = (
+            AUTONOMOUS_CONTEXT
+            + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
+            "重要要求：\n"
+            "1. 修改完成后，运行项目测试确保所有测试通过\n"
+            "2. 如果测试失败，分析失败原因：\n"
+            "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
+            "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
+            "单独一行输出 `CI_STATUS: pre-existing`\n"
+            "3. 确认测试通过后提交 git commit 并推送\n"
+        )
+        if ci_failures:
+            ci_summary = "\n".join(
+                f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
+            )
+            fix_prompt += (
+                f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
+                "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。\n"
+                "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
             )
 
-            fix_prompt = (
-                AUTONOMOUS_CONTEXT
-                + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
-                "重要要求：\n"
-                "1. 修改完成后，运行项目测试确保所有测试通过\n"
-                "2. 如果测试失败，分析失败原因：\n"
-                "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
-                "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
-                "单独一行输出 `CI_STATUS: pre-existing`\n"
-                "3. 确认测试通过后提交 git commit 并推送\n"
-            )
-            if ci_failures:
-                ci_summary = "\n".join(
-                    f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
-                )
-                fix_prompt += (
-                    f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
-                    "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。\n"
-                    "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
-                )
+        commit_before = ""
+        try:
+            commit_before = gh.get_current_commit()
+        except Exception:
+            pass
 
-            commit_before = ""
+        fix_result = self._run_agent(
+            wf=wf,
+            workflow_id=self._workflow_id,
+            cli_tool=wf.get("cli_tool", "claude-code"),
+            model=wf.get("model", ""),
+            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+            prompt=fix_prompt,
+            workspace_type=wf.get("workspace_type", "local"),
+            remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
+            session_line="main",
+            milestone_id=fix_ms.get("milestone_id", ""),
+        )
+
+        self._accumulate_tokens(fix_result)
+
+        # Clear user feedback after it has been injected into the prompt
+        if wf.get("user_feedback", "").strip():
+            self._update_workflow({"user_feedback": ""})
+
+        # Agent may fail to commit (bash blocked / forgot) — salvage uncommitted
+        # changes the way dev does, else the fix never reaches the PR (#960
+        # symptom). A no-op fix is genuinely empty, not a failed dev round.
+        commit_sha = ""
+        diff_stats = {}
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+        sha_changed = commit_before and commit_sha and commit_before != commit_sha
+        if not sha_changed:
             try:
-                commit_before = gh.get_current_commit()
-            except Exception:
-                pass
-
-            fix_result = self._run_agent(
-                wf=wf,
-                workflow_id=self._workflow_id,
-                cli_tool=wf.get("cli_tool", "claude-code"),
-                model=wf.get("model", ""),
-                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                prompt=fix_prompt,
-                workspace_type=wf.get("workspace_type", "local"),
-                remote_machine_id=wf.get("remote_machine_id"),
-                permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
-                session_line="main",
-                milestone_id=fix_ms.get("milestone_id", ""),
-            )
-
-            self._accumulate_tokens(fix_result)
-
-            # Clear user feedback after it has been injected into the prompt
-            if wf.get("user_feedback", "").strip():
-                self._update_workflow({"user_feedback": ""})
-
-            # Agent may fail to commit (bash blocked / forgot) — salvage
-            # uncommitted changes the way dev does, else the fix never reaches
-            # the PR (#960 symptom). Adapted from _run_development_phase (no
-            # branch-vs-base check — a no-op fix is genuinely empty, not a
-            # failed dev round).
-            commit_sha = ""
-            diff_stats = {}
-            try:
-                commit_sha = gh.get_current_commit()
-            except Exception:
-                pass
-            sha_changed = commit_before and commit_sha and commit_before != commit_sha
-            if not sha_changed:
-                try:
-                    if gh.has_uncommitted_changes():
-                        gh.git_add_all()
-                        gh.git_commit(
-                            f"auto: review fixes (round {round_num})",
-                            no_verify=True,
-                        )
-                        commit_sha = gh.get_current_commit()
-                        sha_changed = True
-                except Exception as e:
-                    logger.warning("Fix auto-commit failed: %s", e)
-            if sha_changed:
-                try:
-                    gh.git_push()
-                except Exception as e:
-                    # push failure leaves the fix local; the next pr_review
-                    # re-reads the old PR state — log so it's diagnosable.
-                    logger.warning("Fix git_push failed (round %d): %s", round_num, e)
-            try:
-                diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
-            except Exception:
-                pass
-
-            self.repo.update_milestone(
-                fix_ms.get("milestone_id", ""),
-                {
-                    "status": "completed" if fix_result.success else "failed",
-                    "session_id": fix_result.session_id,
-                    "commit_shas": json.dumps([commit_sha] if commit_sha else []),
-                    "diff_stats": json.dumps(diff_stats),
-                    "result_summary": self._artifact_text(fix_result)[:200],
-                    "tldr": self._artifact_tldr(fix_result),
-                },
-            )
-
-            if pr_number:
-                # Extract fix summary from agent response in full; GitHub comments
-                # render long content fine (capped by _post_github_comment if huge).
-                fix_summary = self._artifact_text(fix_result)
-                comment = (
-                    f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
-                    f"### Changes Made\n{fix_summary}\n\n"
-                )
-                if commit_sha:
-                    comment += f"- Commit: `{commit_sha[:8]}`\n"
-                # Note pre-existing CI failures if fix agent identified them.
-                if self._artifact_status_tag(
-                    fix_result, "ci_status"
-                ).lower() == "pre-existing" or self._is_pre_existing_ci_failure(
-                    self._artifact_visible_text(fix_result)
-                ):
-                    comment += (
-                        "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
+                if gh.has_uncommitted_changes():
+                    gh.git_add_all()
+                    gh.git_commit(
+                        f"auto: review fixes (round {round_num})",
+                        no_verify=True,
                     )
-                self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
+                    commit_sha = gh.get_current_commit()
+                    sha_changed = True
+            except Exception as e:
+                logger.warning("Fix auto-commit failed: %s", e)
+        if sha_changed:
+            try:
+                gh.git_push()
+            except Exception as e:
+                # push failure leaves the fix local; the next pr_review re-reads
+                # the old PR state — log so it's diagnosable.
+                logger.warning("Fix git_push failed (round %d): %s", round_num, e)
+        try:
+            diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
+        except Exception:
+            pass
+
+        self.repo.update_milestone(
+            fix_ms.get("milestone_id", ""),
+            {
+                "status": "completed" if fix_result.success else "failed",
+                "session_id": fix_result.session_id,
+                "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+                "diff_stats": json.dumps(diff_stats),
+                "result_summary": self._artifact_text(fix_result)[:200],
+                "tldr": self._artifact_tldr(fix_result),
+            },
+        )
+
+        if pr_number:
+            # Extract fix summary from agent response in full; GitHub comments
+            # render long content fine (capped by _post_github_comment if huge).
+            fix_summary = self._artifact_text(fix_result)
+            comment = (
+                f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
+                f"### Changes Made\n{fix_summary}\n\n"
+            )
+            if commit_sha:
+                comment += f"- Commit: `{commit_sha[:8]}`\n"
+            # Note pre-existing CI failures if fix agent identified them.
+            if self._artifact_status_tag(
+                fix_result, "ci_status"
+            ).lower() == "pre-existing" or self._is_pre_existing_ci_failure(
+                self._artifact_visible_text(fix_result)
+            ):
+                comment += "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
+            self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
 
     # ── Phase: Report ───────────────────────────────────────────────
 
