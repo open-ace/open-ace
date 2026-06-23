@@ -729,7 +729,10 @@ CREATE TABLE session_messages (
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     metadata text,
     milestone_id text DEFAULT ''::text NOT NULL,
-    source text DEFAULT ''::text NOT NULL
+    source text DEFAULT ''::text NOT NULL,
+    source_timestamp timestamp without time zone,
+    external_message_id text DEFAULT ''::text NOT NULL,
+    content_blocks text
 );
 
 CREATE SEQUENCE session_messages_id_seq
@@ -1967,6 +1970,8 @@ CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
 
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
+CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
+CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
 
 
 --

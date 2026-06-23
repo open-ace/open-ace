@@ -483,7 +483,10 @@ CREATE TABLE session_messages (
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  metadata text,
  milestone_id text DEFAULT '' NOT NULL,
- source text DEFAULT '' NOT NULL
+ source text DEFAULT '' NOT NULL,
+ source_timestamp TIMESTAMP,
+ external_message_id text DEFAULT '' NOT NULL,
+ content_blocks text
 );
 
 CREATE TABLE sessions (
@@ -1045,6 +1048,8 @@ CREATE INDEX idx_remote_machines_status ON remote_machines (status);
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 
 CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
+CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
+CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 
@@ -1141,4 +1146,3 @@ CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type,
 CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
-

@@ -69,7 +69,11 @@ def _schema_present(connection: sa.Connection) -> bool:
 def _missing_formal_tables(connection: sa.Connection) -> list[str]:
     if connection.dialect.name != "postgresql":
         return []
-    return [table_name for table_name in FORMAL_PRODUCT_TABLES if not table_exists(connection, table_name)]
+    return [
+        table_name
+        for table_name in FORMAL_PRODUCT_TABLES
+        if not table_exists(connection, table_name)
+    ]
 
 
 def _column_exists(connection: sa.Connection, table_name: str, column_name: str) -> bool:
@@ -94,7 +98,9 @@ def _column_exists(connection: sa.Connection, table_name: str, column_name: str)
 
 def ensure_system_account_column(connection: sa.Connection) -> bool:
     """Backfill users.system_account for databases that missed migration 025."""
-    if not table_exists(connection, "users") or _column_exists(connection, "users", "system_account"):
+    if not table_exists(connection, "users") or _column_exists(
+        connection, "users", "system_account"
+    ):
         return False
 
     if _column_exists(connection, "users", "linux_account"):
@@ -136,9 +142,70 @@ def ensure_session_messages_source_column(connection: sa.Connection) -> bool:
     return True
 
 
+def ensure_session_messages_transcript_columns(connection: sa.Connection) -> bool:
+    """Add #1125/#1128 transcript columns to session_messages for legacy DBs.
+
+    Backfills source_timestamp, external_message_id and content_blocks plus the
+    supporting indexes when the database predates the baseline snapshot.
+    """
+    if not table_exists(connection, "session_messages"):
+        return False
+
+    changed = False
+    is_postgres = connection.dialect.name == "postgresql"
+
+    if not _column_exists(connection, "session_messages", "source_timestamp"):
+        if is_postgres:
+            connection.exec_driver_sql(
+                "ALTER TABLE session_messages ADD COLUMN source_timestamp timestamp without time zone"
+            )
+        else:
+            connection.exec_driver_sql(
+                "ALTER TABLE session_messages ADD COLUMN source_timestamp TIMESTAMP"
+            )
+        changed = True
+
+    if not _column_exists(connection, "session_messages", "external_message_id"):
+        if is_postgres:
+            connection.exec_driver_sql(
+                "ALTER TABLE session_messages ADD COLUMN external_message_id TEXT DEFAULT ''::text NOT NULL"
+            )
+        else:
+            connection.exec_driver_sql(
+                "ALTER TABLE session_messages ADD COLUMN external_message_id TEXT DEFAULT '' NOT NULL"
+            )
+        changed = True
+
+    if not _column_exists(connection, "session_messages", "content_blocks"):
+        connection.exec_driver_sql("ALTER TABLE session_messages ADD COLUMN content_blocks TEXT")
+        changed = True
+
+    if is_postgres:
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id "
+            "ON session_messages USING btree (session_id, external_message_id)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_session_messages_source "
+            "ON session_messages USING btree (session_id, source)"
+        )
+    else:
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id "
+            "ON session_messages (session_id, external_message_id)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_session_messages_source "
+            "ON session_messages (session_id, source)"
+        )
+    return changed
+
+
 def ensure_users_auto_mapping_enabled(connection: sa.Connection) -> bool:
     """Backfill users.auto_mapping_enabled introduced by mapping rules support."""
-    if not table_exists(connection, "users") or _column_exists(connection, "users", "auto_mapping_enabled"):
+    if not table_exists(connection, "users") or _column_exists(
+        connection, "users", "auto_mapping_enabled"
+    ):
         return False
 
     if connection.dialect.name == "postgresql":
@@ -323,6 +390,8 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
             actions.append("would backfill users.system_account")
         if not _column_exists(connection, "session_messages", "source"):
             actions.append("would backfill session_messages.source")
+        if not _column_exists(connection, "session_messages", "external_message_id"):
+            actions.append("would add session_messages transcript columns (#1125/#1128)")
         if not _column_exists(connection, "users", "auto_mapping_enabled"):
             actions.append("would backfill users.auto_mapping_enabled")
         if not table_exists(connection, "tool_account_mapping_rules"):
@@ -336,6 +405,8 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
         actions.append("backfilled users.system_account")
     if ensure_session_messages_source_column(connection):
         actions.append("backfilled session_messages.source")
+    if ensure_session_messages_transcript_columns(connection):
+        actions.append("added session_messages transcript columns (#1125/#1128)")
     if ensure_users_auto_mapping_enabled(connection):
         actions.append("backfilled users.auto_mapping_enabled")
     if ensure_tool_account_mapping_rules_table(connection):
