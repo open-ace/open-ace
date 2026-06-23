@@ -879,12 +879,18 @@ class AutonomousAgentRunner:
                     milestone_id=milestone_id,
                 )
 
-            persisted_session_id = result.session_id or session_id
+            result.prompt = prompt
+            persisted_session_id = (
+                result.session_id if uses_sidebar_session else (result.session_id or session_id)
+            )
+            message_delta = 0
 
             # Persist session messages to database (Issue #776 Bug 1)
             if self.session_manager and persisted_session_id and workspace_type == "local":
                 try:
-                    self._persist_local_session_messages(persisted_session_id, result, milestone_id)
+                    message_delta = self._persist_local_session_messages(
+                        persisted_session_id, result, milestone_id
+                    )
                 except Exception as e:
                     logger.warning("Failed to persist session messages: %s", e)
 
@@ -896,6 +902,7 @@ class AutonomousAgentRunner:
                 try:
                     self.session_manager.increment_session_usage(
                         persisted_session_id,
+                        message_delta=message_delta,
                         request_delta=result.request_count or 0,
                         total_tokens_delta=result.total_tokens or 0,
                         total_input_delta=result.total_input_tokens or 0,
@@ -1738,7 +1745,7 @@ class AutonomousAgentRunner:
 
     def _persist_local_session_messages(
         self, session_id: str, result: AgentTaskResult, milestone_id: str = ""
-    ) -> None:
+    ) -> int:
         """Write workflow-visible messages to ``session_messages``.
 
         Autonomous workflow detail views should show the final assistant output
@@ -1753,6 +1760,21 @@ class AutonomousAgentRunner:
         updated.  Errors are caught by the caller and do not affect the
         main workflow.
         """
+        persisted_count = 0
+
+        if result.prompt:
+            prompt_external_id = f"phase-prompt:{milestone_id}" if milestone_id else ""
+            stored = self.session_manager.append_transcript_message(
+                session_id=session_id,
+                role="user",
+                content=result.prompt,
+                milestone_id=milestone_id,
+                source="autonomous_local_runner",
+                external_message_id=prompt_external_id,
+            )
+            if getattr(stored, "_was_inserted", False):
+                persisted_count += 1
+
         # Prefer ordered event log for accurate message interleaving
         # count_usage=False: the agent runner owns request_count/total_tokens via
         # increment_session_usage at finish time; counting here too would
@@ -1765,10 +1787,8 @@ class AutonomousAgentRunner:
                     final_assistant = event
                 elif event.get("type") == "tool_use":
                     tool_input = event.get("tool_input", {})
-                    self.session_manager.add_message(
+                    stored = self.session_manager.append_transcript_message(
                         session_id=session_id,
-                        milestone_id=milestone_id,
-                        source="workflow_local",
                         role="tool",
                         content=(
                             json.dumps(tool_input)
@@ -1783,18 +1803,20 @@ class AutonomousAgentRunner:
                                 else {}
                             ),
                         },
-                        count_usage=False,
+                        milestone_id=milestone_id,
+                        source="autonomous_local_runner",
+                        external_message_id=event.get("tool_use_id", ""),
                     )
+                    if getattr(stored, "_was_inserted", False):
+                        persisted_count += 1
             if final_assistant:
                 assistant_content = pick_best_artifact_text(
                     final_assistant.get("text", ""),
                     result.response_text,
                     result.visible_response_text,
                 )
-                self.session_manager.add_message(
+                stored = self.session_manager.append_transcript_message(
                     session_id=session_id,
-                    milestone_id=milestone_id,
-                    source="workflow_local",
                     role="assistant",
                     content=assistant_content or final_assistant.get("text", ""),
                     model=final_assistant.get("model"),
@@ -1803,28 +1825,31 @@ class AutonomousAgentRunner:
                         if final_assistant.get("message_id")
                         else None
                     ),
-                    count_usage=False,
+                    milestone_id=milestone_id,
+                    source="autonomous_local_runner",
+                    external_message_id=final_assistant.get("message_id", ""),
                 )
+                if getattr(stored, "_was_inserted", False):
+                    persisted_count += 1
                 # usage events are metadata-only, not persisted as messages
         else:
             # Fallback: write as single assistant + individual tool messages
             if result.response_text:
-                self.session_manager.add_message(
+                stored = self.session_manager.append_transcript_message(
                     session_id=session_id,
-                    milestone_id=milestone_id,
-                    source="workflow_local",
                     role="assistant",
                     content=result.response_text,
-                    count_usage=False,
+                    milestone_id=milestone_id,
+                    source="autonomous_local_runner",
                 )
+                if getattr(stored, "_was_inserted", False):
+                    persisted_count += 1
             for tool_call in result.tool_calls:
                 tool_info = tool_call.get("tool", {})
                 tool_name = tool_info.get("name", "unknown")
                 tool_input = tool_info.get("input", {})
-                self.session_manager.add_message(
+                stored = self.session_manager.append_transcript_message(
                     session_id=session_id,
-                    milestone_id=milestone_id,
-                    source="workflow_local",
                     role="tool",
                     content=(
                         json.dumps(tool_input)
@@ -1832,8 +1857,12 @@ class AutonomousAgentRunner:
                         else str(tool_input)
                     ),
                     metadata={"tool_name": tool_name},
-                    count_usage=False,
+                    milestone_id=milestone_id,
+                    source="autonomous_local_runner",
                 )
+                if getattr(stored, "_was_inserted", False):
+                    persisted_count += 1
+        return persisted_count
 
     def _send_sdk_init(self, session: _LocalSession) -> bool:
         """Send SDK initialize message and record request_id for response matching."""

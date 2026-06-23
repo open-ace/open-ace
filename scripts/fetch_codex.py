@@ -719,7 +719,7 @@ def update_agent_sessions_stats(messages: list) -> int:
     Returns:
         Number of sessions updated
     """
-    from shared.db import _execute, _placeholder, get_connection
+    from shared.db import _column_exists, _execute, _placeholder, escape_like, get_connection
 
     # Group messages by agent_session_id
     session_stats: dict[str, dict[str, Any]] = defaultdict(
@@ -732,10 +732,12 @@ def update_agent_sessions_stats(messages: list) -> int:
             "last_timestamp": None,
             "session_meta": None,
             "project_path": None,
+            "seen_message_ids": set(),
+            "seen_request_ids": set(),
         }
     )
 
-    for msg in messages:
+    for index, msg in enumerate(messages):
         sid = msg.get("agent_session_id")
         if not sid:
             continue
@@ -743,12 +745,20 @@ def update_agent_sessions_stats(messages: list) -> int:
         role = msg.get("role", "")
         tokens = msg.get("tokens_used", 0) or 0
         model = msg.get("model")
-
-        session_stats[sid]["message_count"] += 1
-        session_stats[sid]["total_tokens"] += tokens
+        message_id = msg.get("message_id")
+        message_identity = f"{role}:{message_id}" if message_id else f"message_row:{sid}:{index}"
+        if message_identity not in session_stats[sid]["seen_message_ids"]:
+            session_stats[sid]["seen_message_ids"].add(message_identity)
+            session_stats[sid]["message_count"] += 1
+            session_stats[sid]["total_tokens"] += tokens
 
         if role == "assistant":
-            session_stats[sid]["request_count"] += 1
+            request_identity = (
+                f"message_id:{message_id}" if message_id else f"assistant_row:{sid}:{index}"
+            )
+            if request_identity not in session_stats[sid]["seen_request_ids"]:
+                session_stats[sid]["seen_request_ids"].add(request_identity)
+                session_stats[sid]["request_count"] += 1
 
         if model:
             session_stats[sid]["models"].add(model)
@@ -776,6 +786,9 @@ def update_agent_sessions_stats(messages: list) -> int:
 
     conn = get_connection()
     cursor = conn.cursor()
+    has_external_message_id = _column_exists(cursor, "session_messages", "external_message_id")
+    has_source = _column_exists(cursor, "session_messages", "source")
+    has_structured_session_messages = has_external_message_id and has_source
 
     # Lazy-loaded cache for all users (avoids N+1 query inside session loop)
     _all_users_cache: list = []
@@ -889,40 +902,120 @@ def update_agent_sessions_stats(messages: list) -> int:
                         if not timestamp:
                             timestamp = now
 
-                        # Dedup by timestamp + role + session_id
-                        check_sql = f"""
-                            SELECT id FROM session_messages
-                            WHERE session_id = {placeholder}
-                            AND role = {placeholder}
-                            AND timestamp = {placeholder}
-                        """
-                        _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
-                        existing = cursor.fetchone()
-
-                        if not existing:
-                            insert_sql = f"""
-                                INSERT INTO session_messages
-                                (session_id, role, content, tokens_used, model, timestamp, metadata)
-                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                        if msg_id and has_external_message_id:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND external_message_id = {placeholder}
                             """
-                            metadata = {
-                                "message_id": msg_id,
-                                "project_path": msg.get("project_path"),
-                                "content_blocks": msg.get("content_blocks"),
-                            }
+                            _execute(cursor, check_sql, (session_id, msg.get("role"), str(msg_id)))
+                        elif msg_id:
+                            escaped_msg_id = escape_like(str(msg_id))
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND metadata LIKE {placeholder}
+                                ESCAPE '\\'
+                            """
                             _execute(
                                 cursor,
-                                insert_sql,
+                                check_sql,
                                 (
                                     session_id,
                                     msg.get("role"),
-                                    msg.get("content"),
-                                    msg.get("tokens_used", 0),
-                                    msg.get("model"),
-                                    timestamp,
-                                    json.dumps(metadata) if metadata else None,
+                                    f'%"message_id": "{escaped_msg_id}"%',
                                 ),
                             )
+                        else:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                            """
+                            _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
+                        existing = cursor.fetchone()
+
+                        if not existing:
+                            metadata = {
+                                "message_id": msg_id,
+                                "project_path": msg.get("project_path"),
+                                "source": "fetch_codex",
+                                "external_message_id": str(msg_id) if msg_id else "",
+                                "content_blocks": msg.get("content_blocks"),
+                            }
+                            if has_structured_session_messages:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp,
+                                     source_timestamp, metadata, milestone_id, source,
+                                     external_message_id, content_blocks)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                        "",
+                                        "fetch_codex",
+                                        str(msg_id) if msg_id else "",
+                                        (
+                                            json.dumps(msg.get("content_blocks"))
+                                            if msg.get("content_blocks")
+                                            else None
+                                        ),
+                                    ),
+                                )
+                            elif has_source:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata, source)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                        "fetch_codex",
+                                    ),
+                                )
+                            else:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                    ),
+                                )
                             messages_inserted += 1
 
                     except Exception as e:

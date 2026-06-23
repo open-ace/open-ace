@@ -622,20 +622,24 @@ class TestPersistLocalSessionMessages:
 
         runner._persist_local_session_messages("sess-1", result)
 
-        assert sm.add_message.call_count == 2
-        first_call = sm.add_message.call_args_list[0].kwargs
+        assert sm.append_transcript_message.call_count == 2
+        first_call = sm.append_transcript_message.call_args_list[0].kwargs
         assert first_call["session_id"] == "sess-1"
         assert first_call["role"] == "tool"
         assert first_call["metadata"] == {
             "tool_name": "Read",
             "tool_use_id": "tool-456",
         }
+        assert first_call["source"] == "autonomous_local_runner"
+        assert first_call["external_message_id"] == "tool-456"
 
-        second_call = sm.add_message.call_args_list[1].kwargs
+        second_call = sm.append_transcript_message.call_args_list[1].kwargs
         assert second_call["session_id"] == "sess-1"
         assert second_call["role"] == "assistant"
         assert second_call["model"] == "claude-sonnet"
         assert second_call["metadata"] == {"message_id": "msg-123"}
+        assert second_call["source"] == "autonomous_local_runner"
+        assert second_call["external_message_id"] == "msg-123"
 
     def test_event_log_persists_only_final_assistant_turn(self):
         sm = MagicMock()
@@ -653,9 +657,29 @@ class TestPersistLocalSessionMessages:
 
         runner._persist_local_session_messages("sess-1", result)
 
-        assert sm.add_message.call_count == 2
-        first_call = sm.add_message.call_args_list[0].kwargs
+        assert sm.append_transcript_message.call_count == 2
+        first_call = sm.append_transcript_message.call_args_list[0].kwargs
         assert first_call["role"] == "tool"
-        second_call = sm.add_message.call_args_list[1].kwargs
+        second_call = sm.append_transcript_message.call_args_list[1].kwargs
         assert second_call["role"] == "assistant"
         assert second_call["content"] == "## Final Plan\n1. Fix the bug"
+
+    def test_milestone_prompt_is_persisted_as_user_message(self):
+        sm = MagicMock()
+        runner = AutonomousAgentRunner(session_manager=sm)
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        result = AgentTaskResult(
+            prompt="Implement the fix",
+            event_log=[{"type": "assistant", "text": "done", "message_id": "msg-1"}],
+        )
+
+        runner._persist_local_session_messages("sess-1", result, milestone_id="ms-1")
+
+        assert sm.append_transcript_message.call_count == 2
+        first_call = sm.append_transcript_message.call_args_list[0].kwargs
+        assert first_call["role"] == "user"
+        assert first_call["content"] == "Implement the fix"
+        assert first_call["milestone_id"] == "ms-1"
+        assert first_call["source"] == "autonomous_local_runner"
+        assert first_call["external_message_id"] == "phase-prompt:ms-1"

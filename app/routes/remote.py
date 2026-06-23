@@ -1038,7 +1038,6 @@ def agent_register():
             severity="info",
             resource_type="remote_machine",
             resource_id=machine_id,
-            resource_name=machine_name,
             details={
                 "machine_id": machine_id,
                 "machine_name": machine_name,
@@ -1179,11 +1178,6 @@ def agent_message():
                 severity="info",
                 resource_type="remote_machine",
                 resource_id=machine_id,
-                resource_name=(
-                    (machine.get("name") or machine.get("machine_name") or machine_id)
-                    if machine
-                    else machine_id
-                ),
                 details={
                     "machine_id": machine_id,
                     "previous_status": getattr(g, "_previous_status", "unknown"),
@@ -1445,7 +1439,7 @@ def agent_message():
             else:
                 session_id = claude_session_id
                 logger.warning(
-                    "session_sync: terminal_id=%s not found, fall back to claude_session_id=%s",
+                    "session_sync: terminal_id=%s not found, " "fall back to claude_session_id=%s",
                     terminal_id[:8],
                     claude_session_id[:8],
                 )
@@ -1516,7 +1510,7 @@ def agent_message():
                     },
                 )
             else:
-                # Update model/project_path/user_id/cli_session_id if missing on existing session
+                # Update model/project_path/user_id if missing on existing session
                 updates = {}
                 if model and not existing.model:
                     updates["model"] = model
@@ -1524,10 +1518,6 @@ def agent_message():
                     updates["project_path"] = project_path
                 if sync_user_id and not existing.user_id:
                     updates["user_id"] = sync_user_id
-                # Issue #1080: Save CLI tool's internal session_id for terminal session restore
-                # When terminal_session exists, claude_session_id is the CLI tool's internal UUID
-                if terminal_session and claude_session_id and not existing.cli_session_id:
-                    updates["cli_session_id"] = claude_session_id
                 if updates:
                     sync_session_mgr.update_session_fields(session_id, updates)
 
@@ -1592,7 +1582,7 @@ def agent_message():
 
                     # 1. Write to session_messages (dual-write with daily_messages)
                     try:
-                        metadata = {"message_source": message_source}
+                        metadata = {"source": message_source}
                         if msg_uuid:
                             metadata["uuid"] = msg_uuid
                         if content_blocks:
@@ -1601,14 +1591,16 @@ def agent_message():
                             metadata["input_tokens"] = input_tokens
                             metadata["output_tokens"] = output_tokens
 
-                        sync_session_mgr.add_message(
+                        sync_session_mgr.append_transcript_message(
                             session_id=session_id,
                             role=role,
                             content=content[:MAX_MESSAGE_LENGTH],
                             tokens_used=tokens_used,
                             model=msg_model,
                             metadata=metadata,
+                            timestamp=timestamp,
                             source="remote_sync",
+                            external_message_id=msg_uuid or message_id,
                         )
                     except Exception as e:
                         logger.debug("Failed to add session_message: %s", e)
@@ -2153,31 +2145,22 @@ def _record_llm_usage(
                 requests=1,
             )
 
-            # Update session token counts
             from app.modules.workspace.session_manager import get_session_manager
 
             sm = get_session_manager()
             session = sm.get_session(session_id)
-            if session:
-                # Handle None values for token counts (new sessions)
-                session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
-                session.total_output_tokens = (session.total_output_tokens or 0) + output_tokens
-                session.total_tokens = (session.total_tokens or 0) + input_tokens + output_tokens
-                session.request_count = (
-                    session.request_count or 0
-                ) + 1  # Increment request count for each API call
-                sm.update_session(session)
-                logger.info(
-                    "Updated session %s tokens: input=%d, output=%d, requests=%d",
-                    session_id[:8],
-                    session.total_input_tokens,
-                    session.total_output_tokens,
-                    session.request_count,
-                )
-            else:
+            if not session:
                 logger.warning(
                     "Session %s not found for usage recording",
                     session_id[:8],
+                )
+            else:
+                sm.increment_session_usage(
+                    session_id,
+                    request_delta=1,
+                    total_tokens_delta=input_tokens + output_tokens,
+                    total_input_delta=input_tokens,
+                    total_output_delta=output_tokens,
                 )
 
             # Refresh user_daily_stats so quota checks see up-to-date data
