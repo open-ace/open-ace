@@ -1323,7 +1323,8 @@ def restore_session(session_id):
                 project_path,
                 workspace_type,
                 remote_machine_id,
-                user_id
+                user_id,
+                cli_session_id
             FROM agent_sessions
             WHERE session_id = {p}
             LIMIT 1
@@ -1355,6 +1356,8 @@ def restore_session(session_id):
         remote_machine_id = session_data.get("remote_machine_id")
 
         # Terminal sessions don't need project_path - they use terminalId
+        # Issue #1080: Check if CLI tool session history exists (cli_session_id)
+        cli_session_id = session_data.get("cli_session_id") or ""
         if workspace_type == "terminal":
             # Build workspace URL for terminal session
             machine_name = None
@@ -1391,6 +1394,7 @@ def restore_session(session_id):
                         "terminal_id": session_id,
                         "remote_machine_id": remote_machine_id,
                         "machine_name": machine_name,
+                        "cli_session_id": cli_session_id,
                     },
                 }
             )

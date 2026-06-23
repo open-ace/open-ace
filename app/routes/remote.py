@@ -1516,7 +1516,7 @@ def agent_message():
                     },
                 )
             else:
-                # Update model/project_path/user_id if missing on existing session
+                # Update model/project_path/user_id/cli_session_id if missing on existing session
                 updates = {}
                 if model and not existing.model:
                     updates["model"] = model
@@ -1524,6 +1524,10 @@ def agent_message():
                     updates["project_path"] = project_path
                 if sync_user_id and not existing.user_id:
                     updates["user_id"] = sync_user_id
+                # Issue #1080: Save CLI tool's internal session_id for terminal session restore
+                # When terminal_session exists, claude_session_id is the CLI tool's internal UUID
+                if terminal_session and claude_session_id and not existing.cli_session_id:
+                    updates["cli_session_id"] = claude_session_id
                 if updates:
                     sync_session_mgr.update_session_fields(session_id, updates)
 
