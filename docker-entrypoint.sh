@@ -370,8 +370,16 @@ def create_system_user(username):
     # When /home is mounted as volume, useradd -m won't fix permissions on existing directory
     user_home = f'/home/{username}'
     if os.path.isdir(user_home):
-        subprocess.run(['chown', '-R', f'{username}:{username}', user_home], capture_output=True)
-        print(f'  Fixed home directory permissions: {user_home}')
+        # Check if ownership is correct before running chown (Issue #1209 review)
+        stat_result = subprocess.run(['stat', '-c', '%U:%G', user_home], capture_output=True, text=True)
+        current_owner = stat_result.stdout.strip()
+        expected_owner = f'{username}:{username}'
+
+        if current_owner != expected_owner:
+            subprocess.run(['chown', '-R', f'{username}:{username}', user_home], capture_output=True)
+            print(f'  Fixed home directory permissions: {user_home}')
+        else:
+            print(f'  Home directory ownership correct: {user_home}')
 
     # Sync SSH keys if mounted (Issue #1122)
     sync_ssh_keys(username)

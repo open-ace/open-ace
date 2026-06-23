@@ -2385,15 +2385,23 @@ upgrade_deployment() {
                 local home_exists=$(docker exec "$old_container" test -d /home 2>/dev/null && echo "yes" || echo "no")
 
                 if [ "$home_exists" = "yes" ]; then
-                    local home_files=$(docker exec "$old_container" ls -1 /home 2>/dev/null | grep -v "open-ace" || true)
+                    # Exclude default system users (Issue #1209 review)
+                    local home_files=$(docker exec "$old_container" ls -1 /home 2>/dev/null | grep -v -E "^(open-ace|openace|root)$" || true)
 
                     if [ -n "$home_files" ]; then
                         print_info "发现容器内 home 目录数据，正在迁移..."
                         mkdir -p "$DEPLOY_DIR/data/home"
 
                         for user_dir in $home_files; do
-                            print_info "  迁移: /home/$user_dir -> ./data/home/$user_dir"
-                            docker cp "$old_container:/home/$user_dir" "$DEPLOY_DIR/data/home/" 2>/dev/null || true
+                            local target_dir="$DEPLOY_DIR/data/home/$user_dir"
+
+                            # Skip if target already exists to avoid overwriting (Issue #1209 review)
+                            if [ -d "$target_dir" ]; then
+                                print_warning "  跳过已存在目录: ./data/home/$user_dir"
+                            else
+                                print_info "  迁移: /home/$user_dir -> ./data/home/$user_dir"
+                                docker cp "$old_container:/home/$user_dir" "$DEPLOY_DIR/data/home/" 2>/dev/null || true
+                            fi
                         done
 
                         print_success "home 目录数据迁移完成: ./data/home"
@@ -2697,7 +2705,9 @@ create_directories() {
     # This ensures user home directories persist across container restarts
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         mkdir -p "$DEPLOY_DIR"/data/home
-        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录)"
+        # Set restrictive permissions for sensitive user data (Issue #1209 review)
+        chmod 700 "$DEPLOY_DIR"/data/home
+        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 700)"
     fi
 
     print_success "目录创建完成"
