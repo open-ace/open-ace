@@ -45,14 +45,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     )
     columns = set()
     if has_session_messages:
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(session_messages)")
-        }
-    user_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info(users)")
-    }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(session_messages)")}
+    user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
     conn.close()
 
     assert version is not None

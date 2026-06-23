@@ -24,9 +24,7 @@ def build_version_table(
         schema=version_table_schema,
     )
     if version_table_pk:
-        table.append_constraint(
-            PrimaryKeyConstraint("version_num", name=f"{version_table}_pkc")
-        )
+        table.append_constraint(PrimaryKeyConstraint("version_num", name=f"{version_table}_pkc"))
     return table
 
 

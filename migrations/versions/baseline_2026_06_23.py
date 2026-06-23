@@ -9,7 +9,12 @@ from typing import Sequence, Union
 
 from alembic import op
 
-from migrations.baseline import BASELINE_REVISION, execute_sql_script, read_baseline_schema, table_exists
+from migrations.baseline import (
+    BASELINE_REVISION,
+    execute_sql_script,
+    read_baseline_schema,
+    table_exists,
+)
 
 # revision identifiers, used by Alembic.
 revision: str = BASELINE_REVISION
