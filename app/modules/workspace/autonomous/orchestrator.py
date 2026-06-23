@@ -1872,8 +1872,41 @@ class AutonomousOrchestrator:
                         "plan_content": final_plan,
                         "result_summary": final_plan[:200],
                         "tldr": self._extract_tldr(final_plan),
+                        "error_message": refine_result.error or "",
                     },
                 )
+                if not refine_result.success:
+                    # The final refine is what guarantees the Nth review's
+                    # feedback is acted on. If it failed (timeout / model /
+                    # runner), do NOT silently proceed with the pre-refine plan —
+                    # block for retry, mirroring the plan-agent failure path.
+                    # Otherwise the last review would be dropped quietly (#1200).
+                    if "timed out" in (refine_result.error or ""):
+                        self._update_workflow(
+                            {
+                                "status": "planning_timeout",
+                                "error_message": (
+                                    f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
+                                    "You can extend the timeout and retry."
+                                ),
+                            }
+                        )
+                        self._emit(
+                            "planning_timeout",
+                            {
+                                "timeout": PLANNING_TIMEOUT,
+                                "tokens_used": refine_result.total_tokens,
+                                "partial_plan": final_plan[:500],
+                            },
+                        )
+                    else:
+                        self._update_workflow(
+                            {
+                                "status": "failed",
+                                "error_message": f"Plan refine failed: {refine_result.error}",
+                            }
+                        )
+                    return
 
             final_plan = self._sanitize_artifact_text(final_plan)
 
