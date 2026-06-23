@@ -79,9 +79,32 @@ def api_login():
 
     if user:
         from app.services.auth_service import _get_session_timeout_hours
+        from app.utils.workspace import ensure_user_workspace
 
         # Validate avatar file exists
         user["avatar_url"] = _validate_avatar_url(user["id"], user.get("avatar_url"))
+
+        # Ensure workspace directory exists on login
+        user_id = int(user.get("id", 0))
+        user_data = user_repo.get_user_by_id(user_id)
+        if user_data:
+            system_account = user_data.get("system_account") or user_data.get("username")
+            if system_account:
+                # Idempotent update: set system_account if empty
+                if not user_data.get("system_account"):
+                    try:
+                        user_repo.update_user(user_id=user_id, system_account=system_account)
+                        logger.info(
+                            f"Updated system_account for user {user_id} to {system_account}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to update system_account for user {user_id}: {e}")
+
+                # Ensure workspace directory exists
+                try:
+                    ensure_user_workspace(system_account)
+                except Exception as e:
+                    logger.warning(f"Failed to ensure workspace for {system_account}: {e}")
 
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(jsonify({"success": True, "user": user}))
