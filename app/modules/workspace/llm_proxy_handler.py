@@ -329,7 +329,13 @@ def handle_llm_proxy_request(
     user_id = int(token_payload["user_id"])
     tenant_id = int(token_payload["tenant_id"])
     provider = str(token_payload["provider"])
-    session_id = str(token_payload["session_id"])
+    # Allow X-Session-Id header to override token session_id for WebUI conversations
+    request_session_id = request.headers.get("X-Session-Id")
+    if request_session_id:
+        session_id = request_session_id
+        logger.debug("Using X-Session-Id header: %s", session_id)
+    else:
+        session_id = str(token_payload["session_id"])
 
     try:
         from app.modules.governance.quota_manager import QuotaManager

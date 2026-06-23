@@ -559,6 +559,11 @@ def list_sessions():
         base_conditions = ["1=1"]
         base_params = []
 
+        # Filter out webui aggregate sessions (session_id LIKE 'webui:%')
+        # These are internal containers that mix multiple conversations
+        base_conditions.append(f"session_id NOT LIKE {p}")
+        base_params.append("webui:%")
+
         if user_id:
             base_conditions.append(f"user_id = {p}")
             base_params.append(user_id)
