@@ -178,14 +178,18 @@ def get_home_directory(user=None):
                 return user_home
             # Directory doesn't exist yet - return expected path
             # Frontend will show "directory doesn't exist" hint
-            logger.info(f"Workspace directory {user_home} doesn't exist yet for user {system_account}")
+            logger.info(
+                f"Workspace directory {user_home} doesn't exist yet for user {system_account}"
+            )
             return user_home
         elif system_account:
             # Already running as target user, check directly
             if os.path.exists(user_home):
                 return user_home
             # Directory doesn't exist yet - return expected path
-            logger.info(f"Workspace directory {user_home} doesn't exist yet for user {system_account}")
+            logger.info(
+                f"Workspace directory {user_home} doesn't exist yet for user {system_account}"
+            )
             return user_home
     # Fallback to process user's home
     return str(Path.home())

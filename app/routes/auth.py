@@ -94,7 +94,9 @@ def api_login():
                 if not user_data.get("system_account"):
                     try:
                         user_repo.update_user(user_id=user_id, system_account=system_account)
-                        logger.info(f"Updated system_account for user {user_id} to {system_account}")
+                        logger.info(
+                            f"Updated system_account for user {user_id} to {system_account}"
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to update system_account for user {user_id}: {e}")
 

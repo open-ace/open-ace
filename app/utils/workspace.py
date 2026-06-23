@@ -149,8 +149,6 @@ def ensure_user_workspace(system_account: str) -> bool:
     Returns:
         True if workspace setup succeeded or was already ready.
     """
-    base_dir = get_workspace_base_dir()
-
     if _is_docker_multi_user_mode():
         # Docker multi-user mode: ensure system user and workspace
         logger.info(f"Ensuring workspace for {system_account} in Docker multi-user mode")
