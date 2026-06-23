@@ -192,8 +192,8 @@ import os, psycopg2
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
-    cur.execute(\"ALTER MATERIALIZED VIEW IF EXISTS session_stats OWNER TO current_user\")
-    cur.execute(\"ALTER MATERIALIZED VIEW IF EXISTS request_stats OWNER TO current_user\")
+    cur.execute(\"ALTER MATERIALIZED VIEW IF EXISTS session_stats OWNER TO CURRENT_USER\")
+    cur.execute(\"ALTER MATERIALIZED VIEW IF EXISTS request_stats OWNER TO CURRENT_USER\")
     conn.commit()
     conn.close()
 except Exception as e:
