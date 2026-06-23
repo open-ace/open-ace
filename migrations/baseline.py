@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.engine import Connection
 
 from migrations.version_table import VERSION_NUM_LENGTH
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection
 
 BASELINE_REVISION = "baseline_2026_06_23"
 HEAD_REVISION = BASELINE_REVISION
