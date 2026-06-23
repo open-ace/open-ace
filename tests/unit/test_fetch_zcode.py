@@ -426,7 +426,7 @@ def test_update_agent_sessions_stats_inserts_session_and_messages(fetch_mod, tmp
     ).fetchall()
     roles = {r["role"] for r in msg_rows}
     assert roles == {"user", "assistant"}
-    assert {r["source"] for r in msg_rows} == {"zcode_fetch"}
+    assert {r["source"] for r in msg_rows} == {"fetch_zcode"}
     conn.close()
 
 

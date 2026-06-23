@@ -388,9 +388,8 @@ def update_agent_sessions_stats(messages: list) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     has_external_message_id = _column_exists(cursor, "session_messages", "external_message_id")
-    has_structured_session_messages = has_external_message_id and _column_exists(
-        cursor, "session_messages", "source"
-    )
+    has_source = _column_exists(cursor, "session_messages", "source")
+    has_structured_session_messages = has_external_message_id and has_source
 
     _all_users_cache: list = []
 
@@ -404,11 +403,22 @@ def update_agent_sessions_stats(messages: list) -> int:
         for session_id, stats in session_stats.items():
             try:
                 check_sql = (
-                    f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
+                    f"SELECT id, user_id, session_type FROM agent_sessions "
+                    f"WHERE session_id = {placeholder}"
                 )
                 _execute(cursor, check_sql, (session_id,))
                 session_row = cursor.fetchone()
                 _is_new_session = False
+
+                session_type = ""
+                if session_row:
+                    session_type = (
+                        session_row["session_type"]
+                        if isinstance(session_row, dict) or hasattr(session_row, "keys")
+                        else session_row[2]
+                    ) or ""
+                if session_type == "workflow":
+                    continue
 
                 if not session_row:
                     first_msg = stats["messages"][0] if stats["messages"] else {}
@@ -569,6 +579,26 @@ def update_agent_sessions_stats(messages: list) -> int:
                                             if msg.get("content_blocks")
                                             else None
                                         ),
+                                    ),
+                                )
+                            elif has_source:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata, source)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content", ""),
+                                        msg.get("tokens_used", 0) or 0,
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata, ensure_ascii=False),
+                                        "fetch_zcode",
                                     ),
                                 )
                             else:

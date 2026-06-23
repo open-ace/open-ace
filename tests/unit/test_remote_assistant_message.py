@@ -53,10 +53,10 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         self.manager.process_session_output("test-session", data, stream, is_complete)
 
     def _get_stored_assistant_messages(self):
-        """Return all add_message calls with role='assistant'."""
+        """Return all append_transcript_message calls with role='assistant'."""
         return [
             call
-            for call in self.mock_session_mgr.add_message.call_args_list
+            for call in self.mock_session_mgr.append_transcript_message.call_args_list
             if call.kwargs.get("role") == "assistant"
             or (len(call.args) > 1 and call.args[1] == "assistant")
         ]
@@ -82,7 +82,7 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
             )
         )
         # No message stored yet — still accumulating
-        self.mock_session_mgr.add_message.assert_not_called()
+        self.mock_session_mgr.append_transcript_message.assert_not_called()
 
         # Result signals end of turn
         self._send_output(json.dumps({"type": "result", "subtype": "success"}))
@@ -205,16 +205,17 @@ class TestAssistantMessageAccumulation(unittest.TestCase):
         """System messages are stored when is_complete=True."""
         self._send_output("system info", stream="system", is_complete=True)
 
-        self.mock_session_mgr.add_message.assert_called_once_with(
+        self.mock_session_mgr.append_transcript_message.assert_called_once_with(
             session_id="test-session",
             role="system",
             content="system info",
+            source="remote_live",
         )
 
     def test_system_message_not_stored_without_complete(self):
         """System messages without is_complete are NOT stored."""
         self._send_output("system info", stream="system", is_complete=False)
-        self.mock_session_mgr.add_message.assert_not_called()
+        self.mock_session_mgr.append_transcript_message.assert_not_called()
 
     def test_empty_text_not_stored(self):
         """Empty accumulated text should not produce a DB record."""
@@ -288,10 +289,10 @@ class TestSystemMessageInStdout(unittest.TestCase):
         self.manager.process_session_output("test-session", data, stream, is_complete)
 
     def _get_stored_system_messages(self):
-        """Return all add_message calls with role='system'."""
+        """Return all append_transcript_message calls with role='system'."""
         return [
             call
-            for call in self.mock_session_mgr.add_message.call_args_list
+            for call in self.mock_session_mgr.append_transcript_message.call_args_list
             if call.kwargs.get("role") == "system"
             or (len(call.args) > 1 and call.args[1] == "system")
         ]

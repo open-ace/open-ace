@@ -236,14 +236,14 @@ class TestSessionManager:
             role="assistant",
             content="message A",
             milestone_id="ms-a",
-            source="workflow_local",
+            source="autonomous_local_runner",
         )
         session_manager.add_message(
             created.session_id,
             role="assistant",
             content="message B",
             milestone_id="ms-b",
-            source="workflow_local",
+            source="autonomous_local_runner",
         )
 
         retrieved = session_manager.get_session(
@@ -255,7 +255,7 @@ class TestSessionManager:
         assert retrieved is not None
         assert len(retrieved.messages) == 1
         assert retrieved.messages[0].content == "message A"
-        assert retrieved.messages[0].source == "workflow_local"
+        assert retrieved.messages[0].source == "autonomous_local_runner"
 
     def test_complete_session(self, session_manager):
         """Test completing a session."""
