@@ -1838,6 +1838,7 @@ export const Workspace: React.FC = () => {
                       tab.waitingForUser && 'fw-semibold'
                     )}
                     style={{ minWidth: 0 }}
+                    title={tab.title}
                   >
                     {tab.tabType === 'terminal' ? (
                       <i className="bi bi-terminal-fill text-warning me-1" title="Terminal" />
