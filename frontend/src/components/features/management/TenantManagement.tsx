@@ -28,6 +28,8 @@ import {
 import { tenantApi, type Tenant, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
 import { formatDateTime } from '@/utils';
 import { usePageRefresh } from '@/hooks';
+import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
+import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
@@ -81,8 +83,8 @@ export const TenantManagement: React.FC = () => {
     contact_name: '',
   });
   const [quotaData, setQuotaData] = useState({
-    daily_token_limit: 1000000,
-    monthly_token_limit: 30000000,
+    daily_token_limit: 1,
+    monthly_token_limit: 30,
     daily_request_limit: 10000,
     monthly_request_limit: 300000,
     max_users: 100,
@@ -171,8 +173,12 @@ export const TenantManagement: React.FC = () => {
   const handleOpenQuota = (tenant: Tenant) => {
     setEditingTenant(tenant);
     setQuotaData({
-      daily_token_limit: tenant.quota?.daily_token_limit ?? 1000000,
-      monthly_token_limit: tenant.quota?.monthly_token_limit ?? 30000000,
+      daily_token_limit: Math.floor(
+        (tenant.quota?.daily_token_limit ?? 1000000) / TOKEN_QUOTA_MULTIPLIER
+      ),
+      monthly_token_limit: Math.floor(
+        (tenant.quota?.monthly_token_limit ?? 30000000) / TOKEN_QUOTA_MULTIPLIER
+      ),
       daily_request_limit: tenant.quota?.daily_request_limit ?? 10000,
       monthly_request_limit: tenant.quota?.monthly_request_limit ?? 300000,
       max_users: tenant.quota?.max_users ?? 100,
@@ -225,7 +231,14 @@ export const TenantManagement: React.FC = () => {
   const handleSaveQuota = async () => {
     if (!editingTenant) return;
     try {
-      await tenantApi.updateQuota(editingTenant.id, quotaData);
+      await tenantApi.updateQuota(editingTenant.id, {
+        daily_token_limit: quotaData.daily_token_limit * TOKEN_QUOTA_MULTIPLIER,
+        monthly_token_limit: quotaData.monthly_token_limit * TOKEN_QUOTA_MULTIPLIER,
+        daily_request_limit: quotaData.daily_request_limit,
+        monthly_request_limit: quotaData.monthly_request_limit,
+        max_users: quotaData.max_users,
+        max_sessions_per_user: quotaData.max_sessions_per_user,
+      });
       handleCloseQuotaModal();
       fetchTenants();
     } catch (err) {
@@ -423,8 +436,15 @@ export const TenantManagement: React.FC = () => {
                             />
                           </div>
                           <small className="text-muted">
-                            {tenant.total_tokens_used.toLocaleString()} /{' '}
-                            {tenant.quota.monthly_token_limit.toLocaleString()}
+                            {formatQuotaForDisplay(
+                              tenant.total_tokens_used / TOKEN_QUOTA_MULTIPLIER,
+                              true
+                            )}{' '}
+                            /{' '}
+                            {formatQuotaForDisplay(
+                              tenant.quota.monthly_token_limit / TOKEN_QUOTA_MULTIPLIER,
+                              true
+                            )}
                           </small>
                         </div>
                       ) : (
@@ -588,7 +608,7 @@ export const TenantManagement: React.FC = () => {
         >
           <div className="row g-3">
             <div className="col-md-6">
-              <label className="form-label">{t('dailyTokenLimit', language)}</label>
+              <label className="form-label">{t('dailyTokenLimit', language)} (M)</label>
               <input
                 type="number"
                 className="form-control"
@@ -602,7 +622,7 @@ export const TenantManagement: React.FC = () => {
               />
             </div>
             <div className="col-md-6">
-              <label className="form-label">{t('monthlyTokenLimit', language)}</label>
+              <label className="form-label">{t('monthlyTokenLimit', language)} (M)</label>
               <input
                 type="number"
                 className="form-control"
