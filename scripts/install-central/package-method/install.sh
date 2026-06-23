@@ -1791,20 +1791,24 @@ ${line}"
         # 【修复 P0】Verify fetch script paths match current install_dir (not just names)
         local need_update=false
 
-        # Check webui rule for $run_user (using grep -F for exact string matching)
-        if ! grep -qF "$webui_path" "$sudoers_file" 2>/dev/null && \
-           ! grep -qF "/usr/local/bin/qwen-code-webui" "$sudoers_file" 2>/dev/null; then
+        # Check webui rule for $run_user (match user+path on same line, not path
+        # alone). On a service-user switch the sudoers file still holds the old
+        # user's path rules, so a path-only grep would hit and skip the update,
+        # leaving the new run_user without sudo permission (#1197 review).
+        # Rule lines look like "$run_user ALL=(ALL) NOPASSWD: $webui_path *",
+        # so we grep for lines starting with "$run_user " that also contain the path.
+        if ! grep -E "^${run_user} .*(NOPASSWD: )?${webui_path}( |\*|$)" "$sudoers_file" 2>/dev/null && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/local/bin/qwen-code-webui( |\*|$)" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing webui rule for user '$run_user'"
             need_update=true
         fi
 
-        # Verify fetch script paths (check full path, not just script name)
+        # Verify fetch script paths (check user+full-path on same line)
         for script in "${fetch_scripts[@]}"; do
             local script_path="$install_dir/scripts/$script"
             if [ -f "$script_path" ]; then
-                # Use grep -qF to check exact path (avoid regex interpretation)
-                if ! grep -qF "$script_path" "$sudoers_file" 2>/dev/null; then
-                    print_warning "Sudoers missing or misconfigured rule for: $script_path"
+                if ! grep -E "^${run_user} .*(NOPASSWD: )?${script_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+                    print_warning "Sudoers missing or misconfigured rule for: $script_path ($run_user)"
                     need_update=true
                     break
                 fi
@@ -1812,8 +1816,10 @@ ${line}"
         done
 
         # 【修复 P2】Check chown rule (consistent with docker-entrypoint.sh)
-        if ! grep -qF "/usr/bin/chown" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers missing /usr/bin/chown rule"
+        # Match user+command: a stale old-user chown rule must not satisfy the
+        # check after a service-user switch (#1197 review).
+        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/bin/chown( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing /usr/bin/chown rule for user '$run_user'"
             need_update=true
         fi
 

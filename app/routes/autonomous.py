@@ -1574,13 +1574,6 @@ def _pause_running_task(workflow_id: str):
     except Exception as e:
         logger.warning("Pause strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
 
-    # The fallback strategies above sent SIGSTOP directly, bypassing
-    # pause_session(), so the matching in-memory sessions never had their
-    # _paused Event set. Without it, _wait_for_completion keeps counting the
-    # timeout budget and reaps the frozen process once it elapses — the
-    # workflow then "auto-resumes". Sync the flag for every PID we suspended.
-    _mark_sessions_paused(workflow_id, affected_pids)
-
     # Strategy 3: scan runner sessions (last resort)
     try:
         from app.services.autonomous_scheduler import AutonomousScheduler
@@ -1601,6 +1594,15 @@ def _pause_running_task(workflow_id: str):
                                 pass
     except Exception as e:
         logger.warning("Pause strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+    # The fallback strategies above sent SIGSTOP directly, bypassing
+    # pause_session(), so the matching in-memory sessions never had their
+    # _paused Event set. Without it, _wait_for_completion keeps counting the
+    # timeout budget and reaps the frozen process once it elapses — the
+    # workflow then "auto-resumes". Sync the flag for every PID we suspended
+    # across all strategies (including the session-scan last resort), so the
+    # budget freezes correctly regardless of which path delivered the signal.
+    _mark_sessions_paused(workflow_id, affected_pids)
 
 
 def _stop_running_task(workflow_id: str):
