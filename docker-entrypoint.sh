@@ -5,7 +5,13 @@
 set -e
 
 # ============================================================================
-# 0. Pre-flight Validation (Issue #1006)
+# 0. Pre-flight Setup
+# ============================================================================
+# Create logs directory (Issue #1205)
+mkdir -p /app/logs
+
+# ============================================================================
+# 0.1. Pre-flight Validation (Issue #1006)
 # ============================================================================
 validate_node_environment() {
     echo "Validating Node.js environment..."
@@ -360,6 +366,21 @@ def create_system_user(username):
         subprocess.run(['chown', f'{username}:{username}', user_workspace], capture_output=True)
         print(f'  Created workspace directory: {user_workspace}')
 
+    # Fix home directory permissions (Issue #1205)
+    # When /home is mounted as volume, useradd -m won't fix permissions on existing directory
+    user_home = f'/home/{username}'
+    if os.path.isdir(user_home):
+        # Check if ownership is correct before running chown (Issue #1209 review)
+        stat_result = subprocess.run(['stat', '-c', '%U:%G', user_home], capture_output=True, text=True)
+        current_owner = stat_result.stdout.strip()
+        expected_owner = f'{username}:{username}'
+
+        if current_owner != expected_owner:
+            subprocess.run(['chown', '-R', f'{username}:{username}', user_home], capture_output=True)
+            print(f'  Fixed home directory permissions: {user_home}')
+        else:
+            print(f'  Home directory ownership correct: {user_home}')
+
     # Sync SSH keys if mounted (Issue #1122)
     sync_ssh_keys(username)
 
@@ -453,7 +474,7 @@ try:
     print('User and project sync completed.')
 except Exception as e:
     print(f'Error syncing users and projects: {e}')
-" 2>&1 | tee /var/log/open-ace-user-sync.log || echo "WARNING: User sync failed - check /var/log/open-ace-user-sync.log for details"
+" 2>&1 | tee /app/logs/open-ace-user-sync.log || echo "WARNING: User sync failed - check /app/logs/open-ace-user-sync.log for details"
     fi
 
     # Configure sudoers for qwen-code-webui

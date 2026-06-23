@@ -2376,6 +2376,41 @@ upgrade_deployment() {
         if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
             print_info "停止容器: $old_container"
             docker stop "$old_container" 2>/dev/null || true
+
+            # Data migration for multi-user mode (Issue #1205)
+            # Export container /home data to host ./data/home before container removal
+            # This is a one-time migration when upgrading from version without volume mapping
+            if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+                print_info "检查容器内 home 目录数据..."
+                local home_exists=$(docker exec "$old_container" test -d /home 2>/dev/null && echo "yes" || echo "no")
+
+                if [ "$home_exists" = "yes" ]; then
+                    # Exclude default system users (Issue #1209 review)
+                    local home_files=$(docker exec "$old_container" ls -1 /home 2>/dev/null | grep -v -E "^(open-ace|openace|root)$" || true)
+
+                    if [ -n "$home_files" ]; then
+                        print_info "发现容器内 home 目录数据，正在迁移..."
+                        mkdir -p "$DEPLOY_DIR/data/home"
+
+                        for user_dir in $home_files; do
+                            local target_dir="$DEPLOY_DIR/data/home/$user_dir"
+
+                            # Skip if target already exists to avoid overwriting (Issue #1209 review)
+                            if [ -d "$target_dir" ]; then
+                                print_warning "  跳过已存在目录: ./data/home/$user_dir"
+                            else
+                                print_info "  迁移: /home/$user_dir -> ./data/home/$user_dir"
+                                docker cp "$old_container:/home/$user_dir" "$DEPLOY_DIR/data/home/" 2>/dev/null || true
+                            fi
+                        done
+
+                        print_success "home 目录数据迁移完成: ./data/home"
+                    else
+                        print_info "容器内 /home 目录为空，无需迁移"
+                    fi
+                fi
+            fi
+
             print_info "删除容器: $old_container"
             docker rm "$old_container" 2>/dev/null || true
         fi
@@ -2445,6 +2480,14 @@ upgrade_deployment() {
     create_docker_compose
     create_env_file
     NON_INTERACTIVE="$old_non_interactive"
+
+    # 3.5. Ensure new directories exist for volume mounts (Issue #1205)
+    print_info "创建持久化目录..."
+    mkdir -p "$DEPLOY_DIR"/logs
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        mkdir -p "$DEPLOY_DIR"/data/home
+    fi
+    print_success "持久化目录创建完成"
 
     # 4. Update sudoers if multi-user mode is enabled
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
@@ -2653,6 +2696,20 @@ create_directories() {
 
     chmod -R 755 "$DEPLOY_DIR"
 
+    # Create logs directory for Docker volume mount (Issue #1205)
+    # This ensures application logs persist across container restarts
+    mkdir -p "$DEPLOY_DIR"/logs
+    print_info "  - $DEPLOY_DIR/logs (应用日志目录)"
+
+    # Create multi-user home directory for Docker volume mount (Issue #1205)
+    # This ensures user home directories persist across container restarts
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        mkdir -p "$DEPLOY_DIR"/data/home
+        # Set restrictive permissions for sensitive user data (Issue #1209 review)
+        chmod 700 "$DEPLOY_DIR"/data/home
+        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 700)"
+    fi
+
     print_success "目录创建完成"
     print_info "  - $DEPLOY_DIR/config"
     print_info "  - 所有者: $RUN_USER:$RUN_USER"
@@ -2836,27 +2893,40 @@ create_docker_compose() {
     fi
     # Build volumes section based on enabled tools
     local volumes_section="      - ./config:/root/.open-ace:ro"
-    local user_home="/home/$RUN_USER"
 
-    if [ "$QWEN_ENABLED" = "true" ]; then
-        # Issue #1192: Map to /home/$RUN_USER instead of /home/open-ace
-        # This ensures fetch scripts can find data under /home/$RUN_USER/.qwen/projects
-        # which matches the multi-user scanning logic in fetch_qwen.py
+    # Add logs directory mount (Issue #1205)
+    volumes_section="$volumes_section
+      - ./logs:/app/logs"
+
+    # Handle CLI/home mapping based on multi-user mode (Issue #1205)
+    # Multi-user mode: Use unified ./data/home:/home mount for all users
+    # Single-user mode: Use per-tool CLI directory mounts (Issue #1192: map to /home/$RUN_USER)
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         volumes_section="$volumes_section
+      - ./data/home:/home"
+        print_info "  - 映射多用户 home 目录: ./data/home:/home"
+    else
+        local user_home="/home/$RUN_USER"
+
+        if [ "$QWEN_ENABLED" = "true" ]; then
+            # Issue #1192: Map to /home/$RUN_USER instead of /home/open-ace
+            # This ensures fetch scripts can find data under /home/$RUN_USER/.qwen/projects
+            volumes_section="$volumes_section
       - $user_home/.qwen:/home/$RUN_USER/.qwen"
-        print_info "  - 映射 .qwen 目录 ($RUN_USER -> $RUN_USER)"
-    fi
+            print_info "  - 映射 .qwen 目录 ($RUN_USER -> $RUN_USER)"
+        fi
 
-    if [ "$CLAUDE_ENABLED" = "true" ]; then
-        volumes_section="$volumes_section
+        if [ "$CLAUDE_ENABLED" = "true" ]; then
+            volumes_section="$volumes_section
       - $user_home/.claude:/home/$RUN_USER/.claude"
-        print_info "  - 映射 .claude 目录 ($RUN_USER -> $RUN_USER)"
-    fi
+            print_info "  - 映射 .claude 目录 ($RUN_USER -> $RUN_USER)"
+        fi
 
-    if [ "$OPENCLAW_ENABLED" = "true" ]; then
-        volumes_section="$volumes_section
+        if [ "$OPENCLAW_ENABLED" = "true" ]; then
+            volumes_section="$volumes_section
       - $user_home/.openclaw:/home/$RUN_USER/.openclaw"
-        print_info "  - 映射 .openclaw 目录 ($RUN_USER -> $RUN_USER)"
+            print_info "  - 映射 .openclaw 目录 ($RUN_USER -> $RUN_USER)"
+        fi
     fi
 
     # Add workspace volume mount (Issue #1083)
