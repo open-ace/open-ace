@@ -5,9 +5,7 @@ API routes for admin operations.
 """
 
 import logging
-import os
-import subprocess
-from typing import Optional, cast
+from typing import cast
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
@@ -18,7 +16,7 @@ from app.repositories.user_repo import UserRepository
 from app.schemas.quota import validate_quota_update
 from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
-from app.utils.workspace import get_workspace_base_dir
+from app.utils.workspace import ensure_system_user, get_workspace_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,75 +28,6 @@ usage_repo = UsageRepository()
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
-
-
-def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
-    """
-    Ensure a system user exists for workspace operations.
-    Creates the OS user, workspace directory, and .qwen directory.
-
-    Args:
-        system_account: Username for the system account.
-        uid: Optional specific UID. If None, system auto-assigns.
-
-    Returns:
-        True if user exists or was created successfully.
-    """
-    base_dir = get_workspace_base_dir()
-
-    # Check if user already exists
-    result = subprocess.run(["id", system_account], capture_output=True, text=True)
-    if result.returncode == 0:
-        logger.info(f"System user {system_account} already exists")
-        # Still ensure workspace directories exist
-        _ensure_workspace_dirs(system_account, base_dir)
-        return True
-
-    # Build useradd command
-    cmd = ["useradd", "-m", "-s", "/bin/bash"]
-    if uid is not None:
-        cmd.extend(["-u", str(uid)])
-    cmd.append(system_account)
-
-    logger.info(f"Creating system user: {system_account}" + (f" (UID: {uid})" if uid else ""))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        logger.error(f"Failed to create system user {system_account}: {result.stderr}")
-        return False
-
-    logger.info(f"System user {system_account} created successfully")
-    _ensure_workspace_dirs(system_account, base_dir)
-    return True
-
-
-def _ensure_workspace_dirs(system_account: str, base_dir: str):
-    """Ensure workspace directories exist with correct ownership."""
-    workspace_dir = f"{base_dir}/{system_account}"
-    qwen_dir = f"{workspace_dir}/.qwen"
-
-    for directory in [workspace_dir, qwen_dir]:
-        if not os.path.exists(directory):
-            try:
-                os.makedirs(directory, mode=0o755, exist_ok=True)
-            except PermissionError:
-                logger.warning(f"Cannot create {directory} (permission denied)")
-                continue
-
-    # Set ownership
-    try:
-        uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
-        gid_result = subprocess.run(["id", "-g", system_account], capture_output=True, text=True)
-        if uid_result.returncode == 0 and gid_result.returncode == 0:
-            uid = int(uid_result.stdout.strip())
-            gid = int(gid_result.stdout.strip())
-            for directory in [workspace_dir, qwen_dir]:
-                try:
-                    os.chown(directory, uid, gid)
-                except PermissionError:
-                    logger.warning(f"Cannot chown {directory} to {uid}:{gid}")
-    except Exception as e:
-        logger.warning(f"Error setting ownership for {system_account}: {e}")
 
 
 @admin_bp.route("/admin/users", methods=["GET"])

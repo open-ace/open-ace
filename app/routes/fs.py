@@ -169,18 +169,24 @@ def get_home_directory(user=None):
     if user:
         system_account = user.get("system_account") or user.get("username")
         effective_system_account = get_effective_system_account(system_account)
+        user_home = f"{base_dir}/{system_account}"
         if effective_system_account:
             # Return the system account's workspace directory
-            user_home = f"{base_dir}/{system_account}"
             # Use sudo to check if directory exists
             result = run_as_user(effective_system_account, ["test", "-e", user_home])
             if result.returncode == 0:
                 return user_home
+            # Directory doesn't exist yet - return expected path
+            # Frontend will show "directory doesn't exist" hint
+            logger.info(f"Workspace directory {user_home} doesn't exist yet for user {system_account}")
+            return user_home
         elif system_account:
             # Already running as target user, check directly
-            user_home = f"{base_dir}/{system_account}"
             if os.path.exists(user_home):
                 return user_home
+            # Directory doesn't exist yet - return expected path
+            logger.info(f"Workspace directory {user_home} doesn't exist yet for user {system_account}")
+            return user_home
     # Fallback to process user's home
     return str(Path.home())
 
@@ -331,10 +337,13 @@ def api_browse_directory():
     if not dir_info["exists"]:
         # Return home directory as fallback
         home = get_home_directory(user)
+        # Provide helpful note: directory will be created when project is set up
+        fallback_note = f"Directory '{path}' does not exist. It will be created automatically when you create a project here."
         return jsonify(
             {
                 "currentPath": path,
                 "error": "Directory does not exist",
+                "fallback_note": fallback_note,
                 "fallback": {
                     "currentPath": home,
                     "parentPath": str(Path(home).parent),
