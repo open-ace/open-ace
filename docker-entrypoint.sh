@@ -193,16 +193,19 @@ except Exception:
     echo "Checking database table integrity..."
     MISSING_TABLES=$(python3 -c "
 import os, psycopg2
-REQUIRED_TABLES = [
-    'ai_agent_settings',
-    'agent_tokens',
-    'autonomous_workflows',
-    'email_notification_logs',
-    'registration_tokens',
-    'smtp_settings',
-    'workflow_events',
-    'workflow_milestones',
-]
+    # Tables created by post-schema.sql migrations that may be missing in legacy databases.
+    # MAINTENANCE NOTE: When adding new migrations that create new tables, update this list
+    # to ensure the integrity check detects them. This prevents stale alembic stamp issues.
+    REQUIRED_TABLES = [
+        'ai_agent_settings',
+        'agent_tokens',
+        'autonomous_workflows',
+        'email_notification_logs',
+        'registration_tokens',
+        'smtp_settings',
+        'workflow_events',
+        'workflow_milestones',
+    ]
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor()
@@ -267,10 +270,10 @@ try:
     owner_row = cur.fetchone()
     if owner_row:
         current_owner = owner_row[0]
-        cur.execute(\"SELECT current_user\")
+        cur.execute(\"SELECT CURRENT_USER\")
         db_user = cur.fetchone()[0]
         if current_owner != db_user:
-            cur.execute(\"ALTER MATERIALIZED VIEW session_stats OWNER TO current_user\")
+            cur.execute(\"ALTER MATERIALIZED VIEW session_stats OWNER TO CURRENT_USER\")
             print(f'Fixed session_stats owner: {current_owner} -> {db_user}')
         else:
             print(f'session_stats owner already correct: {current_owner}')
@@ -280,19 +283,21 @@ try:
     owner_row = cur.fetchone()
     if owner_row:
         current_owner = owner_row[0]
-        cur.execute(\"SELECT current_user\")
+        cur.execute(\"SELECT CURRENT_USER\")
         db_user = cur.fetchone()[0]
         if current_owner != db_user:
-            cur.execute(\"ALTER MATERIALIZED VIEW request_stats OWNER TO current_user\")
+            cur.execute(\"ALTER MATERIALIZED VIEW request_stats OWNER TO CURRENT_USER\")
             print(f'Fixed request_stats owner: {current_owner} -> {db_user}')
 
-    # Fix all sequences and tables ownership to current_user (Issue #1042 + #1192)
+    # Fix all sequences and tables ownership to CURRENT_USER (Issue #1042 + #1192)
+    # Use psycopg2.sql.Identifier for safe identifier quoting (review feedback)
+    from psycopg2 import sql
     cur.execute(\"SELECT sequencename FROM pg_sequences WHERE schemaname = 'public'\")
     for seq_row in cur.fetchall():
-        cur.execute(f\"ALTER SEQUENCE {seq_row[0]} OWNER TO current_user\")
+        cur.execute(sql.SQL(\"ALTER SEQUENCE {} OWNER TO CURRENT_USER\").format(sql.Identifier(seq_row[0])))
     cur.execute(\"SELECT tablename FROM pg_tables WHERE schemaname = 'public'\")
     for tbl_row in cur.fetchall():
-        cur.execute(f\"ALTER TABLE {tbl_row[0]} OWNER TO current_user\")
+        cur.execute(sql.SQL(\"ALTER TABLE {} OWNER TO CURRENT_USER\").format(sql.Identifier(tbl_row[0])))
 
     conn.commit()
     conn.close()
