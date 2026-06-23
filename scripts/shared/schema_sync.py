@@ -478,7 +478,9 @@ def write_schema_snapshots(
     sqlite_path = target_dir / "schema-sqlite.sql"
 
     pg_path.write_text(normalize_sql_text(clean_postgres_sql), encoding="utf-8")
-    sqlite_path.write_text(convert_to_sqlite(clean_postgres_sql), encoding="utf-8")
+    sqlite_path.write_text(
+        normalize_sql_text(convert_to_sqlite(clean_postgres_sql)), encoding="utf-8"
+    )
     return pg_path, sqlite_path
 
 
