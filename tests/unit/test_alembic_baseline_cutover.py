@@ -167,18 +167,38 @@ def test_cutover_stamps_legacy_sqlite_and_backfills_latest_baseline_artifacts(tm
     assert "source" in session_columns
 
 
-def test_cutover_skips_active_revision(tmp_path):
+def test_cutover_skips_active_revision_when_schema_complete(tmp_path):
+    """A DB already on baseline with all current objects is a no-op."""
     db_path = tmp_path / "active.db"
     conn = sqlite3.connect(db_path)
     conn.executescript(
         f"""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL
+            username TEXT NOT NULL,
+            system_account TEXT,
+            auto_mapping_enabled INTEGER DEFAULT 1
         );
-        CREATE TABLE alembic_version (
-            version_num TEXT PRIMARY KEY
+        CREATE TABLE agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            cli_session_id TEXT DEFAULT ''
         );
+        CREATE TABLE session_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            role TEXT,
+            content TEXT,
+            metadata TEXT,
+            milestone_id TEXT DEFAULT '',
+            source TEXT DEFAULT '',
+            source_timestamp TIMESTAMP,
+            external_message_id TEXT DEFAULT '',
+            content_blocks TEXT
+        );
+        CREATE TABLE tool_account_mapping_rules (id INTEGER PRIMARY KEY);
+        CREATE TABLE compliance_reports (id INTEGER PRIMARY KEY);
+        CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY);
         INSERT INTO alembic_version(version_num) VALUES ('{BASELINE_REVISION}');
         """
     )
@@ -194,6 +214,65 @@ def test_cutover_skips_active_revision(tmp_path):
 
     assert changed is False
     assert actions == [f"already on active revision {BASELINE_REVISION}"]
+
+
+def test_cutover_active_revision_backfills_newly_absorbed_objects(tmp_path):
+    """A DB stamped on an earlier baseline still gets objects absorbed later,
+    since the baseline content can evolve without minting a new revision."""
+    db_path = tmp_path / "active_legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        f"""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            system_account TEXT,
+            auto_mapping_enabled INTEGER DEFAULT 1
+        );
+        CREATE TABLE agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT
+        );
+        CREATE TABLE session_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            role TEXT,
+            content TEXT,
+            metadata TEXT,
+            milestone_id TEXT DEFAULT '',
+            source TEXT DEFAULT ''
+        );
+        CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY);
+        INSERT INTO alembic_version(version_num) VALUES ('{BASELINE_REVISION}');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            changed, actions = cutover_database(connection)
+            sm_cols = {
+                row[1]
+                for row in connection.execute(
+                    sa.text("PRAGMA table_info(session_messages)")
+                ).fetchall()
+            }
+            as_cols = {
+                row[1]
+                for row in connection.execute(
+                    sa.text("PRAGMA table_info(agent_sessions)")
+                ).fetchall()
+            }
+    finally:
+        engine.dispose()
+
+    assert changed is True
+    assert any("cli_session_id" in a for a in actions)
+    assert any("transcript" in a for a in actions)
+    assert "external_message_id" in sm_cols
+    assert "cli_session_id" in as_cols
 
 
 def test_cutover_rejects_unknown_revision(tmp_path):

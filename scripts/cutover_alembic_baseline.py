@@ -389,11 +389,10 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
     actions: list[str] = []
 
     current_revision = read_current_revision(connection)
-    if current_revision in active_revisions:
-        actions.append(f"already on active revision {current_revision}")
-        return False, actions
+    on_active_revision = current_revision in active_revisions
 
-    if current_revision and current_revision not in legacy_revisions:
+    # Refuse unknown revisions unless we are already on the active baseline.
+    if current_revision and current_revision not in legacy_revisions and not on_active_revision:
         raise RuntimeError(
             f"Refusing cutover from unknown revision {current_revision!r}; "
             "inspect the database before rewriting alembic_version."
@@ -418,34 +417,51 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
             actions.append("would create tool_account_mapping_rules")
         if not table_exists(connection, "compliance_reports"):
             actions.append("would create compliance_reports")
-        actions.append(f"would stamp {BASELINE_REVISION}")
+        if not on_active_revision:
+            actions.append(f"would stamp {BASELINE_REVISION}")
         return True, actions
 
+    # Backfill objects absorbed into the baseline. This runs for both legacy
+    # cutover and DBs already stamped on an earlier baseline revision: the
+    # baseline content can evolve without minting a new revision, so being on
+    # the active revision is not proof the schema is complete.
+    changed = False
     if ensure_system_account_column(connection):
         actions.append("backfilled users.system_account")
+        changed = True
     if ensure_session_messages_source_column(connection):
         actions.append("backfilled session_messages.source")
+        changed = True
     if ensure_agent_sessions_cli_session_id(connection):
         actions.append("backfilled agent_sessions.cli_session_id")
+        changed = True
     if ensure_session_messages_transcript_columns(connection):
         actions.append("added session_messages transcript columns (#1125/#1128)")
+        changed = True
     if ensure_users_auto_mapping_enabled(connection):
         actions.append("backfilled users.auto_mapping_enabled")
+        changed = True
     if ensure_tool_account_mapping_rules_table(connection):
         actions.append("created tool_account_mapping_rules")
+        changed = True
     if ensure_compliance_reports_table(connection):
         actions.append("created compliance_reports")
+        changed = True
 
-    missing_formal = _missing_formal_tables(connection)
-    if missing_formal:
-        raise RuntimeError(
-            "Formal baseline tables are still missing after cutover preparation: "
-            + ", ".join(missing_formal)
-        )
+    if not on_active_revision:
+        missing_formal = _missing_formal_tables(connection)
+        if missing_formal:
+            raise RuntimeError(
+                "Formal baseline tables are still missing after cutover preparation: "
+                + ", ".join(missing_formal)
+            )
+        stamp_revision(connection, BASELINE_REVISION)
+        actions.append(f"stamped {BASELINE_REVISION}")
+        return True, actions
 
-    stamp_revision(connection, BASELINE_REVISION)
-    actions.append(f"stamped {BASELINE_REVISION}")
-    return True, actions
+    if not changed:
+        actions.append(f"already on active revision {current_revision}")
+    return changed, actions
 
 
 def main() -> int:
