@@ -2676,11 +2676,13 @@ class AutonomousOrchestrator:
 
         review_passed = self._review_is_approved(review_text, "代码审查通过")
 
-        # `round_num > max_rounds` (not `>=`): max_pr_review_rounds counts review
-        # rounds, and a review that finds issues must be allowed a fix round
-        # before finalizing — otherwise max_pr_review_rounds=1 finalizes on the
-        # very first review and the code review findings are silently dropped.
-        if review_passed or round_num > max_rounds:
+        # Decouple "round-1 review must be able to trigger a fix" from the total
+        # review-round cap, so max_pr_review_rounds matches its "PR 审查最大轮次"
+        # label (#1200 review). The cap is `round_num >= max_rounds AND round_num
+        # > 1`: round 1 is never the cap (a review with findings always gets a
+        # fix), but for max>=2 total reviews are capped at max — no stable +1
+        # round. max=1 -> r1 fix -> r2 report; max=2 -> r1 fix -> r2 report.
+        if review_passed or (round_num >= max_rounds and round_num > 1):
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback

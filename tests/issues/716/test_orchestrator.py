@@ -1180,9 +1180,9 @@ class TestOrchestratorPrReview:
         """max_pr_review_rounds=1 must still let a non-passing review trigger a
         fix round before reporting — otherwise the single review is pointless.
 
-        Under the `round_num > max_rounds` cap, round 1 (== max) is NOT the cap,
-        so a review that finds issues gets a fix round; the cap (→ report) only
-        fires at round 2 (#1200)."""
+        Under the decoupled cap (`round_num >= max_rounds and round_num > 1`),
+        round 1 is never the cap, so a review that finds issues gets a fix round;
+        the cap (→ report) fires at round 2 (#1200)."""
         wf = _make_workflow(
             current_phase="pr_review",
             status="pr_review",
@@ -1202,6 +1202,31 @@ class TestOrchestratorPrReview:
         assert orch._runner.run_agent_task.call_count == 2
         final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
         assert final_update.get("status") != "reporting"
+
+    def test_pr_review_max_two_caps_at_round_two(self):
+        """max_pr_review_rounds=2 caps total REVIEW rounds at 2, not 3.
+
+        A perpetually-failing review must not add a stable extra round beyond
+        the configured max. Round 2 is the cap (→ report); the old `round_num >
+        max_rounds` would have let round 2 fix and schedule a round 3 (#1200
+        review)."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=1,  # round_num = 2
+            max_pr_review_rounds=2,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.return_value = _make_agent_result(text="还有问题未解决")
+
+        orch._do_pr_review(wf)
+
+        final = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final.get("current_phase") == "report"  # capped at round 2, not 3
+        assert final.get("status") == "reporting"
 
     def test_pr_review_approved_early_moves_to_report(self):
         """An approved PR review should end early without consuming all rounds."""
