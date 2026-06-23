@@ -332,8 +332,16 @@ def handle_llm_proxy_request(
     # Allow X-Session-Id header to override token session_id for WebUI conversations
     request_session_id = request.headers.get("X-Session-Id")
     if request_session_id:
-        session_id = request_session_id
-        logger.debug("Using X-Session-Id header: %s", session_id)
+        # Validate header format: alphanumeric, hyphens, underscores, colons only
+        # Max length 100 chars to prevent abuse
+        if len(request_session_id) > 100 or not all(
+            c.isalnum() or c in "-_:" for c in request_session_id
+        ):
+            logger.warning("Invalid X-Session-Id header format, falling back to token: %s", request_session_id[:50])
+            session_id = str(token_payload["session_id"])
+        else:
+            session_id = request_session_id
+            logger.debug("Using X-Session-Id header: %s", session_id)
     else:
         session_id = str(token_payload["session_id"])
 
