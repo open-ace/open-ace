@@ -32,6 +32,8 @@ def _make_orchestrator(db_state):
     orch.repo = repo
     orch._session_lock = MagicMock()
     orch._current_session_id = None
+    orch._runner = MagicMock()
+    orch._runner.session_manager = MagicMock()
     return orch, repo
 
 
@@ -92,3 +94,22 @@ def test_resolve_session_line_review_independent_from_main():
     # review line should NOT resume (empty), even though main has a session
     sid, resume_sid, resume = orch._resolve_session_line(wf, "review")
     assert resume is False, "review line must be independent from main"
+
+
+def test_resolve_session_line_uses_claude_cli_session_mapping():
+    """Claude workflow lines keep tracking ids in the workflow row but resume
+    using the mapped sidebar/CLI session id from agent_sessions.context."""
+    db_state = {
+        "main_session_id": "wf-main-track",
+        "review_session_id": "",
+        "cli_tool": "claude-code",
+    }
+    orch, _ = _make_orchestrator(db_state)
+    orch._runner.session_manager.get_session.return_value = {
+        "context": {"cli_session_id": "claude-sidebar-real"}
+    }
+
+    sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
+
+    assert resume is True
+    assert resume_sid == "claude-sidebar-real"

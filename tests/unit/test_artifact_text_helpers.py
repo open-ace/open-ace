@@ -6,7 +6,8 @@ regression-sensitive. Coverage:
 
 - ``_sanitize_artifact_text``: leaked preamble / tool-JSON stripping, and that
   legitimate prose is NOT误删 (the key risk called out in review).
-- ``_artifact_text``: prefers ``response_text`` over ``visible_response_text``.
+- ``_artifact_text``: picks the best publishable candidate across response /
+  visible text, instead of blindly trusting the last assistant turn.
 - ``_artifact_tldr``: prefers the structured ``TL;DR:`` tag over raw slicing,
   and falls back correctly.
 - ``_artifact_status_tag``: reads structured tags with type safety.
@@ -53,17 +54,43 @@ class TestSanitizeArtifactText:
         assert result.count("Same paragraph.") == 1
         assert "Unique." in result
 
+    def test_slices_from_heading_after_process_chatter(self):
+        text = (
+            "Let me update the todo list and provide a summary.\n"
+            "## Test Summary\n\nAll tests passed.\n"
+        )
+        result = AutonomousOrchestrator._sanitize_artifact_text(text)
+        assert result.startswith("## Test Summary")
+        assert "todo list" not in result.lower()
+
+    def test_truncates_repeated_heading_block(self):
+        text = (
+            "## Test Summary\n\nPass.\n\n### Root Cause\nA\n\n" "### Root Cause\nA\n\n### Fix\nB\n"
+        )
+        result = AutonomousOrchestrator._sanitize_artifact_text(text)
+        assert result.count("### Root Cause") == 1
+
     def test_empty_and_none_safe(self):
         assert AutonomousOrchestrator._sanitize_artifact_text("") == ""
 
 
 class TestArtifactText:
-    def test_prefers_response_text_over_visible(self):
+    def test_prefers_clean_response_text_when_publishable(self):
         result = AgentTaskResult(
             response_text="Final concise plan.",
             visible_response_text="Turn 1 text.\n\nFinal concise plan.",
         )
         assert AutonomousOrchestrator._artifact_text(result) == "Final concise plan."
+
+    def test_prefers_visible_when_response_is_process_chatter(self):
+        result = AgentTaskResult(
+            response_text=(
+                "The user wants me to integrate the plan. "
+                "I'm in plan mode and should call ExitPlanMode."
+            ),
+            visible_response_text="## Final Plan\n\n1. Fix the backend filter.",
+        )
+        assert AutonomousOrchestrator._artifact_text(result).startswith("## Final Plan")
 
     def test_falls_back_to_visible_when_response_empty(self):
         result = AgentTaskResult(

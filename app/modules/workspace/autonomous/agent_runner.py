@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
@@ -260,7 +261,7 @@ def _coalesce_assistant_events(event_log: list[dict]) -> list[dict]:
 
 
 def _extract_final_response_text(event_log: list[dict], fallback_text: str = "") -> str:
-    """Return the last user-visible assistant turn from an event log."""
+    """Return the best publishable assistant turn from an event log."""
 
     assistant_turns: list[str] = [
         event.get("text", "").strip()
@@ -268,8 +269,8 @@ def _extract_final_response_text(event_log: list[dict], fallback_text: str = "")
         if event.get("type") == "assistant" and event.get("text", "").strip()
     ]
     if assistant_turns:
-        return assistant_turns[-1]
-    return fallback_text.strip()
+        return pick_best_artifact_text(*assistant_turns, fallback_text)
+    return pick_best_artifact_text(fallback_text)
 
 
 def _extract_visible_response_text(event_log: list[dict], fallback_text: str = "") -> str:
@@ -305,6 +306,7 @@ def _build_agent_task_result(
     *,
     session_id: str,
     tracking_session_id: str,
+    source_session_id: str = "",
     event_log: list[dict] | None = None,
     fallback_text: str = "",
     total_tokens: int = 0,
@@ -323,6 +325,7 @@ def _build_agent_task_result(
     return AgentTaskResult(
         session_id=session_id,
         tracking_session_id=tracking_session_id,
+        source_session_id=source_session_id,
         response_text=final_text,
         visible_response_text=visible_text,
         structured_tags=_extract_structured_response_tags(visible_text),
@@ -603,7 +606,7 @@ class AutonomousAgentRunner:
         return latest_file.stem if latest_file else ""
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:
-        """Resolve and create the single persisted sidebar session for local Claude."""
+        """Resolve the real sidebar Claude session id for a workflow-owned line."""
         if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
             return session.session_id
         if session.persisted_session_id:
@@ -635,28 +638,35 @@ class AutonomousAgentRunner:
 
         if self.session_manager:
             try:
-                self.session_manager.create_session(
-                    session_id=persisted_id,
-                    session_type="chat",
-                    title=f"claude - {persisted_id[:8]}",
-                    tool_name="claude",
-                    user_id=session.user_id,
-                    project_path=session.encoded_project_path,
-                    workspace_type=session.workspace_type,
-                    remote_machine_id=session.remote_machine_id,
-                    context={"workflow_id": session.workflow_id},
+                existing = self.session_manager.get_session(session.session_id) or {}
+                context = (
+                    dict(existing.get("context", {}) or {}) if isinstance(existing, dict) else {}
+                )
+                context.update(
+                    {
+                        "workflow_id": session.workflow_id,
+                        "cli_session_id": persisted_id,
+                    }
+                )
+                self.session_manager.update_session_fields(
+                    session.session_id,
+                    {
+                        "context": context,
+                        "status": "active",
+                    },
                 )
             except Exception as e:
-                logger.warning("Failed to create resolved sidebar session: %s", e)
+                session.persisted_session_id = ""
+                logger.warning("Failed to sync resolved Claude session mapping: %s", e)
                 return ""
-
         session.persisted_session_id = persisted_id
         if self._activity_callback:
             self._activity_callback(
-                persisted_id,
+                session.session_id,
                 {
                     "type": "session_resolved",
-                    "session_id": persisted_id,
+                    "session_id": session.session_id,
+                    "source_session_id": persisted_id,
                 },
             )
 
@@ -685,11 +695,11 @@ class AutonomousAgentRunner:
     def _sync_sidebar_session_totals(
         self, session: _LocalSession, status: str | None = None
     ) -> None:
-        """Write the current local Claude usage into the persisted sidebar session."""
+        """Write the current local Claude usage into the workflow-owned session row."""
         if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
             return
-        persisted_id = session.persisted_session_id or self._resolve_sidebar_session(session)
-        if not persisted_id or not self.session_manager:
+        cli_session_id = session.persisted_session_id or self._resolve_sidebar_session(session)
+        if not cli_session_id or not self.session_manager:
             return
 
         # NOTE: request_count / total_tokens / in-out are owned by
@@ -697,15 +707,27 @@ class AutonomousAgentRunner:
         # here. Writing them here during streaming (ASSIGN) would double-count
         # against the finish increment (#1007 review).
         updates = {
-            "project_path": session.encoded_project_path,
+            "project_path": session.project_path,
         }
         if session.user_id:
             updates["user_id"] = session.user_id
         if status:
             updates["status"] = status
+        try:
+            existing = self.session_manager.get_session(session.session_id) or {}
+            context = dict(existing.get("context", {}) or {}) if isinstance(existing, dict) else {}
+            context.update(
+                {
+                    "workflow_id": session.workflow_id,
+                    "cli_session_id": cli_session_id,
+                }
+            )
+            updates["context"] = context
+        except Exception as e:
+            logger.warning("Failed to load tracking session context: %s", e)
 
         try:
-            self.session_manager.update_session_fields(persisted_id, updates)
+            self.session_manager.update_session_fields(session.session_id, updates)
         except Exception as e:
             logger.warning("Failed to sync sidebar session totals: %s", e)
 
@@ -792,7 +814,7 @@ class AutonomousAgentRunner:
         # check passes and milestone/messages keys line up — same invariant
         # _ensure_sidebar_session gives Claude. So skip the uuid-keyed pre-create
         # here; _run_zcode_appserver creates the row under the real CLI id.
-        creates_session_late = uses_sidebar_session or cli_tool in _APPSERVER_TOOLS
+        creates_session_late = cli_tool in _APPSERVER_TOOLS
 
         # Create wrapper sessions only for tools without a deferred session id.
         if self.session_manager and not creates_session_late:
@@ -850,9 +872,7 @@ class AutonomousAgentRunner:
                     milestone_id=milestone_id,
                 )
 
-            persisted_session_id = (
-                result.session_id if uses_sidebar_session else (result.session_id or session_id)
-            )
+            persisted_session_id = result.session_id or session_id
 
             # Persist session messages to database (Issue #776 Bug 1)
             if self.session_manager and persisted_session_id and workspace_type == "local":
@@ -902,7 +922,7 @@ class AutonomousAgentRunner:
                     workspace_type,
                 )
             return AgentTaskResult(
-                session_id="" if uses_sidebar_session else session_id,
+                session_id=session_id,
                 tracking_session_id=session_id,
                 success=False,
                 error=str(e),
@@ -1132,8 +1152,9 @@ class AutonomousAgentRunner:
         )
         if self._uses_sidebar_session_source(cli_tool, workspace_type) and not resolved_session_id:
             return _build_agent_task_result(
-                session_id="",
+                session_id=session_id,
                 tracking_session_id=session_id,
+                source_session_id="",
                 event_log=session.event_log,
                 fallback_text=session.assistant_text,
                 total_tokens=session.total_tokens,
@@ -1147,8 +1168,9 @@ class AutonomousAgentRunner:
 
         if not completed:
             return _build_agent_task_result(
-                session_id=resolved_session_id,
+                session_id=session_id,
                 tracking_session_id=session_id,
+                source_session_id=resolved_session_id,
                 event_log=session.event_log,
                 fallback_text=session.assistant_text,
                 total_tokens=session.total_tokens,
@@ -1161,8 +1183,9 @@ class AutonomousAgentRunner:
             )
 
         return _build_agent_task_result(
-            session_id=resolved_session_id,
+            session_id=session_id,
             tracking_session_id=session_id,
+            source_session_id=resolved_session_id,
             event_log=session.event_log,
             fallback_text=session.assistant_text,
             total_tokens=session.total_tokens,
@@ -1756,12 +1779,17 @@ class AutonomousAgentRunner:
                         count_usage=False,
                     )
             if final_assistant:
+                assistant_content = pick_best_artifact_text(
+                    final_assistant.get("text", ""),
+                    result.response_text,
+                    result.visible_response_text,
+                )
                 self.session_manager.add_message(
                     session_id=session_id,
                     milestone_id=milestone_id,
                     source="workflow_local",
                     role="assistant",
-                    content=final_assistant.get("text", ""),
+                    content=assistant_content or final_assistant.get("text", ""),
                     model=final_assistant.get("model"),
                     metadata=(
                         {"message_id": final_assistant.get("message_id")}
@@ -1878,7 +1906,7 @@ class AutonomousAgentRunner:
                         # Emit activity for real-time frontend display
                         if self._activity_callback and text_delta:
                             self._activity_callback(
-                                session.persisted_session_id or session.session_id,
+                                session.session_id,
                                 {
                                     "type": "assistant",
                                     "text": text_delta[:500],  # truncate for SSE
@@ -1900,7 +1928,7 @@ class AutonomousAgentRunner:
                         # Emit tool call activity
                         if self._activity_callback:
                             self._activity_callback(
-                                session.persisted_session_id or session.session_id,
+                                session.session_id,
                                 {
                                     "type": "tool_use",
                                     "tool_name": tool_info.get("name", "unknown"),
@@ -1923,7 +1951,7 @@ class AutonomousAgentRunner:
                         # Emit usage activity for real-time token display
                         if self._activity_callback:
                             self._activity_callback(
-                                session.persisted_session_id or session.session_id,
+                                session.session_id,
                                 {
                                     "type": "usage",
                                     "total_tokens": session.total_tokens,

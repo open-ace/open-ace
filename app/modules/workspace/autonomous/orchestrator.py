@@ -21,6 +21,11 @@ from app.modules.workspace.autonomous.agent_runner import (
     DEFAULT_TASK_TIMEOUT,
     AutonomousAgentRunner,
 )
+from app.modules.workspace.autonomous.artifact_text import (
+    clean_agent_text,
+    pick_best_artifact_text,
+    sanitize_artifact_text,
+)
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -456,70 +461,7 @@ class AutonomousOrchestrator:
 
     @staticmethod
     def _clean_agent_text(text: str) -> str:
-        """Strip agent narration/intro/closing text, keep only structured content.
-
-        Performs three cleaning passes:
-        1. Strip everything before the first markdown heading (# Title).
-        2. Strip leading lines matching common agent intro patterns
-           (e.g. "我来为这个需求制定详细的实现方案。").
-        3. Strip trailing lines matching common agent closing patterns
-           (e.g. "下一步是否需要开始实施...").
-        """
-        if not text:
-            return text
-
-        # Pass 1: strip before first markdown heading
-        match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
-        if match:
-            text = text[match.start() :]
-
-        # Pass 2: strip leading agent intro lines, skipping headings/empty lines.
-        # Scan up to the first _INTRO_SCAN_LIMIT non-empty, non-heading lines.
-        # Only strip the FIRST contiguous intro block — once we see a heading
-        # after intro lines, stop so that legitimate sub-headings between
-        # intro lines are not deleted.
-        _INTRO_SCAN_LIMIT = 5
-        lines = text.split("\n")
-        intro_end = 0  # line index after the last contiguous intro line
-        non_heading_count = 0
-        seen_intro = False
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            is_heading = bool(re.match(r"^#{1,6}\s", stripped))
-            if is_heading:
-                if seen_intro:
-                    break  # stop — don't strip across sub-headings
-                continue  # skip initial headings before any intro
-            non_heading_count += 1
-            if non_heading_count > _INTRO_SCAN_LIMIT:
-                break  # past scan limit, stop
-            is_intro = any(p.search(stripped) for p in _AGENT_INTRO_PATTERNS)
-            if is_intro:
-                intro_end = i + 1
-                seen_intro = True
-            else:
-                break  # non-intro content found, stop
-        if intro_end > 0:
-            lines = lines[intro_end:]
-            text = "\n".join(lines)
-
-        # Pass 3: strip trailing agent closing text.
-        # Walk forward to find the first closing pattern match, then strip
-        # everything from that line to the end (including subsequent non-matching
-        # lines like numbered lists that are part of the closing block).
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped and any(p.search(stripped) for p in _AGENT_CLOSING_PATTERNS):
-                # Strip empty lines before the closing text as well
-                while i > 0 and not lines[i - 1].strip():
-                    i -= 1
-                text = "\n".join(lines[:i])
-                break
-
-        return text.strip()
+        return clean_agent_text(text)
 
     # Backward-compatible alias for existing tests (Issue #906, #910)
     @staticmethod
@@ -625,54 +567,17 @@ class AutonomousOrchestrator:
 
     @classmethod
     def _sanitize_artifact_text(cls, text: str) -> str:
-        """Drop leaked process/JSON noise and collapse repeated adjacent blocks.
-
-        The two ``re.sub`` passes below are BEST-EFFORT heuristics, not precise
-        filters: they strip lines that look like leaked agent preamble
-        ("Let me…", "I need to:") and single-line tool-call JSON. They can
-        false-positive on legitimate prose containing those prefixes. This is an
-        acceptable tradeoff for cleaning common model leakage; if precision
-        becomes important, prefer a structured boundary (e.g. agent-emitted
-        visible-output delimiters) over this regex blocklist.
-        """
-        if not text:
-            return ""
-        cleaned = cls._clean_agent_text(text)
-        # The trailing ``\b`` is intentionally only inside the ``Let me``
-        # alternative: putting it after the whole group would break the
-        # ``I need to:`` alternative (``:`` is a non-word char, so a ``\b``
-        # after it never matches when followed by whitespace/newline, leaving
-        # that preamble line un-stripped — a real dead-alternative bug).
-        cleaned = re.sub(
-            r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:).*$",
-            "",
-            cleaned,
-        )
-        cleaned = re.sub(
-            r'(?im)^\s*\{.*"(description|prompt|tool|command|subagent_type|file_path)".*\}\s*$',
-            "",
-            cleaned,
-        )
-        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned) if p.strip()]
-        deduped: list[str] = []
-        last_norm = ""
-        for paragraph in paragraphs:
-            norm = re.sub(r"\s+", " ", paragraph)
-            if norm == last_norm:
-                continue
-            deduped.append(paragraph)
-            last_norm = norm
-        return "\n\n".join(deduped).strip()
+        return sanitize_artifact_text(text)
 
     @classmethod
     def _artifact_text(cls, result: Optional[AgentTaskResult]) -> str:
         """Return the milestone/comment artifact text for a task result."""
         if not result:
             return ""
-        primary = (result.response_text or "").strip()
-        if primary:
-            return cls._sanitize_artifact_text(primary)
-        return cls._sanitize_artifact_text(cls._artifact_visible_text(result))
+        return pick_best_artifact_text(
+            (result.response_text or "").strip(),
+            cls._artifact_visible_text(result),
+        )
 
     @classmethod
     def _artifact_tldr(cls, result: Optional[AgentTaskResult]) -> str:
@@ -692,6 +597,26 @@ class AutonomousOrchestrator:
         structured = getattr(result, "structured_tags", {}) or {}
         value = structured.get(key, "")
         return value.strip() if isinstance(value, str) else ""
+
+    @staticmethod
+    def _build_dev_result_summary(
+        artifact_text: str, diff_stats: dict, commit_sha: str, success: bool
+    ) -> str:
+        """Prefer agent summary, but synthesize a concise fallback when it is noisy/empty."""
+        cleaned = artifact_text.strip()
+        if cleaned:
+            return cleaned[:300]
+
+        status = "Development completed" if success else "Development failed"
+        parts = [status]
+        if commit_sha:
+            parts.append(f"commit {commit_sha[:8]}")
+        if diff_stats:
+            parts.append(
+                f"{diff_stats.get('files', 0)} files changed "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
+            )
+        return "; ".join(parts)
 
     @staticmethod
     def _build_progress_report_tldr(
@@ -934,9 +859,10 @@ class AutonomousOrchestrator:
     def _resolve_session_line(self, wf: dict, session_line: str):
         """Resolve (tracking_session_id, resume_session_id, resume) for a line.
 
-        main/review/test: if the workflow already stores that line's real CLI
-        session id, resume it (--resume); otherwise mint a fresh tracking id
-        (first call on that line). fresh/unknown: brand-new session, no resume.
+        main/review/test: the workflow stores a stable tracking session id for
+        the line. For Claude, the actual CLI/sidebar resume id is looked up from
+        the tracking session row's context (`cli_session_id`). For other tools,
+        the tracking id itself is the resume target.
 
         Reads from the wf dict first, then falls back to a fresh DB query.
         The DB fallback is critical: _run_agent updates the session line in the
@@ -955,8 +881,27 @@ class AutonomousOrchestrator:
             fresh = self.workflow or {}
             existing = (fresh.get(field) or "").strip()
         if existing:
-            return str(uuid.uuid4()), existing, True
+            resume_target = existing
+            if (wf or {}).get("cli_tool") == "claude-code" and getattr(
+                self._runner, "session_manager", None
+            ) is not None:
+                try:
+                    session_row = self._runner.session_manager.get_session(existing) or {}
+                    context = (
+                        session_row.get("context", {}) if isinstance(session_row, dict) else {}
+                    )
+                    cli_session_id = (context.get("cli_session_id") or "").strip()
+                    if cli_session_id:
+                        resume_target = cli_session_id
+                except Exception:
+                    logger.warning("Failed to resolve Claude resume target", exc_info=True)
+            return str(uuid.uuid4()), resume_target, True
         return str(uuid.uuid4()), None, False
+
+    @staticmethod
+    def _review_is_approved(review_text: str, approval_text: str) -> bool:
+        """Whether the review text explicitly approves the artifact."""
+        return bool(review_text and approval_text in review_text)
 
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
@@ -1825,7 +1770,7 @@ class AutonomousOrchestrator:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
 
         if not needs_refinement:
             # Planning complete — finalize the plan via the main session.
@@ -2149,12 +2094,19 @@ class AutonomousOrchestrator:
                 )
                 return
 
+        dev_result_summary = self._build_dev_result_summary(
+            self._artifact_text(result),
+            diff_stats,
+            commit_sha,
+            result.success,
+        )
+
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
             {
                 "status": "completed" if result.success else "failed",
                 "session_id": result.session_id,
-                "result_summary": self._artifact_text(result)[:300],
+                "result_summary": dev_result_summary,
                 "tldr": self._artifact_tldr(result),
                 "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                 "diff_stats": json.dumps(diff_stats),
@@ -2686,7 +2638,9 @@ class AutonomousOrchestrator:
         # Check if all rounds done
         self._update_workflow({"current_round": round_num})
 
-        if round_num >= max_rounds:
+        review_passed = self._review_is_approved(review_text, "代码审查通过")
+
+        if review_passed or round_num >= max_rounds:
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback

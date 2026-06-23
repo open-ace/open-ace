@@ -1171,6 +1171,35 @@ class TestOrchestratorPrReview:
         # Agent called twice: review + fixes
         assert orch._runner.run_agent_task.call_count == 2
 
+    def test_pr_review_approved_early_moves_to_report(self):
+        """An approved PR review should end early without consuming all rounds."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=3,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.side_effect = [
+            _make_agent_result(text="代码审查通过。没有遗留问题。"),
+            _make_agent_result(text="可以合并。"),
+        ]
+
+        orch._do_pr_review(wf)
+
+        # review + summary, no fix round
+        assert orch._runner.run_agent_task.call_count == 2
+        milestone_types = [
+            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
+        ]
+        assert "pr_updated" not in milestone_types
+        final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final_update["current_phase"] == "report"
+        assert final_update["status"] == "reporting"
+
     def test_pr_review_posts_comment_to_pr(self):
         """Review result is posted as a PR comment."""
         wf = _make_workflow(

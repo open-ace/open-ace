@@ -99,7 +99,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is True
 
     def test_refinement_stops_at_max_rounds(self):
@@ -116,7 +116,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
     def test_refinement_stops_when_approved(self):
@@ -130,11 +130,11 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
-    def test_max_plan_rounds_1_allows_one_refinement(self):
-        """max_plan_rounds=1 should allow initial plan + 1 refinement round."""
+    def test_max_plan_rounds_1_allows_no_extra_refinement(self):
+        """max_plan_rounds=1 means one review round total, so no extra refinement."""
         review_text = (
             "方案存在以下问题需要修改：遗漏了错误处理，架构风险较高，"
             "需要补充测试策略，实现难度被低估，缺少回滚方案"
@@ -147,13 +147,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
-        # round 1 <= max_rounds 1 => True, so refinement runs (round 2)
-        assert needs_refinement is True
-
-        # After round 2, round_num=2 > max_rounds=1, stops
-        round_num = 2
-        needs_refinement = True and round_num <= max_rounds  # feedback assumed True
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
 
@@ -225,11 +219,11 @@ class TestPlanningIntegration:
         return base
 
     def test_substantive_review_triggers_refinement(self):
-        """When review has substantive feedback, _do_planning emits round_end
-        (not phase_change), signaling the scheduler to run another round."""
+        """When review has substantive feedback and another round remains,
+        _do_planning emits round_end for refinement."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
-        wf = self._make_workflow(max_plan_rounds=2)
+        wf = self._make_workflow(current_round=0, max_plan_rounds=2)
         orch, mock_repo = self._make_orchestrator(wf)
 
         plan_result = AgentTaskResult(
