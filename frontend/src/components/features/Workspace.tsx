@@ -34,6 +34,7 @@ import {
   useAddWorkspaceTab,
   useUpdateWorkspaceTab,
   useRemoveWorkspaceTab,
+  useReorderWorkspaceTabs,
   type WorkspaceTab as StoreWorkspaceTab,
 } from '@/store';
 import { t } from '@/i18n';
@@ -89,6 +90,8 @@ export const Workspace: React.FC = () => {
   const [isStoppingRemote, setIsStoppingRemote] = useState(false);
   const [tabWidths, setTabWidths] = useState<Record<string, number>>({});
   const [resizingTabId, setResizingTabId] = useState<string | null>(null);
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
   // Flag to track if tabs have been initialized (Issue #65)
   const [tabsInitialized, setTabsInitialized] = useState(false);
@@ -117,6 +120,7 @@ export const Workspace: React.FC = () => {
   const addStoredTab = useAddWorkspaceTab();
   const updateStoredTab = useUpdateWorkspaceTab();
   const removeStoredTab = useRemoveWorkspaceTab();
+  const reorderStoredTabs = useReorderWorkspaceTabs();
 
   // Shared terminal proxy polling helper
   const pollTerminalProxy = useCallback(
@@ -1417,6 +1421,57 @@ export const Workspace: React.FC = () => {
     [tabs]
   );
 
+  // Drag and drop handlers for tab reordering (Issue #946)
+  const handleDragStart = useCallback((tabId: string, e: React.DragEvent) => {
+    setDraggedTabId(tabId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', tabId);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (tabId: string, e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (draggedTabId && tabId !== draggedTabId) {
+        setDragOverTabId(tabId);
+      }
+    },
+    [draggedTabId]
+  );
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverTabId(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (tabId: string) => {
+      if (!draggedTabId || draggedTabId === tabId) return;
+
+      const fromIndex = tabs.findIndex((t) => t.id === draggedTabId);
+      const toIndex = tabs.findIndex((t) => t.id === tabId);
+
+      if (fromIndex !== -1 && toIndex !== -1) {
+        // Update local state
+        const newTabs = [...tabs];
+        const [removed] = newTabs.splice(fromIndex, 1);
+        newTabs.splice(toIndex, 0, removed);
+        setTabs(newTabs);
+
+        // Update store
+        reorderStoredTabs(fromIndex, toIndex);
+      }
+
+      setDraggedTabId(null);
+      setDragOverTabId(null);
+    },
+    [draggedTabId, tabs, reorderStoredTabs]
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedTabId(null);
+    setDragOverTabId(null);
+  }, []);
+
   const handleSaveRename = useCallback(async () => {
     if (!renameTabId || !renameValue.trim()) return;
 
@@ -1810,10 +1865,18 @@ export const Workspace: React.FC = () => {
                 <div
                   key={tab.id}
                   data-tab-id={tab.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(tab.id, e)}
+                  onDragOver={(e) => handleDragOver(tab.id, e)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={() => handleDrop(tab.id)}
+                  onDragEnd={handleDragEnd}
                   className={cn(
                     'workspace-tab d-flex align-items-center px-2 py-2 cursor-pointer',
                     'border-end position-relative',
-                    activeTabId === tab.id && 'active bg-white'
+                    activeTabId === tab.id && 'active bg-white',
+                    draggedTabId === tab.id && 'dragging',
+                    dragOverTabId === tab.id && 'drag-over'
                   )}
                   onClick={() => switchTab(tab.id)}
                   style={{

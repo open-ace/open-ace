@@ -96,6 +96,7 @@ interface AppState {
   updateWorkspaceTab: (tabId: string, updates: Partial<WorkspaceTab>) => void;
   removeWorkspaceTab: (tabId: string) => void;
   clearWorkspaceTabs: () => void;
+  reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => void;
 
   // Tab notification actions
   setEnableTabNotifications: (enabled: boolean) => void;
@@ -235,6 +236,13 @@ export const useAppStore = create<AppState>()(
           workspaceTabs: [],
           workspaceActiveTabId: '',
         }),
+      reorderWorkspaceTabs: (fromIndex, toIndex) =>
+        set((state) => {
+          const tabs = [...state.workspaceTabs];
+          const [removed] = tabs.splice(fromIndex, 1);
+          tabs.splice(toIndex, 0, removed);
+          return { workspaceTabs: tabs };
+        }),
 
       // Tab notification actions
       setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
@@ -307,6 +315,7 @@ export const useAddWorkspaceTab = () => useAppStore((state) => state.addWorkspac
 export const useUpdateWorkspaceTab = () => useAppStore((state) => state.updateWorkspaceTab);
 export const useRemoveWorkspaceTab = () => useAppStore((state) => state.removeWorkspaceTab);
 export const useClearWorkspaceTabs = () => useAppStore((state) => state.clearWorkspaceTabs);
+export const useReorderWorkspaceTabs = () => useAppStore((state) => state.reorderWorkspaceTabs);
 
 // Legacy selector - DEPRECATED: Use individual action selectors instead for stable references
 export const useWorkspaceTabsActions = () =>

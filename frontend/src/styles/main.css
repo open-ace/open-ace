@@ -2246,6 +2246,17 @@ table .latency-row:hover td {
   border-color: var(--color-primary);
 }
 
+/* Workspace tab drag styles (Issue #946) */
+.workspace-tab.dragging {
+  opacity: 0.5;
+  cursor: grabbing !important;
+}
+
+.workspace-tab.drag-over {
+  border-left: 2px solid var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.1);
+}
+
 /* Work Left Panel - Session List */
 .work-left-panel {
   width: 260px;
