@@ -34,6 +34,15 @@ describe('App Store', () => {
       theme: 'light',
       language: 'en',
       sidebarCollapsed: false,
+      workspaceTabs: [],
+      workspaceActiveTabId: '',
+      reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => {
+        const state = useAppStore.getState();
+        const tabs = [...state.workspaceTabs];
+        const [removed] = tabs.splice(fromIndex, 1);
+        tabs.splice(toIndex, 0, removed);
+        useAppStore.setState({ workspaceTabs: tabs });
+      },
     });
     vi.clearAllMocks();
   });
@@ -245,6 +254,45 @@ describe('App Store', () => {
       });
 
       expect(result.current).toBe(true);
+    });
+  });
+
+  describe('workspace tabs actions', () => {
+    it('should reorder workspace tabs', () => {
+      // Set up initial tabs
+      const tabs = [
+        { id: 'tab-1', title: 'Tab 1', sessionId: 'session-1' },
+        { id: 'tab-2', title: 'Tab 2', sessionId: 'session-2' },
+        { id: 'tab-3', title: 'Tab 3', sessionId: 'session-3' },
+      ];
+
+      act(() => {
+        useAppStore.getState().setWorkspaceTabs(tabs as any);
+      });
+
+      expect(useAppStore.getState().workspaceTabs).toHaveLength(3);
+      expect(useAppStore.getState().workspaceTabs[0].id).toBe('tab-1');
+
+      // Reorder: move tab-1 to position 2
+      act(() => {
+        useAppStore.getState().reorderWorkspaceTabs(0, 2);
+      });
+
+      const reorderedTabs = useAppStore.getState().workspaceTabs;
+      expect(reorderedTabs).toHaveLength(3);
+      expect(reorderedTabs[0].id).toBe('tab-2');
+      expect(reorderedTabs[1].id).toBe('tab-3');
+      expect(reorderedTabs[2].id).toBe('tab-1');
+
+      // Reorder back: move tab-1 from position 2 to position 0
+      act(() => {
+        useAppStore.getState().reorderWorkspaceTabs(2, 0);
+      });
+
+      const restoredTabs = useAppStore.getState().workspaceTabs;
+      expect(restoredTabs[0].id).toBe('tab-1');
+      expect(restoredTabs[1].id).toBe('tab-2');
+      expect(restoredTabs[2].id).toBe('tab-3');
     });
   });
 });

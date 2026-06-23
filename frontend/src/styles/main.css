@@ -13,6 +13,7 @@
   /* ===== Color Palette - Modern Tech Theme ===== */
   /* Primary - Deep Ocean Blue */
   --color-primary: #0ea5e9;
+  --color-primary-rgb: 14, 165, 233;
   --color-primary-hover: #0284c7;
   --color-primary-light: #e0f2fe;
   --color-primary-dark: #0c4a6e;
@@ -226,6 +227,7 @@
   --border-color-dark: #475569;
 
   --color-primary: #38bdf8;
+  --color-primary-rgb: 56, 189, 248;
   --color-primary-hover: #0ea5e9;
   --color-primary-light: rgba(14, 165, 233, 0.1);
 
