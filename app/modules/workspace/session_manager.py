@@ -1428,6 +1428,9 @@ def get_ddl_statements() -> list[str]:
             metadata TEXT,
             milestone_id TEXT DEFAULT '',
             source TEXT DEFAULT '',
+            source_timestamp TIMESTAMP,
+            external_message_id TEXT DEFAULT '',
+            content_blocks TEXT,
             FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
         )
         """,
@@ -1456,6 +1459,17 @@ def get_ddl_statements() -> list[str]:
         "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0",
         "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP",
         "ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''",
+        "ALTER TABLE session_messages ADD COLUMN source_timestamp TIMESTAMP",
+        "ALTER TABLE session_messages ADD COLUMN external_message_id TEXT DEFAULT ''",
+        "ALTER TABLE session_messages ADD COLUMN content_blocks TEXT",
+        """
+        CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id
+        ON session_messages(session_id, external_message_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_session_messages_source
+        ON session_messages(session_id, source)
+        """,
     ]
 
 

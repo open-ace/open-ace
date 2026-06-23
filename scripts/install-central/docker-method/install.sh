@@ -2540,8 +2540,7 @@ upgrade_deployment() {
     fi
 
     # 5.6. Check alembic_version table before recreating container (Issue #1192)
-    # This detects legacy databases that were initialized with schema.sql but
-    # alembic stamp failed silently. We need to fix this after container restart.
+    # This detects older databases that still need the baseline cutover path.
     print_info "检查数据库 migration 状态..."
     local alembic_exists=""
     alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
@@ -2552,7 +2551,7 @@ upgrade_deployment() {
         export ALEMBIC_VERSION_EXISTS="yes"
     else
         print_warning "alembic_version 表不存在"
-        print_info "数据库可能是旧版本升级，需要在容器重启后执行 alembic stamp head"
+        print_info "数据库可能是旧版本升级，需要在容器重启后执行 baseline cutover 和 Alembic upgrade"
         export ALEMBIC_VERSION_EXISTS="no"
     fi
 
@@ -2586,10 +2585,11 @@ upgrade_deployment() {
     fi
 
     # 7. Fix alembic_version if missing (Issue #1192)
-    # For legacy databases initialized with schema.sql, alembic stamp may have failed.
-    # The docker-entrypoint.sh handles this automatically, but we verify here.
+    # For legacy databases, docker-entrypoint.sh now runs the baseline cutover
+    # helper before Alembic upgrade. We verify that the migration metadata
+    # exists after container restart and offer a manual recovery path if needed.
     if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
-        print_info "验证 alembic stamp 是否已由 entrypoint 自动修复..."
+        print_info "验证 baseline cutover 是否已由 entrypoint 自动处理..."
         local alembic_fixed=""
         alembic_fixed=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
             "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
@@ -2598,9 +2598,10 @@ upgrade_deployment() {
             print_success "alembic_version 表已自动创建"
         else
             print_warning "alembic_version 表仍然缺失，尝试手动修复..."
-            docker compose exec -T open-ace alembic stamp head 2>&1 || {
-                print_error "alembic stamp head 失败，请检查日志"
-                print_info "可能需要手动执行: docker compose exec open-ace alembic stamp head"
+            docker compose exec -T open-ace sh -c \
+                "python3 scripts/cutover_alembic_baseline.py && alembic upgrade head" 2>&1 || {
+                print_error "baseline cutover / alembic upgrade 失败，请检查日志"
+                print_info "可能需要手动执行: docker compose exec open-ace sh -c 'python3 scripts/cutover_alembic_baseline.py && alembic upgrade head'"
             }
         fi
     fi

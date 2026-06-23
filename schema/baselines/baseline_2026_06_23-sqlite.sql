@@ -1048,10 +1048,8 @@ CREATE INDEX idx_remote_machines_status ON remote_machines (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 
-CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
-
 CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
-
+CREATE INDEX idx_session_messages_external_message_id ON session_messages (session_id, external_message_id);
 CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);

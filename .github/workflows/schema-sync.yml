@@ -1,0 +1,80 @@
+name: Schema Sync
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/schema-sync.yml'
+      - 'migrations/env.py'
+      - 'migrations/baseline.py'
+      - 'migrations/version_table.py'
+      - 'migrations/versions/**'
+      - 'schema/baselines/**'
+      - 'schema/schema-postgres.sql'
+      - 'schema/schema-sqlite.sql'
+      - 'scripts/check_schema_sync.py'
+      - 'scripts/rebuild_schema_snapshots.py'
+      - 'scripts/generate_schema.py'
+      - 'scripts/validate_schema.py'
+      - 'scripts/shared/schema_sync.py'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '.github/workflows/schema-sync.yml'
+      - 'migrations/env.py'
+      - 'migrations/baseline.py'
+      - 'migrations/version_table.py'
+      - 'migrations/versions/**'
+      - 'schema/baselines/**'
+      - 'schema/schema-postgres.sql'
+      - 'schema/schema-sqlite.sql'
+      - 'scripts/check_schema_sync.py'
+      - 'scripts/rebuild_schema_snapshots.py'
+      - 'scripts/generate_schema.py'
+      - 'scripts/validate_schema.py'
+      - 'scripts/shared/schema_sync.py'
+
+jobs:
+  schema-sync:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ace
+          POSTGRES_PASSWORD: ace
+          POSTGRES_DB: ace_schema_sync
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ace -d ace_schema_sync"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Rebuild and validate schema snapshots
+        env:
+          SCHEMA_SYNC_DATABASE_URL: postgresql://ace:ace@127.0.0.1:5432/ace_schema_sync
+        run: |
+          python scripts/rebuild_schema_snapshots.py --postgres-url "$SCHEMA_SYNC_DATABASE_URL"
+          python scripts/check_schema_sync.py --postgres-url "$SCHEMA_SYNC_DATABASE_URL"
+          python scripts/validate_schema.py
+          git diff --exit-code -- schema/schema-postgres.sql schema/schema-sqlite.sql
