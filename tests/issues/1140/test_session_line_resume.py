@@ -32,6 +32,8 @@ def _make_orchestrator(db_state):
     orch.repo = repo
     orch._session_lock = MagicMock()
     orch._current_session_id = None
+    orch._runner = MagicMock()
+    orch._runner.session_manager = MagicMock()
     return orch, repo
 
 
@@ -92,3 +94,59 @@ def test_resolve_session_line_review_independent_from_main():
     # review line should NOT resume (empty), even though main has a session
     sid, resume_sid, resume = orch._resolve_session_line(wf, "review")
     assert resume is False, "review line must be independent from main"
+
+
+def test_resolve_session_line_uses_claude_cli_session_mapping():
+    """Claude workflow lines keep tracking ids in the workflow row but resume
+    using the mapped sidebar/CLI session id from agent_sessions.context."""
+    db_state = {
+        "main_session_id": "wf-main-track",
+        "review_session_id": "",
+        "cli_tool": "claude-code",
+    }
+    orch, _ = _make_orchestrator(db_state)
+    orch._runner.session_manager.get_session.return_value = {
+        "context": {"cli_session_id": "claude-sidebar-real"}
+    }
+
+    sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
+
+    assert resume is True
+    assert resume_sid == "claude-sidebar-real"
+
+
+def test_resolve_session_line_reads_authoritative_cli_session_column():
+    """The resume target is the authoritative ``cli_session_id`` column on the
+    AgentSession row (promoted out of context JSON in #1200)."""
+    from app.modules.workspace.session_manager import AgentSession
+
+    db_state = {"main_session_id": "wf-main-track", "cli_tool": "claude-code"}
+    orch, _ = _make_orchestrator(db_state)
+    orch._runner.session_manager.get_session.return_value = AgentSession(
+        session_id="wf-main-track", cli_session_id="claude-real-999"
+    )
+
+    _, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
+    assert resume is True
+    assert resume_sid == "claude-real-999"
+
+
+def test_resolve_session_line_missing_mapping_starts_fresh_not_fake():
+    """A Claude line whose cli_session_id mapping is lost must NOT disguise the
+    tracking id as a resume target. Return resume=False so ``_run_local``
+    re-probes the real CLI id and rebinds it to this same line — strict
+    3-session topology, no fake resume, no 4th session (#1200)."""
+    from app.modules.workspace.session_manager import AgentSession
+
+    db_state = {"main_session_id": "wf-main-track", "cli_tool": "claude-code"}
+    orch, _ = _make_orchestrator(db_state)
+    # Row exists but the mapping column is empty (partial write / old data).
+    orch._runner.session_manager.get_session.return_value = AgentSession(
+        session_id="wf-main-track", cli_session_id=""
+    )
+
+    sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
+    assert resume is False
+    assert resume_sid is None
+    # A fresh tracking id is minted; the stale tracking id is never used to resume.
+    assert sid != "wf-main-track"

@@ -42,7 +42,8 @@ CREATE TABLE agent_sessions (
     request_count integer,
     workspace_type text DEFAULT 'local'::text,
     remote_machine_id text,
-    paused_at timestamp without time zone
+    paused_at timestamp without time zone,
+    cli_session_id text DEFAULT ''
 );
 
 CREATE SEQUENCE agent_sessions_id_seq

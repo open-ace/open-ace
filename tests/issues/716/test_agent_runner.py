@@ -215,8 +215,8 @@ class TestAgentRunnerRunTask:
 
         self.sm.create_session.assert_called_once()
 
-    def test_local_claude_uses_single_sidebar_session(self):
-        """Local Claude should persist only the resolved sidebar session."""
+    def test_local_claude_keeps_tracking_session_and_stores_cli_session_mapping(self):
+        """Local Claude should keep a workflow tracking session id and store the CLI resume id."""
         mock_adapter = MagicMock()
         mock_adapter.get_executable_name.return_value = "claude"
         mock_adapter.build_start_args.return_value = ["claude", "--model", "m1"]
@@ -280,28 +280,31 @@ class TestAgentRunnerRunTask:
             )
 
         assert result.success is True
-        assert result.session_id == "real-claude-session"
-        assert result.tracking_session_id
+        assert result.session_id == result.tracking_session_id
+        assert result.session_id
+        assert result.source_session_id == "real-claude-session"
 
         create_calls = self.sm.create_session.call_args_list
         assert len(create_calls) == 1
-        assert create_calls[0].kwargs["session_id"] == "real-claude-session"
-        assert create_calls[0].kwargs["tool_name"] == "claude"
-        assert create_calls[0].kwargs["title"] == "claude - real-cla"
-        # realpath-resolved: /tmp is a symlink to /private/tmp on macOS
-        assert create_calls[0].kwargs["project_path"] == os.path.realpath("/tmp/test").replace(
-            "/", "-"
-        )
+        assert create_calls[0].kwargs["session_id"] == result.session_id
+        assert create_calls[0].kwargs["tool_name"] == "claude-code"
         assert create_calls[0].kwargs["user_id"] == 42
 
         persisted_updates = [
             call.args[0] for call in self.sm.update_session_fields.call_args_list if call.args
         ]
-        assert "real-claude-session" in persisted_updates
-        assert "" not in persisted_updates
+        assert result.session_id in persisted_updates
+        context_updates = [
+            call.args[1].get("context")
+            for call in self.sm.update_session_fields.call_args_list
+            if len(call.args) >= 2 and isinstance(call.args[1], dict) and "context" in call.args[1]
+        ]
+        assert any(
+            (ctx or {}).get("cli_session_id") == "real-claude-session" for ctx in context_updates
+        )
 
     def test_local_claude_waits_for_late_session_detection(self):
-        """Late JSONL detection after process completion should still resolve the real session."""
+        """Late JSONL detection after process completion should still resolve the real CLI session."""
         mock_adapter = MagicMock()
         mock_adapter.get_executable_name.return_value = "claude"
         mock_adapter.build_start_args.return_value = ["claude", "--model", "m1"]
@@ -357,22 +360,13 @@ class TestAgentRunnerRunTask:
             )
 
         assert result.success is True
-        assert result.session_id == "late-claude-session"
-        self.sm.create_session.assert_called_with(
-            session_id="late-claude-session",
-            session_type="chat",
-            title="claude - late-cla",
-            tool_name="claude",
-            user_id=42,
-            project_path=os.path.realpath("/tmp/test").replace("/", "-"),
-            workspace_type="local",
-            remote_machine_id=None,
-            context={"workflow_id": "wf-1"},
-        )
+        assert result.source_session_id == "late-claude-session"
+        self.sm.create_session.assert_called_once()
+        assert self.sm.create_session.call_args.kwargs["session_id"] == result.session_id
 
-    def test_sidebar_session_not_marked_resolved_when_create_fails(self):
-        """A failed DB create should not leave a ghost persisted session id."""
-        self.sm.create_session.side_effect = RuntimeError("db down")
+    def test_sidebar_session_not_marked_resolved_when_context_sync_fails(self):
+        """A failed tracking-session sync should not leave a ghost persisted session id."""
+        self.sm.update_session_fields.side_effect = RuntimeError("db down")
         session = _LocalSession(
             session_id="tracking-1",
             process=MagicMock(),
@@ -392,7 +386,7 @@ class TestAgentRunnerRunTask:
 
         assert resolved == ""
         assert session.persisted_session_id == ""
-        self.sm.update_session_fields.assert_not_called()
+        self.sm.update_session_fields.assert_called()
 
 
 class TestLocalSession:

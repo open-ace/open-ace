@@ -1131,11 +1131,16 @@ class TestOrchestratorPrReview:
         assert "Closes #42" in pr_call[1]["body"]
 
     def test_pr_review_max_rounds_moves_to_report(self):
-        """When max rounds reached, workflow moves to report phase."""
+        """When the round count exceeds max, the workflow moves to report.
+
+        Under the `round_num > max_rounds` cap, max_pr_review_rounds=1 still
+        allows the first review a fix round; the cap (→ report) triggers once
+        round_num exceeds max. Enter at round 2 (current_round=1) so the cap
+        fires even though the review did not approve."""
         wf = _make_workflow(
             current_phase="pr_review",
             status="pr_review",
-            current_round=0,
+            current_round=1,
             max_pr_review_rounds=1,
         )
         orch, mock_repo = self._make_orchestrator(wf)
@@ -1170,6 +1175,124 @@ class TestOrchestratorPrReview:
 
         # Agent called twice: review + fixes
         assert orch._runner.run_agent_task.call_count == 2
+
+    def test_pr_review_max_one_still_allows_fix_round(self):
+        """max_pr_review_rounds=1 must still let a non-passing review trigger a
+        fix before reporting — otherwise the single review is pointless.
+
+        Under the symmetric cap, the cap round fixes too, then summarizes: so
+        max=1 -> review -> fix (pr_updated) -> pr_review_summary -> report,
+        with exactly 1 pr_reviewed round (#1200)."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=1,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.return_value = _make_agent_result(text="代码有问题需要修改")
+        orch._gh.get_current_commit.return_value = "fix1234"
+
+        orch._do_pr_review(wf)
+
+        # review + fix + summary (3 agent calls); the fix ran, then it reported.
+        assert orch._runner.run_agent_task.call_count == 3
+        milestone_types = [
+            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
+        ]
+        assert "pr_updated" in milestone_types  # the fix ran on the cap round
+        assert milestone_types.count("pr_reviewed") == 1  # exactly 1 review round
+        final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final_update.get("status") == "reporting"
+
+    def test_pr_review_max_two_caps_at_round_two(self):
+        """max_pr_review_rounds=2 caps total REVIEW rounds at 2, not 3.
+
+        A perpetually-failing review must not add a stable extra round beyond
+        the configured max. Round 2 is the cap (→ report); the old `round_num >
+        max_rounds` would have let round 2 fix and schedule a round 3 (#1200
+        review)."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=1,  # round_num = 2
+            max_pr_review_rounds=2,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.return_value = _make_agent_result(text="还有问题未解决")
+
+        orch._do_pr_review(wf)
+
+        final = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final.get("current_phase") == "report"  # capped at round 2, not 3
+        assert final.get("status") == "reporting"
+
+    def test_pr_review_max_two_full_flow_two_reviews_two_fixes(self):
+        """max_pr_review_rounds=2, reviewer never passes: exactly 2 pr_reviewed
+        rounds, EACH followed by a pr_updated fix (incl. round 2), then one
+        pr_review_summary — no 3rd review round. This is the symmetric spec:
+        review(N) -> pr_updated(N) -> summary (#1200)."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=2,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.create_pr.return_value = {"number": 99, "url": "u"}
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.return_value = _make_agent_result(text="还有问题未解决")
+        orch._gh.get_current_commit.return_value = "c1"
+
+        orch._do_pr_review(wf)  # round 1: review + fix, continue
+        wf["current_round"] = 1  # scheduler advanced to round 2
+        orch._do_pr_review(wf)  # round 2: review + fix + summary -> report
+
+        milestone_types = [
+            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
+        ]
+        assert milestone_types.count("pr_reviewed") == 2
+        assert milestone_types.count("pr_updated") == 2  # round 2's review is fixed too
+        assert milestone_types.count("pr_review_summary") == 1
+        final = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final.get("current_phase") == "report"
+
+    def test_pr_review_approved_early_moves_to_report(self):
+        """An approved PR review should end early without consuming all rounds."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=3,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.side_effect = [
+            _make_agent_result(text="代码审查通过。没有遗留问题。"),
+            _make_agent_result(text="可以合并。"),
+        ]
+
+        orch._do_pr_review(wf)
+
+        # review + summary, no fix round
+        assert orch._runner.run_agent_task.call_count == 2
+        milestone_types = [
+            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
+        ]
+        assert "pr_updated" not in milestone_types
+        final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final_update["current_phase"] == "report"
+        assert final_update["status"] == "reporting"
 
     def test_pr_review_posts_comment_to_pr(self):
         """Review result is posted as a PR comment."""

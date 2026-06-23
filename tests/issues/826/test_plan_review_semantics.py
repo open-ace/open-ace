@@ -99,7 +99,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is True
 
     def test_refinement_stops_at_max_rounds(self):
@@ -116,7 +116,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
     def test_refinement_stops_when_approved(self):
@@ -130,11 +130,14 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
-    def test_max_plan_rounds_1_allows_one_refinement(self):
-        """max_plan_rounds=1 should allow initial plan + 1 refinement round."""
+    def test_max_plan_rounds_1_finalizes_at_round_one(self):
+        """max_plan_rounds=1 runs exactly 1 review round; the loop does NOT
+        continue (round 1 is NOT < max 1). The single review's feedback is
+        acted on by the finalize-time plan_refined, not by an extra loop round.
+        round 1 < max_rounds 1 => False, so needs_refinement is False."""
         review_text = (
             "方案存在以下问题需要修改：遗漏了错误处理，架构风险较高，"
             "需要补充测试策略，实现难度被低估，缺少回滚方案"
@@ -147,13 +150,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num <= max_rounds
-        # round 1 <= max_rounds 1 => True, so refinement runs (round 2)
-        assert needs_refinement is True
-
-        # After round 2, round_num=2 > max_rounds=1, stops
-        round_num = 2
-        needs_refinement = True and round_num <= max_rounds  # feedback assumed True
+        needs_refinement = review_has_feedback and round_num < max_rounds
         assert needs_refinement is False
 
 
@@ -225,11 +222,11 @@ class TestPlanningIntegration:
         return base
 
     def test_substantive_review_triggers_refinement(self):
-        """When review has substantive feedback, _do_planning emits round_end
-        (not phase_change), signaling the scheduler to run another round."""
+        """When review has substantive feedback and another round remains,
+        _do_planning emits round_end for refinement."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
-        wf = self._make_workflow(max_plan_rounds=2)
+        wf = self._make_workflow(current_round=0, max_plan_rounds=2)
         orch, mock_repo = self._make_orchestrator(wf)
 
         plan_result = AgentTaskResult(
@@ -319,3 +316,50 @@ class TestPlanningIntegration:
             if c[0][1].get("status") == "developing"
         ]
         assert len(status_updates) >= 1
+
+    def test_plan_review_final_refine_failure_blocks_development(self):
+        """If the final plan_refined (that acts on the Nth review's feedback)
+        fails, planning must NOT silently proceed to development with the old
+        plan — it blocks (failed) for retry, so the last review is not dropped
+        quietly (#1200 review)."""
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        wf = self._make_workflow(max_plan_rounds=2)  # current_round=1 -> round 2
+        orch, mock_repo = self._make_orchestrator(wf)
+        # Finalize gathers the latest plan + review from milestones.
+        mock_repo.list_milestones.return_value = [
+            {"milestone_type": "plan_created", "plan_content": "# Plan\nStep 1"},
+            {"milestone_type": "plan_reviewed", "review_content": "需要补充错误处理和测试策略"},
+        ]
+
+        plan_result = AgentTaskResult(session_id="s", response_text="# Plan refined", success=True)
+        review_result = AgentTaskResult(
+            session_id="s",
+            response_text=(
+                "方案存在以下问题需要修改：1. 遗漏了错误处理 2. 架构风险较高 "
+                "3. 需要补充测试策略 4. 缺少回滚方案"
+            ),
+            success=True,
+        )
+        refine_result = AgentTaskResult(
+            session_id="s", response_text="", success=False, error="model error"
+        )
+        orch._runner.run_agent_task.side_effect = [plan_result, review_result, refine_result]
+
+        orch._do_planning(wf)
+
+        # Blocked: status failed (not developing), no plan_finalized, no dev move.
+        status_updates = [
+            c[0][1] for c in mock_repo.update_workflow.call_args_list if "status" in c[0][1]
+        ]
+        assert any(u.get("status") == "failed" for u in status_updates)
+        assert not any(u.get("status") == "developing" for u in status_updates)
+        milestone_types = [
+            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
+        ]
+        assert "plan_finalized" not in milestone_types
+        assert not any(
+            c[0][2].get("phase") == "development"
+            for c in orch.emitter.emit.call_args_list
+            if c[0][1] == "phase_change"
+        )
