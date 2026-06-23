@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Open ACE - Project Routes
 
@@ -7,6 +9,7 @@ API routes for project management operations.
 import logging
 import os
 import platform
+import pwd
 import subprocess
 
 from flask import Blueprint, g, jsonify, request
@@ -52,6 +55,24 @@ def _authenticate_user():
                     return None
 
     return jsonify({"error": "Authentication required"}), 401
+
+
+def get_effective_system_account(system_account: str | None) -> str | None:
+    """Check if current user is already the target user.
+
+    When NoNewPrivileges=true is set in systemd, sudo is blocked.
+    If the process is already running as the target user, we can skip sudo.
+
+    Returns None if current user matches target user, otherwise returns system_account.
+    """
+    if not system_account:
+        return None
+
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    if current_user == system_account:
+        return None
+
+    return system_account
 
 
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
@@ -127,14 +148,15 @@ def api_create_project():
     dir_created = False
     if create_dir:
         try:
-            if system_account:
+            effective_system_account = get_effective_system_account(system_account)
+            if effective_system_account:
                 # Use sudo to check and create directory as the user
-                result = run_as_user(system_account, ["test", "-e", path])
+                result = run_as_user(effective_system_account, ["test", "-e", path])
                 path_exists = result.returncode == 0
 
                 if not path_exists:
                     # Create directory using sudo mkdir -p
-                    result = run_as_user(system_account, ["mkdir", "-p", path])
+                    result = run_as_user(effective_system_account, ["mkdir", "-p", path])
                     if result.returncode != 0:
                         logger.error(
                             f"Failed to create directory as {system_account}: {result.stderr}"
@@ -149,11 +171,11 @@ def api_create_project():
                     logger.info(f"Created project directory as {system_account}: {path}")
                 else:
                     # Check if it's a directory
-                    result = run_as_user(system_account, ["test", "-d", path])
+                    result = run_as_user(effective_system_account, ["test", "-d", path])
                     if result.returncode != 0:
                         return jsonify({"error": "Path exists but is not a directory"}), 400
             else:
-                # Fallback to process user's permissions (for admin or no system_account)
+                # Already running as target user or no system_account, use direct permissions
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
                     dir_created = True

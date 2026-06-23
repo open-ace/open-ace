@@ -10,6 +10,7 @@ Used by project selector UI to browse directories.
 import logging
 import os
 import platform
+import pwd
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,24 @@ def _authenticate_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
+def get_effective_system_account(system_account: str | None) -> str | None:
+    """Check if current user is already the target user.
+
+    When NoNewPrivileges=true is set in systemd, sudo is blocked.
+    If the process is already running as the target user, we can skip sudo.
+
+    Returns None if current user matches target user, otherwise returns system_account.
+    """
+    if not system_account:
+        return None
+
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    if current_user == system_account:
+        return None
+
+    return system_account
+
+
 def run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
     """Run a command as a specific user using sudo."""
     sudo_cmd = ["sudo", "-u", system_account] + command
@@ -149,12 +168,18 @@ def get_home_directory(user=None):
     base_dir = get_workspace_base_dir()
     if user:
         system_account = user.get("system_account") or user.get("username")
-        if system_account:
+        effective_system_account = get_effective_system_account(system_account)
+        if effective_system_account:
             # Return the system account's workspace directory
             user_home = f"{base_dir}/{system_account}"
             # Use sudo to check if directory exists
-            result = run_as_user(system_account, ["test", "-e", user_home])
+            result = run_as_user(effective_system_account, ["test", "-e", user_home])
             if result.returncode == 0:
+                return user_home
+        elif system_account:
+            # Already running as target user, check directly
+            user_home = f"{base_dir}/{system_account}"
+            if os.path.exists(user_home):
                 return user_home
     # Fallback to process user's home
     return str(Path.home())
@@ -214,10 +239,14 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
 def get_directory_info(path: str, system_account: str | None = None):
     """Get information about a directory, optionally as a specific user."""
     try:
-        if system_account:
+        # Check if current process user is already the target user
+        # This avoids sudo failures when NoNewPrivileges=true is set
+        effective_system_account = get_effective_system_account(system_account)
+
+        if effective_system_account:
             # Use sudo to check permissions as the specified user
             # Check if directory exists
-            result = run_as_user(system_account, ["test", "-e", path])
+            result = run_as_user(effective_system_account, ["test", "-e", path])
             if result.returncode != 0:
                 return {
                     "exists": False,
@@ -227,7 +256,7 @@ def get_directory_info(path: str, system_account: str | None = None):
                 }
 
             # Check if it's a directory
-            result = run_as_user(system_account, ["test", "-d", path])
+            result = run_as_user(effective_system_account, ["test", "-d", path])
             is_dir = result.returncode == 0
 
             if not is_dir:
@@ -239,11 +268,11 @@ def get_directory_info(path: str, system_account: str | None = None):
                 }
 
             # Check if readable
-            result = run_as_user(system_account, ["test", "-r", path])
+            result = run_as_user(effective_system_account, ["test", "-r", path])
             is_readable = result.returncode == 0
 
             # Check if writable
-            result = run_as_user(system_account, ["test", "-w", path])
+            result = run_as_user(effective_system_account, ["test", "-w", path])
             is_writable = result.returncode == 0
 
             return {
@@ -254,7 +283,7 @@ def get_directory_info(path: str, system_account: str | None = None):
                 "size": 0,
             }
         else:
-            # Fallback to process user's permissions
+            # Direct permission checks (process user or already target user)
             stat = os.stat(path)
             return {
                 "exists": True,
@@ -345,10 +374,14 @@ def list_subdirectories(path: str, system_account: str | None = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
     directories: list[dict[str, Any]] = []
 
+    # Check if current process user is already the target user
+    # This avoids sudo failures when NoNewPrivileges=true is set
+    effective_system_account = get_effective_system_account(system_account)
+
     try:
-        if system_account:
+        if effective_system_account:
             # Use sudo to list directory as the specified user
-            result = run_as_user(system_account, ["ls", "-1", path])
+            result = run_as_user(effective_system_account, ["ls", "-1", path])
             if result.returncode != 0:
                 logger.warning(f"Permission denied accessing {path} as {system_account}")
                 return directories
@@ -363,13 +396,13 @@ def list_subdirectories(path: str, system_account: str | None = None) -> list:
                     continue
 
                 # Check if it's a directory
-                dir_result = run_as_user(system_account, ["test", "-d", full_path])
+                dir_result = run_as_user(effective_system_account, ["test", "-d", full_path])
                 if dir_result.returncode != 0:
                     continue
 
                 # Check permissions
-                readable_result = run_as_user(system_account, ["test", "-r", full_path])
-                writable_result = run_as_user(system_account, ["test", "-w", full_path])
+                readable_result = run_as_user(effective_system_account, ["test", "-r", full_path])
+                writable_result = run_as_user(effective_system_account, ["test", "-w", full_path])
 
                 directories.append(
                     {
@@ -582,9 +615,10 @@ def api_create_directory():
 
     # Create the directory
     try:
-        if system_account:
+        effective_system_account = get_effective_system_account(system_account)
+        if effective_system_account:
             # Use sudo to create directory as the specified user
-            result = run_as_user(system_account, ["mkdir", "-p", dir_path])
+            result = run_as_user(effective_system_account, ["mkdir", "-p", dir_path])
             if result.returncode != 0:
                 logger.error(f"Failed to create directory as {system_account}: {result.stderr}")
                 return (
@@ -595,7 +629,7 @@ def api_create_directory():
                 )
             logger.info(f"Created directory as {system_account}: {dir_path}")
         else:
-            # Fallback to process user's permissions
+            # Already running as target user or no system_account, use direct permissions
             os.makedirs(dir_path, exist_ok=True)
             logger.info(f"Created directory: {dir_path}")
 
