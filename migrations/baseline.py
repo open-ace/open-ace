@@ -32,7 +32,13 @@ def read_baseline_schema(dialect_name: str) -> str:
 
 
 def iter_sql_statements(sql_text: str) -> list[str]:
-    """Split a SQL script into executable statements."""
+    """Split a SQL script into executable statements.
+
+    This helper is intentionally limited to the current baseline snapshots,
+    which only contain plain DDL/DML statements terminated by line-ending
+    semicolons. It is not safe for PostgreSQL function bodies, dollar-quoted
+    strings, or trigger definitions that may embed semicolons internally.
+    """
     statements: list[str] = []
     buffer: list[str] = []
 
@@ -103,7 +109,12 @@ def version_table_exists(connection: Connection) -> bool:
 
 
 def read_current_revision(connection: Connection) -> str | None:
-    """Read the current Alembic revision directly from the database."""
+    """Read the current Alembic revision directly from the database.
+
+    The baseline lineage is intentionally single-head. We read one ordered row
+    here so legacy databases with a single alembic_version entry remain cheap
+    to inspect during cutover.
+    """
     if not version_table_exists(connection):
         return None
 

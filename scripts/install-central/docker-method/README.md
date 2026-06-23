@@ -34,6 +34,22 @@ docker compose up -d --build
 
 无需手动执行 SQL 或迁移命令。
 
+### 旧库升级行为说明
+
+对基线前的历史数据库，`docker-entrypoint.sh` 现在优先选择“安全失败”而不是继续沿用旧的自动缺表修复逻辑：
+
+- 如果数据库仅缺少 `compliance_reports`、`tool_account_mapping_rules` 或相关补齐列，`scripts/cutover_alembic_baseline.py` 会自动补齐并切到 `baseline_2026_06_23`
+- 如果还缺少更多正式产品表，cutover 会直接失败并阻止容器继续启动，避免在不完整 schema 上继续运行
+
+遇到这类失败时，建议先进入容器或应用目录执行：
+
+```bash
+python3 scripts/cutover_alembic_baseline.py
+python3 -m alembic upgrade head
+```
+
+若 cutover 仍报 “Formal baseline tables are still missing”，说明该数据库已经偏离受支持的历史迁移路径，需要先人工核查缺失表和历史 revision，再决定是补齐 schema 还是从已知健康备份恢复。
+
 ## 生产环境部署
 
 ### 使用安装脚本（推荐）

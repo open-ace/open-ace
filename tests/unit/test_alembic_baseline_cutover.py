@@ -3,12 +3,79 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
+import subprocess
+import time
+from contextlib import contextmanager
 
+import pytest
 import sqlalchemy as sa
 
 from migrations.baseline import BASELINE_REVISION, read_current_revision
 from scripts.cutover_alembic_baseline import cutover_database
+
+
+def _postgres_server_binaries_available() -> bool:
+    return all(
+        shutil.which(binary) is not None
+        for binary in ("initdb", "pg_ctl", "createdb", "psql")
+    )
+
+
+@contextmanager
+def _temporary_postgres_database(tmp_path):
+    if not _postgres_server_binaries_available():
+        pytest.skip("PostgreSQL server binaries are not available in this environment")
+
+    cluster_dir = tmp_path / "pg-cluster"
+    log_path = tmp_path / "postgres.log"
+    port = "55435"
+    env = os.environ.copy()
+    env.update({"LC_ALL": "C", "LANG": "C"})
+
+    subprocess.run(
+        ["initdb", "-D", str(cluster_dir), "-A", "trust", "--username=postgres"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    subprocess.run(
+        ["pg_ctl", "-D", str(cluster_dir), "-l", str(log_path), "-o", f"-p {port}", "start"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        for _ in range(30):
+            result = subprocess.run(
+                ["psql", "-h", "127.0.0.1", "-p", port, "-U", "postgres", "-d", "postgres", "-c", "SELECT 1"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError("temporary PostgreSQL server did not become ready")
+
+        db_name = "cutover_test"
+        subprocess.run(
+            ["createdb", "-h", "127.0.0.1", "-p", port, "-U", "postgres", db_name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        yield f"postgresql://postgres@127.0.0.1:{port}/{db_name}"
+    finally:
+        subprocess.run(
+            ["pg_ctl", "-D", str(cluster_dir), "-m", "fast", "stop"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
 
 def test_cutover_stamps_legacy_sqlite_and_backfills_latest_baseline_artifacts(tmp_path):
@@ -115,3 +182,227 @@ def test_cutover_skips_active_revision(tmp_path):
 
     assert changed is False
     assert actions == [f"already on active revision {BASELINE_REVISION}"]
+
+
+def test_cutover_rejects_unknown_revision(tmp_path):
+    db_path = tmp_path / "unknown.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL
+        );
+        CREATE TABLE alembic_version (
+            version_num TEXT PRIMARY KEY
+        );
+        INSERT INTO alembic_version(version_num) VALUES ('unknown_revision');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            with pytest.raises(RuntimeError, match="unknown revision"):
+                cutover_database(connection)
+    finally:
+        engine.dispose()
+
+
+def test_cutover_dry_run_reports_actions_without_mutating_schema(tmp_path):
+    db_path = tmp_path / "dry-run.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            linux_account TEXT
+        );
+        CREATE TABLE agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL
+        );
+        CREATE TABLE session_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL
+        );
+        CREATE TABLE alembic_version (
+            version_num TEXT PRIMARY KEY
+        );
+        INSERT INTO alembic_version(version_num) VALUES ('7bcf07ee658e');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            changed, actions = cutover_database(connection, dry_run=True)
+            revision = read_current_revision(connection)
+            user_columns = {
+                row[1]
+                for row in connection.execute(sa.text("PRAGMA table_info(users)")).fetchall()
+            }
+            session_columns = {
+                row[1]
+                for row in connection.execute(sa.text("PRAGMA table_info(session_messages)")).fetchall()
+            }
+            has_compliance = connection.execute(
+                sa.text(
+                    """
+                    SELECT 1
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'compliance_reports'
+                    """
+                )
+            ).scalar()
+    finally:
+        engine.dispose()
+
+    assert changed is True
+    assert "would backfill users.system_account" in actions
+    assert "would backfill session_messages.source" in actions
+    assert "would backfill users.auto_mapping_enabled" in actions
+    assert "would create tool_account_mapping_rules" in actions
+    assert "would create compliance_reports" in actions
+    assert f"would stamp {BASELINE_REVISION}" in actions
+    assert revision == "7bcf07ee658e"
+    assert "system_account" not in user_columns
+    assert "auto_mapping_enabled" not in user_columns
+    assert "source" not in session_columns
+    assert has_compliance is None
+
+
+def test_cutover_skips_empty_database_without_recognizable_schema(tmp_path):
+    db_path = tmp_path / "empty.db"
+    sqlite3.connect(db_path).close()
+
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as connection:
+            changed, actions = cutover_database(connection)
+    finally:
+        engine.dispose()
+
+    assert changed is False
+    assert actions == ["database has no recognizable application schema; skipping cutover"]
+
+
+def test_cutover_postgres_backfills_legacy_schema(tmp_path):
+    with _temporary_postgres_database(tmp_path) as database_url:
+        engine = sa.create_engine(database_url)
+        try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE users (
+                        id SERIAL PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        linux_account TEXT
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE agent_sessions (
+                        id SERIAL PRIMARY KEY,
+                        session_id TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE session_messages (
+                        id SERIAL PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        role TEXT NOT NULL
+                    )
+                    """
+                )
+                for table_name in (
+                    "agent_tokens",
+                    "ai_agent_settings",
+                    "autonomous_workflows",
+                    "email_notification_logs",
+                    "registration_tokens",
+                    "smtp_settings",
+                    "workflow_events",
+                    "workflow_milestones",
+                ):
+                    connection.exec_driver_sql(f"CREATE TABLE {table_name} (id SERIAL PRIMARY KEY)")
+                connection.exec_driver_sql(
+                    """
+                    CREATE TABLE alembic_version (
+                        version_num VARCHAR(64) PRIMARY KEY
+                    )
+                    """
+                )
+                connection.execute(
+                    sa.text("INSERT INTO alembic_version(version_num) VALUES ('7bcf07ee658e')")
+                )
+
+            with engine.begin() as connection:
+                changed, actions = cutover_database(connection)
+                revision = read_current_revision(connection)
+                user_columns = {
+                    row[0]
+                    for row in connection.execute(
+                        sa.text(
+                            """
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'users'
+                            """
+                        )
+                    ).fetchall()
+                }
+                session_columns = {
+                    row[0]
+                    for row in connection.execute(
+                        sa.text(
+                            """
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'session_messages'
+                            """
+                        )
+                    ).fetchall()
+                }
+                has_mapping_rules = connection.execute(
+                    sa.text(
+                        """
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'tool_account_mapping_rules'
+                        """
+                    )
+                ).scalar()
+                has_compliance = connection.execute(
+                    sa.text(
+                        """
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'compliance_reports'
+                        """
+                    )
+                ).scalar()
+        finally:
+            engine.dispose()
+
+    assert changed is True
+    assert any(action.startswith("backfilled users.system_account") for action in actions)
+    assert any(action.startswith("backfilled session_messages.source") for action in actions)
+    assert any(action.startswith("backfilled users.auto_mapping_enabled") for action in actions)
+    assert any(action.startswith("created tool_account_mapping_rules") for action in actions)
+    assert any(action.startswith("created compliance_reports") for action in actions)
+    assert revision == BASELINE_REVISION
+    assert "system_account" in user_columns
+    assert "auto_mapping_enabled" in user_columns
+    assert "source" in session_columns
+    assert has_mapping_rules == 1
+    assert has_compliance == 1
