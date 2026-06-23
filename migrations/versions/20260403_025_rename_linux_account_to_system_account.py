@@ -1,8 +1,9 @@
-"""Rename linux_account to system_account
+"""Rename linux_account to system_account or add if missing
 
 This migration:
-1. Renames linux_account column to system_account in users table
-2. Updates the column to better reflect cross-platform support
+1. Renames linux_account column to system_account in users table (legacy databases)
+2. Adds system_account column if neither column exists (fresh installations)
+3. Updates the column name to better reflect cross-platform support
 
 Revision ID: 025
 Revises: 024
@@ -39,68 +40,101 @@ def _column_exists(bind, table_name: str, column_name: str) -> bool:
 
 
 def upgrade():
-    """Rename linux_account to system_account."""
+    """Rename linux_account to system_account or add if missing.
 
-    # Check if we're using PostgreSQL or SQLite
+    Handles two scenarios:
+    1. Legacy databases with linux_account column → rename to system_account
+    2. Fresh installations without either column → add system_account column
+    """
+
     bind = op.get_bind()
     has_linux_account = _column_exists(bind, "users", "linux_account")
     has_system_account = _column_exists(bind, "users", "system_account")
 
     if bind.dialect.name == "postgresql":
-        if not has_linux_account or has_system_account:
-            return
-        # PostgreSQL: Use ALTER COLUMN with RENAME
-        op.execute(
-            """
-            ALTER TABLE users RENAME COLUMN linux_account TO system_account
-        """
-        )
-    else:
-        if not has_linux_account or has_system_account:
+        # If system_account already exists, skip (idempotent)
+        if has_system_account:
             return
 
-        # Try to rename (works in SQLite 3.25.0+)
-        try:
+        # If linux_account exists, rename it
+        if has_linux_account:
             op.execute(
                 """
                 ALTER TABLE users RENAME COLUMN linux_account TO system_account
             """
             )
-        except Exception:
-            # Fallback for older SQLite: add new column, copy data, drop old column
-            # This is more complex and requires table recreation
+        else:
+            # Fresh installation: add system_account directly
             op.execute(
                 """
                 ALTER TABLE users ADD COLUMN system_account TEXT
             """
             )
+    else:
+        # SQLite: same logic
+        if has_system_account:
+            return
+
+        if has_linux_account:
+            try:
+                op.execute(
+                    """
+                    ALTER TABLE users RENAME COLUMN linux_account TO system_account
+                """
+                )
+            except Exception:
+                # Fallback for older SQLite
+                op.execute(
+                    """
+                    ALTER TABLE users ADD COLUMN system_account TEXT
+                """
+                )
+                op.execute(
+                    """
+                    UPDATE users SET system_account = linux_account
+                """
+                )
+        else:
+            # Fresh installation
             op.execute(
                 """
-                UPDATE users SET system_account = linux_account
+                ALTER TABLE users ADD COLUMN system_account TEXT
             """
             )
-            # Note: SQLite doesn't easily support DROP COLUMN before 3.35.0
-            # We keep the old column for compatibility
 
 
 def downgrade():
-    """Rename system_account back to linux_account."""
+    """Rename system_account back to linux_account.
+
+    For consistency with historical schema, renames system_account to linux_account.
+    """
 
     bind = op.get_bind()
     has_linux_account = _column_exists(bind, "users", "linux_account")
     has_system_account = _column_exists(bind, "users", "system_account")
 
     if bind.dialect.name == "postgresql":
-        if not has_system_account or has_linux_account:
+        # If system_account doesn't exist, skip
+        if not has_system_account:
             return
+
+        # If linux_account already exists, skip
+        if has_linux_account:
+            return
+
         op.execute(
             """
             ALTER TABLE users RENAME COLUMN system_account TO linux_account
         """
         )
     else:
-        if not has_system_account or has_linux_account:
+        # SQLite: same logic
+        if not has_system_account:
             return
+
+        if has_linux_account:
+            return
+
         try:
             op.execute(
                 """
