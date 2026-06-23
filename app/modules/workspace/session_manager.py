@@ -308,6 +308,47 @@ class SessionManager:
             conn.row_factory = sqlite3.Row
             return conn
 
+    @staticmethod
+    def _column_exists(cursor: Any, table: str, column: str) -> bool:
+        """Check whether a column exists on a table (SQLite or PostgreSQL)."""
+        if is_postgresql():
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+                """,
+                (table, column),
+            )
+        else:
+            cursor.execute(f"PRAGMA table_info({table})")
+            rows = cursor.fetchall()
+            # sqlite3 with row_factory returns Row-like objects; index 1 is name
+            return any(
+                (row[1] if isinstance(row, (tuple, sqlite3.Row)) else row["name"]) == column
+                for row in rows
+            )
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _index_exists(cursor: Any, table: str, index: str) -> bool:
+        """Check whether an index exists on a table (SQLite or PostgreSQL)."""
+        if is_postgresql():
+            cursor.execute(
+                """
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = %s AND indexname = %s
+                """,
+                (table, index),
+            )
+        else:
+            cursor.execute(f"PRAGMA index_list({table})")
+            rows = cursor.fetchall()
+            return any(
+                (row[1] if isinstance(row, (tuple, sqlite3.Row)) else row["name"]) == index
+                for row in rows
+            )
+        return cursor.fetchone() is not None
+
     def _ensure_tables(self) -> None:
         """Ensure required tables exist."""
         conn = self._get_connection()
@@ -399,78 +440,46 @@ class SessionManager:
         """
         )
 
-        # Add remote workspace columns if not present
-        try:
+        # Add remote workspace columns if not present.
+        # Use a check-first strategy so PostgreSQL never enters a failed
+        # transaction (a single "column already exists" error aborts the whole
+        # transaction in PG and breaks subsequent statements). SQLite tolerates
+        # the try/except fallback, but check-first works for both backends.
+        alter_columns = [
+            ("agent_sessions", "workspace_type", "TEXT DEFAULT 'local'"),
+            ("agent_sessions", "remote_machine_id", "TEXT"),
+            ("agent_sessions", "request_count", "INTEGER DEFAULT 0"),
+            ("agent_sessions", "paused_at", "TIMESTAMP"),
+            ("agent_sessions", "cli_session_id", "TEXT DEFAULT ''"),
+            ("session_messages", "milestone_id", "TEXT DEFAULT '' NOT NULL"),
+            ("session_messages", "source_timestamp", "TIMESTAMP"),
+            ("session_messages", "source", "TEXT DEFAULT '' NOT NULL"),
+            ("session_messages", "external_message_id", "TEXT DEFAULT ''"),
+            ("session_messages", "content_blocks", "TEXT"),
+        ]
+        for table, column, definition in alter_columns:
+            if not self._column_exists(cursor, table, column):
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+        # Add newer indexes only when missing (CREATE INDEX IF NOT EXISTS is
+        # also valid on both backends, but check-first keeps PG transactions
+        # healthy when a prior statement in another caller failed).
+        if not self._index_exists(
+            cursor, "session_messages", "idx_session_messages_external_message_id"
+        ):
             cursor.execute(
-                "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'"
-            )
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT")
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0")
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
-        except Exception:
-            pass  # Column already exists
-
-        # cli_session_id: authoritative resume target for workflow-owned Claude
-        # lines (promoted out of context JSON). Idempotent — skipped if present.
-        try:
-            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''")
-        except Exception:
-            pass  # Column already exists
-
-        # Add milestone_id column to session_messages if not present (migration 061)
-        try:
-            cursor.execute("ALTER TABLE session_messages ADD COLUMN milestone_id TEXT DEFAULT ''")
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute("ALTER TABLE session_messages ADD COLUMN source TEXT DEFAULT ''")
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute(
-                "ALTER TABLE session_messages ADD COLUMN source_timestamp TIMESTAMP"
-            )
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute(
-                "ALTER TABLE session_messages ADD COLUMN external_message_id TEXT DEFAULT ''"
-            )
-        except Exception:
-            pass  # Column already exists
-
-        try:
-            cursor.execute("ALTER TABLE session_messages ADD COLUMN content_blocks TEXT")
-        except Exception:
-            pass  # Column already exists
-
-        cursor.execute(
+                """
+                CREATE INDEX idx_session_messages_external_message_id
+                ON session_messages(session_id, external_message_id)
             """
-            CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id
-            ON session_messages(session_id, external_message_id)
-        """
-        )
-        cursor.execute(
+            )
+        if not self._index_exists(cursor, "session_messages", "idx_session_messages_source"):
+            cursor.execute(
+                """
+                CREATE INDEX idx_session_messages_source
+                ON session_messages(session_id, source)
             """
-            CREATE INDEX IF NOT EXISTS idx_session_messages_source
-            ON session_messages(session_id, source)
-        """
-        )
+            )
 
         conn.commit()
         conn.close()
@@ -814,15 +823,18 @@ class SessionManager:
         total_tokens_delta: int = 0,
         total_input_delta: int = 0,
         total_output_delta: int = 0,
+        message_delta: int = 0,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
 
-        ``agent_sessions.{request_count,total_tokens,total_input_tokens,
-        total_output_tokens}`` must be monotonically accumulated so that
-        ``Σ milestone.phase_* == session.*`` holds (#1003). The previous
-        per-call overwrite (update_session_fields) reset the column to each
-        call's local count, breaking the invariant. Callers pass the per-call
-        ``AgentTaskResult`` counters as deltas.
+        ``agent_sessions.{message_count,request_count,total_tokens,
+        total_input_tokens,total_output_tokens}`` must be monotonically
+        accumulated so that ``Σ milestone.phase_* == session.*`` holds (#1003).
+        The previous per-call overwrite (update_session_fields) reset the column
+        to each call's local count, breaking the invariant. Callers pass the
+        per-call ``AgentTaskResult`` counters as deltas. ``message_delta`` lets
+        transcript writers (which keep ``add_message`` side-effect-free via
+        ``count_usage=False``) own ``message_count`` explicitly (#1128).
         """
         if not session_id:
             return False
@@ -832,7 +844,8 @@ class SessionManager:
         cursor.execute(
             f"""
             UPDATE agent_sessions
-            SET request_count = COALESCE(request_count, 0) + {p},
+            SET message_count = COALESCE(message_count, 0) + {p},
+                request_count = COALESCE(request_count, 0) + {p},
                 total_tokens = COALESCE(total_tokens, 0) + {p},
                 total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
                 total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
@@ -840,6 +853,7 @@ class SessionManager:
             WHERE session_id = {p}
             """,
             (
+                message_delta,
                 request_delta,
                 total_tokens_delta,
                 total_input_delta,
@@ -1187,12 +1201,14 @@ class SessionManager:
             ),
         )
 
-        # message_count always increments. request_count / total_tokens are
-        # accumulated ONLY for non-autonomous callers (count_usage=True) —
-        # remote_session_manager and session_sync rely on add_message for these.
-        # Autonomous local runs pass count_usage=False because the agent runner
-        # owns those counters via increment_session_usage (per-call delta), so
-        # counting here too would double-count (#1003 / #1007 review).
+        # When count_usage=True, accumulate message_count/request_count/
+        # total_tokens on the session — remote_session_manager and session_sync
+        # rely on add_message for these summaries. When count_usage=False (the
+        # transcript path used by append_transcript_message), leave the session
+        # summary untouched: those callers own their counters via
+        # increment_session_usage (per-call delta), so counting here too would
+        # double-count (#1003 / #1007 review) and break the side-effect-free
+        # transcript contract (#1128).
         request_count_increment = 1 if (count_usage and role == "assistant") else 0
         if count_usage:
             cursor.execute(
@@ -1205,16 +1221,6 @@ class SessionManager:
                 WHERE session_id = {_param()}
             """,
                 (request_count_increment, tokens_used, now.isoformat(), session_id),
-            )
-        else:
-            cursor.execute(
-                f"""
-                UPDATE agent_sessions
-                SET message_count = message_count + 1,
-                    updated_at = {_param()}
-                WHERE session_id = {_param()}
-            """,
-                (now.isoformat(), session_id),
             )
 
         message.id = cursor.lastrowid
