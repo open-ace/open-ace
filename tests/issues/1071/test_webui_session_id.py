@@ -16,7 +16,6 @@ from flask import Flask
 
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -55,12 +54,14 @@ def _make_quota_ok():
 
 def _mock_upstream_response(status_code=200, content=None):
     if content is None:
-        content = json.dumps({
-            "id": "chatcmpl-123",
-            "model": "qwen3",
-            "choices": [{"message": {"role": "assistant", "content": "hello"}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        }).encode()
+        content = json.dumps(
+            {
+                "id": "chatcmpl-123",
+                "model": "qwen3",
+                "choices": [{"message": {"role": "assistant", "content": "hello"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        ).encode()
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -86,7 +87,9 @@ class TestXSessionIdHeaderFormat:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_valid_uuid_format_accepted(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_valid_uuid_format_accepted(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """Valid UUID format should be accepted."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
@@ -96,7 +99,9 @@ class TestXSessionIdHeaderFormat:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -116,7 +121,9 @@ class TestXSessionIdHeaderFormat:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_valid_webui_format_accepted(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_valid_webui_format_accepted(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """Valid webui:{user_id} format should be accepted."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
@@ -126,7 +133,9 @@ class TestXSessionIdHeaderFormat:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -146,7 +155,9 @@ class TestXSessionIdHeaderFormat:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_invalid_chars_fallback_to_token(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_invalid_chars_fallback_to_token(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """Invalid characters should fallback to token session_id."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -156,7 +167,9 @@ class TestXSessionIdHeaderFormat:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -178,7 +191,9 @@ class TestXSessionIdHeaderFormat:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_too_long_fallback_to_token(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_too_long_fallback_to_token(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """Session ID longer than 100 chars should fallback to token."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -188,7 +203,9 @@ class TestXSessionIdHeaderFormat:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -220,7 +237,9 @@ class TestXSessionIdHeaderOverride:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_header_overrides_token_session_id(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_header_overrides_token_session_id(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """X-Session-Id header should override token's session_id."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -230,7 +249,9 @@ class TestXSessionIdHeaderOverride:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -251,7 +272,9 @@ class TestXSessionIdHeaderOverride:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_no_header_uses_token_session_id(self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app):
+    def test_no_header_uses_token_session_id(
+        self, mock_get_proxy, mock_quota_cls, mock_http, workspace_app
+    ):
         """Without X-Session-Id header, token's session_id should be used."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -261,7 +284,9 @@ class TestXSessionIdHeaderOverride:
             "candidate_keys": [{"key_id": 42}],
         }
         mock_proxy.resolve_api_key_from_key_ids.return_value = (
-            "sk-key", "https://api.openai.com/v1", 42
+            "sk-key",
+            "https://api.openai.com/v1",
+            42,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -298,7 +323,12 @@ class TestListSessionsFilterWebui:
         mock_db.fetch_one.return_value = {"count": 2}  # Total count (excluding webui)
         mock_db.fetch_all.return_value = [
             {"session_id": "conv-abc", "title": "Conversation 1", "user_id": 1, "status": "active"},
-            {"session_id": "conv-def", "title": "Conversation 2", "user_id": 1, "status": "completed"},
+            {
+                "session_id": "conv-def",
+                "title": "Conversation 2",
+                "user_id": 1,
+                "status": "completed",
+            },
         ]
 
         # Mock session manager for stats
@@ -307,8 +337,10 @@ class TestListSessionsFilterWebui:
 
         client = workspace_app.test_client()
         # Need to mock auth - use a valid user
-        with patch("app.routes.workspace.g", MagicMock(user={"id": 1, "username": "test", "role": "user"})):
-            resp = client.get("/api/workspace/sessions")
+        with patch(
+            "app.routes.workspace.g", MagicMock(user={"id": 1, "username": "test", "role": "user"})
+        ):
+            client.get("/api/workspace/sessions")
 
         # The query should have filtered webui:% sessions
         # Check that the SQL query was constructed with NOT LIKE filter

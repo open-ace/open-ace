@@ -561,6 +561,7 @@ def list_sessions():
 
         # Filter out webui aggregate sessions (session_id LIKE 'webui:%')
         # These are internal containers that mix multiple conversations
+        # escape_like not needed: hard-coded pattern, no user input
         base_conditions.append(f"session_id NOT LIKE {p}")
         base_params.append("webui:%")
 
