@@ -48,6 +48,7 @@ config.json
 *.swp
 *.swo
 .DS_Store
+._*
 
 # Node
 node_modules/

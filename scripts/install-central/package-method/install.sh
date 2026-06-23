@@ -3657,6 +3657,26 @@ with open('$config_dir/config.json', 'w') as f:
 
     # Run database migrations (alembic upgrade head)
     print_info "Running database migrations..."
+    if [ -f "$target_path/scripts/cutover_alembic_baseline.py" ]; then
+        print_info "Preparing baseline Alembic lineage..."
+        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+            if su - "$install_user" -c "cd '$target_path' && python3 scripts/cutover_alembic_baseline.py"; then
+                print_success "Baseline cutover check completed"
+            else
+                print_error "Baseline cutover failed."
+                exit 1
+            fi
+        else
+            cd "$target_path"
+            if python3 scripts/cutover_alembic_baseline.py; then
+                print_success "Baseline cutover check completed"
+            else
+                print_error "Baseline cutover failed."
+                exit 1
+            fi
+            cd - > /dev/null
+        fi
+    fi
     if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
             if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
@@ -4006,6 +4026,14 @@ do_upgrade_remote() {
     print_info "Running database migrations on remote..."
     ssh "$remote" "
         cd '$target_path'
+        if [ -f 'scripts/cutover_alembic_baseline.py' ]; then
+            if python3 scripts/cutover_alembic_baseline.py; then
+                echo 'Baseline cutover check completed'
+            else
+                echo 'ERROR: Baseline cutover failed.'
+                exit 1
+            fi
+        fi
         if [ -f 'alembic.ini' ] && [ -d 'migrations' ]; then
             if python3 -m alembic upgrade head; then
                 echo 'Database migrations applied'

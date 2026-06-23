@@ -14,9 +14,13 @@ from sqlalchemy import engine_from_config, pool
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from migrations.version_table import install_wide_version_table
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+install_wide_version_table()
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

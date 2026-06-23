@@ -136,8 +136,10 @@ EOF
 
 安装脚本会自动：
 
-1. **PostgreSQL**: 创建数据库用户和数据库，执行 `schema/schema-postgres.sql` 创建表结构，然后使用 `alembic stamp head` 标记版本
-2. **SQLite**: 执行 `schema/schema-sqlite.sql` 创建表结构
+1. **PostgreSQL**: 创建数据库用户和数据库，执行 `schema/schema-postgres.sql` 创建当前 head schema，然后使用 `alembic stamp head` 标记版本
+2. **SQLite**: 执行 `schema/schema-sqlite.sql` 创建当前 head schema
+
+已有数据库升级时，安装脚本会先运行 `scripts/cutover_alembic_baseline.py`。如果数据库还停留在基线之前的历史 revision，脚本会先补齐正式 schema，再统一切换到 `baseline_2026_06_23`。
 
 ### psycopg2 安装
 

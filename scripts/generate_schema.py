@@ -308,6 +308,11 @@ def _sqlite_convert_column(col_line):
     # Must replace character varying BEFORE anything that could split it
     col_line = re.sub(r"character varying\([^)]*\)", "TEXT", col_line)
     col_line = re.sub(r"character varying", "TEXT", col_line)
+    col_line = re.sub(
+        r"\b(user_role|tenant_status|tenant_plan|message_role|audit_severity|jsonb)\b",
+        "TEXT",
+        col_line,
+    )
     # Clean up orphaned 'varying' keyword (left after partial :: removal)
     col_line = re.sub(r"\s+varying\b", "", col_line)
     col_line = re.sub(r"timestamp without time zone", "TIMESTAMP", col_line)
@@ -581,6 +586,9 @@ def convert_to_sqlite(postgres_sql):
             full_idx = re.sub(r"::[a-z_\[\]]+", "", full_idx)
             # Remove varchar_pattern_ops
             full_idx = re.sub(r"\s+varchar_pattern_ops", "", full_idx)
+            # Convert PostgreSQL pattern operators to SQLite-compatible ones
+            full_idx = full_idx.replace(" !~~ ", " NOT LIKE ")
+            full_idx = full_idx.replace(" ~~ ", " LIKE ")
             # Convert boolean comparisons in WHERE: (role)::text = 'assistant'::text -> role = 'assistant'
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
             # Convert (user_id IS NOT NULL) AND ... in WHERE
