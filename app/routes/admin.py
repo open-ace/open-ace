@@ -16,7 +16,7 @@ from app.repositories.user_repo import UserRepository
 from app.schemas.quota import validate_quota_update
 from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
-from app.utils.workspace import ensure_system_user, get_workspace_base_dir
+from app.utils.workspace import ensure_system_user
 
 logger = logging.getLogger(__name__)
 
