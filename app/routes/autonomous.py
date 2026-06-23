@@ -1478,6 +1478,49 @@ def _resume_pid(pid: int) -> bool:
         return True
 
 
+def _mark_sessions_paused(workflow_id: str, pids: set[int]) -> None:
+    """Flag the in-memory sessions owning ``pids`` as paused.
+
+    The pause fallback paths (``_pause_running_task`` Strategy 2/3) deliver
+    SIGSTOP directly to a PID without going through the runner's
+    ``pause_session``, so the session's ``_paused`` Event stays clear and
+    ``_wait_for_completion`` keeps draining the timeout budget — eventually
+    reaping the frozen process and making a paused workflow appear to
+    auto-resume. This syncs the flag for every PID we actually suspended so
+    the budget freezes correctly regardless of the delivery path.
+    """
+    if not pids:
+        return
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        orchestrator = AutonomousScheduler.instance().get_running_orchestrator(workflow_id)
+        if orchestrator:
+            for pid in pids:
+                orchestrator._runner.mark_session_paused_by_pid(pid)
+    except Exception as e:
+        logger.warning("Failed to mark sessions paused for %s: %s", workflow_id[:8], e)
+
+
+def _mark_sessions_resumed(workflow_id: str, pids: set[int]) -> None:
+    """Clear the paused flag on the in-memory sessions owning ``pids``.
+
+    Mirror of :func:`_mark_sessions_paused` for the resume fallback paths,
+    so ``_wait_for_completion`` unfreezes the deadline.
+    """
+    if not pids:
+        return
+    try:
+        from app.services.autonomous_scheduler import AutonomousScheduler
+
+        orchestrator = AutonomousScheduler.instance().get_running_orchestrator(workflow_id)
+        if orchestrator:
+            for pid in pids:
+                orchestrator._runner.mark_session_resumed_by_pid(pid)
+    except Exception as e:
+        logger.warning("Failed to mark sessions resumed for %s: %s", workflow_id[:8], e)
+
+
 def _pause_running_task(workflow_id: str):
     """Pause the running agent task using multiple strategies.
 
@@ -1551,6 +1594,15 @@ def _pause_running_task(workflow_id: str):
                                 pass
     except Exception as e:
         logger.warning("Pause strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
+
+    # The fallback strategies above sent SIGSTOP directly, bypassing
+    # pause_session(), so the matching in-memory sessions never had their
+    # _paused Event set. Without it, _wait_for_completion keeps counting the
+    # timeout budget and reaps the frozen process once it elapses — the
+    # workflow then "auto-resumes". Sync the flag for every PID we suspended
+    # across all strategies (including the session-scan last resort), so the
+    # budget freezes correctly regardless of which path delivered the signal.
+    _mark_sessions_paused(workflow_id, affected_pids)
 
 
 def _stop_running_task(workflow_id: str):
@@ -1680,3 +1732,9 @@ def _resume_running_task(workflow_id: str):
                 resumed_pids.add(pid)
     except Exception as e:
         logger.warning("Resume strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
+
+    # The fallback strategies above sent SIGCONT directly, bypassing
+    # resume_session(), so the matching in-memory sessions still have their
+    # _paused Event set. Without clearing it, _wait_for_completion keeps the
+    # deadline frozen and the task never times out. Sync the flag.
+    _mark_sessions_resumed(workflow_id, resumed_pids)
