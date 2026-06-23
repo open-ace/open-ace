@@ -113,9 +113,26 @@ if [ -n "$DATABASE_URL" ]; then
         exit 1
     fi
 
-    # Check if database is initialized (check core 'users' table, not alembic_version)
-    echo "Checking database initialization status..."
-    TABLES_EXIST=$(python3 -c "
+    # Check database migration status using alembic_version table (Issue #1192)
+    # This is more accurate than checking 'users' table for migration tracking
+    echo "Checking database migration status..."
+    ALEMBIC_EXISTS=$(python3 -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute(\"SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version'\")
+    result = 'yes' if cur.fetchone() else 'no'
+    conn.close()
+    print(result)
+except Exception:
+    print('error')
+" 2>/dev/null || echo "error")
+
+    if [ "$ALEMBIC_EXISTS" = "no" ]; then
+        # alembic_version not found - check if this is legacy upgrade or fresh install
+        echo "alembic_version table not found. Checking for existing tables..."
+        USERS_EXIST=$(python3 -c "
 import os, psycopg2
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
@@ -125,35 +142,169 @@ try:
     conn.close()
     print(result)
 except Exception:
-    print('error')
-" 2>/dev/null || echo "error")
+    print('no')
+" 2>/dev/null || echo "no")
 
-    if [ "$TABLES_EXIST" = "no" ]; then
-        echo "Database not initialized. Creating schema from schema-postgres.sql..."
+        if [ "$USERS_EXIST" = "yes" ]; then
+            # Legacy database: tables exist but alembic_version missing
+            # This happens when database was initialized with schema.sql but stamp failed
+            echo "Legacy database detected (tables exist, alembic_version missing)."
+            echo "Stamping alembic version to enable future migrations..."
+            alembic stamp head
+            if [ $? -ne 0 ]; then
+                echo "ERROR: alembic stamp failed, database may be corrupted"
+                exit 1
+            fi
+            echo "Alembic version stamped successfully."
+
+            # Run any pending migrations after stamp
+            echo "Running pending migrations..."
+            alembic upgrade head || echo "No pending migrations."
+        else
+            # Fresh installation: use alembic migrations for complete initialization
+            echo "Database not initialized. Running alembic migrations..."
+            alembic upgrade head
+            if [ $? -ne 0 ]; then
+                echo "ERROR: alembic upgrade head failed"
+                exit 1
+            fi
+
+            # Create default admin user
+            echo "Creating default admin user..."
+            python3 scripts/init_db.py || echo "WARNING: admin user creation failed (may already exist)"
+
+            echo "Database initialization completed."
+        fi
+    elif [ "$ALEMBIC_EXISTS" = "error" ]; then
+        echo "WARNING: Could not check database status. Attempting migration..."
+        alembic upgrade head || echo "WARNING: Migration failed (database may not be ready)"
+    else
+        # Database already has alembic_version: run pending migrations
+        echo "Database already initialized. Running pending migrations..."
+        alembic upgrade head || echo "No pending migrations."
+    fi
+
+    # ========================================================================
+    # 1b. Database Integrity Check (Issue #1192)
+    # Detect and fix missing tables that result from incorrect stamp head.
+    # If alembic_version says "head" but tables are missing, clear the version
+    # record and re-run all migrations (migrations have idempotent checks).
+    # ========================================================================
+    echo "Checking database table integrity..."
+    MISSING_TABLES=$(python3 -c "
+import os, psycopg2
+    # Tables created by post-schema.sql migrations that may be missing in legacy databases.
+    # MAINTENANCE NOTE: When adding new migrations that create new tables, update this list
+    # to ensure the integrity check detects them. This prevents stale alembic stamp issues.
+    REQUIRED_TABLES = [
+        'ai_agent_settings',
+        'agent_tokens',
+        'autonomous_workflows',
+        'email_notification_logs',
+        'registration_tokens',
+        'smtp_settings',
+        'workflow_events',
+        'workflow_milestones',
+    ]
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute(\"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'\")
+    existing = set(row[0] for row in cur.fetchall())
+    missing = [t for t in REQUIRED_TABLES if t not in existing]
+    conn.close()
+    print(','.join(missing) if missing else '')
+except Exception as e:
+    print(f'error:{e}')
+" || echo "error")
+
+    if [ -n "$MISSING_TABLES" ] && [ "$MISSING_TABLES" != "error" ]; then
+        echo "WARNING: Missing database tables detected: $MISSING_TABLES"
+        echo "This indicates a legacy database with incomplete migration history."
+        echo "Attempting repair: clearing alembic_version and re-running all migrations..."
+
+        # Clear alembic_version so upgrade head runs from scratch
         python3 -c "
 import os, psycopg2
-conn = psycopg2.connect(os.environ['DATABASE_URL'])
-cur = conn.cursor()
-with open('schema/schema-postgres.sql') as f:
-    cur.execute(f.read())
-conn.commit()
-conn.close()
-print('Schema created successfully.')
-"
-        echo "Stamping alembic version to head..."
-        alembic stamp head 2>/dev/null || echo "WARNING: alembic stamp failed (non-critical)"
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    cur.execute('DELETE FROM alembic_version')
+    conn.commit()
+    conn.close()
+    print('alembic_version record cleared.')
+except Exception as e:
+    print(f'error:{e}')
+" || echo "WARNING: Failed to clear alembic_version"
 
-        echo "Creating default admin user..."
-        python3 scripts/init_db.py 2>/dev/null || echo "WARNING: admin user creation failed (may already exist)"
-
-        echo "Database initialization completed."
-    elif [ "$TABLES_EXIST" = "error" ]; then
-        echo "WARNING: Could not check database status. Attempting migration..."
-        alembic upgrade head 2>/dev/null || echo "WARNING: Migration failed (database may not be ready)"
+        # Re-run all migrations (each migration has idempotent checks for existing tables/columns)
+        echo "Re-running alembic upgrade head to create missing tables..."
+        alembic upgrade head
+        if [ $? -ne 0 ]; then
+            echo "ERROR: Migration repair failed."
+            echo "Missing tables: $MISSING_TABLES"
+            echo "Please check logs and run 'alembic upgrade head' manually."
+        else
+            echo "Database integrity repair completed successfully."
+        fi
+    elif [ "$MISSING_TABLES" = "error" ]; then
+        echo "WARNING: Could not check database table integrity."
     else
-        echo "Database already initialized. Running pending migrations..."
-        alembic upgrade head 2>/dev/null || echo "No pending migrations."
+        echo "Database table integrity check passed."
     fi
+
+    # ========================================================================
+    # 1c. Fix materialized view ownership for PostgreSQL (Issue #1192)
+    # Ensure current database user can refresh materialized views.
+    # Must run AFTER integrity check (which may re-create views via migrations).
+    # ========================================================================
+    echo "Fixing materialized view ownership..."
+    python3 -c "
+import os, psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+
+    # Fix session_stats ownership with verification
+    cur.execute(\"SELECT matviewowner FROM pg_matviews WHERE matviewname = 'session_stats'\")
+    owner_row = cur.fetchone()
+    if owner_row:
+        current_owner = owner_row[0]
+        cur.execute(\"SELECT CURRENT_USER\")
+        db_user = cur.fetchone()[0]
+        if current_owner != db_user:
+            cur.execute(\"ALTER MATERIALIZED VIEW session_stats OWNER TO CURRENT_USER\")
+            print(f'Fixed session_stats owner: {current_owner} -> {db_user}')
+        else:
+            print(f'session_stats owner already correct: {current_owner}')
+
+    # Fix request_stats ownership (if exists)
+    cur.execute(\"SELECT matviewowner FROM pg_matviews WHERE matviewname = 'request_stats'\")
+    owner_row = cur.fetchone()
+    if owner_row:
+        current_owner = owner_row[0]
+        cur.execute(\"SELECT CURRENT_USER\")
+        db_user = cur.fetchone()[0]
+        if current_owner != db_user:
+            cur.execute(\"ALTER MATERIALIZED VIEW request_stats OWNER TO CURRENT_USER\")
+            print(f'Fixed request_stats owner: {current_owner} -> {db_user}')
+
+    # Fix all sequences and tables ownership to CURRENT_USER (Issue #1042 + #1192)
+    # Use psycopg2.sql.Identifier for safe identifier quoting (review feedback)
+    from psycopg2 import sql
+    cur.execute(\"SELECT sequencename FROM pg_sequences WHERE schemaname = 'public'\")
+    for seq_row in cur.fetchall():
+        cur.execute(sql.SQL(\"ALTER SEQUENCE {} OWNER TO CURRENT_USER\").format(sql.Identifier(seq_row[0])))
+    cur.execute(\"SELECT tablename FROM pg_tables WHERE schemaname = 'public'\")
+    for tbl_row in cur.fetchall():
+        cur.execute(sql.SQL(\"ALTER TABLE {} OWNER TO CURRENT_USER\").format(sql.Identifier(tbl_row[0])))
+
+    conn.commit()
+    conn.close()
+    print('Ownership fix completed.')
+except Exception as e:
+    print(f'Warning: {e}')
+" || echo "WARNING: materialized view ownership fix failed"
 fi
 
 # ============================================================================

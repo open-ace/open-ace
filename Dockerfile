@@ -116,11 +116,13 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # - In production, use network isolation and limit container privileges
 # - Refer to docker-entrypoint.sh for sudoers configuration details
 
-# Environment variables
+# Environment variables (Issue #1192: add LANG/LC_ALL for Unicode support)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     FLASK_APP=server.py \
-    FLASK_ENV=production
+    FLASK_ENV=production \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # Expose port
 EXPOSE 5000

@@ -2496,6 +2496,23 @@ upgrade_deployment() {
         fi
     fi
 
+    # 5.6. Check alembic_version table before recreating container (Issue #1192)
+    # This detects legacy databases that were initialized with schema.sql but
+    # alembic stamp failed silently. We need to fix this after container restart.
+    print_info "检查数据库 migration 状态..."
+    local alembic_exists=""
+    alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+        "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$alembic_exists" = "1" ]; then
+        print_success "alembic_version 表存在，migration 系统正常"
+        export ALEMBIC_VERSION_EXISTS="yes"
+    else
+        print_warning "alembic_version 表不存在"
+        print_info "数据库可能是旧版本升级，需要在容器重启后执行 alembic stamp head"
+        export ALEMBIC_VERSION_EXISTS="no"
+    fi
+
     # 6. Recreate only open-ace container (PostgreSQL not restarted)
     print_info "重建 open-ace 容器..."
     docker compose up -d --force-recreate open-ace
@@ -2523,6 +2540,26 @@ upgrade_deployment() {
 
     if [ $attempt -gt $max_attempts ]; then
         print_warning "应用启动中，请稍后检查状态"
+    fi
+
+    # 7. Fix alembic_version if missing (Issue #1192)
+    # For legacy databases initialized with schema.sql, alembic stamp may have failed.
+    # The docker-entrypoint.sh handles this automatically, but we verify here.
+    if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
+        print_info "验证 alembic stamp 是否已由 entrypoint 自动修复..."
+        local alembic_fixed=""
+        alembic_fixed=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+            "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
+
+        if [ "$alembic_fixed" = "1" ]; then
+            print_success "alembic_version 表已自动创建"
+        else
+            print_warning "alembic_version 表仍然缺失，尝试手动修复..."
+            docker compose exec -T open-ace alembic stamp head 2>&1 || {
+                print_error "alembic stamp head 失败，请检查日志"
+                print_info "可能需要手动执行: docker compose exec open-ace alembic stamp head"
+            }
+        fi
     fi
 
     return 0
@@ -2802,21 +2839,24 @@ create_docker_compose() {
     local user_home="/home/$RUN_USER"
 
     if [ "$QWEN_ENABLED" = "true" ]; then
+        # Issue #1192: Map to /home/$RUN_USER instead of /home/open-ace
+        # This ensures fetch scripts can find data under /home/$RUN_USER/.qwen/projects
+        # which matches the multi-user scanning logic in fetch_qwen.py
         volumes_section="$volumes_section
-      - $user_home/.qwen:/home/open-ace/.qwen"
-        print_info "  - 映射 .qwen 目录"
+      - $user_home/.qwen:/home/$RUN_USER/.qwen"
+        print_info "  - 映射 .qwen 目录 ($RUN_USER -> $RUN_USER)"
     fi
 
     if [ "$CLAUDE_ENABLED" = "true" ]; then
         volumes_section="$volumes_section
-      - $user_home/.claude:/home/open-ace/.claude"
-        print_info "  - 映射 .claude 目录"
+      - $user_home/.claude:/home/$RUN_USER/.claude"
+        print_info "  - 映射 .claude 目录 ($RUN_USER -> $RUN_USER)"
     fi
 
     if [ "$OPENCLAW_ENABLED" = "true" ]; then
         volumes_section="$volumes_section
-      - $user_home/.openclaw:/home/open-ace/.openclaw"
-        print_info "  - 映射 .openclaw 目录"
+      - $user_home/.openclaw:/home/$RUN_USER/.openclaw"
+        print_info "  - 映射 .openclaw 目录 ($RUN_USER -> $RUN_USER)"
     fi
 
     # Add workspace volume mount (Issue #1083)
@@ -2852,6 +2892,7 @@ $ports_section
       - DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@postgres:5432/$DB_NAME
       - WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE
       - WORKSPACE_BASE_DIR=/workspace
+      - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
     volumes:
@@ -2860,10 +2901,22 @@ $volumes_section
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:$INTERNAL_WEB_PORT/health')"]
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request, os
+          urllib.request.urlopen('http://localhost:$INTERNAL_WEB_PORT/health')
+          db_url = os.environ.get('DATABASE_URL')
+          if db_url:
+              import psycopg2
+              conn = psycopg2.connect(db_url)
+              conn.close()
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
@@ -3101,9 +3154,13 @@ init_auth_database() {
     fi
 
     # Initialize database and create default admin user
-    if docker compose exec -T -e OPENACE_SYSTEM_ACCOUNT=openace open-ace python scripts/init_db.py; then
+    # Issue #1192: Use RUN_USER as system_account (consistent with binary install)
+    # This ensures workspace paths match the host user's home directory
+    local system_account="${OPENACE_SYSTEM_ACCOUNT:-$RUN_USER}"
+    print_info "使用 system_account=$system_account (与宿主机运行用户一致)"
+    if docker compose exec -T -e OPENACE_SYSTEM_ACCOUNT=$system_account open-ace python scripts/init_db.py; then
         print_success "数据库初始化完成"
-        print_info "默认管理员: admin / admin123 (system_account=openace)"
+        print_info "默认管理员: admin / admin123 (system_account=$system_account)"
     else
         print_warning "数据库初始化失败，可能已存在用户"
     fi
@@ -3134,6 +3191,177 @@ start_application() {
 
     print_warning "应用启动中，请稍后检查状态"
     return 0
+}
+
+# ============================================================================
+# Backup Functions (Issue #1192)
+# ============================================================================
+
+create_backup_scripts() {
+    print_header "创建备份脚本"
+
+    local backup_script="$DEPLOY_DIR/backup.sh"
+    local restore_script="$DEPLOY_DIR/restore.sh"
+
+    cat > "$backup_script" << 'BACKUP_EOF'
+#!/bin/bash
+# Open ACE Backup Script
+# Backs up PostgreSQL data, config, and workspace
+
+set -e
+
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_DIR="$DEPLOY_DIR/backups"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_NAME="open-ace-backup-$TIMESTAMP"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  Open ACE - Backup${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+
+mkdir -p "$BACKUP_DIR/$BACKUP_NAME"
+
+echo -e "${YELLOW}[1/4] 备份 PostgreSQL 数据...${NC}"
+DB_USER_VAL=$(grep "^DB_USER=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2)
+DB_NAME_VAL=$(grep "^DB_NAME=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2)
+if cd "$DEPLOY_DIR" && docker compose exec -T postgres pg_dump -U "$DB_USER_VAL" "$DB_NAME_VAL" > "$BACKUP_DIR/$BACKUP_NAME/database.sql" 2>/dev/null; then
+    echo -e "${GREEN}✓ PostgreSQL 数据备份完成${NC}"
+else
+    echo -e "${RED}✗ PostgreSQL 数据备份失败${NC}"
+    echo -e "${YELLOW}  提示: 请确保容器正在运行${NC}"
+fi
+
+echo -e "${YELLOW}[2/4] 备份配置文件...${NC}"
+if cp -r "$DEPLOY_DIR/config" "$BACKUP_DIR/$BACKUP_NAME/" 2>/dev/null; then
+    echo -e "${GREEN}✓ 配置文件备份完成${NC}"
+else
+    echo -e "${YELLOW}⚠ 配置文件备份失败${NC}"
+fi
+
+echo -e "${YELLOW}[3/4] 备份 Workspace 数据...${NC}"
+if [ -d "$DEPLOY_DIR/workspace" ] && [ "$(ls -A "$DEPLOY_DIR/workspace" 2>/dev/null)" ]; then
+    if tar -czf "$BACKUP_DIR/$BACKUP_NAME/workspace.tar.gz" -C "$DEPLOY_DIR" workspace 2>/dev/null; then
+        echo -e "${GREEN}✓ Workspace 数据备份完成${NC}"
+    else
+        echo -e "${YELLOW}⚠ Workspace 数据备份失败${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ Workspace 目录为空，跳过备份${NC}"
+fi
+
+echo -e "${YELLOW}[4/4] 备份环境变量文件...${NC}"
+if cp "$DEPLOY_DIR/.env" "$BACKUP_DIR/$BACKUP_NAME/.env" 2>/dev/null; then
+    echo -e "${GREEN}✓ 环境变量文件备份完成${NC}"
+else
+    echo -e "${YELLOW}⚠ 环境变量文件备份失败${NC}"
+fi
+
+echo ""
+echo -e "${GREEN}备份完成！${NC}"
+echo "备份位置: $BACKUP_DIR/$BACKUP_NAME"
+echo "备份大小: $(du -sh "$BACKUP_DIR/$BACKUP_NAME" | cut -f1)"
+echo ""
+
+echo -e "${YELLOW}清理旧备份（保留最近 5 个）...${NC}"
+ls -dt "$BACKUP_DIR"/open-ace-backup-* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
+BACKUP_EOF
+    chmod +x "$backup_script"
+    print_success "备份脚本创建完成: $backup_script"
+
+    cat > "$restore_script" << 'RESTORE_EOF'
+#!/bin/bash
+# Open ACE Restore Script
+# Restores PostgreSQL data, config, and workspace from a backup
+
+set -e
+
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_DIR="$DEPLOY_DIR/backups"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+    echo -e "${RED}没有找到备份文件${NC}"
+    echo -e "${YELLOW}请先运行 backup.sh 创建备份${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  Open ACE - Restore${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo "可用的备份:"
+ls -dt "$BACKUP_DIR"/open-ace-backup-* 2>/dev/null | while read backup; do
+    echo "  $(basename "$backup") ($(du -sh "$backup" | cut -f1))"
+done
+echo ""
+
+LATEST_BACKUP=$(ls -dt "$BACKUP_DIR"/open-ace-backup-* 2>/dev/null | head -1)
+echo -e "${YELLOW}请输入要恢复的备份名称（默认: $(basename "$LATEST_BACKUP")）:${NC}"
+read -r backup_name
+if [ -z "$backup_name" ]; then
+    SELECTED_BACKUP="$LATEST_BACKUP"
+else
+    SELECTED_BACKUP="$BACKUP_DIR/$backup_name"
+fi
+
+if [ ! -d "$SELECTED_BACKUP" ]; then
+    echo -e "${RED}备份不存在: $SELECTED_BACKUP${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}⚠️  恢复操作将覆盖当前数据！${NC}"
+echo -e "${YELLOW}确认恢复备份: $(basename "$SELECTED_BACKUP")? [y/N]:${NC}"
+read -r confirm
+if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
+    echo "恢复已取消"
+    exit 0
+fi
+
+DB_USER_VAL=$(grep "^DB_USER=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2)
+DB_NAME_VAL=$(grep "^DB_NAME=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2)
+
+echo -e "${YELLOW}[1/4] 恢复 PostgreSQL 数据...${NC}"
+if cd "$DEPLOY_DIR" && docker compose exec -T postgres psql -U "$DB_USER_VAL" "$DB_NAME_VAL" < "$SELECTED_BACKUP/database.sql" 2>/dev/null; then
+    echo -e "${GREEN}✓ PostgreSQL 数据恢复完成${NC}"
+else
+    echo -e "${RED}✗ PostgreSQL 数据恢复失败${NC}"
+fi
+
+echo -e "${YELLOW}[2/4] 恢复配置文件...${NC}"
+if cp -r "$SELECTED_BACKUP/config" "$DEPLOY_DIR/" 2>/dev/null; then
+    echo -e "${GREEN}✓ 配置文件恢复完成${NC}"
+fi
+
+echo -e "${YELLOW}[3/4] 恢复 Workspace 数据...${NC}"
+if [ -f "$SELECTED_BACKUP/workspace.tar.gz" ]; then
+    if tar -xzf "$SELECTED_BACKUP/workspace.tar.gz" -C "$DEPLOY_DIR" 2>/dev/null; then
+        echo -e "${GREEN}✓ Workspace 数据恢复完成${NC}"
+    fi
+fi
+
+echo -e "${YELLOW}[4/4] 恢复环境变量文件...${NC}"
+if cp "$SELECTED_BACKUP/.env" "$DEPLOY_DIR/.env" 2>/dev/null; then
+    echo -e "${GREEN}✓ 环境变量文件恢复完成${NC}"
+fi
+
+echo -e "${YELLOW}重启应用容器...${NC}"
+cd "$DEPLOY_DIR" && docker compose restart open-ace
+
+echo ""
+echo -e "${GREEN}恢复完成！${NC}"
+RESTORE_EOF
+    chmod +x "$restore_script"
+    print_success "恢复脚本创建完成: $restore_script"
 }
 
 show_deployment_info() {
@@ -3536,4 +3764,5 @@ fi
 start_postgres
 start_application
 init_auth_database
+create_backup_scripts
 show_deployment_info
