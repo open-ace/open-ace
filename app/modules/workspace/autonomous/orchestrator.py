@@ -860,9 +860,17 @@ class AutonomousOrchestrator:
         """Resolve (tracking_session_id, resume_session_id, resume) for a line.
 
         main/review/test: the workflow stores a stable tracking session id for
-        the line. For Claude, the actual CLI/sidebar resume id is looked up from
-        the tracking session row's context (`cli_session_id`). For other tools,
-        the tracking id itself is the resume target.
+        the line. For Claude, the actual CLI/sidebar resume id is read from the
+        tracking session row's authoritative ``cli_session_id`` column (with a
+        context-JSON fallback for rows written before the column existed). For
+        other tools, the tracking id itself is the resume target.
+
+        Strict 3-session topology: if a Claude line's mapping is missing (partial
+        write, old data, manual cleanup), we do NOT disguise the tracking id as a
+        resume id — that would resume a non-existent Claude session and pin the
+        bad id with no self-heal. Instead we return resume=False so ``_run_local``
+        re-probes the real CLI id and rebinds it to this same line (still exactly
+        3 sessions, never a 4th).
 
         Reads from the wf dict first, then falls back to a fresh DB query.
         The DB fallback is critical: _run_agent updates the session line in the
@@ -887,14 +895,37 @@ class AutonomousOrchestrator:
             ) is not None:
                 try:
                     session_row = self._runner.session_manager.get_session(existing) or {}
-                    context = (
-                        session_row.get("context", {}) if isinstance(session_row, dict) else {}
-                    )
-                    cli_session_id = (context.get("cli_session_id") or "").strip()
+                    # get_session returns an AgentSession (column on the object)
+                    # or {} when absent; tests/legacy rows may supply a dict with
+                    # context.cli_session_id. Authoritative column first.
+                    cli_session_id = ""
+                    if session_row:
+                        cli_session_id = (getattr(session_row, "cli_session_id", "") or "").strip()
+                        if not cli_session_id:
+                            ctx = getattr(session_row, "context", None)
+                            if not isinstance(ctx, dict):
+                                ctx = (
+                                    session_row.get("context", {})
+                                    if isinstance(session_row, dict)
+                                    else {}
+                                )
+                            cli_session_id = (ctx.get("cli_session_id") or "").strip()
                     if cli_session_id:
                         resume_target = cli_session_id
+                    else:
+                        # Mapping lost: keep the 3-session design by re-probing
+                        # and rebinding the real CLI id to this line on the next
+                        # run, rather than faking a resume with the tracking id.
+                        logger.warning(
+                            "Claude session line %s has no cli_session_id mapping "
+                            "(tracking=%s); starting fresh and rebinding",
+                            session_line,
+                            existing[:8],
+                        )
+                        return str(uuid.uuid4()), None, False
                 except Exception:
                     logger.warning("Failed to resolve Claude resume target", exc_info=True)
+                    return str(uuid.uuid4()), None, False
             return str(uuid.uuid4()), resume_target, True
         return str(uuid.uuid4()), None, False
 
@@ -1770,7 +1801,12 @@ class AutonomousOrchestrator:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds
+        # `<=` (not `<`): max_plan_rounds counts review rounds, and a round
+        # whose review raised substantive feedback must be allowed to refine
+        # before finalizing — otherwise max_plan_rounds=1 finalizes immediately
+        # and the single review's feedback is silently dropped (the finalize
+        # refine only fires on APPROVING reviews, see _should_refine_plan).
+        needs_refinement = review_has_feedback and round_num <= max_rounds
 
         if not needs_refinement:
             # Planning complete — finalize the plan via the main session.
@@ -2640,7 +2676,11 @@ class AutonomousOrchestrator:
 
         review_passed = self._review_is_approved(review_text, "代码审查通过")
 
-        if review_passed or round_num >= max_rounds:
+        # `round_num > max_rounds` (not `>=`): max_pr_review_rounds counts review
+        # rounds, and a review that finds issues must be allowed a fix round
+        # before finalizing — otherwise max_pr_review_rounds=1 finalizes on the
+        # very first review and the code review findings are silently dropped.
+        if review_passed or round_num > max_rounds:
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback

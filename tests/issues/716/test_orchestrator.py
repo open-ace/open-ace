@@ -1131,11 +1131,16 @@ class TestOrchestratorPrReview:
         assert "Closes #42" in pr_call[1]["body"]
 
     def test_pr_review_max_rounds_moves_to_report(self):
-        """When max rounds reached, workflow moves to report phase."""
+        """When the round count exceeds max, the workflow moves to report.
+
+        Under the `round_num > max_rounds` cap, max_pr_review_rounds=1 still
+        allows the first review a fix round; the cap (→ report) triggers once
+        round_num exceeds max. Enter at round 2 (current_round=1) so the cap
+        fires even though the review did not approve."""
         wf = _make_workflow(
             current_phase="pr_review",
             status="pr_review",
-            current_round=0,
+            current_round=1,
             max_pr_review_rounds=1,
         )
         orch, mock_repo = self._make_orchestrator(wf)
@@ -1170,6 +1175,33 @@ class TestOrchestratorPrReview:
 
         # Agent called twice: review + fixes
         assert orch._runner.run_agent_task.call_count == 2
+
+    def test_pr_review_max_one_still_allows_fix_round(self):
+        """max_pr_review_rounds=1 must still let a non-passing review trigger a
+        fix round before reporting — otherwise the single review is pointless.
+
+        Under the `round_num > max_rounds` cap, round 1 (== max) is NOT the cap,
+        so a review that finds issues gets a fix round; the cap (→ report) only
+        fires at round 2 (#1200)."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            max_pr_review_rounds=1,
+            github_pr_number=99,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_diff.return_value = "diff"
+        orch._runner.run_agent_task.return_value = _make_agent_result(text="代码有问题需要修改")
+        orch._gh.get_current_commit.return_value = "fix1234"
+
+        orch._do_pr_review(wf)
+
+        # review + fix (NOT review + report): the fix round runs at max=1.
+        assert orch._runner.run_agent_task.call_count == 2
+        final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
+        assert final_update.get("status") != "reporting"
 
     def test_pr_review_approved_early_moves_to_report(self):
         """An approved PR review should end early without consuming all rounds."""

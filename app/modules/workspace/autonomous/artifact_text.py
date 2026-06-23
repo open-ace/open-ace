@@ -12,7 +12,11 @@ _AGENT_INTRO_PATTERNS = [
     re.compile(r"^首先[让我]*[^\n]{0,30}[。！]"),
     re.compile(r"^现在[我来让]*[^\n]{0,30}[。！]"),
     re.compile(r"^好的[，,][^\n]{0,30}[。！]"),
-    re.compile(r"^方案[已完]*[^\n]{0,20}[。，！]"),
+    # NOTE: a previous `^方案[已完]*...` pattern here was removed — it matched
+    # the approval sentinel "方案通过审查，…" (and any "方案…" line), stripping
+    # the review's approval signal to empty so the planner kept refining a plan
+    # the reviewer had already approved. "方案" is legitimate review/plan
+    # vocabulary, not intro narration.
     re.compile(r"^探索完成[^\n]*"),
     re.compile(r"^分析完成[^\n]*"),
 ]

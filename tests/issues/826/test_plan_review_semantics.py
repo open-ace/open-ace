@@ -99,7 +99,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds
+        needs_refinement = review_has_feedback and round_num <= max_rounds
         assert needs_refinement is True
 
     def test_refinement_stops_at_max_rounds(self):
@@ -116,7 +116,7 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds
+        needs_refinement = review_has_feedback and round_num <= max_rounds
         assert needs_refinement is False
 
     def test_refinement_stops_when_approved(self):
@@ -130,11 +130,15 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds
+        needs_refinement = review_has_feedback and round_num <= max_rounds
         assert needs_refinement is False
 
-    def test_max_plan_rounds_1_allows_no_extra_refinement(self):
-        """max_plan_rounds=1 means one review round total, so no extra refinement."""
+    def test_max_plan_rounds_1_allows_one_refinement(self):
+        """max_plan_rounds=1 should allow initial plan + 1 refinement round.
+
+        A review with substantive feedback must trigger at least one refine
+        round before finalizing, otherwise the review is pointless. round 1 <=
+        max_rounds 1 => True, so refinement runs (round 2)."""
         review_text = (
             "方案存在以下问题需要修改：遗漏了错误处理，架构风险较高，"
             "需要补充测试策略，实现难度被低估，缺少回滚方案"
@@ -147,8 +151,8 @@ class TestNeedsRefinementLogic:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        needs_refinement = review_has_feedback and round_num < max_rounds
-        assert needs_refinement is False
+        needs_refinement = review_has_feedback and round_num <= max_rounds
+        assert needs_refinement is True
 
 
 class TestPlanningIntegration:

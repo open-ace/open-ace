@@ -156,6 +156,11 @@ class AgentSession:
     workspace_type: str = "local"  # local or remote
     remote_machine_id: Optional[str] = None
     paused_at: Optional[datetime] = None
+    # Real CLI/sidebar session id for workflow-owned lines (Claude local). The
+    # workflow row stores a stable tracking id; this column is the authoritative
+    # resume target. Promoted out of context JSON so a partial context write
+    # can never lose it and resume never falls back to the tracking id (#1200).
+    cli_session_id: str = ""
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -187,6 +192,7 @@ class AgentSession:
             "workspace_type": self.workspace_type,
             "remote_machine_id": self.remote_machine_id,
             "paused_at": _format_dt(self.paused_at),
+            "cli_session_id": self.cli_session_id,
         }
 
     @classmethod
@@ -229,6 +235,7 @@ class AgentSession:
             paused_at=(
                 datetime.fromisoformat(data["paused_at"]) if data.get("paused_at") else None
             ),
+            cli_session_id=data.get("cli_session_id", ""),
         )
 
     def is_expired(self) -> bool:
@@ -318,7 +325,8 @@ class SessionManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP,
-                expires_at TIMESTAMP
+                expires_at TIMESTAMP,
+                cli_session_id TEXT DEFAULT ''
             )
         """
         )
@@ -394,6 +402,13 @@ class SessionManager:
 
         try:
             cursor.execute("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
+        except Exception:
+            pass  # Column already exists
+
+        # cli_session_id: authoritative resume target for workflow-owned Claude
+        # lines (promoted out of context JSON). Idempotent — skipped if present.
+        try:
+            cursor.execute("ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''")
         except Exception:
             pass  # Column already exists
 
@@ -501,8 +516,8 @@ class SessionManager:
             (session_id, session_type, title, tool_name, host_name, user_id, project_id,
              project_path, status, context, settings, model, expires_at, created_at, updated_at,
              request_count, total_tokens, total_input_tokens, total_output_tokens, message_count,
-             workspace_type, remote_machine_id)
-            VALUES ({_params(22)})
+             workspace_type, remote_machine_id, cli_session_id)
+            VALUES ({_params(23)})
         """,
             (
                 session.session_id,
@@ -527,6 +542,7 @@ class SessionManager:
                 session.message_count or 0,
                 session.workspace_type or "local",
                 session.remote_machine_id,
+                session.cli_session_id or "",
             ),
         )
 
@@ -609,7 +625,8 @@ class SessionManager:
                 total_tokens = {_param()}, total_input_tokens = {_param()}, total_output_tokens = {_param()},
                 message_count = {_param()}, request_count = {_param()}, model = {_param()}, tags = {_param()},
                 updated_at = {_param()}, completed_at = {_param()},
-                workspace_type = {_param()}, remote_machine_id = {_param()}, paused_at = {_param()}
+                workspace_type = {_param()}, remote_machine_id = {_param()}, paused_at = {_param()},
+                cli_session_id = {_param()}
             WHERE session_id = {_param()}
         """,
             (
@@ -629,6 +646,7 @@ class SessionManager:
                 session.workspace_type,
                 session.remote_machine_id,
                 session.paused_at.isoformat() if session.paused_at else None,
+                session.cli_session_id or "",
                 session.session_id,
             ),
         )
@@ -663,6 +681,7 @@ class SessionManager:
         "terminal_id",
         "project_path",
         "user_id",
+        "cli_session_id",
     }
 
     def update_session_fields(self, session_id: str, fields: dict[str, Any]) -> bool:
@@ -1334,6 +1353,7 @@ class SessionManager:
             workspace_type=get_value("workspace_type") or "local",
             remote_machine_id=get_value("remote_machine_id"),
             paused_at=parse_datetime(get_value("paused_at")),
+            cli_session_id=get_value("cli_session_id") or "",
         )
 
     def _row_to_message(self, row: Union[sqlite3.Row, dict]) -> SessionMessage:
@@ -1392,7 +1412,8 @@ def get_ddl_statements() -> list[str]:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP,
-            expires_at TIMESTAMP
+            expires_at TIMESTAMP,
+            cli_session_id TEXT DEFAULT ''
         )
         """,
         f"""
@@ -1434,6 +1455,7 @@ def get_ddl_statements() -> list[str]:
         "ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT",
         "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0",
         "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP",
+        "ALTER TABLE agent_sessions ADD COLUMN cli_session_id TEXT DEFAULT ''",
     ]
 
 

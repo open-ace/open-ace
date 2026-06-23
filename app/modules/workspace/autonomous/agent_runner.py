@@ -639,9 +639,11 @@ class AutonomousAgentRunner:
         if self.session_manager:
             try:
                 existing = self.session_manager.get_session(session.session_id) or {}
-                context = (
-                    dict(existing.get("context", {}) or {}) if isinstance(existing, dict) else {}
-                )
+                # get_session returns an AgentSession object (or {} when absent);
+                # read its context via getattr so prior context is preserved
+                # rather than clobbered. cli_session_id is the authoritative
+                # column; we mirror it into context for any legacy reader.
+                context = dict(getattr(existing, "context", {}) or {})
                 context.update(
                     {
                         "workflow_id": session.workflow_id,
@@ -653,6 +655,7 @@ class AutonomousAgentRunner:
                     {
                         "context": context,
                         "status": "active",
+                        "cli_session_id": persisted_id,
                     },
                 )
             except Exception as e:
@@ -715,7 +718,8 @@ class AutonomousAgentRunner:
             updates["status"] = status
         try:
             existing = self.session_manager.get_session(session.session_id) or {}
-            context = dict(existing.get("context", {}) or {}) if isinstance(existing, dict) else {}
+            # get_session returns an AgentSession; read context via getattr.
+            context = dict(getattr(existing, "context", {}) or {})
             context.update(
                 {
                     "workflow_id": session.workflow_id,
@@ -723,6 +727,9 @@ class AutonomousAgentRunner:
                 }
             )
             updates["context"] = context
+            # Authoritative column — written in the same UPDATE as context so a
+            # partial context merge can never lose the resume target (#1200).
+            updates["cli_session_id"] = cli_session_id
         except Exception as e:
             logger.warning("Failed to load tracking session context: %s", e)
 
