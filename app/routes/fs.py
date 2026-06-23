@@ -214,10 +214,21 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
 def get_directory_info(path: str, system_account: str | None = None):
     """Get information about a directory, optionally as a specific user."""
     try:
+        import pwd
+
+        # Check if current process user is already the target user
+        # This avoids sudo failures when NoNewPrivileges=true is set
+        effective_system_account = system_account
         if system_account:
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            if current_user == system_account:
+                # Already running as target user, skip sudo
+                effective_system_account = None
+
+        if effective_system_account:
             # Use sudo to check permissions as the specified user
             # Check if directory exists
-            result = run_as_user(system_account, ["test", "-e", path])
+            result = run_as_user(effective_system_account, ["test", "-e", path])
             if result.returncode != 0:
                 return {
                     "exists": False,
@@ -227,7 +238,7 @@ def get_directory_info(path: str, system_account: str | None = None):
                 }
 
             # Check if it's a directory
-            result = run_as_user(system_account, ["test", "-d", path])
+            result = run_as_user(effective_system_account, ["test", "-d", path])
             is_dir = result.returncode == 0
 
             if not is_dir:
@@ -239,11 +250,11 @@ def get_directory_info(path: str, system_account: str | None = None):
                 }
 
             # Check if readable
-            result = run_as_user(system_account, ["test", "-r", path])
+            result = run_as_user(effective_system_account, ["test", "-r", path])
             is_readable = result.returncode == 0
 
             # Check if writable
-            result = run_as_user(system_account, ["test", "-w", path])
+            result = run_as_user(effective_system_account, ["test", "-w", path])
             is_writable = result.returncode == 0
 
             return {
@@ -254,7 +265,7 @@ def get_directory_info(path: str, system_account: str | None = None):
                 "size": 0,
             }
         else:
-            # Fallback to process user's permissions
+            # Direct permission checks (process user or already target user)
             stat = os.stat(path)
             return {
                 "exists": True,
@@ -343,12 +354,23 @@ def api_browse_directory():
 
 def list_subdirectories(path: str, system_account: str | None = None) -> list:
     """List subdirectories in a path, optionally as a specific user."""
+    import pwd
+
     directories: list[dict[str, Any]] = []
 
+    # Check if current process user is already the target user
+    # This avoids sudo failures when NoNewPrivileges=true is set
+    effective_system_account = system_account
+    if system_account:
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+        if current_user == system_account:
+            # Already running as target user, skip sudo
+            effective_system_account = None
+
     try:
-        if system_account:
+        if effective_system_account:
             # Use sudo to list directory as the specified user
-            result = run_as_user(system_account, ["ls", "-1", path])
+            result = run_as_user(effective_system_account, ["ls", "-1", path])
             if result.returncode != 0:
                 logger.warning(f"Permission denied accessing {path} as {system_account}")
                 return directories
@@ -363,13 +385,13 @@ def list_subdirectories(path: str, system_account: str | None = None) -> list:
                     continue
 
                 # Check if it's a directory
-                dir_result = run_as_user(system_account, ["test", "-d", full_path])
+                dir_result = run_as_user(effective_system_account, ["test", "-d", full_path])
                 if dir_result.returncode != 0:
                     continue
 
                 # Check permissions
-                readable_result = run_as_user(system_account, ["test", "-r", full_path])
-                writable_result = run_as_user(system_account, ["test", "-w", full_path])
+                readable_result = run_as_user(effective_system_account, ["test", "-r", full_path])
+                writable_result = run_as_user(effective_system_account, ["test", "-w", full_path])
 
                 directories.append(
                     {
