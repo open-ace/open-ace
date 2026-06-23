@@ -74,9 +74,13 @@ class SessionMessage:
     tokens_used: int = 0
     model: Optional[str] = None
     timestamp: Optional[datetime] = None
+    source_timestamp: Optional[datetime] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     milestone_id: str = ""
     source: str = ""
+    external_message_id: str = ""
+    content_blocks: list[Any] = field(default_factory=list)
+    _was_inserted: bool = False
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -88,9 +92,12 @@ class SessionMessage:
             "tokens_used": self.tokens_used,
             "model": self.model,
             "timestamp": _format_dt(self.timestamp),
+            "source_timestamp": _format_dt(self.source_timestamp),
             "metadata": self.metadata,
             "milestone_id": self.milestone_id,
             "source": self.source,
+            "external_message_id": self.external_message_id,
+            "content_blocks": self.content_blocks,
         }
 
     @classmethod
@@ -104,9 +111,16 @@ class SessionMessage:
             tokens_used=data.get("tokens_used", 0),
             model=data.get("model"),
             timestamp=datetime.fromisoformat(data["timestamp"]) if data.get("timestamp") else None,
+            source_timestamp=(
+                datetime.fromisoformat(data["source_timestamp"])
+                if data.get("source_timestamp")
+                else None
+            ),
             metadata=data.get("metadata", {}),
             milestone_id=data.get("milestone_id", ""),
             source=data.get("source", ""),
+            external_message_id=data.get("external_message_id", ""),
+            content_blocks=data.get("content_blocks", []) or [],
         )
 
 
@@ -342,9 +356,12 @@ class SessionManager:
                 tokens_used INTEGER DEFAULT 0,
                 model TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                source_timestamp TIMESTAMP,
                 metadata TEXT,
                 milestone_id TEXT DEFAULT '',
                 source TEXT DEFAULT '',
+                external_message_id TEXT DEFAULT '',
+                content_blocks TEXT,
                 FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
             )
         """
@@ -423,8 +440,64 @@ class SessionManager:
         except Exception:
             pass  # Column already exists
 
+        try:
+            cursor.execute(
+                "ALTER TABLE session_messages ADD COLUMN source_timestamp TIMESTAMP"
+            )
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            cursor.execute(
+                "ALTER TABLE session_messages ADD COLUMN external_message_id TEXT DEFAULT ''"
+            )
+        except Exception:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE session_messages ADD COLUMN content_blocks TEXT")
+        except Exception:
+            pass  # Column already exists
+
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_messages_external_message_id
+            ON session_messages(session_id, external_message_id)
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_session_messages_source
+            ON session_messages(session_id, source)
+        """
+        )
+
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def _extract_external_message_id(metadata: Optional[dict[str, Any]]) -> str:
+        """Extract a stable external message identity from transcript metadata."""
+        metadata = metadata or {}
+        for identity_key in ("external_message_id", "message_id", "uuid"):
+            identity_value = metadata.get(identity_key)
+            if identity_value:
+                return str(identity_value)
+        return ""
+
+    @staticmethod
+    def _extract_source(metadata: Optional[dict[str, Any]]) -> str:
+        """Extract the transcript producer identifier from metadata."""
+        metadata = metadata or {}
+        value = metadata.get("source")
+        return str(value) if value else ""
+
+    @staticmethod
+    def _extract_content_blocks(metadata: Optional[dict[str, Any]]) -> list[Any]:
+        """Extract structured content blocks from metadata."""
+        metadata = metadata or {}
+        value = metadata.get("content_blocks")
+        return value if isinstance(value, list) else []
 
     def create_session(
         self,
@@ -825,6 +898,134 @@ class SessionManager:
 
         return [self._row_to_message(row) for row in rows]
 
+    @staticmethod
+    def _normalize_message_timestamp(value: Optional[Union[datetime, str]]) -> Optional[datetime]:
+        """Normalize message timestamps to naive UTC datetimes for storage."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            if raw.endswith("Z"):
+                raw = f"{raw[:-1]}+00:00"
+            try:
+                parsed = datetime.fromisoformat(raw)
+            except ValueError:
+                return None
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        return None
+
+    @staticmethod
+    def _merge_message_metadata(
+        existing: Optional[dict[str, Any]], incoming: Optional[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Merge transcript metadata without clobbering richer existing values."""
+        merged = dict(existing or {})
+        for key, value in (incoming or {}).items():
+            if value in (None, "", [], {}):
+                continue
+            if merged.get(key) in (None, "", [], {}):
+                merged[key] = value
+        return merged
+
+    @staticmethod
+    def _serialize_json(value: Any) -> Optional[str]:
+        """Serialize JSON payloads, preserving NULL for empty structured fields."""
+        if value in (None, "", [], {}):
+            return None
+        return json.dumps(value)
+
+    def _find_existing_message(
+        self, cursor: Any, session_id: str, role: str, metadata: Optional[dict[str, Any]]
+    ) -> Optional[SessionMessage]:
+        """Find an existing transcript row for a stable external message identity."""
+        metadata = metadata or {}
+        external_message_id = self._extract_external_message_id(metadata)
+        if external_message_id:
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM session_messages
+                WHERE session_id = {_param()}
+                  AND role = {_param()}
+                  AND external_message_id = {_param()}
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (session_id, role, external_message_id),
+            )
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_message(row)
+
+        for identity_key in ("external_message_id", "message_id", "uuid"):
+            identity_value = metadata.get(identity_key)
+            if not identity_value:
+                continue
+            escaped = escape_like(str(identity_value))
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM session_messages
+                WHERE session_id = {_param()}
+                  AND role = {_param()}
+                  AND metadata LIKE {_param()}
+                  ESCAPE '\\'
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (session_id, role, f'%"{identity_key}": "{escaped}"%'),
+            )
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_message(row)
+
+        return None
+
+    def append_transcript_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        tokens_used: int = 0,
+        model: Optional[str] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        milestone_id: str = "",
+        timestamp: Optional[Union[datetime, str]] = None,
+        source: str = "",
+        external_message_id: str = "",
+    ) -> Optional[SessionMessage]:
+        """Append a transcript row without incrementing request/token summary.
+
+        This is the preferred writer for transcript-producing code paths
+        (autonomous runner, remote streaming, proxy transcript sync, history
+        import). Those paths should update usage summary separately via
+        ``increment_session_usage`` or an equivalent owner.
+        """
+        merged_metadata = dict(metadata or {})
+        if source and not merged_metadata.get("source"):
+            merged_metadata["source"] = source
+        if external_message_id and not merged_metadata.get("external_message_id"):
+            merged_metadata["external_message_id"] = external_message_id
+        return self.add_message(
+            session_id=session_id,
+            role=role,
+            content=content,
+            tokens_used=tokens_used,
+            model=model,
+            metadata=merged_metadata or None,
+            milestone_id=milestone_id,
+            count_usage=False,
+            timestamp=timestamp,
+        )
+
     def add_message(
         self,
         session_id: str,
@@ -836,6 +1037,7 @@ class SessionManager:
         milestone_id: str = "",
         source: str = "",
         count_usage: bool = True,
+        timestamp: Optional[Union[datetime, str]] = None,
     ) -> Optional[SessionMessage]:
         """
         Add a message to a session.
@@ -853,6 +1055,9 @@ class SessionManager:
                 pass False because the agent runner owns those counters via
                 increment_session_usage (avoids double-count); non-autonomous
                 callers (remote, session_sync) keep True as they rely on this.
+            timestamp: Optional source timestamp. When omitted, store the current
+                UTC time. Historical sync/import paths should pass the original
+                message timestamp so transcript order remains stable.
 
         Returns:
             SessionMessage or None if session not found.
@@ -869,7 +1074,79 @@ class SessionManager:
             conn.close()
             return None
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = self._normalize_message_timestamp(timestamp) or datetime.now(timezone.utc).replace(
+            tzinfo=None
+        )
+        metadata = metadata or {}
+        extracted_source = source or self._extract_source(metadata)
+        external_message_id = self._extract_external_message_id(metadata)
+        content_blocks = self._extract_content_blocks(metadata)
+
+        existing = self._find_existing_message(cursor, session_id, role, metadata)
+        if existing:
+            merged_metadata = self._merge_message_metadata(existing.metadata, metadata)
+            merged_content = existing.content or _sanitize_text_value(content) or ""
+            candidate_content = _sanitize_text_value(content) or ""
+            if candidate_content and len(candidate_content) > len(merged_content or ""):
+                merged_content = candidate_content
+            merged_tokens = max(existing.tokens_used or 0, tokens_used or 0)
+            merged_model = existing.model or model
+            merged_milestone = existing.milestone_id or milestone_id
+            merged_timestamp = existing.source_timestamp or now
+            merged_source = existing.source or extracted_source
+            merged_external_message_id = (
+                existing.external_message_id
+                or external_message_id
+                or self._extract_external_message_id(merged_metadata)
+            )
+            merged_content_blocks = (
+                existing.content_blocks
+                or content_blocks
+                or self._extract_content_blocks(merged_metadata)
+            )
+
+            cursor.execute(
+                f"""
+                UPDATE session_messages
+                SET content = {_param()},
+                    tokens_used = {_param()},
+                    model = {_param()},
+                    source_timestamp = {_param()},
+                    metadata = {_param()},
+                    milestone_id = {_param()},
+                    source = {_param()},
+                    external_message_id = {_param()},
+                    content_blocks = {_param()}
+                WHERE id = {_param()}
+                """,
+                (
+                    merged_content,
+                    merged_tokens,
+                    merged_model,
+                    merged_timestamp.isoformat() if merged_timestamp else None,
+                    _sanitize_text_value(json.dumps(merged_metadata)),
+                    merged_milestone,
+                    merged_source,
+                    merged_external_message_id,
+                    self._serialize_json(merged_content_blocks),
+                    existing.id,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            existing.content = merged_content
+            existing.tokens_used = merged_tokens
+            existing.model = merged_model
+            existing.source_timestamp = merged_timestamp
+            existing.metadata = merged_metadata
+            existing.milestone_id = merged_milestone
+            existing.source = merged_source
+            existing.external_message_id = merged_external_message_id
+            existing.content_blocks = merged_content_blocks
+            existing._was_inserted = False
+            return existing
+
         message = SessionMessage(
             session_id=session_id,
             role=role,
@@ -877,15 +1154,22 @@ class SessionManager:
             tokens_used=tokens_used,
             model=model,
             timestamp=now,
-            metadata=metadata or {},
-            source=source,
+            source_timestamp=now,
+            metadata=metadata,
+            milestone_id=milestone_id,
+            source=extracted_source,
+            external_message_id=external_message_id,
+            content_blocks=content_blocks,
         )
 
         cursor.execute(
             f"""
-            INSERT INTO session_messages
-            (session_id, role, content, tokens_used, model, timestamp, metadata, milestone_id, source)
-            VALUES ({_params(9)})
+            INSERT INTO session_messages (
+                session_id, role, content, tokens_used, model, timestamp,
+                source_timestamp, metadata, milestone_id, source,
+                external_message_id, content_blocks
+            )
+            VALUES ({_params(12)})
         """,
             (
                 message.session_id,
@@ -894,9 +1178,12 @@ class SessionManager:
                 message.tokens_used,
                 message.model,
                 message.timestamp.isoformat() if message.timestamp else None,
+                message.source_timestamp.isoformat() if message.source_timestamp else None,
                 _sanitize_text_value(json.dumps(message.metadata)),
                 milestone_id,
-                source,
+                message.source,
+                message.external_message_id,
+                self._serialize_json(message.content_blocks),
             ),
         )
 
@@ -931,6 +1218,7 @@ class SessionManager:
             )
 
         message.id = cursor.lastrowid
+        message._was_inserted = True
         conn.commit()
         conn.close()
 
@@ -1363,7 +1651,10 @@ class SessionManager:
         def get_value(key: str):
             if isinstance(row, dict):
                 return row.get(key)
-            return row[key]
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
 
         def parse_datetime(value):
             """Parse datetime from string or return datetime object (PostgreSQL)."""
@@ -1381,10 +1672,53 @@ class SessionManager:
             tokens_used=get_value("tokens_used") or 0,
             model=get_value("model"),
             timestamp=parse_datetime(get_value("timestamp")),
-            metadata=json.loads(get_value("metadata")) if get_value("metadata") else {},
+            source_timestamp=parse_datetime(get_value("source_timestamp")),
+            metadata=self._decode_message_metadata(row),
             milestone_id=get_value("milestone_id") or "",
             source=get_value("source") or "",
+            external_message_id=get_value("external_message_id") or "",
+            content_blocks=self._decode_content_blocks(get_value("content_blocks")),
         )
+
+    @staticmethod
+    def _decode_content_blocks(raw_value: Any) -> list[Any]:
+        """Decode structured content blocks from a JSON column."""
+        if not raw_value:
+            return []
+        if isinstance(raw_value, list):
+            return raw_value
+        try:
+            parsed = json.loads(raw_value)
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    def _decode_message_metadata(self, row: Union[sqlite3.Row, dict]) -> dict[str, Any]:
+        """Decode metadata and rehydrate structured columns for API callers."""
+
+        def get_value(key: str):
+            if isinstance(row, dict):
+                return row.get(key)
+            try:
+                return row[key]
+            except (KeyError, IndexError):
+                return None
+
+        metadata: dict[str, Any] = (
+            json.loads(get_value("metadata")) if get_value("metadata") else {}
+        )
+        content_blocks = self._decode_content_blocks(get_value("content_blocks"))
+        source = get_value("source") or ""
+        external_message_id = get_value("external_message_id") or ""
+
+        if content_blocks and not metadata.get("content_blocks"):
+            metadata["content_blocks"] = content_blocks
+        if source and not metadata.get("source"):
+            metadata["source"] = source
+        if external_message_id and not metadata.get("external_message_id"):
+            metadata["external_message_id"] = external_message_id
+
+        return metadata
 
 
 def get_ddl_statements() -> list[str]:

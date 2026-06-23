@@ -90,8 +90,9 @@ def _record_messages(
     response_body: bytes,
     output_tokens: int,
     model: str | None = None,
-) -> None:
+) -> int:
     """Parse request/response and record messages to session_messages."""
+    message_delta = 0
     try:
         # Parse user messages from request body
         if request_body:
@@ -119,11 +120,14 @@ def _record_messages(
                                 break
 
                     if user_content:
-                        sm.add_message(
+                        stored = sm.append_transcript_message(
                             session_id=session_id,
                             role="user",
                             content=user_content[:10000],  # Truncate to prevent overflow
+                            source="llm_proxy",
                         )
+                        if getattr(stored, "_was_inserted", False):
+                            message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -139,13 +143,16 @@ def _record_messages(
                         if isinstance(msg, dict) and msg.get("role") == "assistant":
                             content = msg.get("content", "")
                             if isinstance(content, str) and content:
-                                sm.add_message(
+                                stored = sm.append_transcript_message(
                                     session_id=session_id,
                                     role="assistant",
                                     content=content[:10000],
                                     tokens_used=output_tokens,
                                     model=model or resp_data.get("model"),
+                                    source="llm_proxy",
                                 )
+                                if getattr(stored, "_was_inserted", False):
+                                    message_delta += 1
             except (json.JSONDecodeError, ValueError):
                 # Handle SSE streaming response - accumulate delta content
                 assistant_content_parts = []
@@ -171,15 +178,19 @@ def _record_messages(
                 if assistant_content_parts:
                     full_content = "".join(assistant_content_parts)
                     if full_content:
-                        sm.add_message(
+                        stored = sm.append_transcript_message(
                             session_id=session_id,
                             role="assistant",
                             content=full_content[:10000],
                             tokens_used=output_tokens,
                             model=model,
+                            source="llm_proxy",
                         )
+                        if getattr(stored, "_was_inserted", False):
+                            message_delta += 1
     except Exception:
         logger.debug("Failed to record messages", exc_info=True)
+    return message_delta
 
 
 def _record_llm_usage(
@@ -258,21 +269,23 @@ def _record_llm_usage(
                     logger.error("Session %s still not found after retry", session_id)
                     return
 
-        # Update session token counts
-        session.total_input_tokens = (session.total_input_tokens or 0) + input_tokens
-        session.total_output_tokens = (session.total_output_tokens or 0) + output_tokens
-        session.total_tokens = (session.total_tokens or 0) + input_tokens + output_tokens
-        session.request_count = (session.request_count or 0) + 1
-        sm.update_session(session)
-
-        # Record messages to session_messages table
-        _record_messages(
+        # Record transcript first; summary is updated explicitly afterwards so
+        # transcript persistence never owns agent_sessions side effects.
+        message_delta = _record_messages(
             sm=sm,
             session_id=session_id,
             request_body=request_body,
             response_body=content,
             output_tokens=output_tokens,
             model=response_model,
+        )
+        sm.increment_session_usage(
+            session_id,
+            message_delta=message_delta,
+            request_delta=1,
+            total_tokens_delta=input_tokens + output_tokens,
+            total_input_delta=input_tokens,
+            total_output_delta=output_tokens,
         )
 
         try:

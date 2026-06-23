@@ -1314,7 +1314,14 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
     Returns:
         Number of sessions updated
     """
-    from shared.db import _execute, _placeholder, escape_like, get_connection
+    from shared.db import (
+        _column_exists,
+        _execute,
+        _placeholder,
+        escape_like,
+        get_connection,
+        is_postgresql,
+    )
 
     # Group messages by agent_session_id
     session_stats: dict[str, dict[str, Any]] = defaultdict(
@@ -1325,10 +1332,12 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
             "models": [],
             "messages": [],
             "last_timestamp": None,
+            "seen_message_ids": set(),
+            "seen_request_ids": set(),
         }
     )
 
-    for msg in messages:
+    for index, msg in enumerate(messages):
         session_id = msg.get("agent_session_id")
         if not session_id:
             continue
@@ -1336,13 +1345,20 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
         role = msg.get("role", "")
         tokens = msg.get("tokens_used", 0) or 0
         model = msg.get("model")
+        msg_id = msg.get("message_id")
+        message_identity = f"{role}:{msg_id}" if msg_id else f"message_row:{session_id}:{index}"
+        if message_identity not in session_stats[session_id]["seen_message_ids"]:
+            session_stats[session_id]["seen_message_ids"].add(message_identity)
+            session_stats[session_id]["message_count"] += 1
+            session_stats[session_id]["total_tokens"] += tokens
 
-        session_stats[session_id]["message_count"] += 1
-        session_stats[session_id]["total_tokens"] += tokens
-
-        # Count assistant messages as requests (one assistant response = one request)
         if role == "assistant":
-            session_stats[session_id]["request_count"] += 1
+            request_identity = (
+                f"message_id:{msg_id}" if msg_id else f"assistant_row:{session_id}:{index}"
+            )
+            if request_identity not in session_stats[session_id]["seen_request_ids"]:
+                session_stats[session_id]["seen_request_ids"].add(request_identity)
+                session_stats[session_id]["request_count"] += 1
 
         if model:
             session_stats[session_id]["models"].append(model)
@@ -1362,9 +1378,14 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
     messages_inserted = 0
     now = datetime.utcnow().isoformat()
     placeholder = _placeholder()
+    max_fn = "GREATEST" if is_postgresql() else "MAX"
 
     conn = get_connection()
     cursor = conn.cursor()
+    has_external_message_id = _column_exists(cursor, "session_messages", "external_message_id")
+    has_structured_session_messages = has_external_message_id and _column_exists(
+        cursor, "session_messages", "source"
+    )
 
     try:
         for session_id, stats in session_stats.items():
@@ -1432,9 +1453,9 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                     session_updated_at = stats["last_timestamp"] or now
                     sql = f"""
                         UPDATE agent_sessions
-                        SET message_count = GREATEST(COALESCE(message_count, 0), {placeholder}),
-                            total_tokens = GREATEST(COALESCE(total_tokens, 0), {placeholder}),
-                            request_count = GREATEST(COALESCE(request_count, 0), {placeholder}),
+                        SET message_count = {max_fn}(COALESCE(message_count, 0), {placeholder}),
+                            total_tokens = {max_fn}(COALESCE(total_tokens, 0), {placeholder}),
+                            request_count = {max_fn}(COALESCE(request_count, 0), {placeholder}),
                             model = COALESCE(model, {placeholder}),
                             updated_at = {placeholder}
                         WHERE session_id = {placeholder}
@@ -1464,12 +1485,19 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
 
                         # Deduplicate by (session_id, role, timestamp) + message_id if available
                         # Note: metadata is TEXT type, use LIKE pattern matching instead of JSONB ->>
-                        if msg_id:
+                        if msg_id and has_external_message_id:
                             check_sql = f"""
                                 SELECT id FROM session_messages
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
-                                AND timestamp = {placeholder}
+                                AND external_message_id = {placeholder}
+                            """
+                            _execute(cursor, check_sql, (session_id, msg.get("role"), str(msg_id)))
+                        elif msg_id:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
                                 AND metadata LIKE {placeholder}
                             """
                             # Use escape_like to prevent wildcard injection
@@ -1480,7 +1508,6 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                                 (
                                     session_id,
                                     msg.get("role"),
-                                    timestamp,
                                     f'%"message_id": "{escaped_msg_id}"%',
                                 ),
                             )
@@ -1499,31 +1526,65 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                         existing = cursor.fetchone()
 
                         if not existing:
-                            insert_sql = f"""
-                                INSERT INTO session_messages
-                                (session_id, role, content, tokens_used, model, timestamp, metadata)
-                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-                            """
                             metadata = {
                                 "message_id": msg_id,
                                 "project_path": msg.get("project_path"),
+                                "source": "fetch_openclaw",
+                                "external_message_id": str(msg_id) if msg_id else "",
                                 "content_blocks": msg.get(
                                     "content_blocks"
                                 ),  # Issue #357: structured content
                             }
-                            _execute(
-                                cursor,
-                                insert_sql,
-                                (
-                                    session_id,
-                                    msg.get("role"),
-                                    msg.get("content"),
-                                    msg.get("tokens_used", 0),
-                                    msg.get("model"),
-                                    timestamp,
-                                    json.dumps(metadata) if metadata else None,
-                                ),
-                            )
+                            if has_structured_session_messages:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp,
+                                     source_timestamp, metadata, milestone_id, source,
+                                     external_message_id, content_blocks)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                        "",
+                                        "fetch_openclaw",
+                                        str(msg_id) if msg_id else "",
+                                        (
+                                            json.dumps(msg.get("content_blocks"))
+                                            if msg.get("content_blocks")
+                                            else None
+                                        ),
+                                    ),
+                                )
+                            else:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                    ),
+                                )
                             messages_inserted += 1
 
                     except Exception as e:

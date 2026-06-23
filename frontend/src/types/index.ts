@@ -72,7 +72,7 @@ export interface Message {
   sender_name?: string;
   sender_id?: string;
   model?: string;
-  message_source?: string;
+  source?: string;
   full_entry?: Record<string, unknown>;
 }
 

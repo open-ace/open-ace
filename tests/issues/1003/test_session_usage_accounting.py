@@ -1,17 +1,17 @@
 """Tests for unified session-counter accounting (#1003).
 
-``agent_sessions.{request_count,total_tokens,total_input_tokens,
+``agent_sessions.{message_count,request_count,total_tokens,total_input_tokens,
 total_output_tokens}`` must accumulate monotonically (per-call increment from
 the agent runner, NOT overwrite) so ``Σ milestone.phase_* == session.*`` holds.
 
 Background (#1003 review): the column was written by three parties with
 different semantics — llm_proxy_handler (+= per proxy call; does NOT fire for
 autonomous local runs, which bypass the proxy), session_manager.add_message
-(+= per message), and agent_runner.update_session_fields (= overwrite with the
-per-call local count, clobbering the others). The overwrite made the column
-unstable, so Σ milestone never matched the session. The fix: the agent runner
-now INCREMENTS via ``increment_session_usage``, and ``add_message`` only owns
-``message_count``.
+(historically += per message), and agent_runner.update_session_fields
+(= overwrite with the per-call local count, clobbering the others). The
+overwrite made the column unstable, so Σ milestone never matched the session.
+The fix: explicit summary owners now INCREMENT via ``increment_session_usage``,
+while transcript insertion remains side-effect free by default.
 """
 
 from unittest.mock import MagicMock
@@ -56,6 +56,7 @@ class TestIncrementSessionUsage:
         _create(sm)
         sm.increment_session_usage(
             "sess-1",
+            message_delta=2,
             request_delta=3,
             total_tokens_delta=100,
             total_input_delta=80,
@@ -63,12 +64,14 @@ class TestIncrementSessionUsage:
         )
         sm.increment_session_usage(
             "sess-1",
+            message_delta=1,
             request_delta=2,
             total_tokens_delta=50,
             total_input_delta=40,
             total_output_delta=10,
         )
         s = sm.get_session("sess-1")
+        assert s.message_count == 3
         assert s.request_count == 5  # 3 + 2, not overwritten to 2
         assert s.total_tokens == 150
         assert s.total_input_tokens == 120
@@ -97,7 +100,8 @@ class TestIncrementSessionUsage:
 class TestAddMessageCountUsageGate:
     def test_autonomous_count_usage_false_leaves_counters(self, sqlite_sm):
         """Autonomous runner passes count_usage=False (it owns the counters via
-        increment_session_usage), so add_message only bumps message_count."""
+        increment_session_usage), so transcript insertion does not touch the
+        session summary."""
         sm = sqlite_sm
         _create(sm)
         sm.increment_session_usage("sess-1", request_delta=5, total_tokens_delta=500)
@@ -106,19 +110,30 @@ class TestAddMessageCountUsageGate:
         s = sm.get_session("sess-1")
         assert s.request_count == 5  # unchanged
         assert s.total_tokens == 500  # unchanged
-        assert s.message_count == 2  # add_message still owns this
+        assert s.message_count == 0
 
-    def test_non_autonomous_default_accumulates(self, sqlite_sm):
-        """Non-autonomous callers (remote_session_manager, session_sync) rely on
-        add_message for request_count/total_tokens — the default count_usage=True
-        must keep accumulating (regression guard for the #1007 review)."""
+    def test_legacy_count_usage_true_still_accumulates(self, sqlite_sm):
+        """Legacy callers can still opt into coupled summary updates
+        explicitly, but the default path must stay side-effect free."""
         sm = sqlite_sm
         _create(sm)
         sm.add_message(
-            session_id="sess-1", role="assistant", content="hi", tokens_used=120
-        )  # default count_usage=True
-        sm.add_message(session_id="sess-1", role="assistant", content="bye", tokens_used=80)
-        sm.add_message(session_id="sess-1", role="tool", content="r")  # tool: no request bump
+            session_id="sess-1",
+            role="assistant",
+            content="hi",
+            tokens_used=120,
+            count_usage=True,
+        )
+        sm.add_message(
+            session_id="sess-1",
+            role="assistant",
+            content="bye",
+            tokens_used=80,
+            count_usage=True,
+        )
+        sm.add_message(
+            session_id="sess-1", role="tool", content="r", count_usage=True
+        )  # tool: no request bump
         s = sm.get_session("sess-1")
         assert s.request_count == 2  # only assistant messages count
         assert s.total_tokens == 200  # 120 + 80
@@ -169,9 +184,15 @@ class TestMilestoneSessionInvariant:
         per_call_tokens = [c * 100 for c in per_call_request]
         for rc, tk in zip(per_call_request, per_call_tokens):
             # agent_runner finish path: increment session by this call's counts
-            sm.increment_session_usage("sess-1", request_delta=rc, total_tokens_delta=tk)
+            sm.increment_session_usage(
+                "sess-1",
+                message_delta=1,
+                request_delta=rc,
+                total_tokens_delta=tk,
+            )
 
         s = sm.get_session("sess-1")
         # Σ milestone.phase_request_count == session.request_count
+        assert s.message_count == len(per_call_request)
         assert s.request_count == sum(per_call_request)
         assert s.total_tokens == sum(per_call_tokens)

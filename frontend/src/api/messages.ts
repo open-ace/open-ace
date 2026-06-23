@@ -20,7 +20,7 @@ interface BackendMessage {
   sender_name: string;
   sender_id: string;
   model: string | null;
-  message_source: string;
+  source: string;
   message_id: string;
   parent_id: string;
   date: string;
@@ -61,7 +61,7 @@ function transformMessage(backendMsg: BackendMessage): Message {
     sender_name: backendMsg.sender_name,
     sender_id: backendMsg.sender_id,
     model: backendMsg.model ?? undefined,
-    message_source: backendMsg.message_source,
+    source: backendMsg.source,
     full_entry: backendMsg.full_entry ? JSON.parse(backendMsg.full_entry) : undefined,
   };
 }

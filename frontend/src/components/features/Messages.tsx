@@ -376,9 +376,9 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
               )}
 
               {/* Message Source */}
-              {message.message_source && (
-                <span className={cn('message-source', message.message_source)}>
-                  {message.message_source.toUpperCase()}
+              {message.source && (
+                <span className={cn('message-source', message.source)}>
+                  {message.source.toUpperCase()}
                 </span>
               )}
 

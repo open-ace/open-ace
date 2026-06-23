@@ -326,7 +326,7 @@ def update_agent_sessions_stats(messages: list) -> int:
     Returns:
         Number of sessions updated/inserted.
     """
-    from shared.db import _execute, _placeholder, get_connection
+    from shared.db import _column_exists, _execute, _placeholder, escape_like, get_connection
 
     session_stats: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
@@ -337,10 +337,12 @@ def update_agent_sessions_stats(messages: list) -> int:
             "messages": [],
             "last_timestamp": None,
             "project_path": None,
+            "seen_message_ids": set(),
+            "seen_request_ids": set(),
         }
     )
 
-    for msg in messages:
+    for index, msg in enumerate(messages):
         sid = msg.get("agent_session_id")
         if not sid:
             continue
@@ -348,12 +350,18 @@ def update_agent_sessions_stats(messages: list) -> int:
         role = msg.get("role", "")
         tokens = msg.get("tokens_used", 0) or 0
         model = msg.get("model")
-
-        session_stats[sid]["message_count"] += 1
-        session_stats[sid]["total_tokens"] += tokens
+        msg_id = msg.get("message_id")
+        message_identity = f"{role}:{msg_id}" if msg_id else f"message_row:{sid}:{index}"
+        if message_identity not in session_stats[sid]["seen_message_ids"]:
+            session_stats[sid]["seen_message_ids"].add(message_identity)
+            session_stats[sid]["message_count"] += 1
+            session_stats[sid]["total_tokens"] += tokens
 
         if role == "assistant":
-            session_stats[sid]["request_count"] += 1
+            request_identity = f"message_id:{msg_id}" if msg_id else f"assistant_row:{sid}:{index}"
+            if request_identity not in session_stats[sid]["seen_request_ids"]:
+                session_stats[sid]["seen_request_ids"].add(request_identity)
+                session_stats[sid]["request_count"] += 1
 
         if model:
             session_stats[sid]["models"].add(model)
@@ -379,6 +387,10 @@ def update_agent_sessions_stats(messages: list) -> int:
 
     conn = get_connection()
     cursor = conn.cursor()
+    has_external_message_id = _column_exists(cursor, "session_messages", "external_message_id")
+    has_structured_session_messages = has_external_message_id and _column_exists(
+        cursor, "session_messages", "source"
+    )
 
     _all_users_cache: list = []
 
@@ -392,22 +404,11 @@ def update_agent_sessions_stats(messages: list) -> int:
         for session_id, stats in session_stats.items():
             try:
                 check_sql = (
-                    f"SELECT id, user_id, session_type FROM agent_sessions "
-                    f"WHERE session_id = {placeholder}"
+                    f"SELECT id, user_id FROM agent_sessions WHERE session_id = {placeholder}"
                 )
                 _execute(cursor, check_sql, (session_id,))
                 session_row = cursor.fetchone()
                 _is_new_session = False
-
-                session_type = ""
-                if session_row:
-                    session_type = (
-                        session_row["session_type"]
-                        if isinstance(session_row, dict) or hasattr(session_row, "keys")
-                        else session_row[2]
-                    ) or ""
-                if session_type == "workflow":
-                    continue
 
                 if not session_row:
                     first_msg = stats["messages"][0] if stats["messages"] else {}
@@ -493,40 +494,102 @@ def update_agent_sessions_stats(messages: list) -> int:
                         msg_id = msg.get("message_id")
                         timestamp = msg.get("timestamp") or now
 
-                        check_sql = f"""
-                            SELECT id FROM session_messages
-                            WHERE session_id = {placeholder}
-                            AND role = {placeholder}
-                            AND timestamp = {placeholder}
-                        """
-                        _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
-                        existing = cursor.fetchone()
-
-                        if not existing:
-                            insert_sql = f"""
-                                INSERT INTO session_messages
-                                (session_id, role, content, tokens_used, model, timestamp, metadata, source)
-                                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                        if msg_id and has_external_message_id:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND external_message_id = {placeholder}
                             """
-                            metadata = {
-                                "message_id": msg_id,
-                                "project_path": msg.get("project_path"),
-                                "content_blocks": msg.get("content_blocks"),
-                            }
+                            _execute(cursor, check_sql, (session_id, msg.get("role"), str(msg_id)))
+                        elif msg_id:
+                            escaped_msg_id = escape_like(str(msg_id))
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND metadata LIKE {placeholder}
+                                ESCAPE '\\'
+                            """
                             _execute(
                                 cursor,
-                                insert_sql,
+                                check_sql,
                                 (
                                     session_id,
                                     msg.get("role"),
-                                    msg.get("content", ""),
-                                    msg.get("tokens_used", 0) or 0,
-                                    msg.get("model"),
-                                    timestamp,
-                                    json.dumps(metadata, ensure_ascii=False),
-                                    "zcode_fetch",
+                                    f'%"message_id": "{escaped_msg_id}"%',
                                 ),
                             )
+                        else:
+                            check_sql = f"""
+                                SELECT id FROM session_messages
+                                WHERE session_id = {placeholder}
+                                AND role = {placeholder}
+                                AND timestamp = {placeholder}
+                            """
+                            _execute(cursor, check_sql, (session_id, msg.get("role"), timestamp))
+                        existing = cursor.fetchone()
+
+                        if not existing:
+                            metadata = {
+                                "message_id": msg_id,
+                                "project_path": msg.get("project_path"),
+                                "source": "fetch_zcode",
+                                "external_message_id": str(msg_id) if msg_id else "",
+                                "content_blocks": msg.get("content_blocks"),
+                            }
+                            if has_structured_session_messages:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp,
+                                     source_timestamp, metadata, milestone_id, source,
+                                     external_message_id, content_blocks)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content", ""),
+                                        msg.get("tokens_used", 0) or 0,
+                                        msg.get("model"),
+                                        timestamp,
+                                        timestamp,
+                                        json.dumps(metadata, ensure_ascii=False),
+                                        "",
+                                        "fetch_zcode",
+                                        str(msg_id) if msg_id else "",
+                                        (
+                                            json.dumps(
+                                                msg.get("content_blocks"), ensure_ascii=False
+                                            )
+                                            if msg.get("content_blocks")
+                                            else None
+                                        ),
+                                    ),
+                                )
+                            else:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content", ""),
+                                        msg.get("tokens_used", 0) or 0,
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata, ensure_ascii=False),
+                                    ),
+                                )
                             messages_inserted += 1
                     except Exception as e:
                         print(f"  Warning: Failed to insert message for {session_id}: {e}")
@@ -645,41 +708,6 @@ def fetch_and_save(
         label = system_account or "current user"
         print(f"\nProcessing ZCode DB for {label}: {db_path}")
         candidates = _iter_candidate_sessions(db_path, days, recent)
-        if candidates:
-            try:
-                from shared.db import _execute, _placeholder, get_connection
-
-                # Pre-filter workflow-backed session_ids before any usage or
-                # transcript aggregation. This keeps imported desktop sessions
-                # from inflating per-day usage when the same workflow is already
-                # persisted by the app itself.
-                conn = get_connection()
-                cursor = conn.cursor()
-                try:
-                    placeholder = _placeholder()
-                    candidate_ids = [sid for sid, _ in candidates]
-                    placeholders = ",".join([placeholder] * len(candidate_ids))
-                    _execute(
-                        cursor,
-                        "SELECT session_id FROM agent_sessions "
-                        f"WHERE session_type = {placeholder} AND session_id IN ({placeholders})",
-                        ("workflow", *candidate_ids),
-                    )
-                    workflow_ids = {
-                        row["session_id"] if isinstance(row, dict) else row[0]
-                        for row in cursor.fetchall()
-                    }
-                finally:
-                    cursor.close()
-                    conn.close()
-                if workflow_ids:
-                    candidates = [(sid, ts) for sid, ts in candidates if sid not in workflow_ids]
-                    print(
-                        "  Skipping workflow-backed sessions: "
-                        f"{len(workflow_ids)} filtered before usage/message sync"
-                    )
-            except Exception as e:
-                print(f"  Warning: failed to pre-filter workflow sessions: {e}")
         print(f"  Found {len(candidates)} candidate session(s)")
 
         for session_id, _updated_ms in candidates:
@@ -699,56 +727,6 @@ def fetch_and_save(
             all_messages.extend(messages)
 
     print(f"\nProcessed {total_sessions} sessions, {len(all_messages)} messages")
-
-    if all_messages:
-        workflow_session_ids: set[str] = set()
-        try:
-            from shared.db import _execute, _placeholder, get_connection
-
-            # Keep a second transcript-level filter even after candidate
-            # pre-filtering. It protects against partial/failed pre-filter
-            # queries, concurrent rows added while scanning, and any messages
-            # that arrive from helper paths not sourced from ``candidates``.
-            candidate_ids = sorted(
-                {
-                    str(m.get("agent_session_id", "")).strip()
-                    for m in all_messages
-                    if m.get("agent_session_id")
-                }
-            )
-            if candidate_ids:
-                conn = get_connection()
-                cursor = conn.cursor()
-                try:
-                    placeholder = _placeholder()
-                    placeholders = ",".join([placeholder] * len(candidate_ids))
-                    _execute(
-                        cursor,
-                        "SELECT session_id FROM agent_sessions "
-                        f"WHERE session_type = {placeholder} AND session_id IN ({placeholders})",
-                        ("workflow", *candidate_ids),
-                    )
-                    workflow_session_ids = {
-                        row["session_id"] if isinstance(row, dict) else row[0]
-                        for row in cursor.fetchall()
-                    }
-                finally:
-                    cursor.close()
-                    conn.close()
-        except Exception as e:
-            print(f"Warning: Failed to detect workflow-backed ZCode sessions: {e}")
-
-        if workflow_session_ids:
-            before = len(all_messages)
-            all_messages = [
-                msg
-                for msg in all_messages
-                if msg.get("agent_session_id") not in workflow_session_ids
-            ]
-            print(
-                "Skipped workflow-backed ZCode sessions from transcript sync: "
-                f"{len(workflow_session_ids)} session(s), {before - len(all_messages)} message(s)"
-            )
 
     # Save daily_usage.
     saved = 0
