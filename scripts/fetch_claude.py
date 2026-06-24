@@ -743,9 +743,8 @@ def update_agent_sessions_stats(messages: list) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     has_external_message_id = _column_exists(cursor, "session_messages", "external_message_id")
-    has_structured_session_messages = has_external_message_id and _column_exists(
-        cursor, "session_messages", "source"
-    )
+    has_source = _column_exists(cursor, "session_messages", "source")
+    has_structured_session_messages = has_external_message_id and has_source
 
     try:
         for session_id, stats in session_stats.items():
@@ -928,6 +927,26 @@ def update_agent_sessions_stats(messages: list) -> int:
                                             if msg.get("content_blocks")
                                             else None
                                         ),
+                                    ),
+                                )
+                            elif has_source:
+                                insert_sql = f"""
+                                    INSERT INTO session_messages
+                                    (session_id, role, content, tokens_used, model, timestamp, metadata, source)
+                                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                                """
+                                _execute(
+                                    cursor,
+                                    insert_sql,
+                                    (
+                                        session_id,
+                                        msg.get("role"),
+                                        msg.get("content"),
+                                        msg.get("tokens_used", 0),
+                                        msg.get("model"),
+                                        timestamp,
+                                        json.dumps(metadata) if metadata else None,
+                                        "fetch_claude",
                                     ),
                                 )
                             else:

@@ -1549,6 +1549,7 @@ def agent_message():
                             existing_uuids.add(em_uuid)
 
                 # Mirror messages to daily_messages for ConversationHistory visibility
+                synced_message_delta = 0
                 for msg in messages:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -1591,7 +1592,7 @@ def agent_message():
                             metadata["input_tokens"] = input_tokens
                             metadata["output_tokens"] = output_tokens
 
-                        sync_session_mgr.append_transcript_message(
+                        stored = sync_session_mgr.append_transcript_message(
                             session_id=session_id,
                             role=role,
                             content=content[:MAX_MESSAGE_LENGTH],
@@ -1602,6 +1603,8 @@ def agent_message():
                             source="remote_sync",
                             external_message_id=msg_uuid or message_id,
                         )
+                        if getattr(stored, "_was_inserted", False):
+                            synced_message_delta += 1
                     except Exception as e:
                         logger.debug("Failed to add session_message: %s", e)
 
@@ -1680,6 +1683,16 @@ def agent_message():
                             conn.commit()
                     except Exception as e:
                         logger.debug("Failed to insert daily_message: %s", e)
+
+                # Apply the net message-count delta once after the loop. The
+                # transcript writer keeps add_message side-effect-free
+                # (count_usage=False), so the session owner must advance
+                # message_count itself — otherwise remote-synced sessions
+                # never reflect their imported messages (#1128).
+                if synced_message_delta:
+                    sync_session_mgr.increment_session_usage(
+                        session_id, message_delta=synced_message_delta
+                    )
             except Exception as e:
                 logger.debug("Failed to mirror messages: %s", e)
 
