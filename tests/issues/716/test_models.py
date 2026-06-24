@@ -163,12 +163,14 @@ class TestWorkflowMilestone:
             "phase": "development",
             "milestone_type": "dev_started",
             "status": "in_progress",
+            "fork_workflow_id": "wf-fork-2",
             "created_at": "2026-06-05T12:00:00",
         }
         ms = WorkflowMilestone.from_dict(data)
         assert ms.milestone_id == "ms-2"
         assert ms.phase == "development"
         assert ms.status == "in_progress"
+        assert ms.fork_workflow_id == "wf-fork-2"
 
     def test_from_dict_empty(self):
         ms = WorkflowMilestone.from_dict({})
@@ -194,6 +196,15 @@ class TestWorkflowMilestone:
         assert ms2.milestone_id == ms.milestone_id
         assert ms2.phase == ms.phase
         assert ms2.dev_round == ms.dev_round
+
+    def test_to_dict_includes_fork_workflow_id(self):
+        ms = WorkflowMilestone(
+            milestone_id="ms-fork",
+            milestone_type="workflow_forked",
+            fork_workflow_id="wf-fork-001",
+        )
+        d = ms.to_dict()
+        assert d["fork_workflow_id"] == "wf-fork-001"
 
 
 class TestWorkflowEvent:

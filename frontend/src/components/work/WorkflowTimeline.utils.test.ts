@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
+import { findForkMilestoneIndex, parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
   it('parses diff stats json', () => {
@@ -58,5 +58,61 @@ describe('WorkflowTimeline.utils', () => {
       additions: 1,
       deletions: 1,
     });
+  });
+
+  it('finds the first persisted fork marker for parent timelines', () => {
+    const milestones = [
+      { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },
+      {
+        milestone_id: 'ms-2',
+        milestone_type: 'workflow_forked',
+        fork_workflow_id: 'wf-child-1',
+      },
+      {
+        milestone_id: 'ms-3',
+        milestone_type: 'workflow_forked',
+        fork_workflow_id: 'wf-child-2',
+      },
+    ];
+
+    expect(findForkMilestoneIndex(milestones, { preferFirstForkWorkflowId: true })).toBe(1);
+  });
+
+  it('falls back from child workflow id to fork milestone id to a single marker', () => {
+    const childMatchMilestones = [
+      { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },
+      {
+        milestone_id: 'ms-2',
+        milestone_type: 'workflow_forked',
+        fork_workflow_id: 'wf-child-1',
+      },
+    ];
+    expect(findForkMilestoneIndex(childMatchMilestones, { childWorkflowId: 'wf-child-1' })).toBe(1);
+
+    const milestoneIdFallbackMilestones = [
+      { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },
+      { milestone_id: 'ms-fork', milestone_type: 'workflow_forked', fork_workflow_id: '' },
+      { milestone_id: 'ms-3', milestone_type: 'tests_run', fork_workflow_id: '' },
+    ];
+    expect(
+      findForkMilestoneIndex(milestoneIdFallbackMilestones, { fallbackMilestoneId: 'ms-fork' })
+    ).toBe(1);
+
+    const singleMarkerFallbackMilestones = [
+      { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },
+      { milestone_id: 'ms-2', milestone_type: 'workflow_forked', fork_workflow_id: '' },
+      { milestone_id: 'ms-3', milestone_type: 'tests_run', fork_workflow_id: '' },
+    ];
+    expect(findForkMilestoneIndex(singleMarkerFallbackMilestones)).toBe(1);
+  });
+
+  it('returns -1 when no direct or fallback fork marker can be resolved', () => {
+    const milestones = [
+      { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },
+      { milestone_id: 'ms-2', milestone_type: 'workflow_forked', fork_workflow_id: '' },
+      { milestone_id: 'ms-3', milestone_type: 'workflow_forked', fork_workflow_id: '' },
+    ];
+
+    expect(findForkMilestoneIndex(milestones, { childWorkflowId: 'wf-missing' })).toBe(-1);
   });
 });

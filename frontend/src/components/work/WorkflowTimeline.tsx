@@ -45,6 +45,7 @@ import type {
   WorkflowMilestone,
 } from '@/api/autonomous';
 import {
+  findForkMilestoneIndex,
   formatTokens,
   parseDiffFiles,
   parseDiffStats,
@@ -389,9 +390,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   } | null>(() => {
     if (isForkParent) {
       // Case 1: This workflow has forks — we are the parent
-      const forkIdx = milestones.findIndex(
-        (m) => m.fork_workflow_id && m.fork_workflow_id.trim() !== ''
-      );
+      const forkIdx = findForkMilestoneIndex(milestones, {
+        preferFirstForkWorkflowId: true,
+      });
       if (forkIdx < 0) return null;
 
       const shared = milestones.slice(0, forkIdx + 1);
@@ -431,9 +432,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
     if (isForkChild && parentWorkflow && parentMilestones.length > 0) {
       // Case 2: This workflow is a fork — show from child perspective
-      const forkIdx = parentMilestones.findIndex(
-        (m) => m.fork_workflow_id === workflow.workflow_id
-      );
+      const forkIdx = findForkMilestoneIndex(parentMilestones, {
+        childWorkflowId: workflow.workflow_id,
+        fallbackMilestoneId: workflow.fork_milestone_id,
+      });
       if (forkIdx < 0) return null;
 
       const shared = parentMilestones.slice(0, forkIdx + 1);
