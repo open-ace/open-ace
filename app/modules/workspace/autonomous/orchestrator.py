@@ -1503,10 +1503,28 @@ class AutonomousOrchestrator:
                 )
                 raise
         elif issue_number and not requirements_text:
-            # Read issue content
+            # Read issue content (body + all comments so planning sees the
+            # full discussion, not just the top-level description)
             try:
                 issue_data = gh.get_issue(issue_number)
                 requirements_text = issue_data.get("body", "")
+                comments = issue_data.get("comments", []) or []
+                if comments:
+                    # Format comments in chronological order. The gh CLI
+                    # returns author as {"login": "..."} and timestamps in
+                    # camelCase ("createdAt"), matching list_issue_comments.
+                    formatted = []
+                    for c in comments:
+                        author = c.get("author", {}) or {}
+                        author_name = (
+                            author.get("login") if isinstance(author, dict) else author
+                        ) or "unknown"
+                        created = c.get("createdAt", "") or c.get("created_at", "")
+                        stamp = f" ({created})" if created else ""
+                        formatted.append(f"### 评论 by @{author_name}{stamp}\n{c.get('body', '')}")
+                    requirements_text += "\n\n---\n\n## Issue 评论（补充信息）\n\n" + "\n\n".join(
+                        formatted
+                    )
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",

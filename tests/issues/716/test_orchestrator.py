@@ -216,6 +216,53 @@ class TestOrchestratorPreparation:
         assert len(req_updates) > 0
         assert req_updates[0][0][1]["requirements_text"] == "Issue body content"
 
+    def test_preparation_reads_issue_with_comments(self):
+        """Issue comments are appended to requirements_text so planning sees
+        the full discussion, not just the issue body."""
+        wf = _make_workflow(
+            current_phase="preparation",
+            requirements_text="",
+            requirements_issue_url="https://github.com/user/repo/issues/99",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.get_issue.return_value = {
+            "number": 99,
+            "title": "Test Issue",
+            "body": "Issue body content",
+            "state": "open",
+            "comments": [
+                {
+                    "body": "Should also handle the edge case",
+                    "author": {"login": "alice"},
+                    "createdAt": "2026-06-05T12:00:00Z",
+                },
+                {
+                    "body": "Use Postgres for this",
+                    "author": {"login": "bob"},
+                    "createdAt": "2026-06-05T13:00:00Z",
+                },
+            ],
+        }
+        mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
+        orch._gh = mock_gh
+
+        with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh):
+            orch._do_preparation(wf)
+
+        update_calls = mock_repo.update_workflow.call_args_list
+        req_updates = [c for c in update_calls if c[0][1].get("requirements_text")]
+        assert len(req_updates) > 0
+        merged = req_updates[0][0][1]["requirements_text"]
+        # Body is preserved verbatim at the top
+        assert merged.startswith("Issue body content")
+        # Both comments are included with their authors and timestamps
+        assert "@alice" in merged
+        assert "Should also handle the edge case" in merged
+        assert "@bob" in merged
+        assert "Use Postgres for this" in merged
+
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_preparation_worktree_strategy(self, mock_gh_cls):
         wf = _make_workflow(
