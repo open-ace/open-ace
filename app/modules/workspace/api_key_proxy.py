@@ -418,7 +418,12 @@ class APIKeyProxyService:
             if selected is None:
                 return None
 
-            return (selected["api_key"], selected["base_url"], selected["id"], selected.get("cli_settings"))
+            return (
+                selected["api_key"],
+                selected["base_url"],
+                selected["id"],
+                selected.get("cli_settings"),
+            )
         except Exception as e:
             logger.error("Failed to resolve API key for scope: %s", e)
             return None
