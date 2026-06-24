@@ -380,6 +380,44 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [parentTimelineData?.milestones]
   );
 
+  const findForkMilestoneIndex = useCallback(
+    (
+      sourceMilestones: WorkflowMilestone[],
+      options?: {
+        childWorkflowId?: string | null;
+        fallbackMilestoneId?: string | null;
+      }
+    ) => {
+      if (!sourceMilestones.length) return -1;
+
+      const childWorkflowId = options?.childWorkflowId?.trim() ?? '';
+      if (childWorkflowId) {
+        const directIndex = sourceMilestones.findIndex(
+          (m) => (m.fork_workflow_id ?? '').trim() === childWorkflowId
+        );
+        if (directIndex >= 0) return directIndex;
+      }
+
+      const fallbackMilestoneId = options?.fallbackMilestoneId?.trim() ?? '';
+      if (fallbackMilestoneId) {
+        const milestoneIdIndex = sourceMilestones.findIndex(
+          (m) => m.milestone_id === fallbackMilestoneId
+        );
+        if (milestoneIdIndex >= 0) return milestoneIdIndex;
+      }
+
+      const forkMarkers = sourceMilestones
+        .map((milestone, index) => ({ milestone, index }))
+        .filter(({ milestone }) => milestone.milestone_type === 'workflow_forked');
+      if (forkMarkers.length === 1) {
+        return forkMarkers[0].index;
+      }
+
+      return -1;
+    },
+    []
+  );
+
   // ── Compute Fork Visualization Data ───────────────────────────────
 
   const forkViz = useMemo<{
@@ -389,9 +427,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   } | null>(() => {
     if (isForkParent) {
       // Case 1: This workflow has forks — we are the parent
-      const forkIdx = milestones.findIndex(
-        (m) => m.fork_workflow_id && m.fork_workflow_id.trim() !== ''
-      );
+      const forkIdx = findForkMilestoneIndex(milestones);
       if (forkIdx < 0) return null;
 
       const shared = milestones.slice(0, forkIdx + 1);
@@ -431,9 +467,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
     if (isForkChild && parentWorkflow && parentMilestones.length > 0) {
       // Case 2: This workflow is a fork — show from child perspective
-      const forkIdx = parentMilestones.findIndex(
-        (m) => m.fork_workflow_id === workflow.workflow_id
-      );
+      const forkIdx = findForkMilestoneIndex(parentMilestones, {
+        childWorkflowId: workflow.workflow_id,
+        fallbackMilestoneId: workflow.fork_milestone_id,
+      });
       if (forkIdx < 0) return null;
 
       const shared = parentMilestones.slice(0, forkIdx + 1);
@@ -470,6 +507,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
     return null;
   }, [
+    findForkMilestoneIndex,
     isForkParent,
     isForkChild,
     milestones,

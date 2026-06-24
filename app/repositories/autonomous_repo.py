@@ -624,6 +624,7 @@ class AutonomousWorkflowRepository:
             "error_message",
             "parent_milestone_id",
             "fork_branch",
+            "fork_workflow_id",
             "metadata",
         ]
         col_names = [
@@ -745,12 +746,12 @@ class AutonomousWorkflowRepository:
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
                      plan_content, review_content, tldr,
-                     parent_milestone_id, fork_branch, metadata,
+                     parent_milestone_id, fork_branch, fork_workflow_id, metadata,
                      error_message,
                      phase_total_tokens, phase_input_tokens,
                      phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -776,6 +777,7 @@ class AutonomousWorkflowRepository:
                     data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
+                    data.get("fork_workflow_id", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
                     data.get("phase_total_tokens", 0),
@@ -799,12 +801,12 @@ class AutonomousWorkflowRepository:
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
                      plan_content, review_content, tldr,
-                     parent_milestone_id, fork_branch, metadata,
+                     parent_milestone_id, fork_branch, fork_workflow_id, metadata,
                      error_message,
                      phase_total_tokens, phase_input_tokens,
                      phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("workflow_id", ""),
@@ -829,6 +831,7 @@ class AutonomousWorkflowRepository:
                     data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
+                    data.get("fork_workflow_id", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
                     data.get("phase_total_tokens", 0),

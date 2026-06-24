@@ -696,3 +696,26 @@ class TestForkRepoIntegration:
         original_ids = {"ms-1", "ms-2"}
         copied_ids = {ms["milestone_id"] for ms in dst_milestones}
         assert copied_ids.isdisjoint(original_ids), "Copied milestones should have new IDs"
+
+    def test_create_milestone_persists_fork_workflow_id(self, auto_db):
+        """Fork marker milestones persist fork_workflow_id for timeline fork visualization."""
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        repo = AutonomousWorkflowRepository(auto_db)
+
+        repo.create_workflow(_make_workflow())
+        created = repo.create_milestone(
+            _make_milestone(
+                milestone_id="ms-fork",
+                milestone_type="workflow_forked",
+                title="Forked to new workflow",
+                fork_branch="fork/from-ms-fork",
+                fork_workflow_id="wf-fork-001",
+            )
+        )
+
+        assert created["fork_workflow_id"] == "wf-fork-001"
+
+        fetched = repo.get_milestone("ms-fork")
+        assert fetched is not None
+        assert fetched["fork_workflow_id"] == "wf-fork-001"

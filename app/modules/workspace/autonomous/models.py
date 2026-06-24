@@ -213,6 +213,7 @@ class WorkflowMilestone:
     error_message: str = ""
     parent_milestone_id: str = ""
     fork_branch: str = ""
+    fork_workflow_id: str = ""
     metadata: str = ""  # JSON
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -244,6 +245,7 @@ class WorkflowMilestone:
             "error_message": self.error_message,
             "parent_milestone_id": self.parent_milestone_id,
             "fork_branch": self.fork_branch,
+            "fork_workflow_id": self.fork_workflow_id,
             "metadata": self.metadata,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -279,6 +281,7 @@ class WorkflowMilestone:
             error_message=data.get("error_message", ""),
             parent_milestone_id=data.get("parent_milestone_id", ""),
             fork_branch=data.get("fork_branch", ""),
+            fork_workflow_id=data.get("fork_workflow_id", ""),
             metadata=data.get("metadata", ""),
             started_at=(
                 datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
