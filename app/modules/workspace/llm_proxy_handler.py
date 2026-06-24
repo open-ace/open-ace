@@ -582,13 +582,60 @@ def handle_llm_proxy_request(
                     if not resp.headers.get("Content-Type", "").startswith("text/event-stream")
                     else b""
                 )
+                error_text = peek.decode("utf-8", errors="replace")
                 logger.error(
                     "LLM proxy error %d from %s key_id=%s: %s",
                     resp.status_code,
                     original_target_url,
                     key_id,
-                    peek.decode("utf-8", errors="replace"),
+                    error_text,
                 )
+
+                # 检测上游 quota exceeded 错误并触发告警 (Issue #1060)
+                if resp.status_code == 429 and "quota exceeded" in error_text.lower():
+                    try:
+                        from app.modules.governance.alert_notifier import (
+                            create_quota_alert,
+                            get_alert_notifier,
+                        )
+                        from app.repositories.user_repo import UserRepository
+
+                        # 去重检查：1小时内已有同类告警则跳过
+                        notifier = get_alert_notifier()
+                        if notifier.has_recent_quota_alert(user_id, "platform", hours=1):
+                            logger.debug(
+                                "Skipping duplicate quota exceeded alert for user %d", user_id
+                            )
+                        else:
+                            user_repo = UserRepository()
+                            user = user_repo.get_user_by_id(user_id)
+                            username = user.get("username", "unknown") if user else "unknown"
+
+                            create_quota_alert(
+                                user_id=user_id,
+                                username=username,
+                                usage_percent=100,
+                                quota_type="platform",
+                            )
+                            logger.warning(
+                                "Upstream quota exceeded alert created for user %d", user_id
+                            )
+                    except Exception as alert_exc:
+                        logger.error("Failed to create quota exceeded alert: %s", alert_exc)
+
+                    # 返回明确的 quota exceeded 错误
+                    return (
+                        jsonify(
+                            {
+                                "error": {
+                                    "message": "Platform quota exceeded. Please wait or contact administrator.",
+                                    "type": "quota_exceeded",
+                                }
+                            }
+                        ),
+                        429,
+                    )
+
                 if resp.status_code in (401, 403, 429):
                     exclude_key_ids.add(key_id)
                     continue

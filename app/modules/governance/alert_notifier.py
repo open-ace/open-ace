@@ -563,6 +563,60 @@ class AlertNotifier:
 
         return count or 0
 
+    def has_recent_quota_alert(
+        self,
+        user_id: int,
+        quota_type: str,
+        hours: int = 1,
+    ) -> bool:
+        """
+        Check if a recent quota alert exists for the user.
+
+        Used to deduplicate quota exceeded alerts and avoid spamming users
+        with repeated notifications for the same quota type.
+
+        Args:
+            user_id: User ID to check.
+            quota_type: Quota type (tokens, requests, platform).
+            hours: Time window in hours to check (default: 1).
+
+        Returns:
+            True if a recent alert exists within the time window.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
+
+        # PostgreSQL uses ->> for JSON extraction, SQLite uses json_extract
+        if is_postgresql():
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM alerts
+                WHERE user_id = %s
+                  AND alert_type = %s
+                  AND created_at >= %s
+                  AND metadata->>'quota_type' = %s
+                """,
+                (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM alerts
+                WHERE user_id = ?
+                  AND alert_type = ?
+                  AND created_at >= ?
+                  AND json_extract(metadata, '$.quota_type') = ?
+                """,
+                (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
+            )
+
+        count = cursor.fetchone()["count"]
+        conn.close()
+
+        return bool(count > 0)
+
     def mark_as_read(self, alert_id: str) -> bool:
         """
         Mark an alert as read.
