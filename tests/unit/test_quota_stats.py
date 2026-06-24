@@ -78,7 +78,9 @@ class TestQuotaStatsAPI:
         ]
 
         with patch("app.routes.admin.user_repo.get_all_users", return_value=mock_users):
-            with patch("app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant):
+            with patch(
+                "app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant
+            ):
                 response = admin_client.get("/api/admin/quota/stats")
                 assert response.status_code == 200
                 data = json.loads(response.data)
@@ -115,7 +117,9 @@ class TestQuotaStatsAPI:
         ]
 
         with patch("app.routes.admin.user_repo.get_all_users", return_value=mock_users):
-            with patch("app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant):
+            with patch(
+                "app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant
+            ):
                 response = admin_client.get("/api/admin/quota/stats")
                 assert response.status_code == 200
                 data = json.loads(response.data)
@@ -135,7 +139,9 @@ class TestQuotaStatsAPI:
         mock_users = [{"id": 1, "is_active": True, "daily_token_quota": 10}]
 
         with patch("app.routes.admin.user_repo.get_all_users", return_value=mock_users):
-            with patch("app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant):
+            with patch(
+                "app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant
+            ):
                 response = admin_client.get("/api/admin/quota/stats")
                 assert response.status_code == 200
                 data = json.loads(response.data)
@@ -159,7 +165,9 @@ class TestQuotaStatsAPI:
         ]
 
         with patch("app.routes.admin.user_repo.get_all_users", return_value=mock_users):
-            with patch("app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant):
+            with patch(
+                "app.services.tenant_service.TenantService.get_tenant", return_value=mock_tenant
+            ):
                 response = admin_client.get("/api/admin/quota/stats")
                 assert response.status_code == 200
                 data = json.loads(response.data)

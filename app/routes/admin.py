@@ -292,8 +292,10 @@ def api_quota_stats():
 
     # Calculate remaining (token quotas stored in M units)
     remaining = {
-        "daily_token": tenant_quota.daily_token_limit - allocated["daily_token"] * TOKEN_QUOTA_MULTIPLIER,
-        "monthly_token": tenant_quota.monthly_token_limit - allocated["monthly_token"] * TOKEN_QUOTA_MULTIPLIER,
+        "daily_token": tenant_quota.daily_token_limit
+        - allocated["daily_token"] * TOKEN_QUOTA_MULTIPLIER,
+        "monthly_token": tenant_quota.monthly_token_limit
+        - allocated["monthly_token"] * TOKEN_QUOTA_MULTIPLIER,
         "daily_request": tenant_quota.daily_request_limit - allocated["daily_request"],
         "monthly_request": tenant_quota.monthly_request_limit - allocated["monthly_request"],
     }

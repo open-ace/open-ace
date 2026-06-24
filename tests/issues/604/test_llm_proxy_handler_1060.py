@@ -281,7 +281,7 @@ class TestHasRecentQuotaAlert:
         with patch("app.modules.governance.alert_notifier.AlertNotifier._get_connection"):
             notifier = AlertNotifier.__new__(AlertNotifier)
             notifier.db_path = ":memory:"
-            
+
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = {"count": 2}
@@ -296,7 +296,7 @@ class TestHasRecentQuotaAlert:
         with patch("app.modules.governance.alert_notifier.AlertNotifier._get_connection"):
             notifier = AlertNotifier.__new__(AlertNotifier)
             notifier.db_path = ":memory:"
-            
+
             mock_conn = MagicMock()
             mock_cursor = MagicMock()
             mock_cursor.fetchone.return_value = {"count": 0}
