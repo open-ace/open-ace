@@ -87,9 +87,7 @@ describe('WorkflowTimeline.utils', () => {
         fork_workflow_id: 'wf-child-1',
       },
     ];
-    expect(findForkMilestoneIndex(childMatchMilestones, { childWorkflowId: 'wf-child-1' })).toBe(
-      1
-    );
+    expect(findForkMilestoneIndex(childMatchMilestones, { childWorkflowId: 'wf-child-1' })).toBe(1);
 
     const milestoneIdFallbackMilestones = [
       { milestone_id: 'ms-1', milestone_type: 'dev_started', fork_workflow_id: '' },

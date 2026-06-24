@@ -122,13 +122,17 @@ export function findForkMilestoneIndex(
 
   const childWorkflowId = options?.childWorkflowId?.trim() ?? '';
   if (childWorkflowId) {
-    const directIndex = sourceMilestones.findIndex((m) => m.fork_workflow_id.trim() === childWorkflowId);
+    const directIndex = sourceMilestones.findIndex(
+      (m) => m.fork_workflow_id.trim() === childWorkflowId
+    );
     if (directIndex >= 0) return directIndex;
   }
 
   const fallbackMilestoneId = options?.fallbackMilestoneId?.trim() ?? '';
   if (fallbackMilestoneId) {
-    const milestoneIdIndex = sourceMilestones.findIndex((m) => m.milestone_id === fallbackMilestoneId);
+    const milestoneIdIndex = sourceMilestones.findIndex(
+      (m) => m.milestone_id === fallbackMilestoneId
+    );
     if (milestoneIdIndex >= 0) return milestoneIdIndex;
   }
 
