@@ -27,6 +27,7 @@ export {
   useDeleteUser,
   useUpdateUserPassword,
   useQuotaUsage,
+  useQuotaStats,
   useUpdateQuota,
   useAuditLogs,
   useFilterRules,

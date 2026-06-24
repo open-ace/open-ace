@@ -51,6 +51,39 @@ export interface QuotaUsage extends AdminUser {
   requests_month?: number;
 }
 
+export interface QuotaStats {
+  tenant_quota: {
+    daily_token_limit: number;
+    monthly_token_limit: number;
+    daily_request_limit: number;
+    monthly_request_limit: number;
+    max_users: number;
+  };
+  allocated: {
+    daily_token: number;
+    monthly_token: number;
+    daily_request: number;
+    monthly_request: number;
+  };
+  remaining: {
+    daily_token: number;
+    monthly_token: number;
+    daily_request: number;
+    monthly_request: number;
+  };
+  percentages: {
+    daily_token: number;
+    monthly_token: number;
+    daily_request: number;
+    monthly_request: number;
+  };
+  user_count: {
+    total: number;
+    active: number;
+    max: number;
+  };
+}
+
 export interface AuditLogEntry {
   id: number;
   user_id: number;
@@ -112,6 +145,10 @@ export const adminApi = {
   // Quota Management
   async getQuotaUsage(): Promise<QuotaUsage[]> {
     return apiClient.get<QuotaUsage[]>('/api/admin/quota/usage');
+  },
+
+  async getQuotaStats(): Promise<QuotaStats> {
+    return apiClient.get<QuotaStats>('/api/admin/quota/stats');
   },
 
   async updateUserQuota(userId: number, data: UpdateQuotaRequest): Promise<{ success: boolean }> {

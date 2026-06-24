@@ -246,3 +246,93 @@ def api_quota_usage():
         user["requests_month"] = monthly_combined["requests"]
 
     return jsonify(users)
+
+
+# Token quotas are stored in M (millions) units
+TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
+
+@admin_bp.route("/admin/quota/stats", methods=["GET"])
+@admin_required
+def api_quota_stats():
+    """Get quota allocation statistics for reference."""
+    from app.services.tenant_service import TenantService
+
+    tenant_service = TenantService()
+
+    # Get tenant info (default tenant_id=1 for single-tenant mode)
+    tenant = tenant_service.get_tenant(1)
+    if not tenant:
+        return jsonify({"error": "Tenant not found"}), 404
+
+    tenant_quota = tenant.quota
+
+    # Calculate allocated quotas from all users
+    users = user_repo.get_all_users()
+
+    allocated = {
+        "daily_token": 0,
+        "monthly_token": 0,
+        "daily_request": 0,
+        "monthly_request": 0,
+    }
+
+    active_users = 0
+    for user in users:
+        if user.get("is_active", True):
+            active_users += 1
+            if user.get("daily_token_quota"):
+                allocated["daily_token"] += user["daily_token_quota"]
+            if user.get("monthly_token_quota"):
+                allocated["monthly_token"] += user["monthly_token_quota"]
+            if user.get("daily_request_quota"):
+                allocated["daily_request"] += user["daily_request_quota"]
+            if user.get("monthly_request_quota"):
+                allocated["monthly_request"] += user["monthly_request_quota"]
+
+    # Calculate remaining (token quotas stored in M units)
+    remaining = {
+        "daily_token": tenant_quota.daily_token_limit - allocated["daily_token"] * TOKEN_QUOTA_MULTIPLIER,
+        "monthly_token": tenant_quota.monthly_token_limit - allocated["monthly_token"] * TOKEN_QUOTA_MULTIPLIER,
+        "daily_request": tenant_quota.daily_request_limit - allocated["daily_request"],
+        "monthly_request": tenant_quota.monthly_request_limit - allocated["monthly_request"],
+    }
+
+    # Calculate percentages
+    def calc_percent(allocated_val: float, limit_val: int) -> float:
+        if limit_val <= 0:
+            return 0.0
+        return round((allocated_val / limit_val) * 100, 1)
+
+    percentages = {
+        "daily_token": calc_percent(
+            allocated["daily_token"] * TOKEN_QUOTA_MULTIPLIER, tenant_quota.daily_token_limit
+        ),
+        "monthly_token": calc_percent(
+            allocated["monthly_token"] * TOKEN_QUOTA_MULTIPLIER, tenant_quota.monthly_token_limit
+        ),
+        "daily_request": calc_percent(allocated["daily_request"], tenant_quota.daily_request_limit),
+        "monthly_request": calc_percent(
+            allocated["monthly_request"], tenant_quota.monthly_request_limit
+        ),
+    }
+
+    return jsonify(
+        {
+            "tenant_quota": {
+                "daily_token_limit": tenant_quota.daily_token_limit,
+                "monthly_token_limit": tenant_quota.monthly_token_limit,
+                "daily_request_limit": tenant_quota.daily_request_limit,
+                "monthly_request_limit": tenant_quota.monthly_request_limit,
+                "max_users": tenant_quota.max_users,
+            },
+            "allocated": allocated,
+            "remaining": remaining,
+            "percentages": percentages,
+            "user_count": {
+                "total": len(users),
+                "active": active_users,
+                "max": tenant_quota.max_users,
+            },
+        }
+    )
