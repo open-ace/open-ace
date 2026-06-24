@@ -167,11 +167,41 @@ except Exception:
             echo "Running pending migrations..."
             alembic upgrade head || echo "No pending migrations."
         else
-            # Fresh installation: use alembic migrations for complete initialization
-            echo "Database not initialized. Running alembic migrations..."
-            alembic upgrade head
+            # Fresh installation: use schema.sql + stamp head (consistent with Package install)
+            echo "Database not initialized. Initializing from schema.sql..."
+
+            # Execute schema.sql based on database type
+            if [ -n "$DATABASE_URL" ]; then
+                # PostgreSQL: execute schema-postgres.sql
+                # Parse DATABASE_URL for connection parameters
+                DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+                DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+                DB_NAME=$(echo "$DATABASE_URL" | sed -n 's|.*\/\([^?]*\).*/\1|p')
+                DB_USER=$(echo "$DATABASE_URL" | sed -n 's|.*:\/\/\([^:@]*\):.*/\1|p')
+                DB_PASS=$(echo "$DATABASE_URL" | sed -n 's|.*:\/\/[^:]*:\([^@]*\)@.*/\1|p')
+
+                echo "Executing PostgreSQL schema..."
+                PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f /app/schema/schema-init-postgres.sql
+                if [ $? -ne 0 ]; then
+                    echo "ERROR: PostgreSQL schema execution failed"
+                    exit 1
+                fi
+            else
+                # SQLite: execute schema-sqlite.sql
+                DB_PATH=${DB_PATH:-$HOME/.open-ace/ace.db}
+                echo "Executing SQLite schema at $DB_PATH..."
+                python3 -c "import sqlite3; conn = sqlite3.connect('$DB_PATH'); conn.executescript(open('/app/schema/schema-init-sqlite.sql').read()); conn.close()"
+                if [ $? -ne 0 ]; then
+                    echo "ERROR: SQLite schema execution failed"
+                    exit 1
+                fi
+            fi
+
+            # Stamp alembic version to head
+            echo "Stamping alembic version..."
+            alembic stamp head
             if [ $? -ne 0 ]; then
-                echo "ERROR: alembic upgrade head failed"
+                echo "ERROR: alembic stamp failed"
                 exit 1
             fi
 
