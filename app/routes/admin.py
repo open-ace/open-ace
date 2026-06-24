@@ -5,6 +5,8 @@ API routes for admin operations.
 """
 
 import logging
+import secrets
+import string
 from typing import cast
 
 import bcrypt
@@ -33,12 +35,19 @@ def hash_password(password: str) -> str:
 @admin_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def api_get_users():
-    """Get all users."""
-    users = user_repo.get_all_users()
+    """Get all users, optionally filtered by tenant."""
+    tenant_id = request.args.get("tenant_id", type=int)
 
-    # Remove password hashes
+    users = user_repo.get_all_users(tenant_id=tenant_id)
+
+    # Remove password hashes and add tenant_name
     for user in users:
         user.pop("password_hash", None)
+        # Add tenant_name if tenant_id exists
+        if user.get("tenant_id"):
+            from app.services.tenant_service import TenantService
+            tenant = TenantService().get_tenant(user["tenant_id"])
+            user["tenant_name"] = tenant.name if tenant else None
 
     return jsonify(users)
 
@@ -52,6 +61,7 @@ def api_create_user():
     email: str = data.get("email", "")
     password: str = data.get("password", "")
     role = data.get("role", "user")
+    tenant_id = data.get("tenant_id", 1)
 
     # Validate inputs
     if not validate_username(username):
@@ -73,16 +83,26 @@ def api_create_user():
     if user_repo.get_user_by_email(email):
         return jsonify({"error": "Email already exists"}), 400
 
+    # Check tenant quota before creating user
+    from app.services.tenant_service import TenantService
+    tenant_service = TenantService()
+    if not tenant_service.can_add_user(tenant_id):
+        tenant = tenant_service.get_tenant(tenant_id)
+        max_users = tenant.quota.max_users if tenant else 0
+        return jsonify({"error": f"Tenant user quota exceeded (max: {max_users})"}), 400
+
     # Create user
     password_hash = hash_password(password)
     system_account = data.get("system_account")
     if system_account and not validate_username(system_account):
         return jsonify({"error": "Invalid system_account name"}), 400
     user_id = user_repo.create_user(
-        username, email, password_hash, str(role), system_account=system_account
+        username, email, password_hash, str(role), system_account=system_account, tenant_id=tenant_id
     )
 
     if user_id:
+        # Increment tenant user count
+        tenant_service.increment_user_count(tenant_id)
         # Auto-create system user for workspace if system_account is provided
         if system_account:
             uid = data.get("system_uid")  # Optional: specific UID
@@ -111,6 +131,25 @@ def api_update_user(user_id):
         uid = data.get("system_uid")
         ensure_system_user(system_account, uid=uid)
 
+    # Handle tenant_id change
+    new_tenant_id = data.get("tenant_id")
+    if new_tenant_id is not None:
+        from app.services.tenant_service import TenantService
+        tenant_service = TenantService()
+        # Check if user exists and get current tenant
+        current_user = user_repo.get_user_by_id(user_id)
+        if current_user:
+            current_tenant_id = current_user.get("tenant_id", 1)
+            # If tenant is changing, check quota for new tenant
+            if new_tenant_id != current_tenant_id:
+                if not tenant_service.can_add_user(new_tenant_id):
+                    tenant = tenant_service.get_tenant(new_tenant_id)
+                    max_users = tenant.quota.max_users if tenant else 0
+                    return jsonify({"error": f"Target tenant quota exceeded (max: {max_users})"}), 400
+                # Decrement old tenant count and increment new tenant count
+                tenant_service.decrement_user_count(current_tenant_id)
+                tenant_service.increment_user_count(new_tenant_id)
+
     success = user_repo.update_user(
         user_id=user_id,
         username=data.get("username"),
@@ -118,6 +157,7 @@ def api_update_user(user_id):
         role=data.get("role"),
         is_active=data.get("is_active"),
         system_account=system_account,
+        tenant_id=new_tenant_id,
     )
 
     if success:
@@ -162,6 +202,59 @@ def api_update_user_password(user_id):
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to update password"}), 500
+
+
+@admin_bp.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
+@admin_required
+def api_reset_user_password(user_id):
+    """Reset user password and generate a temporary password.
+
+    The user must change the temporary password on next login.
+    Returns the temporary password to the admin for secure delivery to the user.
+    """
+    # Get user
+    user = user_repo.get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Get security settings for password policy
+    settings = get_security_settings_cached()
+    min_length = 12  # Default to 12 for temporary passwords
+
+    if settings:
+        policy_min = settings.get("password_min_length", 8)
+        # Use policy minimum if it's higher, but ensure at least 12 chars for security
+        min_length = max(policy_min, 12)
+
+    # Generate temporary password
+    # Include uppercase, lowercase, digits, and special characters
+    chars = string.ascii_letters + string.digits + "!@#$%^&*"
+    temp_password = ''.join(secrets.choice(chars) for _ in range(min_length))
+
+    # Validate generated password meets policy
+    is_valid, error_msg = validate_password(temp_password, policy_settings=settings)
+    if not is_valid:
+        # If validation fails (unlikely), regenerate with stronger requirements
+        chars = string.ascii_uppercase + string.ascii_lowercase + string.digits + "!@#$%^&*"
+        temp_password = ''.join(secrets.choice(chars) for _ in range(16))
+
+    # Update password
+    password_hash = hash_password(temp_password)
+    success = user_repo.update_password(user_id, password_hash)
+
+    if not success:
+        return jsonify({"error": "Failed to update password"}), 500
+
+    # Set must_change_password flag to force password change on next login
+    user_repo.set_must_change_password(user_id, True)
+
+    logger.info(f"Password reset for user {user_id} by admin {g.user_id}")
+
+    return jsonify({
+        "success": True,
+        "temporary_password": temp_password,
+        "message": "Password reset successful. User must change password on next login."
+    })
 
 
 @admin_bp.route("/admin/users/<int:user_id>/quota", methods=["PUT"])
