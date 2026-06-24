@@ -2,6 +2,12 @@ import { formatTokens } from '@/utils';
 
 export type ParsedDiffFileStatus = 'added' | 'modified' | 'deleted';
 
+export interface ForkTimelineMilestoneLike {
+  milestone_id: string;
+  milestone_type: string;
+  fork_workflow_id: string;
+}
+
 export interface ParsedDiffFile {
   id: string;
   path: string;
@@ -97,6 +103,43 @@ export function parseDiffFiles(diffText: string): ParsedDiffFile[] {
 
   pushCurrent();
   return files;
+}
+
+export function findForkMilestoneIndex(
+  sourceMilestones: ForkTimelineMilestoneLike[],
+  options?: {
+    childWorkflowId?: string | null;
+    fallbackMilestoneId?: string | null;
+    preferFirstForkWorkflowId?: boolean;
+  }
+): number {
+  if (!sourceMilestones.length) return -1;
+
+  if (options?.preferFirstForkWorkflowId) {
+    const firstForkWorkflowIndex = sourceMilestones.findIndex((m) => m.fork_workflow_id.trim());
+    if (firstForkWorkflowIndex >= 0) return firstForkWorkflowIndex;
+  }
+
+  const childWorkflowId = options?.childWorkflowId?.trim() ?? '';
+  if (childWorkflowId) {
+    const directIndex = sourceMilestones.findIndex((m) => m.fork_workflow_id.trim() === childWorkflowId);
+    if (directIndex >= 0) return directIndex;
+  }
+
+  const fallbackMilestoneId = options?.fallbackMilestoneId?.trim() ?? '';
+  if (fallbackMilestoneId) {
+    const milestoneIdIndex = sourceMilestones.findIndex((m) => m.milestone_id === fallbackMilestoneId);
+    if (milestoneIdIndex >= 0) return milestoneIdIndex;
+  }
+
+  const forkMarkers = sourceMilestones
+    .map((milestone, index) => ({ milestone, index }))
+    .filter(({ milestone }) => milestone.milestone_type === 'workflow_forked');
+  if (forkMarkers.length === 1) {
+    return forkMarkers[0].index;
+  }
+
+  return -1;
 }
 
 export { formatTokens };
