@@ -652,8 +652,16 @@ class AutonomousWorkflowRepository:
                     now,
                     now,
                 ]
+                # Copied milestones become the child workflow's own history. They
+                # are not the fork point this child originated from, so the
+                # ancestor's fork_workflow_id (which points at a *sibling*
+                # workflow, e.g. an earlier fork) must not be carried over —
+                # otherwise a later fork from this child misattributes its split
+                # to the ancestor's branch point. See PR #1243 review.
+                source_milestone = dict(ms)
+                source_milestone["fork_workflow_id"] = ""
                 for f in fields:
-                    col_values.append(ms.get(f, ""))
+                    col_values.append(source_milestone.get(f, ""))
 
                 cursor.execute(
                     adapt_sql(
