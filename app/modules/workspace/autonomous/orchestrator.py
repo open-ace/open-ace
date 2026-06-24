@@ -56,6 +56,20 @@ _COMPLETION_PATTERNS = [
     for kw in COMPLETION_KEYWORDS
 ]
 
+# Substrings that identify a comment as authored by the automation itself.
+# Shared by preparation (issue ingestion) and wait (new-requirement polling)
+# so status reports / PR links the bot posts back to the issue are never
+# re-ingested as requirements (#1244).
+BOT_AUTHOR_KEYWORDS = ["open-ace-bot", "autonomous", "bot"]
+
+
+def _is_bot_comment(comment: dict) -> bool:
+    """Return True if a comment looks like it was authored by the automation."""
+    author = comment.get("author", {}) or {}
+    login = (author.get("login") if isinstance(author, dict) else author) or ""
+    return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
+
+
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
     "## 重要提示\n"
@@ -1509,6 +1523,11 @@ class AutonomousOrchestrator:
                 issue_data = gh.get_issue(issue_number)
                 requirements_text = issue_data.get("body", "")
                 comments = issue_data.get("comments", []) or []
+                if comments:
+                    # Skip automation-authored comments (status reports / PR
+                    # links the bot itself posts) so a rerun or fork on an
+                    # existing issue doesn't re-ingest them as requirements.
+                    comments = [c for c in comments if not _is_bot_comment(c)]
                 if comments:
                     # Format comments in chronological order. The gh CLI
                     # returns author as {"login": "..."} and timestamps in
@@ -3196,15 +3215,7 @@ class AutonomousOrchestrator:
             return  # No new comments
 
         # Filter out bot's own comments (comments authored by the automation)
-        bot_author_keywords = ["open-ace-bot", "autonomous", "bot"]
-        user_comments = [
-            c
-            for c in comments
-            if not any(
-                kw in (c.get("author", {}).get("login", "") or "").lower()
-                for kw in bot_author_keywords
-            )
-        ]
+        user_comments = [c for c in comments if not _is_bot_comment(c)]
 
         # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):

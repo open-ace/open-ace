@@ -239,6 +239,11 @@ class TestOrchestratorPreparation:
                     "createdAt": "2026-06-05T12:00:00Z",
                 },
                 {
+                    "body": "## Progress Report\nPR created: #123",
+                    "author": {"login": "open-ace-bot"},
+                    "createdAt": "2026-06-05T12:30:00Z",
+                },
+                {
                     "body": "Use Postgres for this",
                     "author": {"login": "bob"},
                     "createdAt": "2026-06-05T13:00:00Z",
@@ -257,11 +262,14 @@ class TestOrchestratorPreparation:
         merged = req_updates[0][0][1]["requirements_text"]
         # Body is preserved verbatim at the top
         assert merged.startswith("Issue body content")
-        # Both comments are included with their authors and timestamps
+        # Real user comments are included with their authors and timestamps
         assert "@alice" in merged
         assert "Should also handle the edge case" in merged
         assert "@bob" in merged
         assert "Use Postgres for this" in merged
+        # Automation-authored comments are filtered out (#1244)
+        assert "open-ace-bot" not in merged
+        assert "Progress Report" not in merged
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_preparation_worktree_strategy(self, mock_gh_cls):
