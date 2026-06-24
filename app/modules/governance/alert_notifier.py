@@ -615,7 +615,7 @@ class AlertNotifier:
         count = cursor.fetchone()["count"]
         conn.close()
 
-        return count > 0
+        return bool(count > 0)
 
     def mark_as_read(self, alert_id: str) -> bool:
         """
