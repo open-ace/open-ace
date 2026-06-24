@@ -142,20 +142,32 @@ prompt_yesno() {
     local options="[Y/n]"
     [ "$default" = "n" ] && options="[y/N]"
 
-    echo -ne "${BLUE}$prompt ${options}: ${NC}"
-    read -r value
+    while true; do
+        echo -ne "${BLUE}$prompt ${options}: ${NC}"
+        read -r value
 
-    value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
+        value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
 
-    if [ -z "$value" ]; then
-        value="$default"
-    fi
+        # Empty value uses default
+        if [ -z "$value" ]; then
+            value="$default"
+        fi
 
-    if [ "$value" = "y" ] || [ "$value" = "yes" ]; then
-        eval "$var_name='yes'"
-    else
-        eval "$var_name='no'"
-    fi
+        # Validate input (Issue #1235)
+        case "$value" in
+            y|yes)
+                eval "$var_name='yes'"
+                break
+                ;;
+            n|no)
+                eval "$var_name='no'"
+                break
+                ;;
+            *)
+                print_warning "无效输入 '$value'，请输入 Y/n"
+                ;;
+        esac
+    done
 }
 
 # ============================================================================
@@ -3588,6 +3600,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Ensure DEPLOY_DIR is absolute path (Issue #1235)
+if [[ "$DEPLOY_DIR" != /* ]] && [ -n "$DEPLOY_DIR" ]; then
+    DEPLOY_DIR="$(pwd)/$DEPLOY_DIR"
+fi
+
 # Main execution
 print_header "Open ACE - 快速部署"
 
@@ -3678,6 +3695,41 @@ if [ "$NON_INTERACTIVE" = false ]; then
     DEPLOY_DIR="/home/$RUN_USER/open-ace"
     DB_USER="$RUN_USER"
     prompt_input "部署目录" "$DEPLOY_DIR" DEPLOY_DIR
+
+    # Ensure DEPLOY_DIR is absolute path (Issue #1235)
+    if [[ "$DEPLOY_DIR" != /* ]] && [ -n "$DEPLOY_DIR" ]; then
+        DEPLOY_DIR="$(pwd)/$DEPLOY_DIR"
+    fi
+
+    # Validate parent directory (Issue #1235)
+    while true; do
+        parent_dir=$(dirname "$DEPLOY_DIR")
+
+        if [ -d "$parent_dir" ]; then
+            # Parent exists, continue
+            break
+        else
+            print_warning "父目录不存在: $parent_dir"
+            prompt_yesno "是否创建父目录?" "y" create_parent
+            if [ "$create_parent" = "yes" ]; then
+                mkdir -p "$parent_dir"
+                if [ $? -eq 0 ]; then
+                    print_success "父目录创建成功: $parent_dir"
+                    break
+                else
+                    print_error "创建父目录失败，请重新输入部署目录"
+                fi
+            else
+                print_info "请重新输入部署目录"
+            fi
+            prompt_input "部署目录" "$DEPLOY_DIR" DEPLOY_DIR
+            # Re-normalize after re-input
+            if [[ "$DEPLOY_DIR" != /* ]] && [ -n "$DEPLOY_DIR" ]; then
+                DEPLOY_DIR="$(pwd)/$DEPLOY_DIR"
+            fi
+        fi
+    done
+
     prompt_input "Web 端口" "$WEB_PORT" WEB_PORT
 
     # Host name
