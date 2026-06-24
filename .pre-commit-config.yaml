@@ -16,6 +16,14 @@ repos:
         files: ^migrations/versions/.*\.py$
         pass_filenames: false
 
+      # Check if schema-init-*.sql contains all tables (full schema validation)
+      - id: check-schema-full
+        name: Check schema-init is complete
+        entry: python3 scripts/hooks/check_schema_full.py
+        language: system
+        files: ^(migrations/versions/.*\.py|schema/schema-init.*\.sql)$
+        pass_filenames: false
+
       # Validate PostgreSQL schema for boolean field consistency
       - id: validate-schema
         name: Validate PostgreSQL schema boolean fields

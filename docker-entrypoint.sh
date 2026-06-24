@@ -143,37 +143,87 @@ except Exception:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-    if [ "$HAS_APP_SCHEMA" = "yes" ]; then
+if [ "$HAS_APP_SCHEMA" = "yes" ]; then
+        # Existing application schema detected - use upgrade flow
         echo "Existing application schema detected."
     elif [ "$HAS_APP_SCHEMA" = "no" ]; then
+        # Fresh installation: use schema-init + stamp head (consistent with Package install)
         echo "No application schema detected. Treating this as a fresh installation."
+
+        # Execute schema.sql based on database type
+        if [ -n "$DATABASE_URL" ]; then
+            # PostgreSQL: execute schema-init-postgres.sql
+            # Parse DATABASE_URL for connection parameters
+            DB_HOST=$(echo "$DATABASE_URL" | sed -n 's|.*@\([^:]*\):.*|\1|p')
+            DB_PORT=$(echo "$DATABASE_URL" | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+            DB_NAME=$(echo "$DATABASE_URL" | sed -n 's|.*\/\([^?]*\).*/\1|p')
+            DB_USER=$(echo "$DATABASE_URL" | sed -n 's|.*:\/\/\([^:@]*\):.*/\1|p')
+            DB_PASS=$(echo "$DATABASE_URL" | sed -n 's|.*:\/\/[^:]*:\([^@]*\)@.*/\1|p')
+
+            echo "Executing PostgreSQL schema..."
+            PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f /app/schema/schema-init-postgres.sql
+            if [ $? -ne 0 ]; then
+                echo "ERROR: PostgreSQL schema execution failed"
+                exit 1
+            fi
+        else
+            # SQLite: execute schema-init-sqlite.sql
+            DB_PATH=${DB_PATH:-$HOME/.open-ace/ace.db}
+            echo "Executing SQLite schema at $DB_PATH..."
+            python3 -c "import sqlite3; conn = sqlite3.connect('$DB_PATH'); conn.executescript(open('/app/schema/schema-init-sqlite.sql').read()); conn.close()"
+            if [ $? -ne 0 ]; then
+                echo "ERROR: SQLite schema execution failed"
+                exit 1
+            fi
+        fi
+
+        # Stamp alembic version to head
+        echo "Stamping alembic version..."
+        alembic stamp head
+        if [ $? -ne 0 ]; then
+            echo "ERROR: alembic stamp failed"
+            exit 1
+        fi
+
+        # Create default admin user
+        echo "Creating default admin user..."
+        python3 scripts/init_db.py || echo "WARNING: admin user creation failed (may already exist)"
+
+        echo "Database initialization completed."
     else
         echo "WARNING: Could not determine whether application tables already exist."
         echo "Proceeding with baseline cutover check and Alembic upgrade."
     fi
 
-    if [ -f "scripts/cutover_alembic_baseline.py" ]; then
-        echo "Preparing baseline Alembic lineage..."
-        python3 scripts/cutover_alembic_baseline.py
+    # For existing schema (HAS_APP_SCHEMA = "yes"), run cutover + upgrade head
+    # For fresh install (HAS_APP_SCHEMA = "no"), schema-init + stamp head already done
+    if [ "$HAS_APP_SCHEMA" = "yes" ]; then
+        if [ -f "scripts/cutover_alembic_baseline.py" ]; then
+            echo "Preparing baseline Alembic lineage..."
+            python3 scripts/cutover_alembic_baseline.py
+            if [ $? -ne 0 ]; then
+                echo "ERROR: Baseline cutover failed."
+                exit 1
+            fi
+        fi
+
+        echo "Running database migrations..."
+        alembic upgrade head
         if [ $? -ne 0 ]; then
-            echo "ERROR: Baseline cutover failed."
+            echo "ERROR: alembic upgrade head failed"
             exit 1
         fi
-    fi
 
-    echo "Running database migrations..."
-    alembic upgrade head
-    if [ $? -ne 0 ]; then
-        echo "ERROR: alembic upgrade head failed"
-        exit 1
-    fi
-
-    if [ "$HAS_APP_SCHEMA" != "yes" ]; then
-        echo "Creating default admin user..."
-        python3 scripts/init_db.py || echo "WARNING: admin user creation failed (may already exist)"
-        echo "Database initialization completed."
-    else
         echo "Database migration completed."
+    elif [ "$HAS_APP_SCHEMA" = "unknown" ]; then
+        # Unknown state: try cutover + upgrade head as fallback
+        if [ -f "scripts/cutover_alembic_baseline.py" ]; then
+            echo "Preparing baseline Alembic lineage..."
+            python3 scripts/cutover_alembic_baseline.py || echo "WARNING: Baseline cutover failed"
+        fi
+
+        echo "Running database migrations..."
+        alembic upgrade head || echo "WARNING: Migration failed"
     fi
 
     # ========================================================================
