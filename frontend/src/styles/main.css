@@ -389,18 +389,8 @@ pre code {
   border: 0;
 }
 
-.d-none {
-  display: none !important;
-}
-.d-flex {
-  display: flex;
-}
-.d-grid {
-  display: grid;
-}
-.d-block {
-  display: block;
-}
+/* Note: Bootstrap display utilities (d-none, d-flex, d-grid, d-block) are used directly
+   from Bootstrap CSS. Do not redefine them here to avoid overriding responsive breakpoints. */
 
 .flex-center {
   display: flex;
