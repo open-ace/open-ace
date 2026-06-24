@@ -223,6 +223,12 @@ export const translations: Record<Language, Translations> = {
     quotaUpdatedDesc: 'User quota settings have been saved successfully.',
     validationError: 'Validation Error',
     quotaValidationFailed: 'Please check quota values and fix errors before saving.',
+    // Quota Reference Panel (Issue #849)
+    quotaAllocationReference: 'Quota Allocation Reference',
+    tenantTotalQuota: 'Tenant Total Quota',
+    allocated: 'Allocated',
+    available: 'Available',
+    quotaOverAllocationWarning: 'Warning: Value exceeds available quota',
 
     // Audit Thresholds
     auditThresholds: 'Audit Thresholds',
@@ -1671,6 +1677,12 @@ export const translations: Record<Language, Translations> = {
     quotaUpdatedDesc: '用户配额设置已成功保存。',
     validationError: '验证错误',
     quotaValidationFailed: '请检查配额值并修正错误后再保存。',
+    // 配额参考面板 (Issue #849)
+    quotaAllocationReference: '配额分配参考',
+    tenantTotalQuota: '租户总配额',
+    allocated: '已分配',
+    available: '可分配',
+    quotaOverAllocationWarning: '警告：配额值超过可分配量',
 
     // Audit Thresholds
     auditThresholds: '审计阈值',
@@ -3176,6 +3188,12 @@ export const translations: Record<Language, Translations> = {
     quotaUpdatedDesc: 'ユーザークォータ設定が正常に保存されました。',
     validationError: '検証エラー',
     quotaValidationFailed: 'クォータ値を確認し、エラーを修正してから保存してください。',
+    // クォータ参照パネル (Issue #849)
+    quotaAllocationReference: 'クォータ割り当て参照',
+    tenantTotalQuota: 'テナント総クォータ',
+    allocated: '割り当て済み',
+    available: '利用可能',
+    quotaOverAllocationWarning: '警告：値が利用可能なクォータを超えています',
 
     // Audit Thresholds
     auditThresholds: '監査しきい値',
@@ -4303,6 +4321,12 @@ export const translations: Record<Language, Translations> = {
     quotaUpdatedDesc: '사용자 할당량 설정이 성공적으로 저장되었습니다.',
     validationError: '검증 오류',
     quotaValidationFailed: '할당량 값을 확인하고 오류를 수정한 후 저장하세요.',
+    // 할당량 참조 패널 (Issue #849)
+    quotaAllocationReference: '할당량 배분 참조',
+    tenantTotalQuota: '테넌트 총 할당량',
+    allocated: '배분됨',
+    available: '가용',
+    quotaOverAllocationWarning: '경고: 값이 가용 할당량을 초과합니다',
 
     // Audit Thresholds
     auditThresholds: '감사 임계값',

@@ -9,7 +9,7 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { cn } from '@/utils';
-import { useQuotaUsage, useUpdateQuota, usePageRefresh } from '@/hooks';
+import { useQuotaUsage, useQuotaStats, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
@@ -66,6 +66,7 @@ export const QuotaAlerts: React.FC = () => {
 
   // --- Quota State ---
   const { data: quotaData, isLoading: quotaLoading, isError, error, refetch } = useQuotaUsage();
+  const { data: quotaStats } = useQuotaStats();
   const updateQuota = useUpdateQuota();
 
   // Page refresh control - manages manual refresh for quota and alerts data
@@ -525,6 +526,45 @@ export const QuotaAlerts: React.FC = () => {
               }}
             >
               <div className="row g-3">
+                {/* Quota Allocation Reference Panel */}
+                {quotaStats && (
+                  <div className="col-12">
+                    <Card className="bg-light border-0 mb-3">
+                      <h6 className="mb-2">
+                        <i className="bi bi-bar-chart me-1" />
+                        {t('quotaAllocationReference', language)}
+                      </h6>
+                      <div className="row g-2 small">
+                        <div className="col-6">
+                          <span className="text-muted">{t('tenantTotalQuota', language)}:</span>
+                          <span className="ms-2">
+                            {formatTokens(quotaStats.tenant_quota.daily_token_limit)} /{' '}
+                            {t('daily', language)}
+                          </span>
+                        </div>
+                        <div className="col-6">
+                          <span className="text-muted">{t('allocated', language)}:</span>
+                          <span className="ms-2">
+                            {quotaStats.allocated.daily_token}M (
+                            {quotaStats.percentages.daily_token}%)
+                          </span>
+                        </div>
+                        <div className="col-6">
+                          <span className="text-muted">{t('available', language)}:</span>
+                          <span className="ms-2 text-success">
+                            {formatTokens(quotaStats.remaining.daily_token)}
+                          </span>
+                        </div>
+                        <div className="col-6">
+                          <span className="text-muted">{t('users', language)}:</span>
+                          <span className="ms-2">
+                            {quotaStats.user_count.active} / {quotaStats.tenant_quota.max_users}
+                          </span>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+                )}
                 <div className="col-12">
                   <p className="mb-3">
                     <strong>{t('user', language)}:</strong> {editingUser.username}

@@ -76,6 +76,13 @@ export function useQuotaUsage() {
   });
 }
 
+export function useQuotaStats() {
+  return useQuery({
+    queryKey: ['admin', 'quota-stats'],
+    queryFn: () => adminApi.getQuotaStats(),
+  });
+}
+
 export function useUpdateQuota() {
   const queryClient = useQueryClient();
 
