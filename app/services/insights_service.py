@@ -138,7 +138,7 @@ class InsightsService:
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                temperature=insights_cfg.get("temperature", 0.3),
+                temperature=insights_cfg.get("temperature", 0),
                 max_tokens=insights_cfg.get("max_tokens", 4096),
             )
         except Exception as e:

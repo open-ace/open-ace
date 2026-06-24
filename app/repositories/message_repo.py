@@ -1289,14 +1289,17 @@ class MessageRepository:
             List[Dict]: List of conversations, each with session_id and messages.
         """
         # Find distinct agent_session_ids that have user messages
+        # Use ORDER BY to ensure deterministic sampling (fixes #685)
         safe_prefix = escape_like(sender_prefix)
         session_query = """
-            SELECT DISTINCT COALESCE(agent_session_id, conversation_id) as session_id
+            SELECT COALESCE(agent_session_id, conversation_id) as session_id
             FROM daily_messages
             WHERE date >= ? AND date <= ?
               AND sender_name LIKE ?
               AND role = 'user'
               AND COALESCE(agent_session_id, conversation_id) IS NOT NULL
+            GROUP BY session_id
+            ORDER BY MIN(timestamp) ASC, session_id ASC
             LIMIT ?
         """
         sessions = self.db.fetch_all(
