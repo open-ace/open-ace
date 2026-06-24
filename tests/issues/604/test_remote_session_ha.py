@@ -66,7 +66,7 @@ class TestRemoteSessionHA:
         """Critical bug regression: non-qwen tools must NOT embed empty HA fields."""
         mgr._agent_manager = _connected_machine()
         mgr._api_key_proxy.validate_proxy_token.return_value = None  # not used
-        mgr._api_key_proxy.resolve_api_key_for_scope.return_value = ("sk", None, 1)
+        mgr._api_key_proxy.resolve_api_key_for_scope.return_value = ("sk", None, 1, None)
         mgr._api_key_proxy.get_cli_settings_for_tool.return_value = None
         mgr._api_key_proxy.generate_proxy_token.return_value = "proxy-tok"
         mgr._session_manager.create_session.return_value = MagicMock(context={})

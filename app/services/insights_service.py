@@ -43,7 +43,7 @@ class InsightsService:
             logger.warning(f"Could not load config.json: {e}")
             return {}
 
-    def _get_api_credentials(self, config: dict) -> tuple[str, str]:
+    def _get_api_credentials(self, config: dict) -> tuple[str, str, Optional[str]]:
         """
         Get API credentials from the api_key_store database.
 
@@ -51,7 +51,7 @@ class InsightsService:
         Falls back to environment variables if no key is found in the database.
 
         Returns:
-            Tuple[api_key, base_url]
+            Tuple[api_key, base_url, default_model]
         """
         # Primary: resolve from database
         try:
@@ -60,17 +60,52 @@ class InsightsService:
             api_proxy = get_api_key_proxy_service()
             result = api_proxy.resolve_api_key_for_scope(1, "openai", scope="local")
             if result:
-                api_key, base_url, _ = result
+                api_key, base_url, _, cli_settings = result
+                default_model = self._extract_model_from_cli_settings(cli_settings)
                 if base_url:
-                    return api_key, base_url
-                return api_key, "https://coding.dashscope.aliyuncs.com/v1"
+                    return api_key, base_url, default_model
+                return api_key, "https://coding.dashscope.aliyuncs.com/v1", default_model
         except Exception as e:
             logger.warning("Failed to resolve API key from database: %s", e)
 
         # Fallback: environment variables
         api_key = os.environ.get("OPENAI_API_KEY", "")
         base_url = os.environ.get("OPENAI_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1")
-        return api_key, base_url
+        return api_key, base_url, None
+
+    def _extract_model_from_cli_settings(self, cli_settings: Optional[str]) -> Optional[str]:
+        """
+        Extract default model from cli_settings JSON.
+
+        Parses cli_settings and looks for modelProviders.openai[0].id.
+        Returns None if cli_settings is empty, invalid, or missing the model.
+
+        Args:
+            cli_settings: JSON string from api_key_store.cli_settings.
+
+        Returns:
+            Model ID string or None.
+        """
+        if not cli_settings:
+            return None
+
+        try:
+            settings = json.loads(cli_settings)
+        except json.JSONDecodeError:
+            logger.warning("Invalid cli_settings JSON: %s", cli_settings[:100])
+            return None
+
+        # Try modelProviders.openai[0].id
+        model_providers = settings.get("modelProviders", {})
+        openai_models = model_providers.get("openai", [])
+        if isinstance(openai_models, list) and openai_models:
+            first_model = openai_models[0]
+            if isinstance(first_model, dict):
+                model_id = first_model.get("id")
+                if model_id:
+                    return str(model_id)
+
+        return None
 
     def generate_insights(
         self, user_id: int, start_date: str, end_date: str
@@ -120,8 +155,10 @@ class InsightsService:
         # 6. Load config and credentials
         config = self._load_config()
         insights_cfg = config.get("insights", {})
-        model = insights_cfg.get("model", "glm-5")
-        api_key, base_url = self._get_api_credentials(config)
+        api_key, base_url, cli_model = self._get_api_credentials(config)
+
+        # Model priority: config.insights.model > cli_settings model > default
+        model = insights_cfg.get("model") or cli_model or "glm-5.1"
 
         if not api_key:
             return None, "API key not configured"
