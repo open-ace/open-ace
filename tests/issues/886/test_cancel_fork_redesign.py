@@ -719,3 +719,57 @@ class TestForkRepoIntegration:
         fetched = repo.get_milestone("ms-fork")
         assert fetched is not None
         assert fetched["fork_workflow_id"] == "wf-fork-001"
+
+    def test_copy_milestones_strips_inherited_fork_workflow_id(self, auto_db):
+        """Copied milestones must not carry an ancestor's fork_workflow_id.
+
+        Regression for 2nd-generation forks (PR #1243 review): when A forks to
+        B (marker on A with fork_workflow_id=wf-B) and A later forks to C at a
+        milestone *after* the A->B marker, C's copied history would otherwise
+        inherit fork_workflow_id=wf-B. That makes C's parent-view fork split
+        resolve at A's earlier branch point instead of C's real one. Copied
+        rows are the child's own history, so fork_workflow_id must be cleared.
+        """
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        repo = AutonomousWorkflowRepository(auto_db)
+
+        # Workflow A: M1 is the fork point for B.
+        repo.create_workflow(_make_workflow(workflow_id="wf-A"))
+        repo.create_milestone(_make_milestone(milestone_id="M1", workflow_id="wf-A"))
+
+        # Fork A -> B at M1 (per route order: copy history, then fork marker).
+        repo.create_workflow(
+            _make_workflow(workflow_id="wf-B", parent_workflow_id="wf-A", fork_milestone_id="M1")
+        )
+        repo.copy_milestones_to_workflow("wf-A", "wf-B", "M1")
+        repo.create_milestone(
+            _make_milestone(
+                milestone_id="MS-AFORK",
+                workflow_id="wf-A",
+                milestone_type="workflow_forked",
+                fork_branch="fb-AB",
+                fork_workflow_id="wf-B",
+                parent_milestone_id="M1",
+            )
+        )
+
+        # A continues to M2 (after MS-AFORK), then forks to C at M2. C's copy
+        # scope (id <= M2) *includes* the A->B fork marker MS-AFORK.
+        repo.create_milestone(_make_milestone(milestone_id="M2", workflow_id="wf-A"))
+        repo.create_workflow(
+            _make_workflow(workflow_id="wf-C", parent_workflow_id="wf-A", fork_milestone_id="M2")
+        )
+        repo.copy_milestones_to_workflow("wf-A", "wf-C", "M2")
+
+        c_history = repo.list_milestones("wf-C")
+        # The ancestor's fork marker type is preserved (still describes history)
+        # but its fork_workflow_id must be cleared so it doesn't masattribute a
+        # split to wf-B when C is later rendered as a parent.
+        inherited_markers = [ms for ms in c_history if ms["milestone_type"] == "workflow_forked"]
+        assert inherited_markers, "C should carry the inherited workflow_forked marker"
+        for ms in inherited_markers:
+            assert ms["fork_workflow_id"] == "", (
+                "Copied ancestor fork marker must not retain fork_workflow_id; "
+                f"got {ms['fork_workflow_id']!r}"
+            )
