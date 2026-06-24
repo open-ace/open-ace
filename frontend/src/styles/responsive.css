@@ -571,76 +571,9 @@ body.sidebar-mobile-open {
   }
 }
 
-/* ===== Utility Classes for Responsive ===== */
-
-/* Hide on specific breakpoints */
-.d-xs-none {
-  display: none !important;
-}
-.d-sm-none {
-  display: none !important;
-}
-.d-md-none {
-  display: none !important;
-}
-.d-lg-none {
-  display: none !important;
-}
-
-@media (min-width: 576px) {
-  .d-xs-none {
-    display: block !important;
-  }
-  .d-sm-none {
-    display: none !important;
-  }
-}
-
-@media (min-width: 768px) {
-  .d-sm-none {
-    display: block !important;
-  }
-  .d-md-none {
-    display: none !important;
-  }
-}
-
-@media (min-width: 992px) {
-  .d-md-none {
-    display: block !important;
-  }
-  .d-lg-none {
-    display: none !important;
-  }
-}
-
-/* Show only on specific breakpoints */
-@media (max-width: 575.98px) {
-  .d-xs-block {
-    display: block !important;
-  }
-  .d-sm-block {
-    display: none !important;
-  }
-}
-
-@media (min-width: 576px) and (max-width: 767.98px) {
-  .d-sm-block {
-    display: block !important;
-  }
-}
-
-@media (min-width: 768px) and (max-width: 991.98px) {
-  .d-md-block {
-    display: block !important;
-  }
-}
-
-@media (min-width: 992px) {
-  .d-lg-block {
-    display: block !important;
-  }
-}
+/* Note: Bootstrap responsive display utilities (d-none, d-sm-none, d-md-none, d-lg-none,
+   d-sm-flex, d-sm-block, etc.) are used directly from Bootstrap CSS.
+   Do not redefine them here to avoid overriding Bootstrap's responsive breakpoint behavior. */
 
 /* ===== Chart Responsive Styles ===== */
 
