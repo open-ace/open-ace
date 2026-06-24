@@ -137,6 +137,12 @@ export type {
   RemoteSession,
   RemoteSessionOutput,
   CreateRemoteSessionRequest,
+  AgentRun,
+  RunEvent,
+  AgentApproval,
+  RunTimelineParams,
+  RunEventsResponse,
+  RunApprovalsResponse,
 } from './remote';
 export { smtpConfigApi } from './smtpConfig';
 export type {

@@ -27,13 +27,19 @@ def ensure_all_tables() -> None:
     from app.modules.workspace.collaboration import get_ddl_statements as collab_ddl
     from app.modules.workspace.prompt_library import get_ddl_statements as pl_ddl
     from app.modules.workspace.remote_agent_manager import get_ddl_statements as ram_ddl
+    from app.modules.workspace.run_timeline import get_ddl_statements as rt_ddl
     from app.modules.workspace.session_manager import get_ddl_statements as sm_ddl
     from app.repositories.database import Database
     from app.services.auth_service import get_ddl_statements as auth_ddl
     from app.services.permission_service import get_ddl_statements as ps_ddl
 
-    all_ddl = []
-    for ddl_fn in [
+    # Run-timeline tables are only created when the feature is enabled; this
+    # keeps the optional, removable feature from leaving empty tables behind
+    # when disabled. The runtime DDL mirrors the authoritative Alembic
+    # migration (see app/modules/workspace/run_timeline/__init__.py).
+    from app.utils.config import is_run_timeline_enabled
+
+    base_ddl_fns = [
         sm_ddl,
         collab_ddl,
         pl_ddl,
@@ -46,7 +52,12 @@ def ensure_all_tables() -> None:
         ps_ddl,
         report_ddl,
         auth_ddl,
-    ]:
+    ]
+    if is_run_timeline_enabled():
+        base_ddl_fns.append(rt_ddl)
+
+    all_ddl = []
+    for ddl_fn in base_ddl_fns:
         try:
             all_ddl.extend(ddl_fn())
         except Exception as e:

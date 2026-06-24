@@ -271,25 +271,9 @@ def _require_machine_admin(machine_id):
 
 def _check_session_access(session_id):
     """Check session access: owner, system admin, or machine admin. Returns (session_status, error)."""
-    session_mgr = get_remote_session_manager()
-    status = session_mgr.get_session_status(session_id)
-    if not status:
-        return None, (jsonify({"error": "Session not found"}), 404)
-    # System admin
-    if g.user.get("role") == "admin":
-        return status, None
-    # Session owner
-    session = session_mgr._session_manager.get_session(session_id)
-    if session and session.user_id == g.user["id"]:
-        return status, None
-    # Machine admin
-    mid = status.get("machine_id")
-    if mid:
-        mgr = get_remote_agent_manager()
-        perm = mgr.get_user_permission(mid, g.user["id"])
-        if perm == "admin":
-            return status, None
-    return None, (jsonify({"error": "Access denied"}), 403)
+    from app.modules.workspace.session_access import check_session_access
+
+    return check_session_access(session_id)
 
 
 # ==================== Machine Management (Admin) ====================
@@ -784,21 +768,19 @@ def send_permission_response(session_id):
     tool_name = data.get("tool_name", "")
     message = data.get("message")
 
-    # Queue the permission_response command for the agent
-    agent_mgr = get_remote_agent_manager()
-    cmd = {
-        "type": "command",
-        "command": "permission_response",
-        "session_id": session_id,
-        "behavior": behavior,
-        "tool_name": tool_name,
-    }
-    if request_id:
-        cmd["request_id"] = request_id
-    if message:
-        cmd["message"] = message
-
-    agent_mgr.send_command(session_info.get("machine_id", ""), cmd)
+    # Route through the session manager so the durable approval record and the
+    # permission_answered event are persisted alongside the command, with the
+    # operator identity (decided_by) captured from the auth state.
+    session_mgr = get_remote_session_manager()
+    session_mgr.respond_to_permission(
+        session_id,
+        request_id,
+        behavior,
+        tool_name,
+        message,
+        decided_by=g.user.get("id") if g.get("user") else None,
+        decided_by_name=g.user.get("username") if g.get("user") else None,
+    )
 
     return jsonify({"success": True})
 

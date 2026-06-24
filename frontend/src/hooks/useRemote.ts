@@ -256,3 +256,36 @@ export function useResumeRemoteSession() {
     },
   });
 }
+
+// ==================== Run Timeline Hooks ====================
+// These back the persisted provenance timeline. The API returns
+// { disabled: true } when the backend feature flag is off; callers should
+// treat that as "render nothing" rather than an error.
+
+export function useRunEvents(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['remote', 'run-timeline', sessionId],
+    queryFn: () => remoteApi.getRunEvents(sessionId ?? ''),
+    enabled: !!sessionId,
+    // Poll while a session is live so the timeline streams new events.
+    refetchInterval: (query) => {
+      const data = query.state.data as { disabled?: boolean } | undefined;
+      if (data?.disabled) return false;
+      const run = (data as { run?: { status?: string } } | undefined)?.run;
+      const terminal = run && ['completed', 'stopped', 'error'].includes(run.status ?? '');
+      return terminal ? false : 5000;
+    },
+  });
+}
+
+export function useRunApprovals(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['remote', 'run-timeline', sessionId, 'approvals'],
+    queryFn: () => remoteApi.getRunApprovals(sessionId ?? ''),
+    enabled: !!sessionId,
+    refetchInterval: (query) => {
+      const data = query.state.data as { disabled?: boolean } | undefined;
+      return data?.disabled ? false : 10000;
+    },
+  });
+}

@@ -16,6 +16,95 @@ SET client_min_messages = warning;
 SET row_security = off;
 SET default_tablespace = '';
 SET default_table_access_method = heap;
+CREATE TABLE agent_approvals (
+    id integer NOT NULL,
+    request_id text NOT NULL,
+    run_id text,
+    session_id text,
+    tool_name text,
+    request_subtype text,
+    request_details text,
+    status text DEFAULT 'pending'::text,
+    decision text,
+    decided_by integer,
+    decided_by_name text,
+    decision_metadata text,
+    requested_at timestamp without time zone,
+    decided_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE agent_approvals_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE agent_approvals_id_seq OWNED BY agent_approvals.id;
+CREATE TABLE agent_run_events (
+    id integer NOT NULL,
+    run_id text,
+    session_id text,
+    event_type text DEFAULT ''::text NOT NULL,
+    event_subtype text,
+    role text,
+    content text,
+    tool_name text,
+    provider text,
+    model text,
+    key_id text,
+    user_id integer,
+    tenant_id integer,
+    machine_id text,
+    metadata text,
+    event_ts timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE agent_run_events_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE agent_run_events_id_seq OWNED BY agent_run_events.id;
+CREATE TABLE agent_runs (
+    id integer NOT NULL,
+    run_id text NOT NULL,
+    session_id text NOT NULL,
+    user_id integer,
+    tenant_id integer,
+    machine_id text,
+    tool_name text,
+    provider text,
+    cli_tool text,
+    model text,
+    status text DEFAULT 'active'::text,
+    started_at timestamp without time zone,
+    ended_at timestamp without time zone,
+    total_tokens integer DEFAULT 0,
+    total_input_tokens integer DEFAULT 0,
+    total_output_tokens integer DEFAULT 0,
+    total_requests integer DEFAULT 0,
+    metadata text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE agent_runs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE agent_runs_id_seq OWNED BY agent_runs.id;
 CREATE TABLE agent_sessions (
     id integer NOT NULL,
     session_id text NOT NULL,
@@ -1282,6 +1371,12 @@ CREATE SEQUENCE workflow_milestones_id_seq
     CACHE 1;
 
 ALTER SEQUENCE workflow_milestones_id_seq OWNED BY workflow_milestones.id;
+ALTER TABLE ONLY agent_approvals ALTER COLUMN id SET DEFAULT nextval('agent_approvals_id_seq'::regclass);
+
+ALTER TABLE ONLY agent_run_events ALTER COLUMN id SET DEFAULT nextval('agent_run_events_id_seq'::regclass);
+
+ALTER TABLE ONLY agent_runs ALTER COLUMN id SET DEFAULT nextval('agent_runs_id_seq'::regclass);
+
 ALTER TABLE ONLY agent_sessions ALTER COLUMN id SET DEFAULT nextval('agent_sessions_id_seq'::regclass);
 
 ALTER TABLE ONLY agent_tokens ALTER COLUMN id SET DEFAULT nextval('agent_tokens_id_seq'::regclass);
@@ -1379,6 +1474,21 @@ ALTER TABLE ONLY web_user_auth_sessions ALTER COLUMN id SET DEFAULT nextval('web
 ALTER TABLE ONLY workflow_events ALTER COLUMN id SET DEFAULT nextval('workflow_events_id_seq'::regclass);
 
 ALTER TABLE ONLY workflow_milestones ALTER COLUMN id SET DEFAULT nextval('workflow_milestones_id_seq'::regclass);
+
+ALTER TABLE ONLY agent_approvals
+    ADD CONSTRAINT agent_approvals_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY agent_approvals
+    ADD CONSTRAINT agent_approvals_request_id_key UNIQUE (request_id);
+
+ALTER TABLE ONLY agent_run_events
+    ADD CONSTRAINT agent_run_events_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY agent_runs
+    ADD CONSTRAINT agent_runs_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY agent_runs
+    ADD CONSTRAINT agent_runs_run_id_key UNIQUE (run_id);
 
 ALTER TABLE ONLY agent_sessions
     ADD CONSTRAINT agent_sessions_pkey PRIMARY KEY (id);
@@ -1649,6 +1759,30 @@ ALTER TABLE ONLY workflow_milestones
 
 ALTER TABLE ONLY workflow_milestones
     ADD CONSTRAINT workflow_milestones_pkey PRIMARY KEY (id);
+
+CREATE INDEX idx_agent_approvals_run_id ON agent_approvals USING btree (run_id);
+
+
+--
+--
+
+CREATE INDEX idx_agent_approvals_session_id ON agent_approvals USING btree (session_id);
+
+CREATE INDEX idx_agent_approvals_status ON agent_approvals USING btree (status);
+
+
+--
+--
+
+CREATE UNIQUE INDEX idx_agent_runs_session_id ON agent_runs USING btree (session_id);
+
+CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_agent_runs_user_id ON agent_runs USING btree (user_id);
 
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
 
@@ -1963,6 +2097,22 @@ CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree 
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (machine_id);
 
 CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
+
+CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
+
+
+--
+--
+
+CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
+
+CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
 
 --
