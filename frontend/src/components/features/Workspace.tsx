@@ -1401,6 +1401,8 @@ export const Workspace: React.FC = () => {
         const iframe = iframeRefs.current.get(tabId);
         if (iframe?.contentWindow) {
           iframe.contentWindow.postMessage({ type: 'openace-focus-input' }, '*');
+          // Scroll to bottom when switching tabs to show latest messages (Issue #1232)
+          iframe.contentWindow.postMessage({ type: 'openace-scroll-to-bottom' }, '*');
         }
       }, 100);
     },
