@@ -687,7 +687,8 @@ export const SecurityCenter: React.FC = () => {
           </div>
         </Card>
 
-        {/* Two-Factor Authentication */}
+        {/* Two-Factor Authentication - 功能未实现，暂时隐藏 (Issue #862) */}
+        {/*
         <Card title={t('twoFactorAuth', language)} className="mb-4">
           <div className="form-check form-switch">
             <input
@@ -703,6 +704,7 @@ export const SecurityCenter: React.FC = () => {
           </div>
           <small className="text-muted">{t('twoFactorHelp', language)}</small>
         </Card>
+        */}
 
         {/* IP Whitelist */}
         <Card title={t('ipWhitelist', language)} className="mb-4">
