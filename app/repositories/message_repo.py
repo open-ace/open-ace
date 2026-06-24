@@ -1292,7 +1292,7 @@ class MessageRepository:
         # Use ORDER BY to ensure deterministic sampling (fixes #685)
         safe_prefix = escape_like(sender_prefix)
         session_query = """
-            SELECT DISTINCT COALESCE(agent_session_id, conversation_id) as session_id
+            SELECT COALESCE(agent_session_id, conversation_id) as session_id
             FROM daily_messages
             WHERE date >= ? AND date <= ?
               AND sender_name LIKE ?
