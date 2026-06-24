@@ -538,13 +538,15 @@ export const QuotaAlerts: React.FC = () => {
                         <div className="col-6">
                           <span className="text-muted">{t('tenantTotalQuota', language)}:</span>
                           <span className="ms-2">
-                            {formatTokens(quotaStats.tenant_quota.daily_token_limit)} / {t('daily', language)}
+                            {formatTokens(quotaStats.tenant_quota.daily_token_limit)} /{' '}
+                            {t('daily', language)}
                           </span>
                         </div>
                         <div className="col-6">
                           <span className="text-muted">{t('allocated', language)}:</span>
                           <span className="ms-2">
-                            {quotaStats.allocated.daily_token}M ({quotaStats.percentages.daily_token}%)
+                            {quotaStats.allocated.daily_token}M (
+                            {quotaStats.percentages.daily_token}%)
                           </span>
                         </div>
                         <div className="col-6">
