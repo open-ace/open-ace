@@ -588,16 +588,29 @@ class AlertNotifier:
 
         threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
 
-        cursor.execute(
-            """
-            SELECT COUNT(*) as count FROM alerts
-            WHERE user_id = ?
-              AND alert_type = ?
-              AND created_at >= ?
-              AND json_extract(metadata, '$.quota_type') = ?
-            """,
-            (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
-        )
+        # PostgreSQL uses ->> for JSON extraction, SQLite uses json_extract
+        if is_postgresql():
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM alerts
+                WHERE user_id = %s
+                  AND alert_type = %s
+                  AND created_at >= %s
+                  AND metadata->>'quota_type' = %s
+                """,
+                (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM alerts
+                WHERE user_id = ?
+                  AND alert_type = ?
+                  AND created_at >= ?
+                  AND json_extract(metadata, '$.quota_type') = ?
+                """,
+                (user_id, AlertType.QUOTA.value, threshold.isoformat(), quota_type),
+            )
 
         count = cursor.fetchone()["count"]
         conn.close()
