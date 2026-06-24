@@ -571,8 +571,8 @@ body.sidebar-mobile-open {
   }
 }
 
-/* Note: Bootstrap responsive display utilities (d-none, d-sm-none, d-md-none, d-lg-none, 
-   d-sm-flex, d-sm-block, etc.) are used directly from Bootstrap CSS. 
+/* Note: Bootstrap responsive display utilities (d-none, d-sm-none, d-md-none, d-lg-none,
+   d-sm-flex, d-sm-block, etc.) are used directly from Bootstrap CSS.
    Do not redefine them here to avoid overriding Bootstrap's responsive breakpoint behavior. */
 
 /* ===== Chart Responsive Styles ===== */
