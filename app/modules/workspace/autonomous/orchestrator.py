@@ -56,6 +56,20 @@ _COMPLETION_PATTERNS = [
     for kw in COMPLETION_KEYWORDS
 ]
 
+# Substrings that identify a comment as authored by the automation itself.
+# Shared by preparation (issue ingestion) and wait (new-requirement polling)
+# so status reports / PR links the bot posts back to the issue are never
+# re-ingested as requirements (#1244).
+BOT_AUTHOR_KEYWORDS = ["open-ace-bot", "autonomous", "bot"]
+
+
+def _is_bot_comment(comment: dict) -> bool:
+    """Return True if a comment looks like it was authored by the automation."""
+    author = comment.get("author", {}) or {}
+    login = (author.get("login") if isinstance(author, dict) else author) or ""
+    return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
+
+
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
     "## 重要提示\n"
@@ -1503,10 +1517,33 @@ class AutonomousOrchestrator:
                 )
                 raise
         elif issue_number and not requirements_text:
-            # Read issue content
+            # Read issue content (body + all comments so planning sees the
+            # full discussion, not just the top-level description)
             try:
                 issue_data = gh.get_issue(issue_number)
                 requirements_text = issue_data.get("body", "")
+                comments = issue_data.get("comments", []) or []
+                if comments:
+                    # Skip automation-authored comments (status reports / PR
+                    # links the bot itself posts) so a rerun or fork on an
+                    # existing issue doesn't re-ingest them as requirements.
+                    comments = [c for c in comments if not _is_bot_comment(c)]
+                if comments:
+                    # Format comments in chronological order. The gh CLI
+                    # returns author as {"login": "..."} and timestamps in
+                    # camelCase ("createdAt"), matching list_issue_comments.
+                    formatted = []
+                    for c in comments:
+                        author = c.get("author", {}) or {}
+                        author_name = (
+                            author.get("login") if isinstance(author, dict) else author
+                        ) or "unknown"
+                        created = c.get("createdAt", "") or c.get("created_at", "")
+                        stamp = f" ({created})" if created else ""
+                        formatted.append(f"### 评论 by @{author_name}{stamp}\n{c.get('body', '')}")
+                    requirements_text += "\n\n---\n\n## Issue 评论（补充信息）\n\n" + "\n\n".join(
+                        formatted
+                    )
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",
@@ -3178,15 +3215,7 @@ class AutonomousOrchestrator:
             return  # No new comments
 
         # Filter out bot's own comments (comments authored by the automation)
-        bot_author_keywords = ["open-ace-bot", "autonomous", "bot"]
-        user_comments = [
-            c
-            for c in comments
-            if not any(
-                kw in (c.get("author", {}).get("login", "") or "").lower()
-                for kw in bot_author_keywords
-            )
-        ]
+        user_comments = [c for c in comments if not _is_bot_comment(c)]
 
         # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):

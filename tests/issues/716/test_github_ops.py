@@ -91,11 +91,16 @@ class TestGitHubOpsIssue:
     def test_get_issue(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout='{"number": 42, "title": "Bug", "body": "Fix it", "state": "open"}',
+            stdout='{"number": 42, "title": "Bug", "body": "Fix it", "state": "open", "comments": [{"body": "More detail", "createdAt": "2026-06-05T12:00:00Z"}]}',
         )
         result = self.gh.get_issue(42)
         assert result["number"] == 42
         assert result["title"] == "Bug"
+        # Comments are now included so downstream phases see the full discussion
+        args = mock_run.call_args[0][0]
+        json_fields = next(a for a in args if a.startswith("number,title"))
+        assert "comments" in json_fields
+        assert len(result["comments"]) == 1
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_add_issue_comment(self, mock_run):

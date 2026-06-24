@@ -245,9 +245,20 @@ class GitHubOps:
         return {"number": issue_number, "url": issue_url}
 
     def get_issue(self, number: int) -> dict:
-        """Get issue details."""
+        """Get issue details, including all comments.
+
+        Comments are fetched so downstream phases (e.g. planning) can see
+        clarifications or supplementary requirements that only appear in the
+        issue discussion, not in the issue body.
+        """
         result = self._run_gh(
-            ["issue", "view", str(number), "--json", "number,title,body,url,state,labels"]
+            [
+                "issue",
+                "view",
+                str(number),
+                "--json",
+                "number,title,body,url,state,labels,comments",
+            ]
         )
         return json.loads(result.stdout.strip())
 
