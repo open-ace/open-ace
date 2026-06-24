@@ -594,20 +594,32 @@ def handle_llm_proxy_request(
                 # 检测上游 quota exceeded 错误并触发告警 (Issue #1060)
                 if resp.status_code == 429 and "quota exceeded" in error_text.lower():
                     try:
-                        from app.modules.governance.alert_notifier import create_quota_alert
+                        from app.modules.governance.alert_notifier import (
+                            create_quota_alert,
+                            get_alert_notifier,
+                        )
                         from app.repositories.user_repo import UserRepository
 
-                        user_repo = UserRepository()
-                        user = user_repo.get_user_by_id(user_id)
-                        username = user.get("username", "unknown") if user else "unknown"
+                        # 去重检查：1小时内已有同类告警则跳过
+                        notifier = get_alert_notifier()
+                        if notifier.has_recent_quota_alert(user_id, "platform", hours=1):
+                            logger.debug(
+                                "Skipping duplicate quota exceeded alert for user %d", user_id
+                            )
+                        else:
+                            user_repo = UserRepository()
+                            user = user_repo.get_user_by_id(user_id)
+                            username = user.get("username", "unknown") if user else "unknown"
 
-                        create_quota_alert(
-                            user_id=user_id,
-                            username=username,
-                            usage_percent=100,
-                            quota_type="platform",
-                        )
-                        logger.warning("Upstream quota exceeded alert created for user %d", user_id)
+                            create_quota_alert(
+                                user_id=user_id,
+                                username=username,
+                                usage_percent=100,
+                                quota_type="platform",
+                            )
+                            logger.warning(
+                                "Upstream quota exceeded alert created for user %d", user_id
+                            )
                     except Exception as alert_exc:
                         logger.error("Failed to create quota exceeded alert: %s", alert_exc)
 
