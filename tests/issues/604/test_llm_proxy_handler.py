@@ -636,5 +636,147 @@ class TestResponsesApiConversion:
         )
 
 
+# ===================================================================
+# E. Upstream Quota Exceeded Alert Tests (Issue #1060)
+# ===================================================================
+
+_ALERT_PATH = "app.modules.governance.alert_notifier.create_quota_alert"
+_USER_PATH = "app.repositories.user_repo.UserRepository.get_user_by_id"
+
+
+class TestUpstreamQuotaExceededAlert:
+    """Tests for upstream 429 quota exceeded handling and alert creation."""
+
+    @patch(_ALERT_PATH)
+    @patch(_USER_PATH)
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_upstream_quota_exceeded_creates_alert(
+        self,
+        mock_get_proxy,
+        mock_quota_cls,
+        mock_http,
+        mock_get_user,
+        mock_create_alert,
+        remote_app,
+    ):
+        """When upstream returns 429 with 'quota exceeded', alert should be created."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.return_value = ("key", "https://api.example.com", 1)
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        # Simulate upstream 429 quota exceeded
+        quota_error = json.dumps(
+            {"error": {"message": "429 Quota exceeded: Request quota exceeded. Used: 176/1700"}}
+        ).encode()
+        mock_http.return_value = _mock_upstream_response(429, quota_error)
+
+        mock_get_user.return_value = {"id": 1, "username": "testuser"}
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "model-a", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        # Should return 429 with quota_exceeded type
+        assert resp.status_code == 429
+        data = resp.get_json()
+        assert data["error"]["type"] == "quota_exceeded"
+
+        # Alert should be created
+        mock_create_alert.assert_called_once()
+        call_kwargs = mock_create_alert.call_args.kwargs
+        assert call_kwargs["user_id"] == 1
+        assert call_kwargs["username"] == "testuser"
+        assert call_kwargs["usage_percent"] == 100
+        assert call_kwargs["quota_type"] == "platform"
+
+    @patch(_ALERT_PATH)
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_upstream_429_rate_limit_no_alert(
+        self,
+        mock_get_proxy,
+        mock_quota_cls,
+        mock_http,
+        mock_create_alert,
+        remote_app,
+    ):
+        """When upstream returns 429 without 'quota exceeded', no alert should be created."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.return_value = ("key", "https://api.example.com", 1)
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        # Simulate upstream 429 rate limit (NOT quota exceeded)
+        rate_limit_error = json.dumps(
+            {"error": {"message": "Rate limit exceeded. Please retry after 60 seconds."}}
+        ).encode()
+        mock_http.return_value = _mock_upstream_response(429, rate_limit_error)
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "model-a", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        # Should return 502 (all keys failed) after failover attempts
+        assert resp.status_code == 502
+        data = resp.get_json()
+        assert "API key" in data["error"]["message"]
+
+        # Alert should NOT be created
+        mock_create_alert.assert_not_called()
+
+    @patch(_ALERT_PATH)
+    @patch(_USER_PATH)
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_upstream_quota_alert_exception_handled(
+        self,
+        mock_get_proxy,
+        mock_quota_cls,
+        mock_http,
+        mock_get_user,
+        mock_create_alert,
+        remote_app,
+    ):
+        """Alert creation exception should be logged but not crash the request."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.return_value = ("key", "https://api.example.com", 1)
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        quota_error = json.dumps(
+            {"error": {"message": "429 Quota exceeded: Request quota exceeded"}}
+        ).encode()
+        mock_http.return_value = _mock_upstream_response(429, quota_error)
+
+        mock_get_user.return_value = {"id": 1, "username": "testuser"}
+        mock_create_alert.side_effect = Exception("Alert creation failed")
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "model-a", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer tok"},
+        )
+
+        # Should still return 429 quota_exceeded even if alert creation failed
+        assert resp.status_code == 429
+        data = resp.get_json()
+        assert data["error"]["type"] == "quota_exceeded"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
