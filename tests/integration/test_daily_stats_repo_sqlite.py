@@ -53,6 +53,7 @@ def _insert_daily_messages_row(
     output_tokens=40,
     timestamp=None,
     message_id=None,
+    role="assistant",
 ):
     """Helper to insert a row into daily_messages."""
     if timestamp is None:

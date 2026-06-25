@@ -127,6 +127,14 @@ def load_schema_from_file(db_url: str | None = None, dialect: str | None = None)
             # the wrapper itself, so set autocommit on the raw _conn.
             raw: Any = getattr(conn, "_conn", conn)
             prev_autocommit = getattr(raw, "autocommit", False)
+            # psycopg2 raises ProgrammingError if autocommit is flipped while a
+            # transaction is open; pooled connections come back idle (the
+            # connection() context manager rolls back), but rollback defensively
+            # so a future caller returning a dirty conn can't break the flip.
+            try:
+                raw.rollback()
+            except Exception:
+                pass
             raw.autocommit = True
             try:
                 cursor = conn.cursor()
