@@ -857,5 +857,43 @@ class TestAllowedFieldsFiltering:
         assert "malicious_column" not in updated
 
 
+class TestContentLanguagePersistence:
+    """content_language is persisted, normalized, and defaults to 'en' (#1284)."""
+
+    def _data(self, **overrides):
+        data = {
+            "user_id": 1,
+            "title": "I18n Task",
+            "requirements_text": "Build a feature",
+            "cli_tool": "claude-code",
+            "project_path": "/tmp/test-project",
+        }
+        data.update(overrides)
+        return data
+
+    def test_explicit_content_language_round_trips(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        for lang in ("en", "zh", "ja", "ko"):
+            created = repo.create_workflow(self._data(content_language=lang))
+            assert created["content_language"] == lang
+            fetched = repo.get_workflow(created["workflow_id"])
+            assert fetched["content_language"] == lang
+
+    def test_defaults_to_en_when_omitted(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(self._data())  # no content_language
+        assert created["content_language"] == "en"
+
+    def test_invalid_content_language_normalized_to_en(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(self._data(content_language="fr"))
+        assert created["content_language"] == "en"
+
+    def test_none_content_language_normalized_to_en(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(self._data(content_language=None))
+        assert created["content_language"] == "en"
+
+
 # Required import for TestAllowedFieldsFiltering
 from unittest.mock import MagicMock

@@ -29,7 +29,14 @@ from app.modules.workspace.autonomous.artifact_text import (
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
-from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+from app.modules.workspace.autonomous.progress_report_i18n import (
+    build_progress_payload,
+    render_progress_report,
+)
+from app.repositories.autonomous_repo import (
+    DEFAULT_CONTENT_LANGUAGE,
+    AutonomousWorkflowRepository,
+)
 from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
@@ -250,15 +257,143 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
 GITHUB_COMMENT_MAX_CHARS = 65000
 
 # Each phase agent appends a one-line `TL;DR: ...` summary to its output for the
-# timeline milestone card (#993). TLDR_INSTRUCTION is appended to every agent
-# prompt; _extract_tldr pulls the line back out for storage in the tldr column.
-TLDR_INSTRUCTION = (
-    "\n\n## 输出格式要求\n"
-    "请在输出的最后单独一行，用以下格式给出本次输出的一句话总结"
-    "（将显示在 timeline 卡片上，务必简洁、纯文本、不要 markdown）：\n"
-    "TL;DR: <不超过 80 字的总结>\n"
-)
+# timeline milestone card (#993). build_language_instruction() is appended to
+# every agent prompt; _extract_tldr pulls the line back out for the tldr column.
+#
+# AI-authored content (plan / review / tldr / PR-review summaries) is generated
+# in the workflow's ``content_language`` — the persisted source of truth that
+# does NOT switch per viewer. The language-neutral ``TL;DR:`` marker is kept in
+# every language so _extract_tldr (regex on ``TL;DR:``) works regardless of
+# content_language.
+_LANGUAGE_DIRECTIVES = {
+    "en": "\n\nWrite all content in English.",
+    "zh": "\n\n请用简体中文输出所有内容。",
+    "ja": "\n\nすべての内容を日本語で出力してください。",
+    "ko": "\n\n모든 내용을 한국어로 출력해 주세요.",
+}
+_TLDR_FORMAT_INSTRUCTIONS = {
+    "en": (
+        "\n\n## Output format\n"
+        "On the last line of your output, give a one-sentence summary of this "
+        "output in this format (shown on the timeline card; concise, plain "
+        "text, no markdown):\n"
+        "TL;DR: <summary of no more than 80 characters>\n"
+    ),
+    "zh": (
+        "\n\n## 输出格式要求\n"
+        "请在输出的最后单独一行，用以下格式给出本次输出的一句话总结"
+        "（将显示在 timeline 卡片上，务必简洁、纯文本、不要 markdown）：\n"
+        "TL;DR: <不超过 80 字的总结>\n"
+    ),
+    "ja": (
+        "\n\n## 出力形式\n"
+        "出力の最後の行に、以下の書式で今回の出力の一文要約を記述してください"
+        "（タイムラインカードに表示されます。簡潔に、プレーンテキストで、マークダウンなし）：\n"
+        "TL;DR: <80文字以内の要約>\n"
+    ),
+    "ko": (
+        "\n\n## 출력 형식\n"
+        "출력의 마지막 줄에 다음 형식으로 이번 출력의 한 문장 요약을 작성해 주세요"
+        "（타임라인 카드에 표시됩니다. 간결하게, 일반 텍스트로, 마크다운 없이):\n"
+        "TL;DR: <80자 이내의 요약>\n"
+    ),
+}
+
+# Backward-compatible alias: the Chinese TL;DR format instruction. Kept so
+# existing imports/tests continue to work; new code uses build_language_instruction.
+TLDR_INSTRUCTION = _TLDR_FORMAT_INSTRUCTIONS["zh"]
+
+
+def build_language_instruction(content_language: Optional[str]) -> str:
+    """Build the per-content_language directive + TL;DR format instruction.
+
+    Returned string is appended to every agent prompt so AI-authored content is
+    generated in the workflow's ``content_language``. Unknown/missing languages
+    fall back to English. The language-neutral ``TL;DR:`` marker is always
+    present so ``_extract_tldr`` works across all languages.
+    """
+    lang = content_language if content_language in _LANGUAGE_DIRECTIVES else "en"
+    return _LANGUAGE_DIRECTIVES[lang] + _TLDR_FORMAT_INSTRUCTIONS[lang]
+
+
 _TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+
+# Approval marker the PR reviewer is asked to state when there are no major
+# issues, per content_language. Used in BOTH the review prompt and approval
+# detection — the agent writes its review in content_language, so a zh-only
+# marker would miss en/ja/ko approvals. The structured verdict written to
+# metadata.review_verdict removes progress_reported's dependency on this
+# substring entirely. (Plan-review approval "方案通过审查" is still zh-locked
+# and out of scope for the progress_reported i18n work.)
+_REVIEW_APPROVAL_PHRASES = {
+    "en": "Code review passed",
+    "zh": "代码审查通过",
+    "ja": "コードレビュー合格",
+    "ko": "코드 리뷰 통과",
+}
+
+
+def _review_approval_phrase(content_language: Optional[str]) -> str:
+    """Approval marker for PR review in the given content language."""
+    return _REVIEW_APPROVAL_PHRASES.get(
+        content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
+    )
+
+
+def _parse_metadata(raw) -> dict:
+    """Parse a milestone metadata JSON string/dict into a dict (empty on failure)."""
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+
+
+def _merge_milestone_metadata(milestone, updates: dict) -> str:
+    """Merge ``updates`` into a milestone's metadata, returning the JSON string.
+
+    ``milestone`` may be a milestone dict (read from the repo) or a raw metadata
+    JSON string. Existing keys are preserved; ``updates`` keys overwrite.
+    """
+    raw = milestone.get("metadata") if isinstance(milestone, dict) else milestone
+    merged = _parse_metadata(raw)
+    merged.update(updates)
+    return json.dumps(merged, ensure_ascii=False)
+
+
+# Localized "comment truncated" notice appended when a GitHub comment body
+# exceeds the length cap. Rendered in the workflow's content_language.
+_GITHUB_TRUNCATION_NOTICES = {
+    "en": (
+        "\n\n---\n\n"
+        "> ⚠️ Content exceeded the GitHub comment length limit and was truncated. "
+        "See the workflow timeline milestone card for the full text (plan/review/report).\n"
+    ),
+    "zh": (
+        "\n\n---\n\n"
+        "> ⚠️ 内容超出 GitHub 评论长度上限，已截断显示。"
+        "完整内容请查看 workflow timeline 的里程碑卡片（方案/评审/报告全文）。\n"
+    ),
+    "ja": (
+        "\n\n---\n\n"
+        "> ⚠️ GitHub コメントの文字数上限を超えたため切り詰めました。"
+        "全文はワークフロー タイムラインのマイルストーンカード（計画/レビュー/レポート）で確認してください。\n"
+    ),
+    "ko": (
+        "\n\n---\n\n"
+        "> ⚠️ GitHub 댓글 길이 제한을 초과하여 잘렸습니다. "
+        "전체 내용은 워크플로 타임라인의 마일스톤 카드(계획/리뷰/보고서)에서 확인하세요.\n"
+    ),
+}
+
+
+def _github_truncation_notice(content_language: Optional[str]) -> str:
+    return _GITHUB_TRUNCATION_NOTICES.get(
+        content_language, _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
+    )
 
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
@@ -632,38 +767,6 @@ class AutonomousOrchestrator:
             )
         return "; ".join(parts)
 
-    @staticmethod
-    def _build_progress_report_tldr(
-        dev_round: int,
-        diff_stats: dict,
-        test_summary: str,
-        review_rounds: int,
-        review_passed: bool,
-        pr_number: Optional[int],
-    ) -> str:
-        """Build a compact one-line summary for synthetic progress reports."""
-        parts = [f"Round {dev_round} summary"]
-
-        if diff_stats:
-            parts.append(
-                f"{diff_stats.get('files', 0)} files changed "
-                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
-            )
-
-        cleaned_test_summary = re.sub(r"\s+", " ", test_summary or "").strip()
-        if cleaned_test_summary:
-            parts.append(f"Tests: {cleaned_test_summary[:60].rstrip(' ,.;:')}")
-
-        if review_rounds > 0:
-            parts.append(
-                f"Review: {'passed' if review_passed else 'issues found'} ({review_rounds} rounds)"
-            )
-
-        if pr_number:
-            parts.append(f"PR #{pr_number}")
-
-        return "; ".join(parts)[:200]
-
     def _post_github_comment(
         self,
         gh: GitHubOps,
@@ -672,6 +775,7 @@ class AutonomousOrchestrator:
         *,
         is_pr: bool = False,
         context: str = "",
+        content_language: Optional[str] = None,
     ) -> None:
         """Post a comment to a GitHub issue or PR.
 
@@ -687,10 +791,8 @@ class AutonomousOrchestrator:
           workflow phase. The body survives in the DB / timeline regardless.
         """
         if len(body) > GITHUB_COMMENT_MAX_CHARS:
-            notice = (
-                "\n\n---\n\n"
-                "> ⚠️ 内容超出 GitHub 评论长度上限，已截断显示。"
-                "完整内容请查看 workflow timeline 的里程碑卡片（方案/评审/报告全文）。\n"
+            notice = _github_truncation_notice(
+                content_language or (self.workflow or {}).get("content_language")
             )
             body = body[: GITHUB_COMMENT_MAX_CHARS - len(notice)] + notice
         try:
@@ -948,6 +1050,33 @@ class AutonomousOrchestrator:
         """Whether the review text explicitly approves the artifact."""
         return bool(review_text and approval_text in review_text)
 
+    @staticmethod
+    def _derive_review_passed(review_milestones: list, content_language) -> bool:
+        """Whether any PR review round approved the PR.
+
+        Prefers the structured ``metadata.review_verdict`` written at review time
+        (language-independent) so progress_reported no longer depends on a
+        Chinese substring. Falls back to scanning ``review_content`` for the
+        language-aware approval phrase (and the legacy zh marker) when none of
+        the milestones carry a structured verdict — i.e. for workflows whose
+        reviews predate this field.
+        """
+        phrase = _review_approval_phrase(content_language)
+        have_structured = False
+        for ms in review_milestones:
+            verdict = _parse_metadata(ms.get("metadata")).get("review_verdict") or {}
+            if isinstance(verdict, dict) and "passed" in verdict:
+                have_structured = True
+                if verdict.get("passed"):
+                    return True
+        if have_structured:
+            return False
+        for ms in review_milestones:
+            text = ms.get("review_content") or ""
+            if phrase in text or "代码审查通过" in text:
+                return True
+        return False
+
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
         try:
@@ -1021,10 +1150,13 @@ class AutonomousOrchestrator:
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
 
-        # Append the TL;DR instruction so every phase agent outputs a one-line
-        # summary for the timeline milestone card (#993).
+        # Append the per-content_language directive + TL;DR format instruction
+        # so every phase agent outputs a one-line summary (#993) AND authors its
+        # content in the workflow's content_language. AI content is generated in
+        # content_language (source of truth) and rendered verbatim per viewer.
         if kwargs.get("prompt"):
-            kwargs["prompt"] = kwargs["prompt"] + TLDR_INSTRUCTION
+            content_language = (workflow_data or {}).get("content_language")
+            kwargs["prompt"] = kwargs["prompt"] + build_language_instruction(content_language)
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
@@ -2566,6 +2698,9 @@ class AutonomousOrchestrator:
         dev_round = wf.get("dev_round", 1)
         branch_name = wf.get("branch_name", "")
         gh = self._get_gh()
+        # Language-aware approval marker for PR review (matches what the agent,
+        # writing in content_language, is asked to state).
+        approval_phrase = _review_approval_phrase(wf.get("content_language"))
 
         # Check if branch has any changes vs main
         has_changes = False
@@ -2726,7 +2861,7 @@ class AutonomousOrchestrator:
             "4. 性能影响\n"
             "5. 与需求的对齐程度\n"
             "6. 上一轮审查意见的落实情况(如有)\n\n"
-            "如果没有重大问题，请明确说明'代码审查通过'。\n\n"
+            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n\n"
             "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
             "或结尾引导(如'下一步是否...'等)。"
         )
@@ -2760,6 +2895,17 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(review_result)
 
         review_text = self._artifact_text(review_result)
+        # Detect approval using the language-aware marker, then persist a
+        # structured verdict so progress_reported doesn't re-scan review text.
+        # The legacy zh marker is accepted too, for workflows whose content
+        # language predates this field (mirrors _derive_review_passed).
+        review_passed = self._review_is_approved(
+            review_text, approval_phrase
+        ) or "代码审查通过" in review_text
+        review_metadata = _merge_milestone_metadata(
+            self.repo.get_milestone(review_ms.get("milestone_id", "")),
+            {"review_verdict": {"passed": review_passed, "round": round_num}},
+        )
         self.repo.update_milestone(
             review_ms.get("milestone_id", ""),
             {
@@ -2767,6 +2913,7 @@ class AutonomousOrchestrator:
                 "review_content": review_text,
                 "review_session_id": review_result.session_id,
                 "tldr": self._artifact_tldr(review_result),
+                "metadata": review_metadata,
             },
         )
 
@@ -2782,8 +2929,6 @@ class AutonomousOrchestrator:
 
         # Check if all rounds done
         self._update_workflow({"current_round": round_num})
-
-        review_passed = self._review_is_approved(review_text, "代码审查通过")
 
         # Every review with findings gets a fix — including the cap round — so
         # the last review's feedback is never silently dropped. Total reviews are
@@ -3057,60 +3202,37 @@ class AutonomousOrchestrator:
                 test_summary = self._clean_agent_text(ms["result_summary"])
                 break
 
-        # 4. Code review rounds
+        # 4. Code review rounds + structured approval verdict
+        pr_review_milestones = [
+            ms for ms in all_milestones if ms.get("milestone_type") == "pr_reviewed"
+        ]
         review_rounds = sum(
-            1
-            for ms in all_milestones
-            if ms.get("milestone_type") == "pr_reviewed" and ms.get("phase") == "pr_review"
+            1 for ms in pr_review_milestones if ms.get("phase") == "pr_review"
         )
-        review_passed = any(
-            "代码审查通过" in (ms.get("review_content") or "")
-            for ms in all_milestones
-            if ms.get("milestone_type") == "pr_reviewed"
+        review_passed = self._derive_review_passed(
+            pr_review_milestones, wf.get("content_language")
         )
 
-        # Build report
-        report = f"## 📊 Dev Round {dev_round} Summary\n\n"
-
-        if plan_summary:
-            report += f"### 📋 Plan\n{plan_summary}\n\n"
-
-        # Changes section
-        report += "### 📝 Changes\n"
-        branch = wf.get("branch_name", "")
-        if diff_stats:
-            report += (
-                f"- Files: {diff_stats.get('files', 0)} changed "
-                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
-            )
-        if branch:
-            report += f"- Branch: `{branch}`\n"
-        report += "\n"
-
-        if test_summary:
-            report += f"### 🧪 Tests\n{test_summary}\n\n"
-
-        if review_rounds > 0:
-            report += "### 🔍 Code Review\n"
-            report += f"- Rounds: {review_rounds}\n"
-            report += f"- Final status: {'✅ Passed' if review_passed else '⚠️ Issues found'}\n\n"
-
-        if pr_number:
-            report += f"### 🔗 PR\n- PR #{pr_number}\n\n"
-
-        report += (
-            "### 📈 Resources\n"
-            f"- Tokens: {wf.get('total_tokens', 0):,}\n"
-            f"- API Requests: {wf.get('total_requests', 0)}\n"
-        )
-        report_tldr = self._build_progress_report_tldr(
+        # Build the structured report payload — the single source of truth. The
+        # one-line summary and full report are NOT persisted as localized prose;
+        # the frontend renders them from ``metadata.report`` in the viewer's UI
+        # language. The GitHub issue comment is rendered here in the workflow's
+        # content_language (the issue audience expects the workflow's language).
+        content_language = wf.get("content_language")
+        payload = build_progress_payload(
             dev_round=dev_round,
+            plan_summary=plan_summary,
             diff_stats=diff_stats,
             test_summary=test_summary,
             review_rounds=review_rounds,
             review_passed=review_passed,
             pr_number=pr_number,
+            branch=wf.get("branch_name", ""),
+            total_tokens=wf.get("total_tokens", 0),
+            total_requests=wf.get("total_requests", 0),
         )
+        report_metadata = json.dumps({"report": payload}, ensure_ascii=False)
+        report_markdown = render_progress_report(payload, content_language)
 
         self._create_milestone(
             phase="report",
@@ -3118,13 +3240,14 @@ class AutonomousOrchestrator:
             milestone_type="progress_reported",
             status="completed",
             title=f"Progress report for round {dev_round}",
-            result_summary=report[:500],
-            tldr=report_tldr,
+            metadata=report_metadata,
         )
 
         # Post report to issue
         if issue_number:
-            self._post_github_comment(gh, issue_number, report, context="progress-report")
+            self._post_github_comment(
+                gh, issue_number, report_markdown, context="progress-report"
+            )
 
         # Mark round completed
         self._create_milestone(

@@ -1595,9 +1595,18 @@ class TestOrchestratorReport:
         report_ms_dict = mock_repo.create_milestone.call_args_list[0][0][0]
         assert report_ms_dict["milestone_type"] == "progress_reported"
         assert "Progress report" in report_ms_dict["title"]
-        assert report_ms_dict["tldr"] == (
-            "Round 1 summary; 5 files changed (+100/-20); " "Tests: All 5 tests passed; PR #99"
-        )
+        # The report is now persisted as a structured payload in metadata.report
+        # (single source of truth); the one-line summary + full markdown render
+        # per-viewer from that payload rather than being stored as localized prose.
+        report = json.loads(report_ms_dict["metadata"])["report"]
+        assert report["dev_round"] == 1
+        assert report["files"] == 5
+        assert report["additions"] == 100
+        assert report["deletions"] == 20
+        assert report["test_summary"] == "All 5 tests passed"
+        assert report["pr_number"] == 99
+        assert report["total_tokens"] == 5000
+        assert report["total_requests"] == 10
 
     def test_report_posts_to_issue(self):
         """Report is posted as a GitHub issue comment."""
@@ -1633,9 +1642,9 @@ class TestOrchestratorReport:
 
         # _create_milestone passes dict as positional arg to repo.create_milestone
         report_ms_dict = orch.repo.create_milestone.call_args_list[0][0][0]
-        summary = report_ms_dict.get("result_summary", "")
-        assert "5,000" in summary  # formatted token count
-        assert "99" in summary  # PR number
+        report = json.loads(report_ms_dict["metadata"])["report"]
+        assert report["total_tokens"] == 5000  # token count persisted
+        assert report["pr_number"] == 99  # PR number persisted
 
     def test_report_moves_to_wait_phase(self):
         """Report phase transitions workflow to wait phase."""

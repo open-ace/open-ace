@@ -74,14 +74,19 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     if has_session_messages:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(session_messages)")}
     user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    aw_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(autonomous_workflows)")
+    }
     conn.close()
 
     assert version is not None
-    # run_timeline migration chains after 001_fix_auto_provision (single head)
-    assert version[0] == "20260626_001_add_run_timeline_tables"
+    # content_language migration chains after run_timeline (single head)
+    assert version[0] == "20260626_002_workflow_content_language"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
     assert has_compliance_reports is True
     assert has_run_timeline is True
     assert "auto_mapping_enabled" in user_columns
+    # content_language column added by 20260626_002 (#1284)
+    assert "content_language" in aw_columns

@@ -36,6 +36,7 @@ import { autonomousApi } from '@/api/autonomous';
 import CancelRoundModal from './CancelRoundModal';
 import ForkFromHereModal from './ForkFromHereModal';
 import { MarkdownContent } from './MarkdownContent';
+import { getProgressReportView } from './progressReport';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
 import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
@@ -1155,6 +1156,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       !compact &&
       REVIEW_CONTENT_TYPES.includes(milestone.milestone_type) &&
       !!milestone.review_content?.trim();
+    // progress_reported milestones render from a structured payload in the
+    // viewer's UI language (system-authored structured content). Legacy
+    // milestones without a payload fall back to verbatim tldr/result_summary.
+    const progressReportView =
+      milestone.milestone_type === 'progress_reported'
+        ? getProgressReportView(milestone, language)
+        : null;
+    const canViewReport = !compact && !!progressReportView;
     const canFork =
       !compact &&
       allowMilestoneActions &&
@@ -1166,6 +1175,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const isCurrentActiveMilestone =
       milestone.status === 'in_progress' && (milestone.dev_round || 1) === workflow.dev_round;
     const rawSummary = (
+      (progressReportView?.tldr ?? '') ||
       milestone.tldr ||
       milestone.result_summary ||
       milestone.description ||
@@ -1346,6 +1356,22 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       >
                         <i className="bi bi-chat-text me-1"></i>
                         {t('autoViewReview', language)}
+                      </Button>
+                    )}
+                    {canViewReport && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn timeline-inline-btn--info"
+                        onClick={() =>
+                          setViewingContent({
+                            title: t('autoViewReportTitle', language),
+                            content: progressReportView?.fullReport ?? '',
+                          })
+                        }
+                      >
+                        <i className="bi bi-file-earmark-text me-1"></i>
+                        {t('autoViewReport', language)}
                       </Button>
                     )}
                     {canViewChanges && (

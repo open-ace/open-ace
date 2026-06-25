@@ -61,6 +61,11 @@ class AutonomousWorkflow:
     total_output_tokens: int = 0
     total_requests: int = 0
     error_message: str = ""
+    # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
+    # at creation; persisted content is generated in this language and rendered
+    # verbatim (it does NOT switch per viewer). System-authored structured
+    # content is rendered from structured payloads instead.
+    content_language: str = "en"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -123,6 +128,7 @@ class AutonomousWorkflow:
             "total_output_tokens": self.total_output_tokens,
             "total_requests": self.total_requests,
             "error_message": self.error_message,
+            "content_language": self.content_language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -171,6 +177,7 @@ class AutonomousWorkflow:
             total_output_tokens=data.get("total_output_tokens", 0),
             total_requests=data.get("total_requests", 0),
             error_message=data.get("error_message", ""),
+            content_language=data.get("content_language", "en"),
             created_at=(
                 datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
             ),

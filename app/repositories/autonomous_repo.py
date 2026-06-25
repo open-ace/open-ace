@@ -14,6 +14,12 @@ from app.repositories.database import Database, adapt_sql, escape_like, is_postg
 
 logger = logging.getLogger(__name__)
 
+# Supported content languages for workflow-authored content (en/zh/ja/ko).
+# Shared by the repository (persistence) and the orchestrator (AI prompt
+# injection) so the two layers can never drift apart.
+ALLOWED_CONTENT_LANGUAGES = ("en", "zh", "ja", "ko")
+DEFAULT_CONTENT_LANGUAGE = "en"
+
 
 class AutonomousWorkflowRepository:
     """Repository for autonomous workflow CRUD operations."""
@@ -72,6 +78,7 @@ class AutonomousWorkflowRepository:
         "review_session_id",
         "test_session_id",
         "transient_retry_count",
+        "content_language",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -150,6 +157,17 @@ class AutonomousWorkflowRepository:
     # ── Workflow CRUD ──────────────────────────────────────────────
 
     @staticmethod
+    def _normalize_content_language(value) -> str:
+        """Validate content_language against the supported set, falling back.
+
+        Accepts the 4 supported languages; anything else (None, empty, unknown)
+        falls back to the default so persisted content always has a language.
+        """
+        if isinstance(value, str) and value.strip() in ALLOWED_CONTENT_LANGUAGES:
+            return value.strip()
+        return DEFAULT_CONTENT_LANGUAGE
+
+    @staticmethod
     def _coerce_bool(value, default: bool = False) -> bool:
         """Coerce a value to Python bool for BOOLEAN columns.
 
@@ -167,6 +185,12 @@ class AutonomousWorkflowRepository:
         """Create a new autonomous workflow. Returns the created record."""
         workflow_id = data.get("workflow_id") or str(uuid.uuid4())
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # Normalize content_language up front so both INSERT branches stay in
+        # sync and the value cannot be silently dropped by a missing column.
+        data = dict(data)
+        data["content_language"] = self._normalize_content_language(
+            data.get("content_language")
+        )
 
         if is_postgresql():
             result = self.db.fetch_one(
@@ -181,9 +205,9 @@ class AutonomousWorkflowRepository:
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name,
+                     original_branch_name, content_language,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -218,12 +242,13 @@ class AutonomousWorkflowRepository:
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
+                    data.get("content_language", "en"),
                     now,
                     now,
                 ),
                 commit=True,
             )
-            return result
+            created = result
         else:
             self.db.execute(
                 """
@@ -237,9 +262,9 @@ class AutonomousWorkflowRepository:
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name,
+                     original_branch_name, content_language,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -273,11 +298,23 @@ class AutonomousWorkflowRepository:
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
+                    data.get("content_language", "en"),
                     now,
                     now,
                 ),
             )
-            return self.get_workflow(workflow_id)
+            created = self.get_workflow(workflow_id)
+
+        # Silent-drop guard: content_language must round-trip. If the INSERT
+        # column list ever drifts out of sync with the value tuple, this would
+        # catch a missing column instead of persisting a NULL silently.
+        if created and not created.get("content_language"):
+            logger.error(
+                "content_language missing after create_workflow %s — falling back to 'en'",
+                workflow_id,
+            )
+            created["content_language"] = "en"
+        return created
 
     def get_workflow(self, workflow_id: str) -> Optional[dict]:
         """Get a workflow by workflow_id."""
