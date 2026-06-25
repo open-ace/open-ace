@@ -105,15 +105,19 @@ class TestMilestoneLinksRealCliSession:
 
         # Find the update_milestone call that set session_id on the milestone.
         link_calls = [
-            c for c in mock_repo.update_milestone.call_args_list
-            if len(c[0]) > 1 and isinstance(c[0][1], dict)
+            c
+            for c in mock_repo.update_milestone.call_args_list
+            if len(c[0]) > 1
+            and isinstance(c[0][1], dict)
             and ("session_id" in c[0][1] or "review_session_id" in c[0][1])
         ]
         assert link_calls, "milestone should have been linked to a session id"
-        linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get("review_session_id")
-        assert linked_id == "real-cli-session-4448", (
-            "card must link to the real cli session id, not the wrapper uuid"
+        linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get(
+            "review_session_id"
         )
+        assert (
+            linked_id == "real-cli-session-4448"
+        ), "card must link to the real cli session id, not the wrapper uuid"
 
     def test_card_falls_back_to_wrapper_when_no_source(self):
         """When source_session_id is empty (e.g. session not yet resolved),
@@ -149,10 +153,14 @@ class TestMilestoneLinksRealCliSession:
         )
 
         link_calls = [
-            c for c in mock_repo.update_milestone.call_args_list
-            if len(c[0]) > 1 and isinstance(c[0][1], dict)
+            c
+            for c in mock_repo.update_milestone.call_args_list
+            if len(c[0]) > 1
+            and isinstance(c[0][1], dict)
             and ("session_id" in c[0][1] or "review_session_id" in c[0][1])
         ]
         assert link_calls
-        linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get("review_session_id")
+        linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get(
+            "review_session_id"
+        )
         assert linked_id == "wrapper-uuid-2", "fallback to wrapper uuid when no real cli session"

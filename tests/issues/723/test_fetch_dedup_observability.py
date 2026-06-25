@@ -40,12 +40,10 @@ class TestWarnIfSkippedMessageHasText:
             "content": json.dumps(["## 审查结论 方案成立"], ensure_ascii=False),
         }
         with caplog.at_level(logging.WARNING, logger="fetch_dedup"):
-            warn_if_skipped_message_has_text(
-                existing, incoming, "sess-1", "msg_1", "fetch_claude"
-            )
-        assert any("text NOT in the stored row" in r.message for r in caplog.records), (
-            "should warn when skipped line carries text the stored row lacks"
-        )
+            warn_if_skipped_message_has_text(existing, incoming, "sess-1", "msg_1", "fetch_claude")
+        assert any(
+            "text NOT in the stored row" in r.message for r in caplog.records
+        ), "should warn when skipped line carries text the stored row lacks"
 
     def test_no_warn_when_stored_row_already_has_the_text(self, caplog):
         """If the existing row already contains the text, the skip is benign
@@ -54,9 +52,7 @@ class TestWarnIfSkippedMessageHasText:
         existing = (1, json.dumps(["the answer"], ensure_ascii=False))
         incoming = {"content": json.dumps(["the answer"], ensure_ascii=False)}
         with caplog.at_level(logging.WARNING, logger="fetch_dedup"):
-            warn_if_skipped_message_has_text(
-                existing, incoming, "sess-1", "msg_1", "fetch_qwen"
-            )
+            warn_if_skipped_message_has_text(existing, incoming, "sess-1", "msg_1", "fetch_qwen")
         assert not any("text NOT in the stored row" in r.message for r in caplog.records)
 
     def test_no_warn_when_skipped_line_has_no_text(self, caplog):
@@ -65,9 +61,7 @@ class TestWarnIfSkippedMessageHasText:
         existing = (1, json.dumps(["the answer"], ensure_ascii=False))
         incoming = {"content": "[]"}  # thinking-only, no real text
         with caplog.at_level(logging.WARNING, logger="fetch_dedup"):
-            warn_if_skipped_message_has_text(
-                existing, incoming, "sess-1", "msg_1", "fetch_codex"
-            )
+            warn_if_skipped_message_has_text(existing, incoming, "sess-1", "msg_1", "fetch_codex")
         assert not any("text NOT in the stored row" in r.message for r in caplog.records)
 
     def test_existing_row_none_with_text_warns(self, caplog):
@@ -77,9 +71,7 @@ class TestWarnIfSkippedMessageHasText:
         _caplog_handler(caplog)
         incoming = {"content": "some text"}
         with caplog.at_level(logging.WARNING, logger="fetch_dedup"):
-            warn_if_skipped_message_has_text(
-                None, incoming, "sess-1", "msg_1", "fetch_zcode"
-            )
+            warn_if_skipped_message_has_text(None, incoming, "sess-1", "msg_1", "fetch_zcode")
         assert any("text NOT in the stored row" in r.message for r in caplog.records)
 
     def test_warn_message_names_the_source_and_ids(self, caplog):
@@ -101,9 +93,7 @@ class TestWarnIfSkippedMessageHasText:
         existing = (1, "")
         incoming = {"content": "a user message that would be lost"}
         with caplog.at_level(logging.WARNING, logger="fetch_dedup"):
-            warn_if_skipped_message_has_text(
-                existing, incoming, "sess-1", "msg_1", "fetch_qwen"
-            )
+            warn_if_skipped_message_has_text(existing, incoming, "sess-1", "msg_1", "fetch_qwen")
         assert any("text NOT in the stored row" in r.message for r in caplog.records)
 
     def test_never_raises_on_bad_input(self, caplog):

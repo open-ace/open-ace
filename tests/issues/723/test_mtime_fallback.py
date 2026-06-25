@@ -26,7 +26,9 @@ def _write_jsonl(path: Path, session_id: str, *, mtime_offset: float = 0.0) -> P
     """Write a minimal claude JSONL whose first record carries sessionId."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"type": "summary", "sessionId": session_id, "timestamp": "2026-06-24T12:00:00Z"})
+        json.dumps(
+            {"type": "summary", "sessionId": session_id, "timestamp": "2026-06-24T12:00:00Z"}
+        )
         + "\n",
         encoding="utf-8",
     )
