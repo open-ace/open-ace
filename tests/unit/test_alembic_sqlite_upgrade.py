@@ -71,8 +71,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     conn.close()
 
     assert version is not None
-    # HEAD_REVISION is baseline_2026_06_23 after baseline migration
-    assert version[0] == "baseline_2026_06_23"
+    # HEAD_REVISION is 001_fix_auto_provision after post-baseline migration
+    assert version[0] == "001_fix_auto_provision"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
