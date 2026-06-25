@@ -1477,10 +1477,10 @@ ALTER TABLE ONLY business_project_members
     ADD CONSTRAINT business_project_members_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY business_projects
-    ADD CONSTRAINT business_projects_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT business_projects_code_key UNIQUE (code);
 
 ALTER TABLE ONLY business_projects
-    ADD CONSTRAINT business_projects_code_key UNIQUE (code);
+    ADD CONSTRAINT business_projects_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY compliance_reports
     ADD CONSTRAINT compliance_reports_pkey PRIMARY KEY (id);
@@ -1736,11 +1736,6 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
--- Business project members indexes for efficient JOIN queries (Issue #871)
-CREATE INDEX idx_business_project_members_business_project_id ON business_project_members USING btree (business_project_id);
-
-CREATE INDEX idx_business_project_members_user_id ON business_project_members USING btree (user_id);
-
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
 
@@ -1782,6 +1777,14 @@ CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
+
+
+--
+--
+
+CREATE INDEX idx_business_project_members_business_project_id ON business_project_members USING btree (business_project_id);
+
+CREATE INDEX idx_business_project_members_user_id ON business_project_members USING btree (user_id);
 
 
 --
