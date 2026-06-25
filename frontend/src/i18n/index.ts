@@ -181,12 +181,14 @@ export const translations: Record<Language, Translations> = {
     // Password reset
     resetPassword: 'Reset Password',
     temporaryPassword: 'Temporary Password',
-    tempPasswordWarning: 'Please share this password securely with the user. They will be required to change it on first login.',
+    tempPasswordWarning:
+      'Please share this password securely with the user. They will be required to change it on first login.',
     copyToClipboard: 'Copy to clipboard',
     // Force password change
     changePassword: 'Change Password',
     changePasswordRequired: 'Change Password Required',
-    mustChangePasswordHint: 'Your password was reset by an administrator. You must change it before continuing.',
+    mustChangePasswordHint:
+      'Your password was reset by an administrator. You must change it before continuing.',
     currentPassword: 'Current Password',
     currentPasswordRequired: 'Current password is required',
     newPasswordRequired: 'New password is required',
@@ -3080,12 +3082,14 @@ export const translations: Record<Language, Translations> = {
     // Password reset
     resetPassword: 'パスワードリセット',
     temporaryPassword: '一時パスワード',
-    tempPasswordWarning: 'このパスワードをユーザーと安全に共有してください。初回ログイン時に変更が必要です。',
+    tempPasswordWarning:
+      'このパスワードをユーザーと安全に共有してください。初回ログイン時に変更が必要です。',
     copyToClipboard: 'クリップボードにコピー',
     // Force password change
     changePassword: 'パスワード変更',
     changePasswordRequired: 'パスワード変更が必要',
-    mustChangePasswordHint: 'パスワードが管理者によってリセットされました。続行前にパスワードを変更してください。',
+    mustChangePasswordHint:
+      'パスワードが管理者によってリセットされました。続行前にパスワードを変更してください。',
     currentPassword: '現在のパスワード',
     currentPasswordRequired: '現在のパスワードは必須です',
     newPasswordRequired: '新しいパスワードは必須です',
@@ -4231,12 +4235,14 @@ export const translations: Record<Language, Translations> = {
     // Password reset
     resetPassword: '비밀번호 재설정',
     temporaryPassword: '임시 비밀번호',
-    tempPasswordWarning: '이 비밀번호를 사용자와 안전하게 공유하세요. 첫 로그인 시 변경이 필요합니다.',
+    tempPasswordWarning:
+      '이 비밀번호를 사용자와 안전하게 공유하세요. 첫 로그인 시 변경이 필요합니다.',
     copyToClipboard: '클립보드에 복사',
     // Force password change
     changePassword: '비밀번호 변경',
     changePasswordRequired: '비밀번호 변경 필요',
-    mustChangePasswordHint: '비밀번호가 관리자에 의해 재설정되었습니다. 계속하기 전에 비밀번호를 변경하세요.',
+    mustChangePasswordHint:
+      '비밀번호가 관리자에 의해 재설정되었습니다. 계속하기 전에 비밀번호를 변경하세요.',
     currentPassword: '현재 비밀번호',
     currentPasswordRequired: '현재 비밀번호는 필수입니다',
     newPasswordRequired: '새 비밀번호는 필수입니다',

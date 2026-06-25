@@ -118,8 +118,8 @@ def create_tenant():
     admin_email = data.get("admin_email")
 
     # Guard: tenant.id must exist after creation
-    if not tenant.id:
-        return jsonify({"error": "Tenant creation failed - missing ID"}), 500
+    assert tenant.id is not None  # Type guard for mypy
+    tenant_id = tenant.id
 
     if admin_username and admin_password:
         # Validate admin username
@@ -153,12 +153,12 @@ def create_tenant():
             password_hash=password_hash,
             role="admin",
             is_active=True,
-            tenant_id=tenant.id,
+            tenant_id=tenant_id,
         )
 
         if admin_user_id:
             # Increment tenant user count
-            tenant_service.increment_user_count(tenant.id)
+            tenant_service.increment_user_count(tenant_id)
             admin_info = {
                 "user_id": admin_user_id,
                 "username": admin_username,
