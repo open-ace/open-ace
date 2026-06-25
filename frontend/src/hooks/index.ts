@@ -110,7 +110,6 @@ export {
   useLanguage,
   useSidebarCollapsed,
   useAppMode,
-  useMustChangePassword,
 } from '@/store';
 
 // Page refresh hooks
