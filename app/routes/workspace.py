@@ -1949,7 +1949,7 @@ def get_workspace_status():
                 requests_limit = user.get("daily_request_quota") or 1000
 
                 # Get today's usage — session-only (agent_sessions) per #1125:
-                # the Work page must not read the daily_messages analysis table.
+                # the Work page must not read the analysis fact table.
                 usage_repo = UsageRepository()
                 combined = usage_repo.get_session_only_usage(
                     user_id=user_id,

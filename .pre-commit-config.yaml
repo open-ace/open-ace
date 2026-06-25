@@ -39,6 +39,12 @@ repos:
         language: system
         files: ^app/routes/.*\.py$
         pass_filenames: false
+      - id: table-boundary-check
+        name: Table Boundary Check (#1125)
+        entry: python3 scripts/lint/table_boundary_checker.py
+        language: system
+        files: ^app/routes/.*\.py$
+        pass_filenames: false
 
   # =============================================================================
   # Code Formatting
