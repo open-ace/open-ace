@@ -17,6 +17,7 @@ HEAD_REVISION = "001_fix_auto_provision"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE_SCHEMA_DIR = _PROJECT_ROOT / "schema" / "baselines"
+ACTIVE_MIGRATIONS_DIR = _PROJECT_ROOT / "migrations" / "versions"
 LEGACY_MIGRATIONS_DIR = _PROJECT_ROOT / "migrations" / "legacy_versions"
 
 

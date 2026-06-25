@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from migrations.baseline import (
+    ACTIVE_MIGRATIONS_DIR,
     BASELINE_REVISION,
     LEGACY_MIGRATIONS_DIR,
     read_current_revision,
@@ -54,6 +55,29 @@ def collect_legacy_revision_ids() -> set[str]:
         return revision_ids
 
     for path in LEGACY_MIGRATIONS_DIR.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        match = _REVISION_RE.search(text) or _REVISION_RE_FALLBACK.search(text)
+        if match:
+            revision_ids.add(match.group(1))
+
+    return revision_ids
+
+
+def collect_active_revision_ids() -> set[str]:
+    """Collect revision identifiers from the active post-baseline lineage.
+
+    Mirrors :func:`collect_legacy_revision_ids` but scans the live
+    ``migrations/versions`` directory. The baseline migration pins its
+    ``revision`` to the ``BASELINE_REVISION`` symbol rather than a literal, so
+    its identifier is not picked up here; the caller unions the baseline in
+    explicitly. This keeps the active-revision allowlist self-maintaining as
+    new post-baseline migrations ship.
+    """
+    revision_ids: set[str] = set()
+    if not ACTIVE_MIGRATIONS_DIR.exists():
+        return revision_ids
+
+    for path in ACTIVE_MIGRATIONS_DIR.glob("*.py"):
         text = path.read_text(encoding="utf-8")
         match = _REVISION_RE.search(text) or _REVISION_RE_FALLBACK.search(text)
         if match:
@@ -407,7 +431,13 @@ def ensure_compliance_reports_table(connection: sa.Connection) -> bool:
 
 def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tuple[bool, list[str]]:
     """Cut over a legacy database to the baseline revision."""
-    active_revisions = {BASELINE_REVISION}
+    # The active lineage includes the baseline plus every post-baseline
+    # revision in migrations/versions/. A DB already migrated to head (or any
+    # post-baseline revision) is on a known-good revision, so cutover treats
+    # it as a no-op and lets `alembic upgrade head` advance it the rest of the
+    # way. This must be derived from the live migration directory, not
+    # hard-coded, so new post-baseline migrations do not trip the refusal guard.
+    active_revisions = collect_active_revision_ids() | {BASELINE_REVISION}
     legacy_revisions = collect_legacy_revision_ids()
     actions: list[str] = []
 
