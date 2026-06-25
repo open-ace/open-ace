@@ -203,8 +203,12 @@ class TestConfigureLocalOpenAIProxy:
                 manager, "_configure_local_openai_proxy", return_value={"models": []}
             ) as mock_proxy_setup,
             patch("subprocess.Popen") as mock_popen,
+            patch("app.services.webui_manager.run_as_root_if_needed") as mock_run_as_root,
+            patch("os.open", return_value=123),
+            patch("os.close"),
         ):
             mock_popen.return_value = MagicMock(pid=12345)
+            mock_run_as_root.return_value = MagicMock(returncode=0, stdout="", stderr="")
             _, model_pool = manager._launch_webui_process(1, "testuser", 9000)
 
             # Verify local proxy setup was called

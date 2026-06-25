@@ -10,6 +10,8 @@ the env explicitly (e.g. ``/workspace``).
 
 import logging
 import os
+import platform
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -19,6 +21,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "get_workspace_base_dir",
     "get_workspace_base_dirs",
+    "run_as_root_if_needed",
     "ensure_system_user",
     "ensure_user_workspace",
 ]
@@ -48,6 +51,26 @@ def get_workspace_base_dirs() -> list[str]:
     return [d.strip() for d in base_dir.split(",") if d.strip()]
 
 
+def run_as_root_if_needed(cmd: list) -> subprocess.CompletedProcess:
+    """以 root 权限执行命令（用于 useradd/chown/mkdir 等系统管理操作）。
+
+    当服务以非 root 用户运行时（如 Package 版 ivyent），需要通过 sudo 执行
+    需要 root 权限的系统命令。
+
+    注意：此函数仅用于需要 root 权限的命令（useradd, chown, mkdir）。
+    id 命令不应使用此函数，因为 id 命令任何用户都可以执行。
+
+    Args:
+        cmd: 命令列表，如 ["useradd", "-m", "-s", "/bin/bash", "username"]
+
+    Returns:
+        subprocess.CompletedProcess 结果。
+    """
+    if os.geteuid() != 0:
+        return subprocess.run(["sudo"] + cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
 def _is_docker_multi_user_mode() -> bool:
     """Check if running in Docker multi-user mode.
 
@@ -66,20 +89,49 @@ def _is_docker_multi_user_mode() -> bool:
 
 
 def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
-    """
-    Ensure a system user exists for workspace operations.
-    Creates the OS user, workspace directory, and .qwen directory.
+    """确保系统用户存在，创建工作目录。
+
+    此函数用于 Package 版 multi-user mode，当服务以非 root 用户运行时，
+    通过 sudo 执行 useradd 和 chown 命令。
 
     Args:
-        system_account: Username for the system account.
-        uid: Optional specific UID. If None, system auto-assigns.
+        system_account: 用户名（必须符合 Linux useradd 要求）
+        uid: 可选 UID，必须 >= 1000（系统保留 UID < 1000）
 
     Returns:
-        True if user exists or was created successfully.
+        True 如果用户存在或创建成功。
     """
+    # 用户名格式验证（Linux useradd 要求）
+    # - Must start with a lowercase letter or underscore
+    # - Can contain lowercase letters, digits, underscores, and dashes
+    # - Maximum 32 characters
+    # - No spaces or special characters
+    if not system_account:
+        logger.error("Empty username provided")
+        return False
+
+    if len(system_account) > 32:
+        logger.error(f"Username too long (max 32 chars): {system_account}")
+        return False
+
+    # Linux username pattern: [a-z_][a-z0-9_-]*
+    if not re.match(r"^[a-z_][a-z0-9_-]*$", system_account):
+        logger.error(f"Invalid username format: {system_account}")
+        return False
+
+    # macOS 特殊处理（无 useradd）
+    if platform.system() == "Darwin":
+        logger.debug(f"Skipping system user creation on macOS for: {system_account}")
+        return True
+
+    # uid 安全验证：禁止创建系统保留 UID (< 1000)
+    if uid is not None and uid < 1000:
+        logger.error(f"UID {uid} is reserved for system users, rejected")
+        return False
+
     base_dir = get_workspace_base_dir()
 
-    # Check if user already exists
+    # 检查用户是否存在（id 命令不需要 sudo，任何用户都可以执行）
     result = subprocess.run(["id", system_account], capture_output=True, text=True)
     if result.returncode == 0:
         logger.info(f"System user {system_account} already exists")
@@ -87,14 +139,14 @@ def ensure_system_user(system_account: str, uid: Optional[int] = None) -> bool:
         _ensure_workspace_dirs(system_account, base_dir)
         return True
 
-    # Build useradd command
+    # 创建用户（通过 sudo，因为 useradd 需要 root 权限）
     cmd = ["useradd", "-m", "-s", "/bin/bash"]
     if uid is not None:
         cmd.extend(["-u", str(uid)])
     cmd.append(system_account)
 
     logger.info(f"Creating system user: {system_account}" + (f" (UID: {uid})" if uid else ""))
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_as_root_if_needed(cmd)
 
     if result.returncode != 0:
         logger.error(f"Failed to create system user {system_account}: {result.stderr}")
@@ -110,28 +162,31 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
     workspace_dir = f"{base_dir}/{system_account}"
     qwen_dir = f"{workspace_dir}/.qwen"
 
+    # 创建目录（必要时通过 sudo）
     for directory in [workspace_dir, qwen_dir]:
         if not os.path.exists(directory):
             try:
                 os.makedirs(directory, mode=0o755, exist_ok=True)
             except PermissionError:
-                logger.warning(f"Cannot create {directory} (permission denied)")
-                continue
+                # 尝试通过 sudo 创建
+                result = run_as_root_if_needed(["mkdir", "-p", "-m", "755", directory])
+                if result.returncode != 0:
+                    logger.warning(f"Cannot create {directory}: {result.stderr}")
+                    continue
 
-    # Set ownership
-    try:
-        uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
-        gid_result = subprocess.run(["id", "-g", system_account], capture_output=True, text=True)
-        if uid_result.returncode == 0 and gid_result.returncode == 0:
-            uid = int(uid_result.stdout.strip())
-            gid = int(gid_result.stdout.strip())
-            for directory in [workspace_dir, qwen_dir]:
-                try:
-                    os.chown(directory, uid, gid)
-                except PermissionError:
-                    logger.warning(f"Cannot chown {directory} to {uid}:{gid}")
-    except Exception as e:
-        logger.warning(f"Error setting ownership for {system_account}: {e}")
+    # 获取 UID/GID（id 命令不需要 sudo，任何用户都可以执行）
+    uid_result = subprocess.run(["id", "-u", system_account], capture_output=True, text=True)
+    gid_result = subprocess.run(["id", "-g", system_account], capture_output=True, text=True)
+
+    if uid_result.returncode == 0 and gid_result.returncode == 0:
+        uid = int(uid_result.stdout.strip())
+        gid = int(gid_result.stdout.strip())
+
+        # 设置所有权（通过 sudo，因为 chown 需要 root 权限）
+        for directory in [workspace_dir, qwen_dir]:
+            result = run_as_root_if_needed(["chown", f"{uid}:{gid}", directory])
+            if result.returncode != 0:
+                logger.warning(f"Cannot chown {directory} to {uid}:{gid}: {result.stderr}")
 
 
 def ensure_user_workspace(system_account: str) -> bool:
