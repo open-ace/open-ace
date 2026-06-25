@@ -112,24 +112,15 @@ class TestFindLatestClaudeSessionIdExcludesBound:
 def _init_session_manager(tmp_path):
     """Build a SessionManager over a temp SQLite DB with a usable schema.
 
-    Mirrors the workaround in tests/issues/1003/test_session_usage_accounting.py:
-    SessionManager._ensure_tables() builds the BASE schema, but project_id /
-    project_path come from Alembic migrations on a real DB. create_session()'s
-    INSERT writes those columns, so they must be added here too.
+    SessionManager.__init__ does NOT auto-create tables, so _ensure_tables()
+    is required before create_session(). project_id/project_path are added by
+    _ensure_tables()'s alter_columns (fixed for parity with the authoritative
+    schema files, #723).
     """
     from app.modules.workspace.session_manager import SessionManager
 
     sm = SessionManager(db_path=str(tmp_path / "test_sessions.db"))
     sm._ensure_tables()
-    conn = sm._get_connection()
-    cur = conn.cursor()
-    for col in ("project_id", "project_path"):
-        try:
-            cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
-        except Exception:
-            pass
-    conn.commit()
-    conn.close()
     return sm
 
 

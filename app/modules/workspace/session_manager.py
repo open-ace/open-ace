@@ -451,6 +451,13 @@ class SessionManager:
             ("agent_sessions", "request_count", "INTEGER DEFAULT 0"),
             ("agent_sessions", "paused_at", "TIMESTAMP"),
             ("agent_sessions", "cli_session_id", "TEXT DEFAULT ''"),
+            # project_id / project_path are in the authoritative schema files
+            # (schema-sqlite.sql / schema-postgres.sql) and added by Alembic on
+            # real DBs, but were missing from this bootstrap CREATE TABLE, so a
+            # fresh SQLite-only DB (and SessionManager tests) hit "no such column"
+            # on create_session()'s INSERT. Add them here for parity (#723).
+            ("agent_sessions", "project_id", "INTEGER"),
+            ("agent_sessions", "project_path", "TEXT"),
             ("session_messages", "milestone_id", "TEXT DEFAULT '' NOT NULL"),
             ("session_messages", "source_timestamp", "TIMESTAMP"),
             ("session_messages", "source", "TEXT DEFAULT '' NOT NULL"),
