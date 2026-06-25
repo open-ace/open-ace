@@ -118,20 +118,34 @@
 
 ## 🚀 5 分钟快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：一键部署（推荐）
 
 ```bash
 # 克隆项目
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# 构建并启动（包含 PostgreSQL 数据库）
-docker compose up -d --build
+# 拉取预构建镜像并启动（包含 PostgreSQL 数据库）
+docker compose up -d
 
 # 访问 http://localhost:5000
 ```
 
-> 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
+> 💡 预构建镜像托管在 Docker Hub (openace/open-ace)
+>
+> 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
+
+<details>
+<summary>本地构建（开发者可选）</summary>
+
+如需本地构建镜像：
+
+```bash
+docker build -t open-ace:dev --target production .
+IMAGE_NAME=open-ace:dev docker compose up -d
+```
+
+</details>
 
 ### 方式二：源码安装
 
@@ -421,20 +435,34 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 
 ## 🚀 Quick Start in 5 Minutes
 
-### Option 1: Docker (Recommended)
+### Option 1: One-click Deploy (Recommended)
 
 ```bash
 # Clone the project
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# Build and start (includes PostgreSQL database)
-docker compose up -d --build
+# Pull pre-built image and start (includes PostgreSQL database)
+docker compose up -d
 
 # Visit http://localhost:5000
 ```
 
-> 💡 For production deployment, see [Deployment Guide](scripts/install-central/docker-method/README.md)
+> 💡 Pre-built image hosted on GitHub Container Registry (ghcr.io/open-ace/open-ace)
+>
+> For production deployment, see [Deployment Guide](scripts/install-central/docker-method/README.md)
+
+<details>
+<summary>Local Build (Optional for Developers)</summary>
+
+To build the image locally:
+
+```bash
+docker build -t open-ace:dev --target production .
+IMAGE_NAME=open-ace:dev docker compose up -d
+```
+
+</details>
 
 ### Option 2: From Source
 

@@ -1,24 +1,29 @@
 # Open ACE - AI Computing Explorer - Docker Compose Configuration
 # For production deployment with PostgreSQL database
 #
-# Usage:
-#   docker compose up -d                          # Basic deployment
-#   docker compose --profile production up -d     # With nginx reverse proxy
+# One-click deploy (Issue #1260):
+#   docker compose up -d                          # Pull from Docker Hub and start
+#   # Access http://localhost:5000
+#
+# With nginx reverse proxy:
+#   docker compose --profile production up -d
 #
 # Multi-user workspace:
 #   WORKSPACE_MULTI_USER_MODE=true docker compose up -d
 #   Then create users via admin API — system users are auto-created in container
+#
+# Developer build (for local testing):
+#   docker build -t open-ace:dev --target production .
+#   IMAGE_NAME=open-ace:dev docker compose up -d
 
 services:
   # ===========================================================================
   # Main Application
   # ===========================================================================
   open-ace:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    image: ${IMAGE_NAME:-open-ace:latest}
+    # Pull pre-built image from Docker Hub (Issue #1260)
+    # For local development: build with docker build and set IMAGE_NAME
+    image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:

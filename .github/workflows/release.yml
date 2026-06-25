@@ -3,11 +3,58 @@ name: Release
 on:
   release:
     types: [published]
+  # Allow manual trigger for testing Docker build
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # ===========================================================================
+  # Docker Image Build & Push to Docker Hub (Issue #1260)
+  # ===========================================================================
+  docker-build-push:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/open-ace
+        tags: |
+          type=ref,event=tag
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile
+        target: production
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64
+
+    - name: Output image digest
+      run: echo "Pushed to Docker Hub: ${{ steps.meta.outputs.tags }}"
+
+  # ===========================================================================
+  # PyPI Package Build & Publish
+  # ===========================================================================
   build-and-publish:
     runs-on: ubuntu-latest
     env:
