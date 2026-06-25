@@ -279,6 +279,49 @@ CREATE SEQUENCE autonomous_workflows_id_seq
     CACHE 1;
 
 ALTER SEQUENCE autonomous_workflows_id_seq OWNED BY autonomous_workflows.id;
+
+-- Business Project Members (Issue #871)
+CREATE TABLE business_project_members (
+    id integer NOT NULL,
+    business_project_id integer NOT NULL,
+    user_id integer NOT NULL,
+    added_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE SEQUENCE business_project_members_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE business_project_members_id_seq OWNED BY business_project_members.id;
+
+-- Business Projects (Issue #871)
+CREATE TABLE business_projects (
+    id integer NOT NULL,
+    name character varying(200) NOT NULL,
+    code character varying(50) NOT NULL,
+    description text,
+    key_patterns text,
+    is_active boolean DEFAULT true NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at timestamp without time zone
+);
+
+CREATE SEQUENCE business_projects_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE business_projects_id_seq OWNED BY business_projects.id;
+
 CREATE TABLE compliance_reports (
     id integer NOT NULL,
     report_id text NOT NULL,
@@ -535,7 +578,8 @@ CREATE TABLE projects (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
-    is_shared boolean DEFAULT false NOT NULL
+    is_shared boolean DEFAULT false NOT NULL,
+    business_project_id integer
 );
 
 CREATE SEQUENCE projects_id_seq
@@ -547,70 +591,6 @@ CREATE SEQUENCE projects_id_seq
     CACHE 1;
 
 ALTER SEQUENCE projects_id_seq OWNED BY projects.id;
-
--- Business Projects (Issue #871)
-CREATE TABLE business_projects (
-    id integer NOT NULL,
-    name character varying(200) NOT NULL,
-    code character varying(50) NOT NULL UNIQUE,
-    description text,
-    key_patterns text,
-    is_active boolean DEFAULT true NOT NULL,
-    created_by integer,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at timestamp without time zone
-);
-
-CREATE SEQUENCE business_projects_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE business_projects_id_seq OWNED BY business_projects.id;
-
-ALTER TABLE ONLY business_projects
-    ADD CONSTRAINT business_projects_pkey PRIMARY KEY (id);
-
--- Business Project Members (Issue #871)
-CREATE TABLE business_project_members (
-    id integer NOT NULL,
-    business_project_id integer NOT NULL,
-    user_id integer NOT NULL,
-    added_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE SEQUENCE business_project_members_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-ALTER SEQUENCE business_project_members_id_seq OWNED BY business_project_members.id;
-
-ALTER TABLE ONLY business_project_members
-    ADD CONSTRAINT business_project_members_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY business_project_members
-    ADD CONSTRAINT business_project_members_business_project_id_fkey
-    FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY business_project_members
-    ADD CONSTRAINT business_project_members_user_id_fkey
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
--- Add business_project_id to projects table for categorization (Issue #871)
-ALTER TABLE projects
-    ADD COLUMN business_project_id integer;
-
-ALTER TABLE ONLY projects
-    ADD CONSTRAINT projects_business_project_id_fkey
-    FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
 
 CREATE TABLE prompt_templates (
     id integer NOT NULL,
@@ -1493,6 +1473,15 @@ ALTER TABLE ONLY autonomous_workflows
 ALTER TABLE ONLY autonomous_workflows
     ADD CONSTRAINT autonomous_workflows_workflow_id_key UNIQUE (workflow_id);
 
+ALTER TABLE ONLY business_project_members
+    ADD CONSTRAINT business_project_members_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY business_projects
+    ADD CONSTRAINT business_projects_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY business_projects
+    ADD CONSTRAINT business_projects_code_key UNIQUE (code);
+
 ALTER TABLE ONLY compliance_reports
     ADD CONSTRAINT compliance_reports_pkey PRIMARY KEY (id);
 
@@ -2264,6 +2253,18 @@ ALTER TABLE ONLY api_key_store
 
 ALTER TABLE ONLY autonomous_workflows
     ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY business_project_members
+    ADD CONSTRAINT business_project_members_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY business_project_members
+    ADD CONSTRAINT business_project_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY business_projects
+    ADD CONSTRAINT business_projects_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY projects
+    ADD CONSTRAINT projects_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
