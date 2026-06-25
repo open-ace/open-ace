@@ -1971,6 +1971,9 @@ CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
 
 CREATE INDEX idx_projects_path ON projects USING btree (path);
 
+-- Index for business_project_id foreign key (Issue #871)
+CREATE INDEX idx_projects_business_project_id ON projects USING btree (business_project_id);
+
 
 --
 --
