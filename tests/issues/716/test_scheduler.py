@@ -3,6 +3,8 @@
 import threading
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.autonomous_scheduler import AutonomousScheduler
 
 
@@ -63,6 +65,18 @@ class TestSchedulerProcessWorkflows:
 
     def setup_method(self):
         AutonomousScheduler._instance = None
+
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """Stub QuotaManager to allow-by-default. The runtime quota gate in
+        _advance_single calls check_quota; without this stub it reaches the
+        environment's default DB and fail-closed-pauses the workflow before
+        advance() runs, breaking these scheduler-logic tests (which mock the
+        orchestrator, not quota)."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
 
     def test_processes_active_workflows(self):
         scheduler = AutonomousScheduler()

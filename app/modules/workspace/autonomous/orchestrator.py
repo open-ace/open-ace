@@ -1157,18 +1157,7 @@ class AutonomousOrchestrator:
         result.structured_tags = {}
 
     def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
-        """Write this call's token/request increment to its milestone.
-
-        Then refresh the owner's ``user_daily_stats`` for today so the quota
-        gate's fast path sees autonomous spend promptly. Local autonomous
-        agents bypass the LLM proxy, so without this the proxy-only
-        aggregation path never refreshes ``user_daily_stats`` for autonomous
-        spend, and the gate reads a stale number until the next periodic
-        aggregator cycle. This re-aggregates from ``agent_sessions`` (where
-        ``increment_session_usage`` already recorded the tokens) — it does
-        NOT write ``daily_messages``/``session_messages``, honoring the
-        #1125 / data-contract table boundaries.
-        """
+        """Write this call's token/request increment to its milestone."""
         if not milestone_id:
             return
         try:
@@ -1183,26 +1172,6 @@ class AutonomousOrchestrator:
             )
         except Exception:
             logger.warning("Failed to write phase usage to milestone", exc_info=True)
-        # Refresh the owner's today roll-up so check_quota's fast path is current.
-        self._refresh_owner_quota_usage()
-
-    def _refresh_owner_quota_usage(self) -> None:
-        """Re-aggregate today's user_daily_stats for the workflow owner.
-
-        Drives the autonomous token delta recorded in agent_sessions into the
-        user_daily_stats table check_quota reads on its fast path, closing the
-        metering lag for autonomous spend without the periodic aggregator wait.
-        """
-        wf = self.workflow or {}
-        user_id = wf.get("user_id")
-        if not user_id:
-            return
-        try:
-            from app.services.user_stats_aggregator import get_aggregator
-
-            get_aggregator().aggregate_today(int(user_id))
-        except Exception:
-            logger.warning("Failed to refresh owner quota usage", exc_info=True)
 
     def _write_realtime_phase_usage(self, activity: dict) -> None:
         """Write the current call's running cumulative usage to the in-progress milestone.
