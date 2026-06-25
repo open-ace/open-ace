@@ -68,6 +68,35 @@ class TestTimelineSeam:
         mgr._timeline("record_run_status", "sess-1", "completed")
         noop.record_run_status.assert_not_called()
 
+    def test_unknown_method_does_not_raise_when_enabled(self):
+        # Enabled recorder + a typo'd method name must not raise on the hot path.
+        # A real recorder object (not a MagicMock, which auto-vivifies attrs) is
+        # used so getattr(missing) genuinely returns None.
+        class EnabledStub:
+            is_noop = False
+
+            def record_run_status(self, *args, **kwargs):
+                self.dispatched = (args, kwargs)
+
+        mgr = RemoteSessionManager.__new__(RemoteSessionManager)
+        stub = EnabledStub()
+        mgr._run_recorder = stub
+        mgr._timeline("record_typo_does_not_exist", "sess-1")  # must not raise
+        assert not hasattr(stub, "dispatched")  # the real method was not reached
+        # A valid method still dispatches.
+        mgr._timeline("record_run_status", "sess-1", "completed")
+        assert stub.dispatched == (("sess-1", "completed"), {})
+
+    def test_swallows_unexpected_recorder_exception(self):
+        # Even if a recorder method raised, _timeline must not propagate it.
+        mgr = RemoteSessionManager.__new__(RemoteSessionManager)
+        bad = MagicMock()
+        bad.is_noop = False
+        bad.record_run_status.side_effect = RuntimeError("boom")
+        mgr._run_recorder = bad
+        mgr._timeline("record_run_status", "sess-1", "completed")  # must not raise
+        bad.record_run_status.assert_called_once_with("sess-1", "completed")
+
 
 # ── manager lifecycle → recorder wiring ────────────────────────────────────
 

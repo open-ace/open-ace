@@ -67,11 +67,23 @@ class RemoteSessionManager:
         ``self._run_recorder`` init above) — there is nothing else to strip. The
         internal short-circuit keeps a disabled recorder free of even building
         the call, and the recorder itself is non-blocking regardless.
+
+        Never raises, even on the hot path: an unknown/typo'd method name or an
+        unexpected recorder failure is swallowed so stdout handling is never
+        interrupted. (The recorder methods already catch internally; this is the
+        belt-and-suspenders for the ``_timeline`` call site itself.)
         """
         recorder = self._run_recorder
         if recorder.is_noop:
             return
-        getattr(recorder, method)(*args, **kwargs)
+        fn = getattr(recorder, method, None)
+        if fn is None:
+            logger.warning("run_timeline: unknown recorder method %r ignored", method)
+            return
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:  # pragma: no cover - defensive, hot path must never raise
+            logger.debug("run_timeline: recorder %s failed: %s", method, e)
 
     def create_remote_session(
         self,

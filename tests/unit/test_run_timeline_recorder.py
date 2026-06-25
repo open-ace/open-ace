@@ -6,6 +6,8 @@ request/response state machine, the never-raise contract, and that the timeline
 survives a process restart (a fresh recorder reads prior persisted data).
 """
 
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +18,7 @@ from app.modules.workspace.run_timeline.recorder import (
     DbRunRecorder,
     NullRunRecorder,
     RunRecorder,
+    _AsyncRunWriter,
     get_run_recorder,
     reset_run_recorder_for_tests,
 )
@@ -284,6 +287,35 @@ class TestAsyncWriter:
         types = [e.content for e in repo.query_events("sess-1", event_type="tool_use")]
         # FIFO worker ⇒ stable insertion order.
         assert types == [f"step-{i}" for i in range(20)]
+
+    def test_submit_drops_and_never_raises_when_queue_full(self):
+        """A wedged DB must not cause unbounded memory growth: a full queue drops
+        new events (best-effort) and never raises to the caller."""
+        w = _AsyncRunWriter(maxsize=1)
+        block = threading.Event()
+        w.submit(lambda: block.wait(10))  # worker picks this up and stalls
+        time.sleep(0.1)
+        w.submit(lambda: None)  # fills the 1-slot queue
+        assert w._dropped == 0
+        w.submit(lambda: None)  # full → drop
+        w.submit(lambda: None)  # full → drop
+        assert w._dropped == 2
+        block.set()
+        w.flush(2.0)
+
+    def test_flush_timeout_returns_false_when_worker_wedged(self):
+        w = _AsyncRunWriter(maxsize=10)
+        block = threading.Event()
+        for _ in range(5):
+            w.submit(lambda: block.wait(10))  # keep the worker busy
+        assert w.flush(timeout=0.2) is False  # did not drain in time
+        block.set()
+        assert w.flush(timeout=5.0) is True  # now drains
+
+    def test_async_writer_registers_atexit_flush(self):
+        with patch("atexit.register") as reg:
+            _AsyncRunWriter(maxsize=1)
+        reg.assert_called_once()
 
 
 # ── tenant attribution ────────────────────────────────────────────────────

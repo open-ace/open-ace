@@ -57,14 +57,23 @@ def _provider_for_cli_tool(cli_tool: str | None) -> str | None:
     return _PROVIDER_BY_CLI_TOOL.get(cli_tool)
 
 
+_QUEUE_MAXSIZE = 10000
+_SHUTDOWN_FLUSH_TIMEOUT = 5.0
+
+
 class _RunWriter:
     """Abstract sink for DB writes. submit() must never raise to the caller."""
 
     def submit(self, fn: Callable[[], None]) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 
-    def flush(self) -> None:  # pragma: no cover - interface
-        """Block until all submitted writes are durable (tests / shutdown)."""
+    def flush(self, timeout: float | None = None) -> bool:  # pragma: no cover - interface
+        """Block until all submitted writes are durable (tests / shutdown).
+
+        Returns True if the queue drained within ``timeout`` (or when timeout is
+        None). A bounded timeout lets shutdown best-effort flush without hanging.
+        """
+        return True
 
 
 class _SyncRunWriter(_RunWriter):
@@ -77,32 +86,64 @@ class _SyncRunWriter(_RunWriter):
     def submit(self, fn: Callable[[], None]) -> None:
         fn()
 
-    def flush(self) -> None:
-        return None
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
 
 
 class _AsyncRunWriter(_RunWriter):
-    """Drains a FIFO queue on a single background daemon thread.
+    """Drains a bounded FIFO queue on a single background daemon thread.
 
     Used by the production recorder (via ``get_run_recorder``) so the hot path
     only enqueues — DB latency never blocks stdout handling. The worker is the
     sole DB writer, so per-session event ordering is preserved; writes across
-    sessions are interleaved but independent. As a daemon thread it dies with the
-    process; queued-but-unwritten events on shutdown are a best-effort loss (the
-    contract is non-blocking, and persisted data survives restarts regardless).
+    sessions are interleaved but independent.
+
+    Robustness under a wedged database: the queue is bounded (``maxsize``); when
+    full, ``submit`` drops the new event (best-effort — losing one event beats
+    unbounded memory growth, since each item may carry large metadata) and warns
+    at a throttled rate. On shutdown an ``atexit`` flush drains pending writes
+    within a timeout so restarts don't lose the tail (daemon thread otherwise
+    dies immediately).
     """
 
-    def __init__(self) -> None:
-        self._queue: queue_module.Queue[Callable[[], None]] = queue_module.Queue()
+    def __init__(self, maxsize: int = _QUEUE_MAXSIZE) -> None:
+        import atexit
+
+        self._queue: queue_module.Queue[Callable[[], None]] = queue_module.Queue(maxsize=maxsize)
+        self._dropped = 0
         self._thread = threading.Thread(target=self._drain, name="run-timeline-writer", daemon=True)
         self._thread.start()
+        atexit.register(self._shutdown_flush)
 
     def submit(self, fn: Callable[[], None]) -> None:
-        self._queue.put(fn)
+        try:
+            self._queue.put_nowait(fn)
+        except queue_module.Full:
+            # DB wedged / consumer can't keep up: drop and warn (throttled).
+            self._dropped += 1
+            if self._dropped == 1 or self._dropped % 1000 == 0:
+                logger.warning(
+                    "run_timeline: write queue full (>%d); dropped %d event(s)",
+                    self._queue.maxsize,
+                    self._dropped,
+                )
 
-    def flush(self) -> None:
-        # Blocks until every queued item has been gotten and task_done()'d.
-        self._queue.join()
+    def flush(self, timeout: float | None = None) -> bool:
+        # queue.Queue.join() has no timeout; run it on a throwaway daemon thread
+        # joined with our deadline so a wedged worker can't hang shutdown.
+        if timeout is None:
+            self._queue.join()
+            return True
+        joiner = threading.Thread(target=self._queue.join, name="run-timeline-flush", daemon=True)
+        joiner.start()
+        joiner.join(timeout)
+        drained = not joiner.is_alive()
+        if not drained:
+            logger.warning("run_timeline: flush did not drain within %.1fs", timeout)
+        return drained
+
+    def _shutdown_flush(self) -> None:
+        self.flush(timeout=_SHUTDOWN_FLUSH_TIMEOUT)
 
     def _drain(self) -> None:
         while True:
@@ -175,9 +216,9 @@ class RunRecorder:
     ) -> None:
         raise NotImplementedError
 
-    def flush(self) -> None:
+    def flush(self, timeout: float | None = None) -> bool:
         """No-op default; only the DB recorder actually has queued work."""
-        return None
+        return True
 
 
 class NullRunRecorder(RunRecorder):
@@ -237,9 +278,9 @@ class DbRunRecorder(RunRecorder):
         self._ensured: set[str] = set()
         self._writer: _RunWriter = _AsyncRunWriter() if async_writer else _SyncRunWriter()
 
-    def flush(self) -> None:
+    def flush(self, timeout: float | None = None) -> bool:
         """Block until all queued writes are durable."""
-        self._writer.flush()
+        return self._writer.flush(timeout=timeout)
 
     # ── attribution resolution ─────────────────────────────────────
 
