@@ -2868,6 +2868,10 @@ $workspace_config,
 }
 EOF
 
+    # Set permissions for config.json (Issue #1252)
+    # This file contains sensitive information: database password, token secret, etc.
+    chmod 600 "$config_file"
+
     print_success "配置文件创建完成: $config_file"
     print_info "  - 主机名: $HOST_NAME"
     print_info "  - 服务地址: $server_url"
@@ -3025,6 +3029,10 @@ volumes:
   postgres-data:
     driver: local
 EOF
+
+    # Set permissions for docker-compose.yml (Issue #1253)
+    # This file contains sensitive information: database password, secret key, etc.
+    chmod 600 "$compose_file"
 
     print_success "Docker Compose 配置创建完成"
 }
