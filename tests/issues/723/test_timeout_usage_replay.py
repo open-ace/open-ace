@@ -23,21 +23,21 @@ import pytest
 
 from app.modules.workspace.autonomous.agent_runner import (
     AutonomousAgentRunner,
-    _LocalSession,
     _iso_to_epoch,
+    _LocalSession,
 )
 
 
 def _make_session(**kwargs):
     """Build a _LocalSession with only the fields the unit tests touch."""
-    defaults = dict(
-        session_id="s1",
-        process=MagicMock(),
-        cli_tool="claude-code",
-        project_path="/p",
-        encoded_project_path="enc-wt",
-        started_at_epoch=time.time(),
-    )
+    defaults = {
+        "session_id": "s1",
+        "process": MagicMock(),
+        "cli_tool": "claude-code",
+        "project_path": "/p",
+        "encoded_project_path": "enc-wt",
+        "started_at_epoch": time.time(),
+    }
     defaults.update(kwargs)
     return _LocalSession(**defaults)
 
@@ -130,7 +130,10 @@ class TestReplayUsageFromJsonl:
         cli_sid = "abc12345"
         jsonl = tmp_path / ".claude" / "projects" / "enc-wt" / f"{cli_sid}.jsonl"
         jsonl.parent.mkdir(parents=True)
-        recent = lambda off: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(started + off))
+
+        def recent(off):
+            return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(started + off))
+
         jsonl.write_text(
             "\n".join(
                 [
@@ -139,7 +142,10 @@ class TestReplayUsageFromJsonl:
                         {
                             "type": "assistant",
                             "timestamp": "2020-01-01T00:00:00.000Z",
-                            "message": {"id": "old", "usage": {"input_tokens": 999, "output_tokens": 999}},
+                            "message": {
+                                "id": "old",
+                                "usage": {"input_tokens": 999, "output_tokens": 999},
+                            },
                         }
                     ),
                     # Records from this call.
@@ -147,14 +153,20 @@ class TestReplayUsageFromJsonl:
                         {
                             "type": "assistant",
                             "timestamp": recent(1),
-                            "message": {"id": "m1", "usage": {"input_tokens": 200, "output_tokens": 100}},
+                            "message": {
+                                "id": "m1",
+                                "usage": {"input_tokens": 200, "output_tokens": 100},
+                            },
                         }
                     ),
                     json.dumps(
                         {
                             "type": "assistant",
                             "timestamp": recent(2),
-                            "message": {"id": "m2", "usage": {"input_tokens": 300, "output_tokens": 150}},
+                            "message": {
+                                "id": "m2",
+                                "usage": {"input_tokens": 300, "output_tokens": 150},
+                            },
                         }
                     ),
                 ]
@@ -198,17 +210,44 @@ class TestReplayUsageFromJsonl:
         cli_sid = "abc12345"
         jsonl = tmp_path / ".claude" / "projects" / "enc-wt" / f"{cli_sid}.jsonl"
         jsonl.parent.mkdir(parents=True)
-        recent = lambda off: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(started + off))
+
+        def recent(off):
+            return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(started + off))
+
         # Same message_id twice (thinking + text) + one distinct.
         jsonl.write_text(
             "\n".join(
                 [
-                    json.dumps({"type": "assistant", "timestamp": recent(1),
-                                "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50}}}),
-                    json.dumps({"type": "assistant", "timestamp": recent(2),
-                                "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50}}}),
-                    json.dumps({"type": "assistant", "timestamp": recent(3),
-                                "message": {"id": "m2", "usage": {"input_tokens": 200, "output_tokens": 100}}}),
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": recent(1),
+                            "message": {
+                                "id": "m1",
+                                "usage": {"input_tokens": 100, "output_tokens": 50},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": recent(2),
+                            "message": {
+                                "id": "m1",
+                                "usage": {"input_tokens": 100, "output_tokens": 50},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": recent(3),
+                            "message": {
+                                "id": "m2",
+                                "usage": {"input_tokens": 200, "output_tokens": 100},
+                            },
+                        }
+                    ),
                 ]
             )
             + "\n",

@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -30,7 +30,7 @@ from app.modules.workspace.autonomous.models import AgentTaskResult
 logger = logging.getLogger(__name__)
 
 
-def _iso_to_epoch(ts: str) -> Optional[float]:
+def _iso_to_epoch(ts: str) -> float | None:
     """Parse a claude JSONL ISO timestamp to epoch seconds.
 
     Claude timestamps look like ``2026-06-24T12:39:05.000Z``. Returns None on
@@ -668,7 +668,7 @@ class AutonomousAgentRunner:
             pass
         return ""
 
-    def _replay_usage_from_jsonl(self, session: "_LocalSession", cli_session_id: str) -> None:
+    def _replay_usage_from_jsonl(self, session: _LocalSession, cli_session_id: str) -> None:
         """Replay token/request usage from the claude session JSONL.
 
         Used on the timeout path when the subprocess did real work but never
@@ -729,9 +729,7 @@ class AutonomousAgentRunner:
                             cur["out"] = max(cur["out"], row_out)
                             per_msg[mid] = cur
         except OSError:
-            logger.warning(
-                "Failed to replay usage JSONL for session %s", cli_session_id[:8]
-            )
+            logger.warning("Failed to replay usage JSONL for session %s", cli_session_id[:8])
             return
         in_t = sum(v["in"] for v in per_msg.values())
         out_t = sum(v["out"] for v in per_msg.values())
@@ -744,7 +742,10 @@ class AutonomousAgentRunner:
                 session.request_count = requests
             logger.info(
                 "Replayed timeout usage from JSONL: in=%d out=%d req=%d (session=%s)",
-                in_t, out_t, requests, cli_session_id[:8],
+                in_t,
+                out_t,
+                requests,
+                cli_session_id[:8],
             )
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:

@@ -5,11 +5,11 @@ AI Token Usage - Utils Module
 Provides utility functions for the ai_token_usage project.
 """
 
+import logging
 import os
 import re
 import sys
 from typing import Any, Optional
-import logging
 
 # Ensure scripts directory is in path for standalone script execution
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -166,8 +166,7 @@ def _message_has_text(content: Any) -> str:
                 return s
             if isinstance(arr, list):
                 texts = [
-                    p if isinstance(p, str)
-                    else (p.get("text", "") if isinstance(p, dict) else "")
+                    p if isinstance(p, str) else (p.get("text", "") if isinstance(p, dict) else "")
                     for p in arr
                 ]
                 return "\n".join(t for t in texts if t)
