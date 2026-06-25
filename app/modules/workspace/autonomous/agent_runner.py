@@ -20,13 +20,29 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_text
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
+
+
+def _iso_to_epoch(ts: str) -> Optional[float]:
+    """Parse a claude JSONL ISO timestamp to epoch seconds.
+
+    Claude timestamps look like ``2026-06-24T12:39:05.000Z``. Returns None on
+    any parse failure so callers can skip filtering rather than crash.
+    """
+    if not ts:
+        return None
+    try:
+        # fromisoformat doesn't accept a trailing 'Z' until 3.11; strip it.
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
 
 
 # Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
@@ -127,6 +143,9 @@ class _LocalSession:
     sdk_initialized: threading.Event = field(default_factory=threading.Event)
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
+    # Distinct assistant message_ids counted toward request_count (dedup, since
+    # claude emits multiple assistant events per message: thinking then text).
+    _counted_message_ids: set = field(default_factory=set)
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
@@ -648,6 +667,85 @@ class AutonomousAgentRunner:
         except OSError:
             pass
         return ""
+
+    def _replay_usage_from_jsonl(self, session: "_LocalSession", cli_session_id: str) -> None:
+        """Replay token/request usage from the claude session JSONL.
+
+        Used on the timeout path when the subprocess did real work but never
+        emitted a closing ``result`` event (so ``session.total_tokens`` is 0).
+        Reads the JSONL for ``cli_session_id`` and accumulates usage from
+        records whose timestamp is at/after this call's ``started_at_epoch``,
+        filling ``total_tokens``/``request_count`` so the milestone records the
+        real cost instead of 0/0 (#723).
+
+        Only fills in values when the live counters are zero (timeout), so a
+        normal completed run is never overwritten.
+        """
+        if not cli_session_id or not session.encoded_project_path:
+            return
+        jsonl_path = (
+            Path.home()
+            / ".claude"
+            / "projects"
+            / session.encoded_project_path
+            / f"{cli_session_id}.jsonl"
+        )
+        if not jsonl_path.is_file():
+            return
+        # Accumulate usage per distinct message_id. Claude repeats the FULL
+        # message usage on every block-line of a message (thinking line, text
+        # line, ...), so summing raw rows would double/triple count. Take the
+        # max usage per message_id (each row carries the same totals for that
+        # message), then sum across distinct messages.
+        per_msg: dict[str, dict[str, int]] = {}
+        started = session.started_at_epoch
+        try:
+            with open(jsonl_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    # Only count records from this call onward.
+                    ts = rec.get("timestamp", "")
+                    ts_epoch = _iso_to_epoch(ts)
+                    if ts_epoch is not None and ts_epoch < started:
+                        continue
+                    if rec.get("type") == "assistant":
+                        msg = rec.get("message", {}) or {}
+                        mid = msg.get("id") or ""
+                        usage = msg.get("usage") or {}
+                        if isinstance(usage, dict):
+                            row_in = usage.get("input_tokens", 0) or 0
+                            row_out = usage.get("output_tokens", 0) or 0
+                            cur = per_msg.get(mid, {"in": 0, "out": 0})
+                            # max per message_id (rows repeat the same totals)
+                            cur["in"] = max(cur["in"], row_in)
+                            cur["out"] = max(cur["out"], row_out)
+                            per_msg[mid] = cur
+        except OSError:
+            logger.warning(
+                "Failed to replay usage JSONL for session %s", cli_session_id[:8]
+            )
+            return
+        in_t = sum(v["in"] for v in per_msg.values())
+        out_t = sum(v["out"] for v in per_msg.values())
+        requests = len(per_msg)
+        if in_t or out_t or requests:
+            session.total_input_tokens = in_t
+            session.total_output_tokens = out_t
+            session.total_tokens = in_t + out_t
+            if session.request_count == 0:
+                session.request_count = requests
+            logger.info(
+                "Replayed timeout usage from JSONL: in=%d out=%d req=%d (session=%s)",
+                in_t, out_t, requests, cli_session_id[:8],
+            )
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:
         """Resolve the real sidebar Claude session id for a workflow-owned line."""
@@ -1234,6 +1332,19 @@ class AutonomousAgentRunner:
             )
 
         if not completed:
+            # Timeout: the claude subprocess may have done real work (and
+            # consumed tokens) without ever emitting the closing `result` event,
+            # leaving session.total_tokens==0 / request_count==0. Recover the
+            # real usage by replaying the session JSONL for records written
+            # after this call started, so the milestone/session don't record a
+            # zero-cost round (issue #723: dev timed out with 0/0 but actually
+            # produced a 3721-line commit costing ~370K tokens).
+            if (
+                session.total_tokens == 0
+                and resolved_session_id
+                and self._uses_sidebar_session_source(cli_tool, workspace_type)
+            ):
+                self._replay_usage_from_jsonl(session, resolved_session_id)
             return _build_agent_task_result(
                 session_id=session_id,
                 tracking_session_id=session_id,
@@ -2105,6 +2216,15 @@ class AutonomousAgentRunner:
                         text_delta = _extract_visible_text(content)
                         if text_delta:
                             session.assistant_text += text_delta
+                        # Count one request per distinct assistant message (by
+                        # message_id), aligning with the session-detail口径
+                        # (fetch dedups assistant turns by message_id). Claude
+                        # --print emits one `result` summarizing all turns, so
+                        # counting on `result` would always yield 1 regardless
+                        # of how many model turns happened (#723).
+                        if message_id and message_id not in session._counted_message_ids:
+                            session._counted_message_ids.add(message_id)
+                            session.request_count += 1
                         # Record in event log for ordered message persistence
                         if text_delta:
                             session.event_log.append(
@@ -2149,7 +2269,9 @@ class AutonomousAgentRunner:
                             )
 
                     elif msg_type == "result":
-                        # End of turn - extract usage via shared parser
+                        # End of turn - extract usage via shared parser.
+                        # request_count is counted per assistant message_id above
+                        # (not here), since one --print result summarizes all turns.
                         usage = _extract_stream_usage(session.cli_tool, parsed)
                         if usage:
                             session.total_input_tokens += usage["input"]
@@ -2157,7 +2279,6 @@ class AutonomousAgentRunner:
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )
-                        session.request_count += 1
                         self._sync_sidebar_session_totals(session, status="active")
                         session.completed.set()
                         # Emit usage activity for real-time token display
