@@ -47,9 +47,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # CONFIG_DIR: Container runs as root (required for multi-user workspace mode)
-      # ~/.open-ace expands to /root/.open-ace when running as root
-      - ./config:/root/.open-ace:ro
+      # Config: Use named volume for persistence (Issue #1260)
+      # Entrypoint will auto-generate config.json if not exists
+      # Users can mount custom config: - ./my-config.json:/root/.open-ace/config.json:ro
+      - config-data:/root/.open-ace
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
@@ -136,6 +137,8 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
+  config-data:
+    driver: local
   postgres-data:
     driver: local
   workspace-data:
