@@ -511,10 +511,13 @@ class QuotaManager:
         except Exception:
             pass  # Fall through to legacy query
 
-        # Legacy path: agent_sessions (remote) + daily_messages (local)
-        # Remote session usage from agent_sessions
-        # Use a simpler query: sum tokens and count sessions (each session = 1 request batch)
-        remote_result = self.db.fetch_one(
+        # Legacy path: agent_sessions (all workspace types) + daily_messages
+        # (unbound rows only). Counts all session-backed spend — including
+        # local autonomous sessions (workspace_type='local'), which the proxy
+        # never sees because local agents connect to the model API directly.
+        # daily_messages then adds only messages NOT tied to a session
+        # (agent_session_id IS NULL), so the two legs don't double-count.
+        session_result = self.db.fetch_one(
             adapt_sql(
                 """
             SELECT
@@ -522,24 +525,25 @@ class QuotaManager:
                 COUNT(*) as requests
             FROM agent_sessions
             WHERE user_id = ?
-              AND workspace_type = 'remote'
+              AND workspace_type IN ('local', 'remote', 'terminal')
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
         """
             ),
             (user_id, start_date, end_date),
         )
 
-        remote_tokens = int(remote_result["tokens"]) if remote_result else 0
-        remote_requests = int(remote_result["requests"]) if remote_result else 0
+        session_tokens = int(session_result["tokens"]) if session_result else 0
+        session_requests = int(session_result["requests"]) if session_result else 0
 
-        # Local CLI usage from daily_messages — use sender_name LIKE since many rows lack user_id
-        local_tokens = 0
-        local_requests = 0
+        # Unbound local CLI usage from daily_messages — only messages with no
+        # agent_session_id (session-backed spend is counted above via
+        # agent_sessions, so excluding them avoids double-counting).
+        unbound_tokens = 0
+        unbound_requests = 0
         user = self.user_repo.get_user_by_id(user_id)
         if user:
             system_account = user.get("system_account") or user.get("username", "")
             if system_account:
-                # Exclude messages with agent_session_id (WebUI session messages, counted elsewhere)
                 local_result = self.db.fetch_one(
                     adapt_sql(
                         """
@@ -555,12 +559,12 @@ class QuotaManager:
                     ),
                     (f"{escape_like(system_account)}%", start_date, end_date),
                 )
-                local_tokens = int(local_result["tokens"]) if local_result else 0
-                local_requests = int(local_result["requests"]) if local_result else 0
+                unbound_tokens = int(local_result["tokens"]) if local_result else 0
+                unbound_requests = int(local_result["requests"]) if local_result else 0
 
         return {
-            "tokens": remote_tokens + local_tokens,
-            "requests": remote_requests + local_requests,
+            "tokens": session_tokens + unbound_tokens,
+            "requests": session_requests + unbound_requests,
         }
 
     def _get_recent_alerts(self, user_id: int, limit: int = 10) -> list[QuotaAlert]:
@@ -646,9 +650,12 @@ class QuotaManager:
         # Get all user IDs
         user_ids = [u.get("id") for u in users if u.get("id")]
 
-        # Batch query: get remote usage from agent_sessions for all users
+        # Batch query: get session usage from agent_sessions for all users.
+        # Includes all workspace types so local autonomous sessions (which
+        # bypass the proxy) are counted — mirroring _get_usage_in_range and
+        # UserDailyStatsAggregator's workspace_type filter.
         start_date, end_date = self._get_period_dates("daily")
-        remote_usage_rows = self.db.fetch_all(
+        session_usage_rows = self.db.fetch_all(
             """
             SELECT user_id,
                    COALESCE(SUM(total_tokens), 0) as tokens,
@@ -658,7 +665,7 @@ class QuotaManager:
                           AND sm.role = 'assistant'))
                    ), 0) as requests
             FROM agent_sessions
-            WHERE user_id IN ({}) AND workspace_type = 'remote'
+            WHERE user_id IN ({}) AND workspace_type IN ('local', 'remote', 'terminal')
               AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
             GROUP BY user_id
         """.format(
@@ -667,14 +674,16 @@ class QuotaManager:
             tuple(user_ids) + (start_date, end_date),
         )
 
-        # Build remote usage lookup
-        remote_usage_lookup = {
+        # Build session usage lookup
+        session_usage_lookup = {
             row["user_id"]: {"tokens": row["tokens"], "requests": row["requests"]}
-            for row in remote_usage_rows
+            for row in session_usage_rows
         }
 
-        # Batch query: get local CLI usage from daily_messages for all users
-        # Use sender_name LIKE to cover rows that lack user_id
+        # Batch query: get unbound local CLI usage from daily_messages for all
+        # users. Only rows WITHOUT an agent_session_id (session-backed spend is
+        # counted above via agent_sessions, so excluding them avoids double-counting).
+        # Use sender_name LIKE to cover rows that lack user_id.
         sender_conditions = []
         sender_params = []
         for user in users:
@@ -778,10 +787,10 @@ class QuotaManager:
             ) * TOKEN_QUOTA_MULTIPLIER  # Convert M units to actual tokens
             request_limit = user.get("daily_request_quota") or 1000
 
-            remote_usage = remote_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
+            session_usage = session_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
             local_usage = local_usage_lookup.get(user_id, {"tokens": 0, "requests": 0})
-            tokens_used = int(remote_usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
-            requests_used = int(remote_usage.get("requests", 0)) + int(
+            tokens_used = int(session_usage.get("tokens", 0)) + int(local_usage.get("tokens", 0))
+            requests_used = int(session_usage.get("requests", 0)) + int(
                 local_usage.get("requests", 0)
             )
 
