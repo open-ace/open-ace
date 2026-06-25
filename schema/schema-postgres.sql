@@ -279,7 +279,6 @@ CREATE SEQUENCE autonomous_workflows_id_seq
     CACHE 1;
 
 ALTER SEQUENCE autonomous_workflows_id_seq OWNED BY autonomous_workflows.id;
-
 CREATE TABLE business_project_members (
     id integer NOT NULL,
     business_project_id integer NOT NULL,
@@ -296,7 +295,6 @@ CREATE SEQUENCE business_project_members_id_seq
     CACHE 1;
 
 ALTER SEQUENCE business_project_members_id_seq OWNED BY business_project_members.id;
-
 CREATE TABLE business_projects (
     id integer NOT NULL,
     name character varying(200) NOT NULL,
@@ -319,7 +317,6 @@ CREATE SEQUENCE business_projects_id_seq
     CACHE 1;
 
 ALTER SEQUENCE business_projects_id_seq OWNED BY business_projects.id;
-
 CREATE TABLE compliance_reports (
     id integer NOT NULL,
     report_id text NOT NULL,
@@ -589,7 +586,6 @@ CREATE SEQUENCE projects_id_seq
     CACHE 1;
 
 ALTER SEQUENCE projects_id_seq OWNED BY projects.id;
-
 CREATE TABLE prompt_templates (
     id integer NOT NULL,
     name text NOT NULL,
@@ -1734,11 +1730,6 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
--- Business project members indexes for efficient JOIN queries (Issue #871)
-CREATE INDEX idx_business_project_members_business_project_id ON business_project_members USING btree (business_project_id);
-
-CREATE INDEX idx_business_project_members_user_id ON business_project_members USING btree (user_id);
-
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
 
@@ -1971,18 +1962,21 @@ CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (w
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
 
+CREATE INDEX idx_projects_business_project_id ON projects USING btree (business_project_id);
+
+
+--
+--
+
 CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
-
-
---
---
 
 CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
 
-CREATE INDEX idx_projects_path ON projects USING btree (path);
 
--- Index for business_project_id foreign key (Issue #871)
-CREATE INDEX idx_projects_business_project_id ON projects USING btree (business_project_id);
+--
+--
+
+CREATE INDEX idx_projects_path ON projects USING btree (path);
 
 
 --
