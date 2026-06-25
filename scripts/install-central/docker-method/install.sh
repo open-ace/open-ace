@@ -2706,9 +2706,11 @@ create_directories() {
     # This ensures user home directories persist across container restarts
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         mkdir -p "$DEPLOY_DIR"/data/home
-        # Set restrictive permissions for sensitive user data (Issue #1209 review)
-        chmod 700 "$DEPLOY_DIR"/data/home
-        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 700)"
+        # Set permissions for /home directory (Issue #1249)
+        # /home should be 755 (enterable by all users)
+        # Individual /home/<user> directories will be 700 (private, set by useradd -m)
+        chmod 755 "$DEPLOY_DIR"/data/home
+        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 755)"
     fi
 
     print_success "目录创建完成"
