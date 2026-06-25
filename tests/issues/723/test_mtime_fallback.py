@@ -109,17 +109,33 @@ class TestFindLatestClaudeSessionIdExcludesBound:
             assert result == "newer"
 
 
+def _init_session_manager(tmp_path):
+    """Build a SessionManager over a temp SQLite DB with a usable schema.
+
+    Mirrors the workaround in tests/issues/1003/test_session_usage_accounting.py:
+    SessionManager._ensure_tables() builds the BASE schema, but project_id /
+    project_path come from Alembic migrations on a real DB. create_session()'s
+    INSERT writes those columns, so they must be added here too.
+    """
+    from app.modules.workspace.session_manager import SessionManager
+
+    sm = SessionManager(db_path=str(tmp_path / "test_sessions.db"))
+    sm._ensure_tables()
+    conn = sm._get_connection()
+    cur = conn.cursor()
+    for col in ("project_id", "project_path"):
+        try:
+            cur.execute(f"ALTER TABLE agent_sessions ADD COLUMN {col} TEXT")
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+    return sm
+
+
 class TestListCliSessionIdsForProject:
     def test_returns_distinct_nonempty_ids(self, tmp_path):
-        from app.modules.workspace.session_manager import SessionManager
-
-        # Use a real temp DB file — SessionManager opens a fresh connection per
-        # call (:memory: would create/lose the schema across connections).
-        db_path = tmp_path / "test_sessions.db"
-        sm = SessionManager(db_path=str(db_path))
-        # __init__ does NOT auto-create the schema; create_session() would hit
-        # "no such table: agent_sessions" without this.
-        sm._ensure_tables()
+        sm = _init_session_manager(tmp_path)
         # Insert sessions: two with cli_session_id, one without, different project.
         for sid, cli, proj in [
             ("w1", "main123", "/proj"),
@@ -143,9 +159,5 @@ class TestListCliSessionIdsForProject:
         assert ids == {"main123", "review456"}
 
     def test_empty_project_path_returns_empty_set(self, tmp_path):
-        from app.modules.workspace.session_manager import SessionManager
-
-        db_path = tmp_path / "test_sessions.db"
-        sm = SessionManager(db_path=str(db_path))
-        sm._ensure_tables()
+        sm = _init_session_manager(tmp_path)
         assert sm.list_cli_session_ids_for_project("") == set()
