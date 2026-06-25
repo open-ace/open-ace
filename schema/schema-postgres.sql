@@ -2011,6 +2011,9 @@ ALTER TABLE ONLY machine_assignments
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
+ALTER TABLE ONLY projects
+    ADD CONSTRAINT projects_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
+
 ALTER TABLE ONLY quota_alerts
     ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
