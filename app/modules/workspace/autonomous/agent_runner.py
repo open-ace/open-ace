@@ -1475,6 +1475,127 @@ class AutonomousAgentRunner:
             error=collector.error,
         )
 
+    @staticmethod
+    def _parse_single_shot_line(parsed: dict, cli_tool: str) -> dict | None:
+        """Normalize one parsed JSON stdout line into a typed event-log dict.
+
+        Single-shot tools (codex ``exec --json``, openclaw ``--agent --json``)
+        emit line-delimited JSON with per-tool shapes. This coalesces the common
+        shapes into the same ``{"type": ...}`` dict contract used by the
+        interactive path (see ``_read_stdout``) so that
+        ``_extract_visible_response_text`` / ``_persist_local_session_messages``
+        — which assume dict entries with ``type``/``text`` keys — work correctly.
+
+        Returns ``None`` when the line is not a recognizable assistant/tool event
+        (the caller then falls back to best-effort text extraction).
+        """
+        if not isinstance(parsed, dict):
+            return None
+        msg_type = parsed.get("type", "")
+
+        # Claude stream-json shape: {"type":"assistant","message":{"content":...}}
+        if msg_type == "assistant":
+            msg = parsed.get("message", {}) or {}
+            text = _extract_visible_text(msg.get("content", ""))
+            if text:
+                return {
+                    "type": "assistant",
+                    "text": text,
+                    "message_id": msg.get("id"),
+                    "model": msg.get("model"),
+                }
+            return None
+
+        # Claude stream-json shape: {"type":"tool_use","tool":{"name":...,"input":...}}
+        if msg_type == "tool_use":
+            tool_info = parsed.get("tool", {}) or parsed
+            return {
+                "type": "tool_use",
+                "tool_name": tool_info.get("name", "unknown"),
+                "tool_input": tool_info.get("input", {}),
+                "tool_use_id": tool_info.get("id"),
+            }
+
+        # Codex/OpenAI shape: {"type":"message","role":"assistant","content":[{"type":"output_text","text":...}]}
+        if msg_type == "message" and parsed.get("role") == "assistant":
+            text = _extract_visible_text(parsed.get("content", ""))
+            if text:
+                return {"type": "assistant", "text": text, "message_id": None, "model": None}
+            return None
+
+        # Codex/OpenAI shape: {"type":"function_call","name":...,"arguments":...}
+        if msg_type in ("function_call", "custom_tool_call"):
+            name = parsed.get("name", "")
+            if name:
+                return {
+                    "type": "tool_use",
+                    "tool_name": name,
+                    "tool_input": parsed.get("arguments", parsed.get("input", {})),
+                    "tool_use_id": parsed.get("call_id"),
+                }
+            return None
+
+        return None
+
+    def _parse_single_shot_stdout(
+        self, stdout: str, cli_tool: str
+    ) -> tuple[list, str, int, int, list]:
+        """Parse single-shot stdout into typed event log + text + tokens + tools.
+
+        Returns ``(event_log, response_text, input_tokens, output_tokens,
+        tool_calls)`` where ``event_log`` contains dict entries (matching the
+        interactive-path contract) instead of raw strings, so that downstream
+        extractors and persistence behave identically for single-shot runs.
+        """
+        event_log: list[dict] = []
+        response_text = ""
+        input_tokens = 0
+        output_tokens = 0
+        tool_calls: list[dict] = []
+
+        for line in (stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                # Non-JSON line (e.g. progress noise): keep as raw text only.
+                response_text += line + "\n"
+                continue
+
+            if not isinstance(parsed, dict):
+                continue
+
+            event = self._parse_single_shot_line(parsed, cli_tool)
+            if event:
+                event_log.append(event)
+                if event["type"] == "assistant" and event.get("text"):
+                    response_text += event["text"] + "\n"
+                elif event["type"] == "tool_use":
+                    tool_calls.append(
+                        {"tool": {"name": event["tool_name"], "input": event["tool_input"]}}
+                    )
+            else:
+                # Unrecognized JSON event: best-effort text extraction, plus
+                # usage parsing (single-shot result/usage lines often land here).
+                text = (
+                    parsed.get("response")
+                    or parsed.get("text")
+                    or parsed.get("content")
+                    or parsed.get("output")
+                )
+                if isinstance(text, str):
+                    response_text += text + "\n"
+
+            if _extract_stream_usage is not None:
+                usage = _extract_stream_usage(cli_tool, parsed)
+                if usage:
+                    input_tokens += usage["input"]
+                    output_tokens += usage["output"]
+
+        return event_log, response_text.strip(), input_tokens, output_tokens, tool_calls
+
     def _run_single_shot(
         self,
         session_id: str,
@@ -1528,10 +1649,33 @@ class AutonomousAgentRunner:
                 env=env,
                 timeout=timeout,
             )
-        except subprocess.TimeoutExpired:
-            return AgentTaskResult(
+        except subprocess.TimeoutExpired as te:
+            # Salvage partial output: the agent may have emitted assistant text
+            # and tool calls before the wall-clock timeout fired. ``run`` populates
+            # ``TimeoutExpired.output`` with whatever stdout was captured. Parse
+            # it so the result carries real text/events rather than an empty
+            # shell (an empty visible_response_text would, e.g., make the
+            # orchestrator's test-skip detector false-positive).
+            partial_out = te.output if isinstance(te.output, str) else ""
+            event_log, response_text, input_tokens, output_tokens, tool_calls = (
+                self._parse_single_shot_stdout(partial_out, cli_tool)
+            )
+            logger.warning(
+                "Single-shot agent (%s) timed out after %ds; salvaged %d events",
+                cli_tool,
+                timeout,
+                len(event_log),
+            )
+            return _build_agent_task_result(
                 session_id=session_id,
                 tracking_session_id=session_id,
+                event_log=event_log,
+                fallback_text=response_text,
+                total_tokens=input_tokens + output_tokens,
+                total_input_tokens=input_tokens,
+                total_output_tokens=output_tokens,
+                request_count=1 if event_log else 0,
+                tool_calls=tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
             )
@@ -1543,38 +1687,9 @@ class AutonomousAgentRunner:
                 error=f"Failed to run command: {e}",
             )
 
-        response_text = ""
-        total_tokens = 0
-        input_tokens = 0
-        output_tokens = 0
-        event_log = []
-
-        for line in (proc.stdout or "").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            event_log.append(line)
-            try:
-                parsed = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                response_text += line + "\n"
-                continue
-
-            # Extract text content from common JSON shapes
-            if isinstance(parsed, dict):
-                text = (
-                    parsed.get("response")
-                    or parsed.get("text")
-                    or parsed.get("content")
-                    or parsed.get("output")
-                )
-                if isinstance(text, str):
-                    response_text += text + "\n"
-                usage = _extract_stream_usage(cli_tool, parsed)
-                if usage:
-                    input_tokens += usage["input"]
-                    output_tokens += usage["output"]
-
+        event_log, response_text, input_tokens, output_tokens, tool_calls = (
+            self._parse_single_shot_stdout(proc.stdout or "", cli_tool)
+        )
         total_tokens = input_tokens + output_tokens
 
         stderr_text = (proc.stderr or "").strip()
@@ -1587,11 +1702,12 @@ class AutonomousAgentRunner:
             session_id=session_id,
             tracking_session_id=session_id,
             event_log=event_log,
-            fallback_text=response_text.strip(),
+            fallback_text=response_text,
             total_tokens=total_tokens,
             total_input_tokens=input_tokens,
             total_output_tokens=output_tokens,
             request_count=1,
+            tool_calls=tool_calls,
             success=success,
             error=error,
         )
