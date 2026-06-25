@@ -288,6 +288,73 @@ def extract_content_blocks_from_entry(entry: dict) -> list[dict]:
     return content_blocks
 
 
+def _merge_messages_by_id(messages: list[dict]) -> list[dict]:
+    """Merge JSONL lines that share a ``message_id`` into one logical message.
+
+    Claude Code writes one logical assistant message as SEVERAL JSONL lines
+    (a thinking line, a text line, then tool_use lines) that all reuse the same
+    ``message.id``. The per-line extraction already yields the right blocks per
+    line; this step concatenates them so the downstream
+    ``(session_id, role, external_message_id)`` dedup keeps exactly ONE row per
+    logical message — carrying both thinking AND the final text output.
+    Without this, the first line (thinking) wins the INSERT and every later line
+    for that id (including the assistant's final answer) is dropped as a dup.
+
+    Merge rules per ``(agent_session_id, role, message_id)`` group:
+      * ``content_blocks``: concatenated across lines (preserves block order).
+      * ``content``: prefer the first line carrying real text; fall back to the
+        last non-empty content. For assistant messages ``content`` is
+        ``json.dumps([text,...])`` so we prefer the line whose text is non-empty
+        over a ``[]`` thinking-only line.
+      * ``tokens_used`` / ``input_tokens`` / ``output_tokens``: summed (each
+        usage-bearing line reports the message's tokens; claude writes usage on
+        every block-line of a message, so dedup by taking the MAX across lines
+        within the group rather than summing, to avoid over-counting).
+      * ``timestamp`` / ``full_entry`` / ``model``: keep the first occurrence.
+    """
+    if not messages:
+        return messages
+
+    grouped: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for msg in messages:
+        key = (msg.get("agent_session_id"), msg.get("role"), msg.get("message_id"))
+        if key not in grouped:
+            grouped[key] = dict(msg)
+            grouped[key]["content_blocks"] = list(msg.get("content_blocks") or [])
+            order.append(key)
+        else:
+            g = grouped[key]
+            cb = msg.get("content_blocks")
+
+            # content: prefer a line that carries a real text block over a
+            # thinking-only line (whose content is the raw thinking JSON).
+            # Decide via content_blocks since it's the structured source of truth;
+            # capture g's text-ness BEFORE extending so we compare prior state.
+            def _has_text_block(blocks):
+                return any(
+                    isinstance(b, dict)
+                    and b.get("type") == "text"
+                    and (b.get("text") or "").strip()
+                    for b in (blocks or [])
+                )
+
+            g_had_text = _has_text_block(g.get("content_blocks"))
+            incoming_has_text = _has_text_block(cb)
+            if cb:
+                g["content_blocks"].extend(cb)
+            if incoming_has_text and not g_had_text:
+                g["content"] = msg.get("content", "")
+        # tokens: claude repeats the message's usage on every block-line, so
+        # take the max within the group (not the sum) to avoid double counting.
+        for tok_field in ("tokens_used", "input_tokens", "output_tokens"):
+            cur = grouped[key].get(tok_field, 0) or 0
+            new = msg.get(tok_field, 0) or 0
+            grouped[key][tok_field] = max(cur, new)
+
+    return [grouped[k] for k in order]
+
+
 def process_jsonl_file(
     filepath: Path, hostname: str = "localhost", system_account: Optional[str] = None
 ) -> tuple:
@@ -533,6 +600,10 @@ def process_jsonl_file(
                 # Silently skip problematic entries
                 continue
 
+    # Merge JSONL lines that share a message_id (thinking/text/tool_use splits)
+    # into one logical message before insert, so the per-message_id dedup keeps
+    # the full content (incl. the final assistant text) instead of just thinking.
+    messages = _merge_messages_by_id(messages)
     return dict(daily), messages
 
 
