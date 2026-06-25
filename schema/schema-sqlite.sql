@@ -186,6 +186,26 @@ CREATE TABLE autonomous_workflows (
  test_session_id text DEFAULT '' NOT NULL
 );
 
+CREATE TABLE business_project_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_project_id integer NOT NULL,
+    user_id integer NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE business_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT NOT NULL,
+    description text,
+    key_patterns text,
+    is_active INTEGER DEFAULT 1 NOT NULL,
+    created_by integer,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP
+);
+
 CREATE TABLE compliance_reports (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  report_id text NOT NULL,
@@ -370,7 +390,8 @@ CREATE TABLE projects (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
- is_shared INTEGER DEFAULT 0 NOT NULL
+ is_shared INTEGER DEFAULT 0 NOT NULL,
+ business_project_id integer
 );
 
 CREATE TABLE prompt_templates (
@@ -824,6 +845,8 @@ CREATE UNIQUE INDEX api_key_store_tenant_id_provider_key_name_key ON api_key_sto
 
 CREATE UNIQUE INDEX autonomous_workflows_workflow_id_key ON autonomous_workflows (workflow_id);
 
+CREATE UNIQUE INDEX business_projects_code_key ON business_projects (code);
+
 CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (report_id);
 
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
@@ -930,6 +953,10 @@ CREATE INDEX idx_audit_severity ON audit_logs (severity);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
+
+CREATE INDEX idx_business_project_members_business_project_id ON business_project_members (business_project_id);
+
+CREATE INDEX idx_business_project_members_user_id ON business_project_members (user_id);
 
 CREATE INDEX idx_daily_stats_date ON daily_stats (date);
 
