@@ -37,6 +37,11 @@ def _insert_daily_stats_row(
     )
 
 
+import itertools
+
+_message_id_counter = itertools.count()
+
+
 def _insert_daily_messages_row(
     tmp_db,
     date="2025-01-15",
@@ -47,16 +52,22 @@ def _insert_daily_messages_row(
     input_tokens=60,
     output_tokens=40,
     timestamp=None,
+    message_id=None,
 ):
     """Helper to insert a row into daily_messages."""
     if timestamp is None:
         timestamp = "2025-01-15T10:30:00"
+    if message_id is None:
+        # schema.sql has a UNIQUE(date, tool_name, message_id, host_name) constraint,
+        # so generate a distinct message_id per row (the old hand-written conftest
+        # table didn't enforce it). #1273 follow-up surfaced this real divergence.
+        message_id = f"msg-{date}-{tool_name}-{sender_name}-{next(_message_id_counter)}"
     tmp_db.execute(
         """
         INSERT INTO daily_messages
         (date, tool_name, host_name, sender_name, tokens_used,
-         input_tokens, output_tokens, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         input_tokens, output_tokens, timestamp, message_id, role)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             date,
@@ -67,6 +78,8 @@ def _insert_daily_messages_row(
             input_tokens,
             output_tokens,
             timestamp,
+            message_id,
+            "assistant",
         ),
     )
 

@@ -13,10 +13,52 @@ from pathlib import Path
 import pytest
 
 from app.repositories.schema_init import (
+    _iter_pg_statements,
     _make_idempotent,
     load_schema_from_file,
     schema_file_for_dialect,
 )
+
+
+class TestIterPgStatements:
+    """Lock in statement splitting — esp. that a multi-line MATERIALIZED VIEW
+    is emitted as a single statement (not fragmented)."""
+
+    def test_materialized_view_single_statement(self):
+        sql = (
+            "CREATE TABLE foo (id INTEGER);\n"
+            "CREATE MATERIALIZED VIEW session_stats\n"
+            "AS SELECT 1\n"
+            "WITH NO DATA;\n"
+            "CREATE SEQUENCE bar_seq;\n"
+        )
+        stmts = list(_iter_pg_statements(sql))
+        assert len(stmts) == 3
+        assert "MATERIALIZED VIEW" in stmts[1]
+        assert "WITH NO DATA" in stmts[1]  # multi-line view kept together
+
+    def test_skips_comments_and_blanks(self):
+        sql = "-- a comment\n\nCREATE TABLE foo (id INTEGER);\n"
+        stmts = list(_iter_pg_statements(sql))
+        assert len(stmts) == 1
+        assert "CREATE TABLE" in stmts[0]
+
+    def test_trailing_statement_without_semicolon(self):
+        sql = "CREATE TABLE foo (id INTEGER);\nCREATE TABLE bar (id INTEGER)"
+        stmts = list(_iter_pg_statements(sql))
+        assert len(stmts) == 2
+
+    def test_real_schema_postgres_no_fragmentation(self):
+        """The real schema-postgres.sql splits into a sane number of statements,
+        and the MATERIALIZED VIEW isn't broken across multiple yields."""
+        sql = schema_file_for_dialect("postgresql").read_text(encoding="utf-8")
+        stmts = list(_iter_pg_statements(sql))
+        # Should be many statements (54 tables + sequences + indexes + view).
+        assert len(stmts) > 100
+        mv_stmts = [s for s in stmts if "MATERIALIZED VIEW" in s]
+        if mv_stmts:  # the file contains one
+            assert len(mv_stmts) == 1
+            assert "WITH NO DATA" in mv_stmts[0]
 
 
 def _table_columns(conn, table):
