@@ -117,6 +117,9 @@ class TestListCliSessionIdsForProject:
         # call (:memory: would create/lose the schema across connections).
         db_path = tmp_path / "test_sessions.db"
         sm = SessionManager(db_path=str(db_path))
+        # __init__ does NOT auto-create the schema; create_session() would hit
+        # "no such table: agent_sessions" without this.
+        sm._ensure_tables()
         # Insert sessions: two with cli_session_id, one without, different project.
         for sid, cli, proj in [
             ("w1", "main123", "/proj"),
@@ -144,4 +147,5 @@ class TestListCliSessionIdsForProject:
 
         db_path = tmp_path / "test_sessions.db"
         sm = SessionManager(db_path=str(db_path))
+        sm._ensure_tables()
         assert sm.list_cli_session_ids_for_project("") == set()
