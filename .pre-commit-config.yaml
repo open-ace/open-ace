@@ -39,6 +39,17 @@ repos:
         language: system
         files: ^app/routes/.*\.py$
         pass_filenames: false
+      - id: table-boundary-check
+        name: Table Boundary Check (#1125)
+        entry: python3 scripts/lint/table_boundary_checker.py
+        language: system
+        # Always run: the guard parses fixed route sets AND the repo files
+        # (usage_repo/message_repo) it cross-references for call-graph analysis,
+        # so it must trigger even on a repo-only change (e.g. re-adding
+        # daily_messages to get_session_only_usage) — pre-commit's changed-files
+        # filter would otherwise skip it.
+        always_run: true
+        pass_filenames: false
 
   # =============================================================================
   # Code Formatting

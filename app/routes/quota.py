@@ -91,7 +91,7 @@ def check_quota():
         username = user.get("username", "")
 
         # Get today's usage — session-only (agent_sessions) per #1125: the Work
-        # page must not read the daily_messages analysis fact table.
+        # page must not read the analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
@@ -216,7 +216,7 @@ def get_quota_status():
         username = user.get("username", "")
 
         # Get today's usage — session-only (agent_sessions) per #1125: the Work
-        # page must not read the daily_messages analysis fact table.
+        # page must not read the analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
@@ -418,7 +418,7 @@ def webui_quota_check():
             return jsonify({"error": "User not found"}), 404
 
         # Get today's usage — session-only (agent_sessions) per #1125: the Work
-        # page must not read the daily_messages analysis fact table.
+        # page must not read the analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
         today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
