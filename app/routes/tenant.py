@@ -117,6 +117,10 @@ def create_tenant():
     admin_password = data.get("admin_password")
     admin_email = data.get("admin_email")
 
+    # Guard: tenant.id must exist after creation
+    if not tenant.id:
+        return jsonify({"error": "Tenant creation failed - missing ID"}), 500
+
     if admin_username and admin_password:
         # Validate admin username
         if not validate_username(admin_username):
