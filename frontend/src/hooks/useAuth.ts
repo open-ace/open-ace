@@ -105,6 +105,21 @@ export function useAuth() {
     },
   });
 
+  // Change password mutation
+  const changePasswordMutation = useMutation({
+    mutationFn: ({
+      currentPassword,
+      newPassword,
+    }: {
+      currentPassword: string;
+      newPassword: string;
+    }) => authApi.changePassword(currentPassword, newPassword),
+    onSuccess: async () => {
+      // Refetch auth to get updated must_change_password flag
+      await refetchAuth();
+    },
+  });
+
   const login = useCallback(
     (credentials: LoginRequest) => loginMutation.mutateAsync(credentials),
     [loginMutation]
@@ -112,14 +127,23 @@ export function useAuth() {
 
   const logout = useCallback(() => logoutMutation.mutate(), [logoutMutation]);
 
+  const changePassword = useCallback(
+    (currentPassword: string, newPassword: string) =>
+      changePasswordMutation.mutateAsync({ currentPassword, newPassword }),
+    [changePasswordMutation]
+  );
+
   return {
     user,
     isAuthenticated,
     isLoading: authLoading || isCheckingAuth,
     login,
     logout,
+    changePassword,
     loginError: loginMutation.error,
     isLoggingIn: loginMutation.isPending,
     isLoggingOut: logoutMutation.isPending,
+    isChangingPassword: changePasswordMutation.isPending,
+    changePasswordError: changePasswordMutation.error,
   };
 }
