@@ -594,7 +594,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
       className={cn(
         'session-item card mb-2',
         isSelected && 'border-primary',
-        isImported && 'session-imported',
+        isImported && 'session-imported'
       )}
       onClick={onClick}
       style={{ cursor: 'pointer' }}
