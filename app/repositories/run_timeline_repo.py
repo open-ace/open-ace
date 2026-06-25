@@ -129,6 +129,41 @@ class RunTimelineRepository:
             ),
         )
 
+    def increment_run_usage(
+        self,
+        session_id: str,
+        delta_total: int,
+        delta_input: int,
+        delta_output: int,
+        delta_requests: int,
+    ) -> None:
+        """Atomically add a usage delta to the run's cumulative snapshot.
+
+        A single ``UPDATE ... SET col = col + ?`` avoids both the extra
+        ``SELECT`` of a read-modify-write and the lost-update race when two
+        usage reports for the same session land concurrently. Safe with SQLite's
+        serialised writes and PostgreSQL's row-level locking.
+        """
+        self.db.execute(
+            """
+            UPDATE agent_runs
+               SET total_tokens = COALESCE(total_tokens, 0) + ?,
+                   total_input_tokens = COALESCE(total_input_tokens, 0) + ?,
+                   total_output_tokens = COALESCE(total_output_tokens, 0) + ?,
+                   total_requests = COALESCE(total_requests, 0) + ?,
+                   updated_at = ?
+             WHERE session_id = ?
+            """,
+            (
+                delta_total,
+                delta_input,
+                delta_output,
+                delta_requests,
+                datetime.utcnow(),
+                session_id,
+            ),
+        )
+
     def get_run_by_session(self, session_id: str) -> AgentRun | None:
         row = self.db.fetch_one(
             "SELECT * FROM agent_runs WHERE session_id = ?",

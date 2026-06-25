@@ -29,16 +29,25 @@ def app():
 
 
 def _authenticated_client(app):
-    """A test client that patches the route's auth helpers per request."""
+    """A test client that patches the route's auth helper per request.
+
+    Auth is now the shared ``load_remote_user`` (imported into the blueprint),
+    so we stub that import target to set a logged-in user and return ``None``.
+    """
+    from flask import g
+
     raw = app.test_client()
     user = {"id": 1, "role": "admin", "username": "test_admin"}
 
+    def _authenticated():  # stands in for load_remote_user()
+        g.user = user
+        g.user_id = user["id"]
+        g.user_role = user["role"]
+        return None
+
     class AuthenticatedClient:
         def get(self, *args, **kwargs):
-            with (
-                patch("app.routes.run_timeline._extract_token", return_value="tok"),
-                patch("app.routes.run_timeline._load_user_from_token", return_value=user),
-            ):
+            with patch("app.routes.run_timeline.load_remote_user", new=_authenticated):
                 return raw.get(*args, **kwargs)
 
     return AuthenticatedClient()

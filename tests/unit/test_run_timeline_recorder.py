@@ -236,3 +236,73 @@ class TestPersistenceSurvivesRestart:
         # And the new recorder can append to the existing run.
         rec_b.record_event("sess-1", "tool_use", tool_name="Edit")
         assert len(repo_b.query_events("sess-1")) == 3
+
+
+# ── Async writer (production path) ────────────────────────────────────────
+
+
+class TestAsyncWriter:
+    """The production recorder hands DB I/O to a background queue+worker so the
+    hot path never blocks. These verify enqueue→flush→durable and that the
+    worker swallows errors (never-raise holds on the async path too)."""
+
+    def test_queued_writes_become_durable_after_flush(self, rt_db):
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db), async_writer=True)
+        repo = rec._repo
+        rec.record_session_created("sess-1", user_id=3, tool_name="t")
+        rec.record_event("sess-1", "user_message", content="hi")
+        rec.record_usage("sess-1", {"input": 10, "output": 5}, requests=2)
+        # Before flush the worker may not have drained yet; flush guarantees it.
+        rec.flush()
+
+        run = repo.get_run_by_session("sess-1")
+        assert run is not None
+        assert run.user_id == 3
+        # Atomic increment landed (10 + 5 = 15 tokens, 2 requests).
+        assert run.total_tokens == 15
+        assert run.total_requests == 2
+        types = [e.event_type for e in repo.query_events("sess-1")]
+        assert types == ["session_created", "user_message", "usage_reported"]
+
+    def test_async_writer_never_raises_to_caller(self, rt_db):
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db), async_writer=True)
+        rec._repo = None  # type: ignore[assignment] — every worker write will raise
+        # Caller returns immediately; the broken repo only blows up on the worker.
+        rec.record_session_created("s", user_id=1)
+        rec.record_event("s", "tool_use")
+        rec.record_usage("s", {"input": 1, "output": 1})
+        # flush() must return cleanly once the worker has swallowed every error.
+        rec.flush()
+
+    def test_per_session_event_order_preserved_under_async(self, rt_db):
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db), async_writer=True)
+        repo = rec._repo
+        rec.record_session_created("sess-1")
+        for i in range(20):
+            rec.record_event("sess-1", "tool_use", content=f"step-{i}")
+        rec.flush()
+        types = [e.content for e in repo.query_events("sess-1", event_type="tool_use")]
+        # FIFO worker ⇒ stable insertion order.
+        assert types == [f"step-{i}" for i in range(20)]
+
+
+# ── tenant attribution ────────────────────────────────────────────────────
+
+
+class TestTenantAttribution:
+    def test_unknown_machine_records_null_tenant(self, rt_db):
+        """A failed machine lookup must record NULL, not a wrong tenant guess."""
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db))
+        with patch("app.modules.workspace.remote_agent_manager.get_remote_agent_manager") as gm:
+            gm.return_value.get_machine.return_value = None
+            assert rec._machine_tenant_id("mac-unknown") is None
+
+    def test_known_machine_resolves_tenant(self, rt_db):
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db))
+        with patch("app.modules.workspace.remote_agent_manager.get_remote_agent_manager") as gm:
+            gm.return_value.get_machine.return_value = {"tenant_id": 7}
+            assert rec._machine_tenant_id("mac-1") == 7
+
+    def test_no_machine_id_is_null(self, rt_db):
+        rec = DbRunRecorder(repo=RunTimelineRepository(db=rt_db))
+        assert rec._machine_tenant_id(None) is None

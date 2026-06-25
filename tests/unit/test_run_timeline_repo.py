@@ -274,3 +274,27 @@ class TestModels:
         d = a.to_dict()
         assert d["request_details"] == {"tool": "Bash"}
         assert d["decision_metadata"] == {}  # default empty dict, not None
+
+
+class TestIncrementRunUsage:
+    """The atomic ``UPDATE ... SET col = col + ?`` replaces the prior
+    read-modify-write (which cost a SELECT and lost updates under concurrency)."""
+
+    def test_accumulates_across_calls(self, repo):
+        repo.ensure_run(run_id="s1", session_id="s1", user_id=1)
+        repo.increment_run_usage("s1", 120, 100, 20, 1)
+        repo.increment_run_usage("s1", 60, 50, 10, 1)
+        run = repo.get_run_by_session("s1")
+        assert run.total_tokens == 180
+        assert run.total_input_tokens == 150
+        assert run.total_output_tokens == 30
+        assert run.total_requests == 2
+
+    def test_handles_null_columns(self, repo):
+        # COALESCE(..., 0) keeps the increment safe even if a column is NULL.
+        repo.ensure_run(run_id="s2", session_id="s2")
+        repo.db.execute("UPDATE agent_runs SET total_tokens=NULL WHERE session_id=?", ("s2",))
+        repo.increment_run_usage("s2", 5, 3, 2, 1)
+        run = repo.get_run_by_session("s2")
+        assert run.total_tokens == 5
+        assert run.total_requests == 1

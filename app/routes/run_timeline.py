@@ -5,23 +5,23 @@ Exposes the persisted remote-session run/event timeline as a read API under
 the shared ``/api/remote`` namespace. Lives in its own blueprint so the whole
 feature can be removed with one registration line.
 
-Auth: reuses the same session-token / webui-token loading as the remote
-blueprint, then the shared session-access owner/admin check. The local
-``_check_session_access`` wrapper delegates to it; the leading-underscore name
-is what the API security scanner recognises as an ownership check (SEC002).
-When ``run_timeline.enabled`` is false the blueprint returns
-``{success: False, disabled: True}`` (200) so the frontend can hide itself.
+Auth: reuses ``load_remote_user`` (the same session-token / webui-token loading
+the remote blueprint uses), then the shared session-access owner/admin check.
+The local ``_check_session_access`` wrapper delegates to it; the
+leading-underscore name is what the API security scanner recognises as an
+ownership check (SEC002). When ``run_timeline.enabled`` is false the blueprint
+returns ``{success: False, disabled: True}`` (200) so the frontend can hide
+itself.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.modules.workspace.session_access import load_remote_user
 
 logger = logging.getLogger(__name__)
 
@@ -29,44 +29,6 @@ run_timeline_bp = Blueprint("run_timeline", __name__)
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 1000
-
-
-def _authenticate() -> Any | None:
-    """Load the current user into ``g``. Returns an error response or None."""
-    if request.method == "OPTIONS":
-        return None
-    token = _extract_token()
-    if token:
-        user = _load_user_from_token(token)
-        if user:
-            g.user = user
-            g.user_id = user.get("id")
-            g.user_role = user.get("role")
-            return None
-    # Fallback: WebUI url token (iframe requests from qwen-code-webui).
-    url_token = request.args.get("token")
-    if url_token:
-        try:
-            from app.services.webui_manager import WebUIManager
-
-            ok, user_id, _ = WebUIManager().validate_token(url_token)
-            if ok and user_id:
-                from app.repositories.user_repo import UserRepository
-
-                user_data = UserRepository().get_user_by_id(user_id)
-                if user_data:
-                    g.user = {
-                        "id": user_id,
-                        "username": user_data.get("username"),
-                        "email": user_data.get("email"),
-                        "role": user_data.get("role"),
-                    }
-                    g.user_id = user_id
-                    g.user_role = user_data.get("role")
-                    return None
-        except Exception as e:
-            logger.warning("run_timeline: webui token validation failed: %s", e)
-    return jsonify({"error": "Authentication required"}), 401
 
 
 @run_timeline_bp.before_request
@@ -77,7 +39,7 @@ def _guard():
     if not is_run_timeline_enabled():
         return jsonify({"success": False, "disabled": True}), 200
 
-    return _authenticate()
+    return load_remote_user()
 
 
 def _parse_ts(value: str | None) -> datetime | None:

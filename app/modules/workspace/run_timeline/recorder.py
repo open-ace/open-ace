@@ -3,21 +3,23 @@ Open ACE - Run Timeline recorder.
 
 The recorder is the single integration seam between the existing remote-session
 code and the persisted timeline. ``RemoteSessionManager`` holds one recorder
-instance and calls into it from each lifecycle/output hook.
+instance and funnels every lifecycle/output hook through ``_timeline`` into it.
 
 Contract (must hold for every implementation):
 - Every method is **non-blocking and best-effort**: it must never raise to the
   caller. It runs on the ``process_session_output`` hot path, so an exception
-  would interrupt stdout handling. DbRunRecorder wraps all DB work in
-  try/except; a future RemoteApiRecorder must use an internal queue + background
-  worker rather than synchronous network I/O.
+  would interrupt stdout handling. ``DbRunRecorder`` resolves attribution on the
+  calling thread (cheap, cached) and hands all DB I/O to a background writer, so
+  a slow/hung database cannot stall stdout processing. The writer swallows every
+  error; a future RemoteApiRecorder would use the same seam with a remote queue.
 - ``is_noop`` lets hot-path callers short-circuit before building metadata, so a
   disabled recorder costs essentially nothing.
 
 Attribution is resolved per-run and cached (plan §2.3 source map):
 - user_id / model / tool_name  <- agent_sessions (via SessionManager)
 - machine_id                   <- session.context["remote_machine_id"]
-- tenant_id                    <- remote_machines.tenant_id (per-run cached)
+- tenant_id                    <- remote_machines.tenant_id (per-run cached; NULL
+                                   on lookup failure rather than a wrong guess)
 - provider                     <- derived from cli_tool
 - key_id                       <- NULL phase 1 (not reported by the agent yet)
 """
@@ -25,9 +27,10 @@ Attribution is resolved per-run and cached (plan §2.3 source map):
 from __future__ import annotations
 
 import logging
+import queue as queue_module
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from app.modules.workspace.run_timeline.audit_bridge import maybe_log_audit
 from app.modules.workspace.run_timeline.models import _dump_json
@@ -52,6 +55,64 @@ def _provider_for_cli_tool(cli_tool: str | None) -> str | None:
     if not cli_tool:
         return None
     return _PROVIDER_BY_CLI_TOOL.get(cli_tool)
+
+
+class _RunWriter:
+    """Abstract sink for DB writes. submit() must never raise to the caller."""
+
+    def submit(self, fn: Callable[[], None]) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def flush(self) -> None:  # pragma: no cover - interface
+        """Block until all submitted writes are durable (tests / shutdown)."""
+
+
+class _SyncRunWriter(_RunWriter):
+    """Runs writes inline on the calling thread.
+
+    The default for directly-constructed recorders (i.e. unit tests): keeps the
+    record-then-assert sequence synchronous with no thread plumbing.
+    """
+
+    def submit(self, fn: Callable[[], None]) -> None:
+        fn()
+
+    def flush(self) -> None:
+        return None
+
+
+class _AsyncRunWriter(_RunWriter):
+    """Drains a FIFO queue on a single background daemon thread.
+
+    Used by the production recorder (via ``get_run_recorder``) so the hot path
+    only enqueues — DB latency never blocks stdout handling. The worker is the
+    sole DB writer, so per-session event ordering is preserved; writes across
+    sessions are interleaved but independent. As a daemon thread it dies with the
+    process; queued-but-unwritten events on shutdown are a best-effort loss (the
+    contract is non-blocking, and persisted data survives restarts regardless).
+    """
+
+    def __init__(self) -> None:
+        self._queue: queue_module.Queue[Callable[[], None]] = queue_module.Queue()
+        self._thread = threading.Thread(target=self._drain, name="run-timeline-writer", daemon=True)
+        self._thread.start()
+
+    def submit(self, fn: Callable[[], None]) -> None:
+        self._queue.put(fn)
+
+    def flush(self) -> None:
+        # Blocks until every queued item has been gotten and task_done()'d.
+        self._queue.join()
+
+    def _drain(self) -> None:
+        while True:
+            fn = self._queue.get()
+            try:
+                fn()
+            except Exception as e:  # pragma: no cover - contract: writer never raises
+                logger.debug("run_timeline: background write failed: %s", e)
+            finally:
+                self._queue.task_done()
 
 
 class RunRecorder:
@@ -114,6 +175,10 @@ class RunRecorder:
     ) -> None:
         raise NotImplementedError
 
+    def flush(self) -> None:
+        """No-op default; only the DB recorder actually has queued work."""
+        return None
+
 
 class NullRunRecorder(RunRecorder):
     """No-op recorder used when the feature is disabled. Zero DB writes."""
@@ -149,17 +214,32 @@ class NullRunRecorder(RunRecorder):
 
 
 class DbRunRecorder(RunRecorder):
-    """Persists runs/events/approvals to the database. Non-blocking."""
+    """Persists runs/events/approvals to the database. Non-blocking.
+
+    Attribution is resolved on the calling thread and cached per run; every DB
+    write is handed to ``self._writer`` (a background queue+worker in production,
+    inline in tests). Callers therefore never block on the database.
+    """
 
     is_noop = False
 
-    def __init__(self, repo: RunTimelineRepository | None = None):
+    def __init__(
+        self,
+        repo: RunTimelineRepository | None = None,
+        *,
+        async_writer: bool = False,
+    ):
         self._repo = repo or RunTimelineRepository()
         self._lock = threading.Lock()
         # session_id -> cached attribution dict (tenant_id etc. resolved once)
         self._attr_cache: dict[str, dict[str, Any]] = {}
         # session_ids whose agent_runs row has been ensured
         self._ensured: set[str] = set()
+        self._writer: _RunWriter = _AsyncRunWriter() if async_writer else _SyncRunWriter()
+
+    def flush(self) -> None:
+        """Block until all queued writes are durable."""
+        self._writer.flush()
 
     # ── attribution resolution ─────────────────────────────────────
 
@@ -174,6 +254,12 @@ class DbRunRecorder(RunRecorder):
             return None
 
     def _machine_tenant_id(self, machine_id: str | None) -> int | None:
+        """Resolve a machine's tenant_id. Returns None when unknown.
+
+        A compliance/provenance feature must never silently attribute a run to
+        the wrong tenant: when the machine lookup fails we store NULL (matching
+        the phase-1 key_id handling) rather than guessing tenant 1.
+        """
         if not machine_id:
             return None
         try:
@@ -185,11 +271,11 @@ class DbRunRecorder(RunRecorder):
                 if tid is not None:
                     return int(tid)
         except Exception as e:  # pragma: no cover - defensive
-            logger.debug("run_timeline: tenant lookup failed for %s: %s", machine_id, e)
+            logger.debug("run_timeline: tenant lookup failed for %s: %s", machine_id[:8], e)
         logger.warning(
-            "run_timeline: tenant_id unknown for machine %s, defaulting to 1", machine_id[:8]
+            "run_timeline: tenant_id unknown for machine %s; recording NULL", machine_id[:8]
         )
-        return 1
+        return None
 
     def _ensure_attribution(self, session_id: str) -> dict[str, Any]:
         """Resolve and cache attribution for a session from live session state."""
@@ -211,8 +297,7 @@ class DbRunRecorder(RunRecorder):
             attr["cli_tool"] = cli_tool
             attr["provider"] = _provider_for_cli_tool(cli_tool)
             # tenant_id requires a machine lookup; cache the result per run.
-            if "tenant_id" not in attr:
-                attr["tenant_id"] = self._machine_tenant_id(machine_id)
+            attr["tenant_id"] = self._machine_tenant_id(machine_id)
 
         with self._lock:
             # Merge with anything set earlier by record_session_created.
@@ -231,25 +316,42 @@ class DbRunRecorder(RunRecorder):
     # ── run lifecycle ──────────────────────────────────────────────
 
     def _ensure_run(self, session_id: str) -> dict[str, Any]:
+        """Resolve attribution and ensure the run row exists (once per session).
+
+        Attribution is resolved on the calling thread (live state, cached). The
+        ensure_run INSERT is enqueued exactly once — guarded by ``_ensured``
+        under the lock so concurrent first-events for a session don't double-up
+        (the row itself is also idempotent via ``ON CONFLICT DO NOTHING``).
+        """
         attr = self._ensure_attribution(session_id)
-        if session_id not in self._ensured:
-            try:
-                self._repo.ensure_run(
-                    run_id=session_id,
-                    session_id=session_id,
-                    user_id=attr.get("user_id"),
-                    tenant_id=attr.get("tenant_id"),
-                    machine_id=attr.get("machine_id"),
-                    tool_name=attr.get("tool_name"),
-                    provider=attr.get("provider"),
-                    cli_tool=attr.get("cli_tool"),
-                    model=attr.get("model"),
-                    status="active",
-                )
+        need_ensure = False
+        with self._lock:
+            if session_id not in self._ensured:
                 self._ensured.add(session_id)
-            except Exception as e:  # pragma: no cover - defensive
-                logger.debug("run_timeline: ensure_run failed for %s: %s", session_id[:8], e)
+                need_ensure = True
+        if need_ensure:
+            self._writer.submit(lambda: self._ensure_run_row(session_id, attr))
         return attr
+
+    def _ensure_run_row(self, session_id: str, attr: dict[str, Any]) -> None:
+        try:
+            self._repo.ensure_run(
+                run_id=session_id,
+                session_id=session_id,
+                user_id=attr.get("user_id"),
+                tenant_id=attr.get("tenant_id"),
+                machine_id=attr.get("machine_id"),
+                tool_name=attr.get("tool_name"),
+                provider=attr.get("provider"),
+                cli_tool=attr.get("cli_tool"),
+                model=attr.get("model"),
+                status="active",
+            )
+        except Exception:
+            # Allow a later event to retry ensuring the run row.
+            with self._lock:
+                self._ensured.discard(session_id)
+            raise
 
     def record_session_created(self, session_id: str, **attrs: Any) -> None:
         try:
@@ -263,12 +365,14 @@ class DbRunRecorder(RunRecorder):
         try:
             attr = self._ensure_run(session_id)
             ended = datetime.utcnow() if status in ("completed", "stopped", "error") else None
-            self._repo.update_run_status(session_id, status, ended_at=ended)
-            self._emit(
-                session_id,
-                attr,
-                status if status in ("stop", "error", "pause", "resume") else "stop",
+            # Run rows keep the precise status (completed/stopped/error/pause/
+            # resume); the event stream normalises to its smaller enum so the
+            # timeline UI has one badge per lifecycle kind.
+            normalized = status if status in ("stop", "error", "pause", "resume") else "stop"
+            self._writer.submit(
+                lambda: self._repo.update_run_status(session_id, status, ended_at=ended)
             )
+            self._emit(session_id, attr, normalized)
         except Exception as e:  # pragma: no cover - contract: never raise
             logger.debug("run_timeline: record_run_status failed: %s", e)
 
@@ -292,16 +396,10 @@ class DbRunRecorder(RunRecorder):
                 "usage_reported",
                 metadata=meta,
             )
-            # Refresh cumulative snapshot on the run row.
-            run = self._repo.get_run_by_session(session_id)
-            if run:
-                self._repo.update_run_usage(
-                    session_id,
-                    (run.total_tokens or 0) + total,
-                    (run.total_input_tokens or 0) + inp,
-                    (run.total_output_tokens or 0) + out,
-                    (run.total_requests or 0) + requests,
-                )
+            # Atomic increment — one UPDATE, no SELECT, no read-modify-write race.
+            self._writer.submit(
+                lambda: self._repo.increment_run_usage(session_id, total, inp, out, requests)
+            )
         except Exception as e:  # pragma: no cover - contract: never raise
             logger.debug("run_timeline: record_usage failed: %s", e)
 
@@ -318,13 +416,16 @@ class DbRunRecorder(RunRecorder):
             request_id = request.get("request_id") or control_request.get("request_id")
             subtype = request.get("subtype") or control_request.get("subtype")
             tool_name = request.get("tool_name") or attr.get("tool_name")
-            self._repo.upsert_approval_request(
-                request_id=request_id or f"session:{session_id}:{datetime.utcnow().isoformat()}",
-                run_id=session_id,
-                session_id=session_id,
-                tool_name=tool_name,
-                request_subtype=subtype,
-                request_details=control_request,
+            resolved_id = request_id or f"session:{session_id}:{datetime.utcnow().isoformat()}"
+            self._writer.submit(
+                lambda: self._repo.upsert_approval_request(
+                    request_id=resolved_id,
+                    run_id=session_id,
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    request_subtype=subtype,
+                    request_details=control_request,
+                )
             )
             self._emit(
                 session_id,
@@ -349,11 +450,10 @@ class DbRunRecorder(RunRecorder):
     ) -> None:
         try:
             attr = self._ensure_run(session_id)
-            rid = request_id
-            if not rid:
-                pending = self._repo.get_latest_pending_approval(session_id)
-                rid = pending.request_id if pending else None
-            if rid:
+
+            def _write_response(rid: str | None) -> None:
+                if not rid:
+                    return
                 self._repo.update_approval_response(
                     request_id=rid,
                     decision=decision,
@@ -361,12 +461,21 @@ class DbRunRecorder(RunRecorder):
                     decided_by_name=decided_by_name,
                     decision_metadata={"message": message} if message else None,
                 )
+
+            rid = request_id
+            if not rid:
+                # Resolve latest pending synchronously: the fallback join key is
+                # needed to emit the event, so it can't be deferred to the worker.
+                pending = self._repo.get_latest_pending_approval(session_id)
+                rid = pending.request_id if pending else None
+            self._writer.submit(lambda: _write_response(rid))
             self._emit(
                 session_id,
                 attr,
                 "permission_answered",
                 content=decision,
                 metadata={"request_id": rid, "decision": decision, "message": message},
+                audit_username=decided_by_name,
             )
         except Exception as e:  # pragma: no cover - contract: never raise
             logger.debug("run_timeline: record_approval_response failed: %s", e)
@@ -386,6 +495,38 @@ class DbRunRecorder(RunRecorder):
         provider: str | None = None,
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
+        audit_username: str | None = None,
+    ) -> None:
+        self._writer.submit(
+            lambda: self._emit_now(
+                session_id,
+                attr,
+                event_type,
+                event_subtype=event_subtype,
+                role=role,
+                content=content,
+                tool_name=tool_name,
+                provider=provider,
+                model=model,
+                metadata=metadata,
+                audit_username=audit_username,
+            )
+        )
+
+    def _emit_now(
+        self,
+        session_id: str,
+        attr: dict[str, Any],
+        event_type: str,
+        *,
+        event_subtype: str | None = None,
+        role: str | None = None,
+        content: str | None = None,
+        tool_name: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        audit_username: str | None = None,
     ) -> None:
         self._repo.append_event(
             run_id=session_id,
@@ -407,6 +548,7 @@ class DbRunRecorder(RunRecorder):
             event_type=event_type,
             run_id=session_id,
             user_id=attr.get("user_id"),
+            username=audit_username,
             session_id=session_id,
             details=metadata,
         )
@@ -420,7 +562,8 @@ def get_run_recorder() -> RunRecorder:
     """Return the process-wide recorder (Db when enabled, Null otherwise).
 
     The choice is resolved once and cached; flipping the config flag requires a
-    restart (same semantics as the autonomous scheduler).
+    restart (same semantics as the autonomous scheduler). The production Db
+    recorder uses the background async writer so the hot path never blocks on DB.
     """
     global _recorder_instance
     if _recorder_instance is not None:
@@ -430,7 +573,7 @@ def get_run_recorder() -> RunRecorder:
             from app.utils.config import is_run_timeline_enabled
 
             if is_run_timeline_enabled():
-                _recorder_instance = DbRunRecorder()
+                _recorder_instance = DbRunRecorder(async_writer=True)
             else:
                 _recorder_instance = NullRunRecorder()
     return _recorder_instance
