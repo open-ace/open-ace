@@ -834,7 +834,6 @@ export const translations: Record<Language, Translations> = {
     smtpNotVerified: 'SMTP server not verified. Please test connection first.',
     enterSenderEmail: 'Please enter sender email address',
     testEmailSent: 'Test Email Sent',
-    currentPassword: 'Current password',
     confirmDeleteSmtpConfig: 'Are you sure you want to delete SMTP configuration?',
     smtpConfigDeleted: 'SMTP Configuration Deleted',
     smtpConfigDeletedDesc: 'SMTP configuration has been deleted',
