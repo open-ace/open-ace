@@ -3030,6 +3030,10 @@ volumes:
     driver: local
 EOF
 
+    # Set permissions for docker-compose.yml (Issue #1253)
+    # This file contains sensitive information: database password, secret key, etc.
+    chmod 600 "$compose_file"
+
     print_success "Docker Compose 配置创建完成"
 }
 
