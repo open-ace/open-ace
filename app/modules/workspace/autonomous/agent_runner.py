@@ -1655,8 +1655,15 @@ class AutonomousAgentRunner:
             # ``TimeoutExpired.output`` with whatever stdout was captured. Parse
             # it so the result carries real text/events rather than an empty
             # shell (an empty visible_response_text would, e.g., make the
-            # orchestrator's test-skip detector false-positive).
-            partial_out = te.output if isinstance(te.output, str) else ""
+            # orchestrator's test-skip detector false-positive). NB: on POSIX
+            # the captured output is bytes even when ``text=True`` was passed
+            # (the decode step only runs on the normal return path, not when
+            # the exception is re-raised mid-read), so decode it explicitly.
+            partial_out = te.output
+            if isinstance(partial_out, bytes):
+                partial_out = partial_out.decode("utf-8", "replace")
+            elif not isinstance(partial_out, str):
+                partial_out = ""
             event_log, response_text, input_tokens, output_tokens, tool_calls = (
                 self._parse_single_shot_stdout(partial_out, cli_tool)
             )

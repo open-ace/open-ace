@@ -2213,6 +2213,13 @@ class AutonomousOrchestrator:
         # committed code, treat the round as completed instead of discarding
         # hours of work. Only the no-commit case (handled at the ``not
         # sha_changed`` branch above) is a true failure.
+        #
+        # Note (scope): ``sha_changed`` is set both by an explicit agent commit
+        # AND by the auto-commit of uncommitted changes above. So a failed agent
+        # that left half-finished edits is also salvaged and forwarded to the
+        # test phase. This is intentional: the test phase is the gate that
+        # catches broken/half-finished code, so salvaging lets the workflow
+        # progress to that gate rather than dying on a late subprocess error.
         salvaged = (not result.success) and bool(sha_changed)
         if salvaged:
             logger.warning(

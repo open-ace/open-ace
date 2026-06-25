@@ -188,7 +188,13 @@ class TestRunSingleShotResult:
         assert result.event_log and isinstance(result.event_log[0], dict)
 
     def test_timeout_salvages_partial_output(self):
-        """Bug #3 fix: TimeoutExpired keeps partial stdout in the result."""
+        """Bug #3 fix: TimeoutExpired keeps partial stdout in the result.
+
+        On POSIX, ``subprocess.run(..., text=True)`` raises a TimeoutExpired
+        whose ``.output`` is **bytes** (the decode step only runs on the normal
+        return path, not on the re-raised exception), so the salvage path must
+        decode explicitly. The exception here mirrors that: bytes output.
+        """
         runner = AutonomousAgentRunner()
         partial = json.dumps(
             {
@@ -198,7 +204,10 @@ class TestRunSingleShotResult:
         )
 
         def _raise(*a, **k):
-            raise subprocess.TimeoutExpired(cmd=["codex"], timeout=5, output=partial)
+            # bytes — the real POSIX shape, not str.
+            raise subprocess.TimeoutExpired(
+                cmd=["codex"], timeout=5, output=partial.encode("utf-8")
+            )
 
         mod_patch, which_patch = _patch_cli_adapters(runner)
         with mod_patch, which_patch, patch("subprocess.run", side_effect=_raise):
