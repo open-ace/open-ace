@@ -623,9 +623,9 @@ CREATE TABLE tenant_settings (
  custom_branding INTEGER DEFAULT 0,
  branding_name TEXT,
  branding_logo_url TEXT,
+ auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- auto_provision_users integer DEFAULT 0
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tenant_usage (
