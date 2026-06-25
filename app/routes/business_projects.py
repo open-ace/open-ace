@@ -4,12 +4,15 @@ Business Projects API Routes
 Issue #871: Predefined business projects for workspace categorization
 """
 
+import logging
+
 from flask import Blueprint, jsonify, request
 
-from app.decorators import admin_required
+from app.auth.decorators import admin_required
 from app.models.business_project import BusinessProject, BusinessProjectMember
 from app.repositories.business_project_repo import BusinessProjectRepository
 
+logger = logging.getLogger(__name__)
 business_projects_bp = Blueprint("business_projects", __name__)
 repo = BusinessProjectRepository()
 
@@ -65,6 +68,7 @@ def create_business_project():
         key_patterns=key_patterns,
         created_by=created_by,
     )
+    logger.info(f"Created business project '{name}' (code={code}) by user {created_by}")
     return jsonify({"success": True, "project": BusinessProject.from_dict(project).to_dict()})
 
 
@@ -98,6 +102,7 @@ def update_business_project(project_id: int):
         key_patterns=key_patterns,
         is_active=is_active,
     )
+    logger.info(f"Updated business project {project_id} (name={updated.get('name')})")
     return jsonify({"success": True, "project": BusinessProject.from_dict(updated).to_dict()})
 
 
@@ -110,6 +115,7 @@ def delete_business_project(project_id: int):
         return jsonify({"error": "Business project not found"}), 404
 
     repo.delete_project(project_id)
+    logger.info(f"Deleted business project {project_id} (name={project.get('name')})")
     return jsonify({"success": True})
 
 
@@ -141,6 +147,9 @@ def add_business_project_member(project_id: int):
         return jsonify({"error": "user_id is required"}), 400
 
     member = repo.add_member(project_id, user_id)
+    logger.info(
+        f"Added member user_id={user_id} to business project {project_id} (name={project.get('name')})"
+    )
     return jsonify({"success": True, "member": BusinessProjectMember.from_dict(member).to_dict()})
 
 
@@ -155,6 +164,9 @@ def remove_business_project_member(project_id: int, member_id: int):
         return jsonify({"error": "Business project not found"}), 404
 
     repo.remove_member(project_id, member_id)
+    logger.info(
+        f"Removed member {member_id} from business project {project_id} (name={project.get('name')})"
+    )
     return jsonify({"success": True})
 
 

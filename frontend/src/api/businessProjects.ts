@@ -55,19 +55,61 @@ export interface UpdateBusinessProjectRequest {
   is_active?: boolean;
 }
 
+interface ListBusinessProjectsResponse {
+  success: boolean;
+  projects: BusinessProject[];
+}
+
+interface GetBusinessProjectResponse {
+  success: boolean;
+  project: BusinessProject;
+}
+
+interface CreateBusinessProjectResponse {
+  success: boolean;
+  project: BusinessProject;
+}
+
+interface UpdateBusinessProjectResponse {
+  success: boolean;
+  project: BusinessProject;
+}
+
+interface DeleteBusinessProjectResponse {
+  success: boolean;
+}
+
+interface GetBusinessProjectMembersResponse {
+  success: boolean;
+  members: BusinessProjectMember[];
+}
+
+interface AddBusinessProjectMemberResponse {
+  success: boolean;
+  member: BusinessProjectMember;
+}
+
+interface RemoveBusinessProjectMemberResponse {
+  success: boolean;
+}
+
+interface GetBusinessProjectStatsResponse {
+  success: boolean;
+  stats: BusinessProjectStats;
+}
+
 /**
  * List all business projects
  */
 export async function listBusinessProjects(
   includeDeleted = false,
   activeOnly = true
-): Promise<{ success: boolean; projects: BusinessProject[] }> {
+): Promise<ListBusinessProjectsResponse> {
   const params = new URLSearchParams({
     include_deleted: includeDeleted.toString(),
     active_only: activeOnly.toString(),
   });
-  const response = await apiClient.get(`/api/business-projects?${params}`);
-  return response.data;
+  return apiClient.get<ListBusinessProjectsResponse>(`/api/business-projects?${params}`);
 }
 
 /**
@@ -75,9 +117,8 @@ export async function listBusinessProjects(
  */
 export async function getBusinessProject(
   projectId: number
-): Promise<{ success: boolean; project: BusinessProject }> {
-  const response = await apiClient.get(`/api/business-projects/${projectId}`);
-  return response.data;
+): Promise<GetBusinessProjectResponse> {
+  return apiClient.get<GetBusinessProjectResponse>(`/api/business-projects/${projectId}`);
 }
 
 /**
@@ -85,9 +126,8 @@ export async function getBusinessProject(
  */
 export async function createBusinessProject(
   data: CreateBusinessProjectRequest
-): Promise<{ success: boolean; project: BusinessProject }> {
-  const response = await apiClient.post('/api/business-projects', data);
-  return response.data;
+): Promise<CreateBusinessProjectResponse> {
+  return apiClient.post<CreateBusinessProjectResponse>('/api/business-projects', data);
 }
 
 /**
@@ -96,17 +136,18 @@ export async function createBusinessProject(
 export async function updateBusinessProject(
   projectId: number,
   data: UpdateBusinessProjectRequest
-): Promise<{ success: boolean; project: BusinessProject }> {
-  const response = await apiClient.put(`/api/business-projects/${projectId}`, data);
-  return response.data;
+): Promise<UpdateBusinessProjectResponse> {
+  return apiClient.put<UpdateBusinessProjectResponse>(
+    `/api/business-projects/${projectId}`,
+    data
+  );
 }
 
 /**
  * Delete a business project (soft delete)
  */
-export async function deleteBusinessProject(projectId: number): Promise<{ success: boolean }> {
-  const response = await apiClient.delete(`/api/business-projects/${projectId}`);
-  return response.data;
+export async function deleteBusinessProject(projectId: number): Promise<DeleteBusinessProjectResponse> {
+  return apiClient.delete<DeleteBusinessProjectResponse>(`/api/business-projects/${projectId}`);
 }
 
 /**
@@ -114,9 +155,10 @@ export async function deleteBusinessProject(projectId: number): Promise<{ succes
  */
 export async function getBusinessProjectMembers(
   projectId: number
-): Promise<{ success: boolean; members: BusinessProjectMember[] }> {
-  const response = await apiClient.get(`/api/business-projects/${projectId}/members`);
-  return response.data;
+): Promise<GetBusinessProjectMembersResponse> {
+  return apiClient.get<GetBusinessProjectMembersResponse>(
+    `/api/business-projects/${projectId}/members`
+  );
 }
 
 /**
@@ -125,11 +167,11 @@ export async function getBusinessProjectMembers(
 export async function addBusinessProjectMember(
   projectId: number,
   userId: number
-): Promise<{ success: boolean; member: BusinessProjectMember }> {
-  const response = await apiClient.post(`/api/business-projects/${projectId}/members`, {
-    user_id: userId,
-  });
-  return response.data;
+): Promise<AddBusinessProjectMemberResponse> {
+  return apiClient.post<AddBusinessProjectMemberResponse>(
+    `/api/business-projects/${projectId}/members`,
+    { user_id: userId }
+  );
 }
 
 /**
@@ -138,11 +180,10 @@ export async function addBusinessProjectMember(
 export async function removeBusinessProjectMember(
   projectId: number,
   memberId: number
-): Promise<{ success: boolean }> {
-  const response = await apiClient.delete(
+): Promise<RemoveBusinessProjectMemberResponse> {
+  return apiClient.delete<RemoveBusinessProjectMemberResponse>(
     `/api/business-projects/${projectId}/members/${memberId}`
   );
-  return response.data;
 }
 
 /**
@@ -150,7 +191,8 @@ export async function removeBusinessProjectMember(
  */
 export async function getBusinessProjectStats(
   projectId: number
-): Promise<{ success: boolean; stats: BusinessProjectStats }> {
-  const response = await apiClient.get(`/api/business-projects/${projectId}/stats`);
-  return response.data;
+): Promise<GetBusinessProjectStatsResponse> {
+  return apiClient.get<GetBusinessProjectStatsResponse>(
+    `/api/business-projects/${projectId}/stats`
+  );
 }
