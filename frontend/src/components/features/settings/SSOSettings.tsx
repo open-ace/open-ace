@@ -235,11 +235,15 @@ export const SSOSettings: React.FC = () => {
 
     setIsRegistering(true);
     try {
-      await ssoApi.registerProvider(formData);
+      await ssoApi.registerProvider({
+        ...formData,
+        tenant_id: effectiveTenantId ?? undefined,
+      });
       handleCloseModal();
       fetchProviders();
       success(t('providerRegistered', language));
     } catch (err) {
+      console.error('Failed to register provider:', err);
       const errorMsg = err instanceof Error ? err.message : t('registerFailed', language);
       setRegisterError(errorMsg);
     } finally {
