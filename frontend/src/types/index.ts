@@ -12,6 +12,7 @@ export interface User {
   createdAt: string;
   lastLogin?: string;
   avatar_url?: string;
+  must_change_password?: boolean;
 }
 
 // Authentication types
