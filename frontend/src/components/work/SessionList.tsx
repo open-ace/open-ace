@@ -169,8 +169,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         isImported:
           session.workspace_type === 'local' &&
           !session.cli_session_id &&
-          session.status === 'completed' &&
-          (session.message_count ?? 0) === 0,
+          session.status === 'completed',
         firstMessage: session.first_message, // First user message preview
       };
 
