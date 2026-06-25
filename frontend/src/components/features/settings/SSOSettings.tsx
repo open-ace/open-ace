@@ -243,6 +243,7 @@ export const SSOSettings: React.FC = () => {
       fetchProviders();
       success(t('providerRegistered', language));
     } catch (err) {
+      console.error('Failed to register provider:', err);
       const errorMsg = err instanceof Error ? err.message : t('registerFailed', language);
       setRegisterError(errorMsg);
     } finally {
