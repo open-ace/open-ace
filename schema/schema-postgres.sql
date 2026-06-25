@@ -2265,15 +2265,6 @@ ALTER TABLE ONLY business_project_members
 ALTER TABLE ONLY business_projects
     ADD CONSTRAINT business_projects_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
 
-ALTER TABLE ONLY projects
-    ADD CONSTRAINT projects_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY user_daily_stats
-    ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY users
-    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
-
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
@@ -2285,6 +2276,9 @@ ALTER TABLE ONLY machine_assignments
 
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY projects
+    ADD CONSTRAINT projects_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
 
 ALTER TABLE ONLY quota_alerts
     ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
@@ -2324,6 +2318,12 @@ ALTER TABLE ONLY tenant_usage
 
 ALTER TABLE ONLY tool_account_mapping_rules
     ADD CONSTRAINT tool_account_mapping_rules_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_daily_stats
+    ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY users
+    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
 
 ALTER TABLE ONLY user_tool_accounts
     ADD CONSTRAINT user_tool_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;

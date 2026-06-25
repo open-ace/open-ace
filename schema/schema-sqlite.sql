@@ -1049,6 +1049,9 @@ CREATE INDEX idx_projects_is_active ON projects (is_active);
 
 CREATE INDEX idx_projects_path ON projects (path);
 
+-- Index for business_project_id foreign key (Issue #871)
+CREATE INDEX idx_projects_business_project_id ON projects (business_project_id);
+
 CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates (category);
