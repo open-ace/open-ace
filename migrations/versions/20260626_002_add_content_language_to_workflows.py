@@ -12,6 +12,8 @@ Revises: 20260626_001_add_run_timeline_tables
 Create Date: 2026-06-26
 """
 
+from __future__ import annotations
+
 import sqlalchemy as sa
 from alembic import op
 

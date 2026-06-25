@@ -187,9 +187,7 @@ def render_progress_report(payload: dict[str, Any], language: str | None) -> str
     if files or additions or deletions or branch:
         out += f["changes_header"]
         if files or additions or deletions:
-            out += f["changes_files"].format(
-                files=files, additions=additions, deletions=deletions
-            )
+            out += f["changes_files"].format(files=files, additions=additions, deletions=deletions)
         if branch:
             out += f["changes_branch"].format(branch=branch)
         out += "\n"
@@ -203,9 +201,7 @@ def render_progress_report(payload: dict[str, Any], language: str | None) -> str
         out += f["review_header"]
         out += f["review_rounds"].format(review_rounds=review_rounds)
         out += (
-            f["review_status_passed"]
-            if payload.get("review_passed")
-            else f["review_status_issues"]
+            f["review_status_passed"] if payload.get("review_passed") else f["review_status_issues"]
         )
 
     pr_number = payload.get("pr_number")
@@ -231,9 +227,7 @@ def render_progress_report_tldr(payload: dict[str, Any], language: str | None) -
     additions = payload.get("additions", 0)
     deletions = payload.get("deletions", 0)
     if files or additions or deletions:
-        parts.append(
-            f["tldr_files"].format(files=files, additions=additions, deletions=deletions)
-        )
+        parts.append(f["tldr_files"].format(files=files, additions=additions, deletions=deletions))
 
     test_summary = payload.get("test_summary") or ""
     if test_summary:

@@ -188,9 +188,7 @@ class AutonomousWorkflowRepository:
         # Normalize content_language up front so both INSERT branches stay in
         # sync and the value cannot be silently dropped by a missing column.
         data = dict(data)
-        data["content_language"] = self._normalize_content_language(
-            data.get("content_language")
-        )
+        data["content_language"] = self._normalize_content_language(data.get("content_language"))
 
         if is_postgresql():
             result = self.db.fetch_one(

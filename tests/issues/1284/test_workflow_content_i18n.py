@@ -122,12 +122,12 @@ class TestGithubTruncationNotice:
             assert _GITHUB_TRUNCATION_NOTICES[lang]
 
     def test_falls_back_to_default(self):
-        assert _github_truncation_notice("fr") == _GITHUB_TRUNCATION_NOTICES[
-            DEFAULT_CONTENT_LANGUAGE
-        ]
-        assert _github_truncation_notice(None) == _GITHUB_TRUNCATION_NOTICES[
-            DEFAULT_CONTENT_LANGUAGE
-        ]
+        assert (
+            _github_truncation_notice("fr") == _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
+        )
+        assert (
+            _github_truncation_notice(None) == _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
+        )
 
 
 # ── build_progress_payload (structured source of truth) ─────────────────────
@@ -447,9 +447,7 @@ class TestContentLanguageNormalization:
 
     @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
     def test_supported_languages_pass_through(self, lang):
-        assert (
-            AutonomousWorkflowRepository._normalize_content_language(lang) == lang
-        )
+        assert AutonomousWorkflowRepository._normalize_content_language(lang) == lang
 
     def test_unsupported_falls_back_to_default(self):
         assert (
@@ -470,9 +468,7 @@ class TestContentLanguageNormalization:
         )
 
     def test_allowed_set_matches_supported_languages(self):
-        assert tuple(sorted(ALLOWED_CONTENT_LANGUAGES)) == tuple(
-            sorted(SUPPORTED_LANGUAGES)
-        )
+        assert tuple(sorted(ALLOWED_CONTENT_LANGUAGES)) == tuple(sorted(SUPPORTED_LANGUAGES))
         assert DEFAULT_CONTENT_LANGUAGE in ALLOWED_CONTENT_LANGUAGES
 
 

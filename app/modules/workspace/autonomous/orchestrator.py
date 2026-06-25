@@ -33,10 +33,7 @@ from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
 )
-from app.repositories.autonomous_repo import (
-    DEFAULT_CONTENT_LANGUAGE,
-    AutonomousWorkflowRepository,
-)
+from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
@@ -394,6 +391,7 @@ def _github_truncation_notice(content_language: Optional[str]) -> str:
     return _GITHUB_TRUNCATION_NOTICES.get(
         content_language, _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
     )
+
 
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
@@ -2899,9 +2897,9 @@ class AutonomousOrchestrator:
         # structured verdict so progress_reported doesn't re-scan review text.
         # The legacy zh marker is accepted too, for workflows whose content
         # language predates this field (mirrors _derive_review_passed).
-        review_passed = self._review_is_approved(
-            review_text, approval_phrase
-        ) or "代码审查通过" in review_text
+        review_passed = (
+            self._review_is_approved(review_text, approval_phrase) or "代码审查通过" in review_text
+        )
         review_metadata = _merge_milestone_metadata(
             self.repo.get_milestone(review_ms.get("milestone_id", "")),
             {"review_verdict": {"passed": review_passed, "round": round_num}},
@@ -3206,12 +3204,8 @@ class AutonomousOrchestrator:
         pr_review_milestones = [
             ms for ms in all_milestones if ms.get("milestone_type") == "pr_reviewed"
         ]
-        review_rounds = sum(
-            1 for ms in pr_review_milestones if ms.get("phase") == "pr_review"
-        )
-        review_passed = self._derive_review_passed(
-            pr_review_milestones, wf.get("content_language")
-        )
+        review_rounds = sum(1 for ms in pr_review_milestones if ms.get("phase") == "pr_review")
+        review_passed = self._derive_review_passed(pr_review_milestones, wf.get("content_language"))
 
         # Build the structured report payload — the single source of truth. The
         # one-line summary and full report are NOT persisted as localized prose;
@@ -3245,9 +3239,7 @@ class AutonomousOrchestrator:
 
         # Post report to issue
         if issue_number:
-            self._post_github_comment(
-                gh, issue_number, report_markdown, context="progress-report"
-            )
+            self._post_github_comment(gh, issue_number, report_markdown, context="progress-report")
 
         # Mark round completed
         self._create_milestone(
