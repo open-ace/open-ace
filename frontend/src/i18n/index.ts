@@ -178,23 +178,6 @@ export const translations: Record<Language, Translations> = {
     newPassword: 'New Password',
     confirmPassword: 'Confirm Password',
     passwordHint: 'Leave blank to keep current password',
-    // Password reset
-    resetPassword: 'Reset Password',
-    temporaryPassword: 'Temporary Password',
-    tempPasswordWarning:
-      'Please share this password securely with the user. They will be required to change it on first login.',
-    copyToClipboard: 'Copy to clipboard',
-    // Force password change
-    changePassword: 'Change Password',
-    changePasswordRequired: 'Change Password Required',
-    mustChangePasswordHint:
-      'Your password was reset by an administrator. You must change it before continuing.',
-    currentPassword: 'Current Password',
-    currentPasswordRequired: 'Current password is required',
-    newPasswordRequired: 'New password is required',
-    enterCurrentPassword: 'Enter current password',
-    enterNewPassword: 'Enter new password',
-    failedToChangePassword: 'Failed to change password',
     activationStatus: 'Activation Status',
     active: 'Active',
     inactive: 'Inactive',
@@ -1659,21 +1642,6 @@ export const translations: Record<Language, Translations> = {
     tableStatus: '状态',
     tableCreatedAt: '创建时间',
     tableActions: '操作',
-    // Password reset
-    resetPassword: '重置密码',
-    temporaryPassword: '临时密码',
-    tempPasswordWarning: '请安全地与用户共享此密码。首次登录时需要更改。',
-    copyToClipboard: '复制到剪贴板',
-    // Force password change
-    changePassword: '更改密码',
-    changePasswordRequired: '需要更改密码',
-    mustChangePasswordHint: '您的密码已被管理员重置。继续操作前必须更改密码。',
-    currentPassword: '当前密码',
-    currentPasswordRequired: '当前密码为必填项',
-    newPasswordRequired: '新密码为必填项',
-    enterCurrentPassword: '输入当前密码',
-    enterNewPassword: '输入新密码',
-    failedToChangePassword: '更改密码失败',
 
     linuxAccount: '系统账号',
     toolAccounts: '工具账号',
@@ -3111,23 +3079,6 @@ export const translations: Record<Language, Translations> = {
     tableStatus: 'ステータス',
     tableCreatedAt: '作成日時',
     tableActions: 'アクション',
-    // Password reset
-    resetPassword: 'パスワードリセット',
-    temporaryPassword: '一時パスワード',
-    tempPasswordWarning:
-      'このパスワードをユーザーと安全に共有してください。初回ログイン時に変更が必要です。',
-    copyToClipboard: 'クリップボードにコピー',
-    // Force password change
-    changePassword: 'パスワード変更',
-    changePasswordRequired: 'パスワード変更が必要',
-    mustChangePasswordHint:
-      'パスワードが管理者によってリセットされました。続行前にパスワードを変更してください。',
-    currentPassword: '現在のパスワード',
-    currentPasswordRequired: '現在のパスワードは必須です',
-    newPasswordRequired: '新しいパスワードは必須です',
-    enterCurrentPassword: '現在のパスワードを入力',
-    enterNewPassword: '新しいパスワードを入力',
-    failedToChangePassword: 'パスワード変更に失敗しました',
 
     linuxAccount: 'システムアカウント',
     newPassword: '新しいパスワード',
@@ -4281,23 +4232,6 @@ export const translations: Record<Language, Translations> = {
     tableStatus: '상태',
     tableCreatedAt: '생성일',
     tableActions: '작업',
-    // Password reset
-    resetPassword: '비밀번호 재설정',
-    temporaryPassword: '임시 비밀번호',
-    tempPasswordWarning:
-      '이 비밀번호를 사용자와 안전하게 공유하세요. 첫 로그인 시 변경이 필요합니다.',
-    copyToClipboard: '클립보드에 복사',
-    // Force password change
-    changePassword: '비밀번호 변경',
-    changePasswordRequired: '비밀번호 변경 필요',
-    mustChangePasswordHint:
-      '비밀번호가 관리자에 의해 재설정되었습니다. 계속하기 전에 비밀번호를 변경하세요.',
-    currentPassword: '현재 비밀번호',
-    currentPasswordRequired: '현재 비밀번호는 필수입니다',
-    newPasswordRequired: '새 비밀번호는 필수입니다',
-    enterCurrentPassword: '현재 비밀번호 입력',
-    enterNewPassword: '새 비밀번호 입력',
-    failedToChangePassword: '비밀번호 변경 실패',
 
     linuxAccount: '시스템 계정',
     newPassword: '새 비밀번호',
