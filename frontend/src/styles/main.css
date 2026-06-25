@@ -2497,6 +2497,16 @@ table .latency-row:hover td {
   border: 1px solid var(--color-primary);
 }
 
+/* CLI-imported sessions (no cli_session_id + completed) — muted to distinguish
+   from live WebUI/autonomous/remote sessions. */
+.session-item.session-imported {
+  opacity: 0.7;
+}
+.session-item.session-imported .session-id,
+.session-item.session-imported .session-title {
+  color: var(--text-secondary);
+}
+
 .session-item .session-title {
   flex: 1;
   min-width: 0;

@@ -737,6 +737,7 @@ def list_sessions():
                     "project_path": s.get("project_path"),
                     "workspace_type": s.get("workspace_type") or "local",
                     "remote_machine_id": s.get("remote_machine_id"),
+                    "cli_session_id": s.get("cli_session_id") or "",
                     "messages": [],
                 }
             )
@@ -1947,15 +1948,11 @@ def get_workspace_status():
                 tokens_limit = (user.get("daily_token_quota") or 1) * TOKEN_QUOTA_MULTIPLIER
                 requests_limit = user.get("daily_request_quota") or 1000
 
-                # Get user's system_account for filtering (sender_name format: {system_account}-{hostname}-{tool})
-                username = user.get("username", "")
-                system_account = user.get("system_account") or username
-
-                # Get today's usage combining local CLI (daily_messages) and remote proxy (quota_usage)
+                # Get today's usage — session-only (agent_sessions) per #1125:
+                # the Work page must not read the daily_messages analysis table.
                 usage_repo = UsageRepository()
-                combined = usage_repo.get_combined_usage(
+                combined = usage_repo.get_session_only_usage(
                     user_id=user_id,
-                    system_account=system_account,
                     start_date=today,
                     end_date=today,
                 )
