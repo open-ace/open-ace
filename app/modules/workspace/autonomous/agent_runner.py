@@ -2279,6 +2279,14 @@ class AutonomousAgentRunner:
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )
+                        # Fallback: if no assistant turn carried a message_id
+                        # (older/non-Claude adapters, or chunks without id),
+                        # count this result as one request so request accounting
+                        # doesn't silently drop to 0. When ids WERE seen, turns
+                        # were already counted per-id above and result must NOT
+                        # bump (it summarizes the whole --print run).
+                        if not session._counted_message_ids and session.request_count == 0:
+                            session.request_count += 1
                         self._sync_sidebar_session_totals(session, status="active")
                         session.completed.set()
                         # Emit usage activity for real-time token display

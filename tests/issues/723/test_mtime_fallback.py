@@ -110,11 +110,13 @@ class TestFindLatestClaudeSessionIdExcludesBound:
 
 
 class TestListCliSessionIdsForProject:
-    def test_returns_distinct_nonempty_ids(self, tmp_path, monkeypatch):
+    def test_returns_distinct_nonempty_ids(self, tmp_path):
         from app.modules.workspace.session_manager import SessionManager
 
-        # Point SessionManager at an in-memory sqlite DB it manages itself.
-        sm = SessionManager(db_path=":memory:")
+        # Use a real temp DB file — SessionManager opens a fresh connection per
+        # call (:memory: would create/lose the schema across connections).
+        db_path = tmp_path / "test_sessions.db"
+        sm = SessionManager(db_path=str(db_path))
         # Insert sessions: two with cli_session_id, one without, different project.
         for sid, cli, proj in [
             ("w1", "main123", "/proj"),
@@ -137,8 +139,9 @@ class TestListCliSessionIdsForProject:
         ids = sm.list_cli_session_ids_for_project("/proj")
         assert ids == {"main123", "review456"}
 
-    def test_empty_project_path_returns_empty_set(self):
+    def test_empty_project_path_returns_empty_set(self, tmp_path):
         from app.modules.workspace.session_manager import SessionManager
 
-        sm = SessionManager(db_path=":memory:")
+        db_path = tmp_path / "test_sessions.db"
+        sm = SessionManager(db_path=str(db_path))
         assert sm.list_cli_session_ids_for_project("") == set()

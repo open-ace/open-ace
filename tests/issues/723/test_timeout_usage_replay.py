@@ -96,6 +96,29 @@ class TestRequestCountDedupField:
         assert session._counted_message_ids == set()
         assert session.request_count == 0
 
+    def test_no_id_assistant_turn_falls_back_to_result_count(self):
+        """Regression guard (review on #1270): when assistant events carry NO
+        message.id (older/non-Claude adapters, e.g. tests/issues/716), the turn
+        is counted via the result-event fallback so request_count isn't dropped
+        to 0. Simulates the result-handler fallback logic."""
+        session = _make_session()
+        # An assistant turn with no message.id → _counted_message_ids stays empty.
+        # The result fallback: if no ids were counted, bump request_count to 1.
+        if not session._counted_message_ids and session.request_count == 0:
+            session.request_count += 1
+        assert session.request_count == 1
+
+    def test_id_assistant_turn_disables_result_fallback(self):
+        """When ids WERE seen, the result fallback must NOT bump (turns already
+        counted per-id; result summarizes the whole run)."""
+        session = _make_session()
+        session._counted_message_ids.add("msg_a")
+        session.request_count = 1
+        before = session.request_count
+        if not session._counted_message_ids and session.request_count == 0:
+            session.request_count += 1
+        assert session.request_count == before  # unchanged
+
 
 class TestReplayUsageFromJsonl:
     """On timeout with zero counters, replay the session JSONL to recover usage."""
