@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import socket
 import threading
@@ -229,15 +230,22 @@ class AutonomousScheduler:
         # Quota gate (fail-closed): a user over quota (or whose quota check
         # errored) must not advance. Local autonomous agents bypass the LLM
         # proxy, so this scheduler gate — not the proxy's 429 — is what bounds
-        # them. Pausing here (before advance()) also bounds a workflow whose
-        # agent was launched on a prior cycle and is still mid-flight.
+        # them.
+        #
+        # Enforcement granularity is between advance() cycles, not mid-step:
+        # while an agent is mid-flight, advance() is blocked and workflow_id
+        # stays in _in_progress_ids, so _process_workflows won't re-enter here
+        # until that advance() returns (its finally has already torn the
+        # orchestrator down). A local agent call can't be metered mid-flight,
+        # so when this gate trips it pauses before the *next* advance — the
+        # already-running step completes (bounded by its step timeout) first.
         # NB: this lives INSIDE the try/finally below so the early-return paths
         # still release the DB lock and in-progress slot — otherwise a
         # quota-paused workflow would hold both forever.
         orchestrator = None
         try:
             owner_id = workflow.get("user_id") if workflow else None
-            if owner_id:
+            if owner_id is not None:
                 try:
                     from app.modules.governance.quota_manager import QuotaManager
 
@@ -308,17 +316,27 @@ class AutonomousScheduler:
 
         Writes the reason to ``error_message`` with the ``QUOTA_PAUSE_REASON_PREFIX``
         so the auto-resume scan can later distinguish it from a user's manual
-        pause, and so the timeline banner surfaces why it stopped. Also stops the
-        running agent subprocess in case this fires while an agent launched on a
-        prior cycle is still in flight.
+        pause, and so the timeline banner surfaces why it stopped. The gate fires
+        between advance() cycles (no orchestrator is mid-flight at this point),
+        so ``_pause_running_task`` is a defensive no-op in the normal path; it
+        only matters for the rare race where a prior cycle's agent is still
+        draining when the pause lands.
         """
         from app.routes.autonomous import _emit_event_safe, _pause_running_task
 
-        full_reason = (
-            reason
-            if reason.startswith(QUOTA_PAUSE_REASON_PREFIX)
-            else f"{QUOTA_PAUSE_REASON_PREFIX}: {reason}"
-        )
+        # Normalize so error_message always starts with QUOTA_PAUSE_REASON_PREFIX
+        # (the auto-resume predicate keys on it) but avoid the doubled-up
+        # "Quota exceeded: Token quota exceeded: …" the banner would otherwise
+        # show. check_quota returns "<X> quota exceeded. Used: …"; collapse the
+        # redundant "quota exceeded" so the marker prefix isn't repeated.
+        normalized = (reason or "Quota exceeded").strip()
+        if normalized.lower().startswith(QUOTA_PAUSE_REASON_PREFIX.lower()):
+            full_reason = normalized  # already starts with the marker
+        else:
+            collapsed = re.sub(
+                r"\s*quota\s+exceeded\s*", " ", normalized, flags=re.IGNORECASE
+            ).strip(" :.")
+            full_reason = f"{QUOTA_PAUSE_REASON_PREFIX}: {collapsed}"
         try:
             _pause_running_task(workflow_id)
         except Exception as e:
@@ -353,7 +371,9 @@ class AutonomousScheduler:
         from app.routes.autonomous import PHASE_TO_STATUS, _emit_event_safe
 
         try:
-            paused = repo.get_paused_workflows()
+            # Filter in SQL (status + error_message prefix) so the scan doesn't
+            # grow with the full paused set; _is_quota_paused below is defense-in-depth.
+            paused = repo.get_paused_workflows(QUOTA_PAUSE_REASON_PREFIX)
         except Exception as e:
             logger.error("Failed to query paused workflows for quota resume: %s", e)
             return

@@ -107,8 +107,14 @@ class TestRuntimeQuotaGate:
             mock_pause_task.assert_called_once_with("wf-1")
             update = repo.update_workflow.call_args[0][1]
             assert update["status"] == "paused"
+            # error_message always starts with the marker prefix (auto-resume
+            # keys on it); the redundant "quota exceeded" tail is collapsed so
+            # the banner reads "Quota exceeded: Daily token" not the doubled form.
             assert update["error_message"].startswith(QUOTA_PAUSE_REASON_PREFIX)
-            assert "Daily token quota exceeded" in update["error_message"]
+            assert "Daily token" in update["error_message"]
+            assert "quota exceeded" not in update["error_message"].lower().replace(
+                QUOTA_PAUSE_REASON_PREFIX.lower(), ""
+            )
             # DB lock + in-progress slot released even on the early return.
             repo.release_lock.assert_called_once()
 
