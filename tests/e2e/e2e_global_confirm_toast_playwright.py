@@ -116,6 +116,68 @@ def get_admin_session_token():
     return None
 
 
+def ensure_smtp_config():
+    """Ensure an SMTP config exists so the Delete button is reachable.
+
+    Idempotent: PUTs a dummy config only when none is present. Without this the
+    ConfirmModal path (and the native-dialog sentinel) would skip whenever the
+    dev DB has no SMTP config, leaving the Delete -> confirm regression
+    uncovered. Seeding is non-destructive (the test cancels, never deletes).
+    """
+    token = get_admin_session_token()
+    if not token:
+        return False
+    try:
+        existing = subprocess.run(
+            [
+                "curl",
+                "-s",
+                "--max-time",
+                "8",
+                f"{BASE_URL}/api/management/smtp-config",
+                "-H",
+                f"Cookie: session_token={token}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+        if '"id"' in existing:
+            return True  # a config already exists
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "--max-time",
+                "8",
+                "-X",
+                "PUT",
+                f"{BASE_URL}/api/management/smtp-config",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                f"Cookie: session_token={token}",
+                "-d",
+                json.dumps(
+                    {
+                        "smtp_host": "smtp.e2e-seed.test",
+                        "smtp_port": 587,
+                        "from_address": "seed@e2e-seed.test",
+                        "use_tls": True,
+                    }
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def login(context, page):
     print("\n[TEST] Authenticate as admin (cookie injection)...")
     token = get_admin_session_token()
@@ -168,11 +230,11 @@ def test_global_toast_renders_at_root(page):
 def test_delete_uses_confirm_modal_not_native_dialog(page):
     """Delete opens a styled ConfirmModal, never a native window.confirm.
 
-    If no SMTP config exists the Delete button is hidden; we skip the
-    ConfirmModal assertion gracefully (like the retention suite's RUN_EXECUTE
-    gate). When present, we register a native-dialog handler that FAILS the
-    test if any window.confirm/alert fires — proving the migration removed the
-    native dialog — then assert a Bootstrap .modal-dialog appears and Cancel
+    If no SMTP config exists the Delete button is hidden, so we seed a dummy
+    config first (ensure_smtp_config) to guarantee the path is exercised. A
+    global native-dialog sentinel (registered in run_tests) FAILS the test if
+    any window.confirm/alert fires — proving the migration removed the native
+    dialog — and we assert a Bootstrap .modal-dialog appears and Cancel
     dismisses it without deleting.
     """
     print("\n[TEST] Delete opens ConfirmModal (not native dialog)...")
@@ -184,8 +246,18 @@ def test_delete_uses_confirm_modal_not_native_dialog(page):
         del_btn = page.locator("button").filter(has_text="Delete")
 
     if not del_btn.first.is_visible():
-        check(True, "Delete button absent (no SMTP config); ConfirmModal check skipped")
-        print("    [SKIP] no Delete button present — set an SMTP config to exercise this")
+        # No config -> no Delete button. Seed one so the ConfirmModal path and
+        # the native-dialog sentinel actually run instead of being skipped.
+        if ensure_smtp_config():
+            print("    [SEED] created a dummy SMTP config to exercise the Delete flow")
+            page.goto(f"{BASE_URL}/manage/settings/smtp")
+            pause(2)
+            del_btn = page.locator("button").filter(has_text="删除")
+            if not del_btn.first.is_visible():
+                del_btn = page.locator("button").filter(has_text="Delete")
+
+    if not del_btn.first.is_visible():
+        check(False, "Delete button still absent after seeding; cannot exercise ConfirmModal")
         return
 
     # A global dialog sentinel is registered in run_tests(): if the migration
