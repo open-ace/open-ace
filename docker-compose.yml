@@ -38,6 +38,14 @@ services:
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
+      # Server IP for URL configuration (Issue #1260)
+      # Defaults to host.docker.internal for one-click deploy
+      # Users can override via .env file for production
+      - SERVER_IP=${SERVER_IP:-host.docker.internal}
+    # Allow container to access host network (Issue #1260)
+    # Required for host.docker.internal on Linux Docker 20.10+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # CONFIG_DIR: Container runs as root (required for multi-user workspace mode)
       # ~/.open-ace expands to /root/.open-ace when running as root

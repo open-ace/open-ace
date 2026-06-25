@@ -91,6 +91,109 @@ echo "  Open ACE - Starting..."
 echo "=========================================="
 
 # ============================================================================
+# 0.2. Generate Default Config (Issue #1260)
+# ============================================================================
+# Generate default config.json if not exists (one-click deploy support)
+generate_default_config() {
+    CONFIG_FILE="/root/.open-ace/config.json"
+    CONFIG_DIR=$(dirname "$CONFIG_FILE")
+
+    # Skip if config already exists (user-mounted or previously generated)
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "Config file exists at $CONFIG_FILE, skipping generation."
+        return 0
+    fi
+
+    echo "Generating default config at $CONFIG_FILE..."
+
+    # Create config directory
+    mkdir -p "$CONFIG_DIR"
+
+    # Use SERVER_IP environment variable (default: host.docker.internal)
+    SERVER_IP="${SERVER_IP:-host.docker.internal}"
+    PORT="${PORT:-5000}"
+
+    # Generate random token secret and upload auth key (32 chars hex)
+    TOKEN_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+    UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+
+    # Generate default config (matches install.sh defaults)
+    # Note: DATABASE_URL env var takes precedence over config file for database connection
+    cat > "$CONFIG_FILE" << CONFIG_EOF
+{
+  "host_name": "docker-container",
+  "database": {
+    "type": "postgresql",
+    "url": "postgresql://ace:ace-secret@postgres:5432/ace"
+  },
+  "server": {
+    "upload_auth_key": "$UPLOAD_AUTH_KEY",
+    "server_url": "http://${SERVER_IP}:${PORT}",
+    "web_port": ${PORT},
+    "web_host": "0.0.0.0"
+  },
+  "workspace": {
+    "enabled": true,
+    "url": "http://${SERVER_IP}",
+    "multi_user_mode": true,
+    "port_range_start": 3100,
+    "port_range_end": 3200,
+    "max_instances": 30,
+    "idle_timeout_minutes": 30,
+    "cleanup_interval_minutes": 5,
+    "token_secret": "$TOKEN_SECRET",
+    "webui_path": ""
+  },
+  "autonomous": {
+    "enabled": false
+  },
+  "tools": {
+    "openclaw": {
+      "enabled": true,
+      "token_env": "OPENCLAW_TOKEN",
+      "gateway_url": "http://localhost:18789",
+      "hostname": "docker-container"
+    },
+    "claude": {
+      "enabled": true,
+      "hostname": "docker-container"
+    },
+    "qwen": {
+      "enabled": true,
+      "hostname": "docker-container"
+    }
+  },
+  "cron": {
+    "enabled": true,
+    "run_time": "00:30"
+  },
+  "feishu": {
+    "app_id": "",
+    "app_secret": ""
+  },
+  "auth": {
+    "auth_type": "openai",
+    "env": {
+      "OPENAI_API_KEY": "",
+      "OPENAI_BASE_URL": "https://api.openai.com/v1"
+    }
+  },
+  "insights": {
+    "model": "glm-5",
+    "temperature": 0.3,
+    "max_tokens": 4096
+  }
+}
+CONFIG_EOF
+
+    # Set restrictive permissions (Issue #1252)
+    chmod 600 "$CONFIG_FILE"
+    echo "Default config generated with permissions 600."
+}
+
+generate_default_config
+
+# ============================================================================
 # 1. Database Initialization
 # ============================================================================
 if [ -n "$DATABASE_URL" ]; then
