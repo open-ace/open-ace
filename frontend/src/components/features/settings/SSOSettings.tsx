@@ -235,7 +235,10 @@ export const SSOSettings: React.FC = () => {
 
     setIsRegistering(true);
     try {
-      await ssoApi.registerProvider(formData);
+      await ssoApi.registerProvider({
+        ...formData,
+        tenant_id: effectiveTenantId ?? undefined,
+      });
       handleCloseModal();
       fetchProviders();
       success(t('providerRegistered', language));
