@@ -1966,17 +1966,9 @@ CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_wo
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
-
---
---
-
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (path) WHERE (is_active IS TRUE);
-
-
---
---
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
 
@@ -2000,9 +1992,6 @@ ALTER TABLE ONLY business_project_members
 
 ALTER TABLE ONLY business_projects
     ADD CONSTRAINT business_projects_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY projects
-    ADD CONSTRAINT projects_business_project_id_fkey FOREIGN KEY (business_project_id) REFERENCES business_projects(id) ON DELETE SET NULL;
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
