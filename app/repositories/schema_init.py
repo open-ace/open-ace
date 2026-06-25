@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,13 @@ def _make_idempotent(sql_text: str) -> str:
 def _iter_pg_statements(sql_text: str):
     """Yield top-level statements from a SQL script (split on ';'-terminated lines).
 
-    Mirrors migrations/baseline.iter_sql_statements: the schema files only contain
-    plain DDL terminated by line-ending semicolons, so line-based splitting is safe.
+    Duplicates migrations/baseline.iter_sql_statements by design: importing
+    migrations/ (Alembic land: sqlalchemy, version_table) into the app startup
+    path is undesirable, so this keeps schema_init dependency-light. The two must
+    stay in sync; if the schema files ever grow dollar-quoted function bodies or
+    embedded semicolons, both need a real tokenizer. The schema files currently
+    contain only plain DDL terminated by line-ending semicolons, so line-based
+    splitting is safe (and tested against the MATERIALIZED VIEW statement).
     """
     buffer = []
     for line in sql_text.splitlines():
@@ -82,17 +88,26 @@ def load_schema_from_file(db_url: str | None = None, dialect: str | None = None)
     Replaces both the per-module get_ddl_statements() aggregation and
     SessionManager._ensure_tables(): both had drifted from the authoritative
     schema files (missing columns like project_id/project_path/request_count).
-    This reads schema-{sqlite,postgres}.sql, makes the CREATE statements
-    idempotent (IF NOT EXISTS), and executes them — so every table carries the
-    full, authoritative column set with no parallel hand-maintained DDL.
+    This reads schema-{sqlite,postgres}.sql and executes them — so every table
+    carries the full, authoritative column set with no parallel hand-maintained
+    DDL.
 
     ``dialect`` lets a caller (e.g. SessionManager._ensure_tables under a
     monkeypatched is_postgresql) pin the dialect explicitly; otherwise it's
     derived from the current DATABASE_URL.
 
-    For sqlite the whole script runs via executescript; for postgres statements
-    run one-by-one (each wrapped in try/except so a CREATE on an existing object
-    is a no-op rather than aborting the whole script).
+    Idempotency (re-running on a DB that already has the tables):
+      * sqlite: the whole script runs via executescript; CREATE TABLE/INDEX are
+        rewritten to IF NOT EXISTS in-memory so the script is safe to re-run.
+      * postgres: CREATE TABLE/INDEX are likewise rewritten to IF NOT EXISTS;
+        additionally the connection is switched to autocommit for the DDL loop
+        so each statement is independent. The schema file also contains objects
+        _not_ covered by IF NOT EXISTS (~40 CREATE SEQUENCE, a MATERIALIZED
+        VIEW, ALTER TABLE ADD CONSTRAINT) — on a live DB these raise "already
+        exists", which is expected and logged at DEBUG; genuinely unexpected
+        errors are logged at WARNING. Without autocommit a single pre-existing
+        object would abort the transaction and cascade-skip every later
+        statement (#1276 review).
     """
     from app.repositories.database import Database, is_postgresql
 
@@ -104,13 +119,49 @@ def load_schema_from_file(db_url: str | None = None, dialect: str | None = None)
     conn = db.get_connection()
     try:
         if db.is_postgresql:
-            cursor = conn.cursor()
-            for stmt in _iter_pg_statements(sql_text):
-                try:
-                    cursor.execute(stmt)
-                except Exception as e:  # noqa: BLE001 - idempotent DDL tolerates "already exists"
-                    logger.debug("Schema DDL skipped: %s — %s", stmt[:80].strip(), e)
-            conn.commit()
+            # autocommit so each statement is independent: a pre-existing
+            # SEQUENCE/VIEW/CONSTRAINT (not covered by IF NOT EXISTS) raising
+            # "already exists" won't abort the transaction and cascade-skip the
+            # rest of the script. NB: PgConnectionWrapper delegates attribute
+            # access to its underlying psycopg2 conn, but __setattr__ lands on
+            # the wrapper itself, so set autocommit on the raw _conn.
+            raw: Any = getattr(conn, "_conn", conn)
+            prev_autocommit = getattr(raw, "autocommit", False)
+            # psycopg2 raises ProgrammingError if autocommit is flipped while a
+            # transaction is open; pooled connections come back idle (the
+            # connection() context manager rolls back), but rollback defensively
+            # so a future caller returning a dirty conn can't break the flip.
+            try:
+                raw.rollback()
+            except Exception:
+                pass
+            raw.autocommit = True
+            try:
+                cursor = conn.cursor()
+                for stmt in _iter_pg_statements(sql_text):
+                    try:
+                        cursor.execute(stmt)
+                    except Exception as e:  # noqa: BLE001 - "already exists" is expected
+                        msg = str(e).lower()
+                        # Expected when re-running on an existing DB: the object
+                        # or constraint already exists. Postgres reports these in
+                        # several phrasings, so match them all and log at DEBUG;
+                        # anything else is a genuine DDL error → WARNING.
+                        is_expected = any(
+                            phrase in msg
+                            for phrase in (
+                                "already exists",
+                                "duplicate",
+                                "multiple primary keys",
+                                "constraint already exists",
+                                "already an object named",
+                            )
+                        )
+                        level = logging.DEBUG if is_expected else logging.WARNING
+                        logger.log(level, "Schema DDL skipped: %s — %s", stmt[:80].strip(), e)
+                cursor.close()
+            finally:
+                raw.autocommit = prev_autocommit
         else:
             conn.executescript(sql_text)  # sqlite: whole-script, IF NOT EXISTS makes it safe
             conn.commit()
