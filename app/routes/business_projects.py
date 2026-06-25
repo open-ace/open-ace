@@ -103,6 +103,9 @@ def update_business_project(project_id: int):
         key_patterns=key_patterns,
         is_active=is_active,
     )
+    if not updated:
+        return jsonify({"error": "Business project not found after update"}), 500
+
     logger.info(f"Updated business project {project_id} (name={updated.get('name')})")
     return jsonify({"success": True, "project": BusinessProject.from_dict(updated).to_dict()})
 

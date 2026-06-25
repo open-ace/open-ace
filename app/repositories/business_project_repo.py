@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.repositories.base import BaseRepository, DatabaseConnection
+from app.repositories.database import adapt_boolean_condition
 from app.utils.db_utils import get_db_connection, is_postgresql
 
 
@@ -42,30 +43,17 @@ class BusinessProjectRepository(BaseRepository):
         """List all business projects."""
         conn = self._get_connection()
         try:
-            if is_postgresql():
-                sql = """
-                    SELECT bp.*, u.username as created_by_username
-                    FROM business_projects bp
-                    LEFT JOIN users u ON bp.created_by = u.id
-                    WHERE 1=1
-                """
-                if not include_deleted:
-                    sql += " AND bp.deleted_at IS NULL"
-                if active_only:
-                    sql += " AND bp.is_active = true"
-                sql += " ORDER BY bp.name"
-            else:
-                sql = """
-                    SELECT bp.*, u.username as created_by_username
-                    FROM business_projects bp
-                    LEFT JOIN users u ON bp.created_by = u.id
-                    WHERE 1=1
-                """
-                if not include_deleted:
-                    sql += " AND bp.deleted_at IS NULL"
-                if active_only:
-                    sql += " AND bp.is_active = 1"
-                sql += " ORDER BY bp.name"
+            sql = """
+                SELECT bp.*, u.username as created_by_username
+                FROM business_projects bp
+                LEFT JOIN users u ON bp.created_by = u.id
+                WHERE 1=1
+            """
+            if not include_deleted:
+                sql += " AND bp.deleted_at IS NULL"
+            if active_only:
+                sql += f" AND {adapt_boolean_condition('bp.is_active', True)}"
+            sql += " ORDER BY bp.name"
 
             rows = conn.execute(sql).fetchall()
             return [self._row_to_dict(row) for row in rows]
@@ -140,7 +128,9 @@ class BusinessProjectRepository(BaseRepository):
                 project_id = cursor.lastrowid
                 conn.commit()
 
-            return self.get_project(project_id)
+            project = self.get_project(project_id)
+            assert project is not None, f"Project {project_id} not found after update"
+            return project
         finally:
             conn.close()
 
@@ -156,8 +146,8 @@ class BusinessProjectRepository(BaseRepository):
         """Update a business project."""
         conn = self._get_connection()
         try:
-            updates = []
-            params = []
+            updates: List[str] = []
+            params: List[Any] = []
 
             if name is not None:
                 updates.append("name = ?")
@@ -180,7 +170,9 @@ class BusinessProjectRepository(BaseRepository):
                     params.append(1 if is_active else 0)
 
             if not updates:
-                return self.get_project(project_id)
+                project = self.get_project(project_id)
+                assert project is not None, f"Project {project_id} not found"
+                return project
 
             updates.append("updated_at = ?")
             params.append(datetime.utcnow())
@@ -190,7 +182,9 @@ class BusinessProjectRepository(BaseRepository):
             conn.execute(sql, params)
             conn.commit()
 
-            return self.get_project(project_id)
+            project = self.get_project(project_id)
+            assert project is not None, f"Project {project_id} not found after update"
+            return project
         finally:
             conn.close()
 
@@ -303,18 +297,13 @@ class BusinessProjectRepository(BaseRepository):
         """Match a workspace path to a business project based on key patterns."""
         conn = self._get_connection()
         try:
-            if is_postgresql():
-                sql = """
-                    SELECT id, key_patterns
-                    FROM business_projects
-                    WHERE is_active = true AND deleted_at IS NULL AND key_patterns IS NOT NULL
-                """
-            else:
-                sql = """
-                    SELECT id, key_patterns
-                    FROM business_projects
-                    WHERE is_active = 1 AND deleted_at IS NULL AND key_patterns IS NOT NULL
-                """
+            sql = f"""
+                SELECT id, key_patterns
+                FROM business_projects
+                WHERE {adapt_boolean_condition('is_active', True)}
+                  AND deleted_at IS NULL
+                  AND key_patterns IS NOT NULL
+            """
 
             rows = conn.execute(sql).fetchall()
             for row in rows:
