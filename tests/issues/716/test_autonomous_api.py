@@ -145,6 +145,16 @@ class TestIssueSelectorParser:
 class TestCreateWorkflow:
     """Tests for POST /api/autonomous/workflows."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """These tests exercise creation logic, not the quota gate. Stub the
+        QuotaManager to allow-by-default so the (real, DB-backed) quota check
+        doesn't reach the environment's default DB and spuriously 429."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
+
     def test_create_success(self, client):
         repo = _make_repo()
         with _mock_auth():
@@ -726,6 +736,16 @@ class TestCancelMilestone:
 
 class TestForkMilestone:
     """Tests for POST /api/autonomous/workflows/<id>/milestones/<mid>/fork."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """These tests exercise fork logic, not the quota gate. Stub the
+        QuotaManager to allow-by-default so the gate doesn't reach the
+        environment's default DB and spuriously 429 the fork."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
 
     def test_fork_milestone(self, client):
         repo = _make_repo()
