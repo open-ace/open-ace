@@ -115,9 +115,7 @@ export async function listBusinessProjects(
 /**
  * Get a single business project
  */
-export async function getBusinessProject(
-  projectId: number
-): Promise<GetBusinessProjectResponse> {
+export async function getBusinessProject(projectId: number): Promise<GetBusinessProjectResponse> {
   return apiClient.get<GetBusinessProjectResponse>(`/api/business-projects/${projectId}`);
 }
 
@@ -137,16 +135,15 @@ export async function updateBusinessProject(
   projectId: number,
   data: UpdateBusinessProjectRequest
 ): Promise<UpdateBusinessProjectResponse> {
-  return apiClient.put<UpdateBusinessProjectResponse>(
-    `/api/business-projects/${projectId}`,
-    data
-  );
+  return apiClient.put<UpdateBusinessProjectResponse>(`/api/business-projects/${projectId}`, data);
 }
 
 /**
  * Delete a business project (soft delete)
  */
-export async function deleteBusinessProject(projectId: number): Promise<DeleteBusinessProjectResponse> {
+export async function deleteBusinessProject(
+  projectId: number
+): Promise<DeleteBusinessProjectResponse> {
   return apiClient.delete<DeleteBusinessProjectResponse>(`/api/business-projects/${projectId}`);
 }
 

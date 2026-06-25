@@ -59,6 +59,7 @@ def create_business_project():
         return jsonify({"error": f"Business project with code '{code}' already exists"}), 400
 
     from flask import g
+
     created_by = g.user.get("id") if hasattr(g, "user") else None
 
     project = repo.create_project(
