@@ -7,7 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { useToast, Modal, LoadingSpinner } from '@/components/common';
+import { useToast, Modal, Loading } from '@/components/common';
 import {
   listBusinessProjects,
   createBusinessProject,
@@ -17,6 +17,8 @@ import {
   addBusinessProjectMember,
   removeBusinessProjectMember,
   getBusinessProjectStats,
+} from '@/api/businessProjects';
+import type {
   BusinessProject,
   BusinessProjectMember,
   BusinessProjectStats,
@@ -242,7 +244,7 @@ export const BusinessProjectManagement: React.FC = () => {
   if (loading) {
     return (
       <div className="management-page">
-        <LoadingSpinner text={t('loading', language)} />
+        <Loading text={t('loading', language)} />
       </div>
     );
   }
