@@ -2868,6 +2868,10 @@ $workspace_config,
 }
 EOF
 
+    # Set permissions for config.json (Issue #1252)
+    # This file contains sensitive information: database password, token secret, etc.
+    chmod 600 "$config_file"
+
     print_success "配置文件创建完成: $config_file"
     print_info "  - 主机名: $HOST_NAME"
     print_info "  - 服务地址: $server_url"
