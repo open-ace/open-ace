@@ -406,6 +406,26 @@ def create_workflow():
     if not _workflow_rate_limiter.is_allowed(user_id):
         return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
 
+    # Quota gate (fail-closed): over-quota users may not create workflows.
+    # Autonomous dev consumes tokens that bypass the LLM proxy (local agents
+    # connect to the model API directly), so the proxy's 429 enforcement can't
+    # stop them — enforce here instead.
+    try:
+        from app.modules.governance.quota_manager import QuotaManager
+
+        quota_result = QuotaManager().check_quota(user_id)
+        if not quota_result["allowed"]:
+            return (
+                jsonify({"error": quota_result["reason"] or "Quota exceeded"}),
+                429,
+            )
+    except Exception as exc:
+        logger.error("Quota check failed, denying workflow creation for safety: %s", exc)
+        return (
+            jsonify({"error": "Quota check unavailable - request denied for safety"}),
+            429,
+        )
+
     # Validate remote machine admin permission
     workspace_type = data.get("workspace_type", "local")
     remote_machine_id = data.get("remote_machine_id", "")

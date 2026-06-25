@@ -37,6 +37,27 @@ RUNNING_BATCH_STATUSES = {
 QUEUE_ADVANCE_STATUSES = {"waiting", "completed", "failed", "planning_timeout"}
 QUEUE_BLOCKING_STATUSES = {"paused", "cancelled"}
 
+# Prefix written to error_message when a workflow is paused because its owner
+# exceeded quota. The scheduler auto-resumes only workflows paused with this
+# prefix — a user's manual pause (error_message empty / different text) is left
+# untouched. Autonomous agents bypass the LLM proxy (local mode connects to the
+# model API directly), so the proxy's 429 can't enforce quota for them; the
+# scheduler gate below is the enforcement point.
+QUOTA_PAUSE_REASON_PREFIX = "Quota exceeded"
+
+
+def _is_quota_paused(wf: dict) -> bool:
+    """Whether a paused workflow was paused by the quota gate.
+
+    Distinguishes quota-paused (auto-resumable) from a user's manual pause
+    (must stay paused until the user resumes). Uses the ``error_message``
+    prefix so no new DB column / migration is needed; the message is already
+    rendered by the timeline banner.
+    """
+    return wf.get("status") == "paused" and (wf.get("error_message") or "").startswith(
+        QUOTA_PAUSE_REASON_PREFIX
+    )
+
 
 class AutonomousScheduler:
     """Singleton scheduler that advances autonomous workflows."""
@@ -205,8 +226,36 @@ class AutonomousScheduler:
                     self._in_progress_branches.discard(branch)
             return workflow_id
 
+        # Quota gate (fail-closed): a user over quota (or whose quota check
+        # errored) must not advance. Local autonomous agents bypass the LLM
+        # proxy, so this scheduler gate — not the proxy's 429 — is what bounds
+        # them. Pausing here (before advance()) also bounds a workflow whose
+        # agent was launched on a prior cycle and is still mid-flight.
+        # NB: this lives INSIDE the try/finally below so the early-return paths
+        # still release the DB lock and in-progress slot — otherwise a
+        # quota-paused workflow would hold both forever.
         orchestrator = None
         try:
+            owner_id = workflow.get("user_id") if workflow else None
+            if owner_id:
+                try:
+                    from app.modules.governance.quota_manager import QuotaManager
+
+                    quota_result = QuotaManager().check_quota(int(owner_id))
+                    if not quota_result["allowed"]:
+                        self._pause_for_quota(
+                            repo, workflow_id, quota_result["reason"] or "Quota exceeded"
+                        )
+                        return workflow_id
+                except Exception as exc:
+                    logger.error(
+                        "Quota pre-check failed (fail-closed), pausing %s: %s",
+                        workflow_id[:8],
+                        exc,
+                    )
+                    self._pause_for_quota(repo, workflow_id, "Quota check unavailable")
+                    return workflow_id
+
             orchestrator = AutonomousOrchestrator(workflow_id)
             with self._orchestrator_lock:
                 self._running_orchestrators[workflow_id] = orchestrator
@@ -253,6 +302,94 @@ class AutonomousScheduler:
     def _batch_has_running_workflow(batch_workflows: list[dict]) -> bool:
         """Whether a batch currently has a workflow actively executing."""
         return any(wf.get("status") in RUNNING_BATCH_STATUSES for wf in batch_workflows)
+
+    def _pause_for_quota(self, repo, workflow_id: str, reason: str) -> None:
+        """Pause a workflow because its owner exceeded quota (or the check failed).
+
+        Writes the reason to ``error_message`` with the ``QUOTA_PAUSE_REASON_PREFIX``
+        so the auto-resume scan can later distinguish it from a user's manual
+        pause, and so the timeline banner surfaces why it stopped. Also stops the
+        running agent subprocess in case this fires while an agent launched on a
+        prior cycle is still in flight.
+        """
+        from app.routes.autonomous import _emit_event_safe, _pause_running_task
+
+        full_reason = (
+            reason
+            if reason.startswith(QUOTA_PAUSE_REASON_PREFIX)
+            else f"{QUOTA_PAUSE_REASON_PREFIX}: {reason}"
+        )
+        try:
+            _pause_running_task(workflow_id)
+        except Exception as e:
+            logger.warning("Failed to pause agent task for %s: %s", workflow_id[:8], e)
+        try:
+            repo.update_workflow(
+                workflow_id,
+                {
+                    "status": "paused",
+                    "paused_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    "error_message": full_reason,
+                },
+            )
+            _emit_event_safe(
+                workflow_id,
+                "status_change",
+                {"status": "paused", "reason": full_reason},
+            )
+            logger.info("Workflow %s paused for quota: %s", workflow_id[:8], full_reason)
+        except Exception as e:
+            logger.error("Failed to persist quota pause for %s: %s", workflow_id[:8], e)
+
+    def _auto_resume_quota_paused(self, repo) -> None:
+        """Resume workflows paused by the quota gate once the owner's quota recovers.
+
+        Only workflows paused *by the quota gate* (``error_message`` carries the
+        ``QUOTA_PAUSE_REASON_PREFIX``) are considered — a user's manual pause is
+        never auto-resumed. fail-closed: if the recovery check itself errors, the
+        workflow stays paused and is retried on a later cycle.
+        """
+        from app.modules.governance.quota_manager import QuotaManager
+        from app.routes.autonomous import PHASE_TO_STATUS, _emit_event_safe
+
+        try:
+            paused = repo.get_paused_workflows()
+        except Exception as e:
+            logger.error("Failed to query paused workflows for quota resume: %s", e)
+            return
+
+        for wf in paused:
+            if not _is_quota_paused(wf):
+                continue
+            owner_id = wf.get("user_id")
+            if not owner_id:
+                continue
+            try:
+                allowed = QuotaManager().check_quota(int(owner_id))["allowed"]
+            except Exception:
+                # fail-closed: leave it paused, retry next cycle.
+                continue
+            if not allowed:
+                continue
+
+            phase = wf.get("current_phase", "preparation")
+            status = PHASE_TO_STATUS.get(phase, "pending")
+            try:
+                repo.update_workflow(
+                    wf["workflow_id"],
+                    {"status": status, "paused_at": None, "error_message": ""},
+                )
+                _emit_event_safe(wf["workflow_id"], "status_change", {"status": status})
+                logger.info(
+                    "Auto-resumed quota-paused workflow %s (quota recovered)",
+                    wf["workflow_id"][:8],
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to auto-resume quota-paused workflow %s: %s",
+                    wf["workflow_id"][:8],
+                    e,
+                )
 
     def _promote_queued_workflows(self, repo) -> None:
         """Promote the next queued workflow in each eligible batch."""
@@ -311,6 +448,10 @@ class AutonomousScheduler:
 
         repo = _get_repo()
         self._promote_queued_workflows(repo)
+        # Resume workflows the quota gate paused once the owner's quota recovers.
+        # Runs before the active scan so a freshly-resumed workflow can be picked
+        # up in the same cycle.
+        self._auto_resume_quota_paused(repo)
         # Release git-conflict keys held by workflows paused mid-advance, so a
         # forked child sharing the parent's project_path isn't starved (#1002).
         self._reclaim_paused_slots(repo)

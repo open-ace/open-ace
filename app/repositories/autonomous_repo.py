@@ -390,6 +390,16 @@ class AutonomousWorkflowRepository:
             """
         )
 
+    def get_paused_workflows(self) -> list:
+        """Get all paused workflows (used by the quota auto-resume scan)."""
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE status = 'paused'
+            ORDER BY created_at ASC
+            """
+        )
+
     def get_queued_workflows(self) -> list:
         """Get workflows that are queued behind another workflow in the same batch."""
         return self.db.fetch_all(
