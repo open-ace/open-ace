@@ -1337,7 +1337,12 @@ WORKSPACE_PORT_RANGE_END="3200"
 WORKSPACE_MAX_INSTANCES="30"
 WORKSPACE_IDLE_TIMEOUT="30"
 WORKSPACE_URL=""      # Workspace URL (will be set based on host_name or server_url)
-WORKSPACE_BASE_DIR="/home"  # Default workspace base directory for Package version
+# Default workspace base directory for Package version: /home on Linux, /Users on macOS
+if [ "$(uname)" = "Darwin" ]; then
+    WORKSPACE_BASE_DIR="/Users"
+else
+    WORKSPACE_BASE_DIR="/home"
+fi
 
 # Upgrade systemd service switch decision (set in verify_upgrade_systemd_config)
 UPGRADE_SWITCH_SERVICE="no"
@@ -2968,18 +2973,9 @@ install_local() {
             # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
             local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
             if [ -z "$current_workspace_base" ]; then
-                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
-                # Determine WORKSPACE_BASE_DIR based on service user
-                local service_user=$(grep "^User=" "$service_file" | cut -d'=' -f2)
-                local upgrade_workspace_base="/home"
-                if [ "$service_user" != "root" ] && [ -n "$service_user" ]; then
-                    local user_home=$(getent passwd "$service_user" | cut -d: -f6)
-                    if [ -n "$user_home" ]; then
-                        upgrade_workspace_base="$user_home"
-                    fi
-                fi
-                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$upgrade_workspace_base" "$service_file"
-                print_info "Set WORKSPACE_BASE_DIR=$upgrade_workspace_base (Issue #1217)"
+                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service (Issue #1217)..."
+                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR" "$service_file"
+                print_info "Set WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR"
             fi
 
             print_info "Restarting open-ace service..."
