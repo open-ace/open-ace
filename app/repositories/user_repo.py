@@ -33,6 +33,7 @@ class UserRepository:
         role: str = "user",
         is_active: bool = True,
         system_account: Optional[str] = None,
+        tenant_id: int = 1,
     ) -> Optional[int]:
         """
         Create a new user.
@@ -44,6 +45,7 @@ class UserRepository:
             role: User role.
             is_active: Whether user is active.
             system_account: System account name for multi-user workspace mode.
+            tenant_id: Tenant ID for multi-tenant support.
 
         Returns:
             Optional[int]: User ID if successful, None otherwise.
@@ -54,8 +56,8 @@ class UserRepository:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
                     """
-                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                 """,
                     (
@@ -66,6 +68,7 @@ class UserRepository:
                         is_active,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
+                        tenant_id,
                     ),
                     commit=True,
                 )
@@ -75,8 +78,8 @@ class UserRepository:
                 is_active_int = adapt_boolean_value(is_active)
                 cursor = self.db.execute(
                     """
-                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         username,
@@ -86,6 +89,7 @@ class UserRepository:
                         is_active_int,
                         datetime.now(timezone.utc).replace(tzinfo=None),
                         system_account,
+                        tenant_id,
                     ),
                 )
                 return cast("int", cursor.lastrowid)
@@ -133,7 +137,10 @@ class UserRepository:
         return self.db.fetch_one(query, (email,))
 
     def get_all_users(
-        self, include_inactive: bool = True, include_deleted: bool = False
+        self,
+        include_inactive: bool = True,
+        include_deleted: bool = False,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get all users.
@@ -141,21 +148,29 @@ class UserRepository:
         Args:
             include_inactive: Whether to include inactive users.
             include_deleted: Whether to include soft-deleted users.
+            tenant_id: Filter by tenant ID.
 
         Returns:
             List[Dict]: List of user records.
         """
         conditions = []
+        params: list[Any] = []
+
         if not include_inactive:
             conditions.append("is_active IS TRUE")
         if not include_deleted:
             conditions.append("deleted_at IS NULL")
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         if conditions:
             query = f"SELECT * FROM users WHERE {' AND '.join(conditions)} ORDER BY created_at DESC"
         else:
             query = "SELECT * FROM users ORDER BY created_at DESC"
 
+        if params:
+            return self.db.fetch_all(query, tuple(params))
         return self.db.fetch_all(query)
 
     def update_user(
@@ -166,6 +181,7 @@ class UserRepository:
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
         system_account: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """
         Update user information.
@@ -177,6 +193,7 @@ class UserRepository:
             role: New role.
             is_active: New active status.
             system_account: System account name.
+            tenant_id: Tenant ID for multi-tenant support.
 
         Returns:
             bool: True if successful.
@@ -207,6 +224,10 @@ class UserRepository:
         if system_account is not None:
             updates.append("system_account = ?")
             params.append(system_account)
+
+        if tenant_id is not None:
+            updates.append("tenant_id = ?")
+            params.append(tenant_id)
 
         if not updates:
             return False

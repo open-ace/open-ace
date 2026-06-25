@@ -5,11 +5,16 @@ API endpoints for multi-tenant management.
 """
 
 import logging
+from typing import cast
 
+import bcrypt
 from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.repositories.user_repo import UserRepository
+from app.services.auth_service import get_security_settings_cached
 from app.services.tenant_service import TenantService
+from app.utils.validators import validate_email, validate_password, validate_username
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +23,12 @@ tenant_bp = Blueprint("tenant", __name__, url_prefix="/api/tenants")
 
 # Services
 tenant_service = TenantService()
+user_repo = UserRepository()
+
+
+def _hash_password(password: str) -> str:
+    """Hash a password using bcrypt."""
+    return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
 
 
 @tenant_bp.route("", methods=["GET"])
@@ -72,7 +83,7 @@ def get_tenant_by_slug(slug: str):
 @tenant_bp.route("", methods=["POST"])
 @admin_required
 def create_tenant():
-    """Create a new tenant (admin only)."""
+    """Create a new tenant (admin only). Optionally create an admin user."""
 
     data = request.get_json()
 
@@ -100,7 +111,69 @@ def create_tenant():
             return jsonify({"error": "Tenant slug already exists", "code": "SLUG_EXISTS"}), 409
         return jsonify({"error": "Failed to create tenant"}), 500
 
-    return jsonify(tenant.to_dict()), 201
+    # Optionally create admin user for the tenant
+    admin_info = None
+    admin_username = data.get("admin_username")
+    admin_password = data.get("admin_password")
+    admin_email = data.get("admin_email")
+
+    # Guard: tenant.id must exist after creation
+    assert tenant.id is not None  # Type guard for mypy
+    tenant_id = tenant.id
+
+    if admin_username and admin_password:
+        # Validate admin username
+        if not validate_username(admin_username):
+            return jsonify({"error": "Invalid admin username"}), 400
+
+        # Validate admin password
+        settings = get_security_settings_cached()
+        is_valid, error_msg = validate_password(admin_password, policy_settings=settings)
+        if not is_valid:
+            return jsonify({"error": f"Admin password invalid: {error_msg}"}), 400
+
+        # Validate admin email if provided
+        if admin_email and not validate_email(admin_email):
+            return jsonify({"error": "Invalid admin email"}), 400
+
+        # Check if username already exists
+        if user_repo.get_user_by_username(admin_username):
+            return jsonify({"error": "Admin username already exists"}), 400
+
+        # Check if email already exists (if provided)
+        if admin_email and user_repo.get_user_by_email(admin_email):
+            return jsonify({"error": "Admin email already exists"}), 400
+
+        # Create admin user
+        password_hash = _hash_password(admin_password)
+        admin_email_final = admin_email or f"{admin_username}@{slug or 'tenant'}.local"
+        admin_user_id = user_repo.create_user(
+            username=admin_username,
+            email=admin_email_final,
+            password_hash=password_hash,
+            role="admin",
+            is_active=True,
+            tenant_id=tenant_id,
+        )
+
+        if admin_user_id:
+            # Increment tenant user count
+            tenant_service.increment_user_count(tenant_id)
+            admin_info = {
+                "user_id": admin_user_id,
+                "username": admin_username,
+                "email": admin_email_final,
+                "role": "admin",
+            }
+            logger.info(f"Created admin user {admin_username} for tenant {tenant.name}")
+        else:
+            logger.warning(f"Failed to create admin user for tenant {tenant.name}")
+
+    response = tenant.to_dict()
+    if admin_info:
+        response["admin_user"] = admin_info
+
+    return jsonify(response), 201
 
 
 @tenant_bp.route("/<int:tenant_id>", methods=["PUT"])
