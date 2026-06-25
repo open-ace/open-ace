@@ -310,7 +310,7 @@ class BusinessProjectRepository(BaseRepository):
                 patterns = self._json_loads(row["key_patterns"])
                 for pattern in patterns:
                     if pattern and pattern.lower() in project_path.lower():
-                        return row["id"]
+                        return int(row["id"])
             return None
         finally:
             conn.close()

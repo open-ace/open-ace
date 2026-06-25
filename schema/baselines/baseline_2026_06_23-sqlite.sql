@@ -904,6 +904,11 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
+-- Business project members indexes for efficient JOIN queries (Issue #871)
+CREATE INDEX idx_business_project_members_business_project_id ON business_project_members (business_project_id);
+
+CREATE INDEX idx_business_project_members_user_id ON business_project_members (user_id);
+
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings (setting_key);
 
 CREATE INDEX idx_alerts_created_at ON alerts (created_at);
@@ -1021,6 +1026,9 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
 CREATE INDEX idx_projects_path ON projects (path);
+
+-- Index for business_project_id foreign key (Issue #871)
+CREATE INDEX idx_projects_business_project_id ON projects (business_project_id);
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
