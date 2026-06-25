@@ -3304,7 +3304,7 @@ do_fresh_install() {
         local db_url=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('database', {}).get('url', ''))")
         if [ -n "$db_url" ]; then
             cd "$target_path"
-            
+
             # Check if Open ACE schema already exists
             local schema_exists="no"
             if check_app_schema_exists "$db_url"; then
@@ -3342,7 +3342,7 @@ do_fresh_install() {
                     else
                         PGPASSWORD="$db_pass" psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -f "$schema_file" && print_success "Database schema created" || print_warning "Failed to execute schema"
                     fi
-                    
+
                     # Mark alembic version as head
                     print_info "Marking database version..."
                     if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
@@ -3846,10 +3846,10 @@ print(f\"db_pass='{pw}'\")
                     echo 'ERROR: Could not parse database name from URL'
                     exit 1
                 fi
-                
+
                 # Check for existing schema (Issue #1095)
                 schema_exists=\$(PGPASSWORD=\"\$db_pass\" psql -h \"\$db_host\" -p \"\$db_port\" -U \"\$db_user\" -d \"\$db_name\" -tAc \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('users', 'agent_sessions', 'session_messages')\" 2>/dev/null || echo \"0\")
-                
+
                 if [ \"\$schema_exists\" = \"3\" ]; then
                     echo 'Existing Open ACE schema detected (3 sentinel tables found)'
                     # Run baseline cutover + alembic upgrade
