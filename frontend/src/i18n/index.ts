@@ -4411,12 +4411,14 @@ export const translations: Record<Language, Translations> = {
     descriptionPlaceholder: '설명 입력',
     totalBusinessProjects: '전체 비즈니스 프로젝트',
     noBusinessProjects: '비즈니스 프로젝트 없음',
-    noBusinessProjectsDesc: '비즈니스 프로젝트를 생성하여 워크스페이스를 분류하고 통계를 집계합니다.',
+    noBusinessProjectsDesc:
+      '비즈니스 프로젝트를 생성하여 워크스페이스를 분류하고 통계를 집계합니다.',
     businessProjectCreated: '비즈니스 프로젝트가 성공적으로 생성되었습니다',
     businessProjectUpdated: '비즈니스 프로젝트가 성공적으로 업데이트되었습니다',
     businessProjectDeleted: '비즈니스 프로젝트가 성공적으로 삭제되었습니다',
     confirmDeleteBusinessProject: '비즈니스 프로젝트를 삭제하시겠습니까',
-    deleteBusinessProjectWarning: '프로젝트가 삭제되지만 워크스페이스는 분류되지 않은 상태로 유지됩니다.',
+    deleteBusinessProjectWarning:
+      '프로젝트가 삭제되지만 워크스페이스는 분류되지 않은 상태로 유지됩니다.',
     projectMembers: '프로젝트 멤버',
     statistics: '통계',
     totalWorkspaces: '전체 워크스페이스',
