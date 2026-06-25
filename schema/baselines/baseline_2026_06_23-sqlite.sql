@@ -847,6 +847,8 @@ CREATE UNIQUE INDEX api_key_store_tenant_id_provider_key_name_key ON api_key_sto
 
 CREATE UNIQUE INDEX autonomous_workflows_workflow_id_key ON autonomous_workflows (workflow_id);
 
+CREATE UNIQUE INDEX business_projects_code_key ON business_projects (code);
+
 CREATE UNIQUE INDEX compliance_reports_report_id_key ON compliance_reports (report_id);
 
 CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
