@@ -13,8 +13,8 @@ from contextlib import contextmanager
 import pytest
 import sqlalchemy as sa
 
-from migrations.baseline import BASELINE_REVISION, read_current_revision
-from scripts.cutover_alembic_baseline import cutover_database
+from migrations.baseline import BASELINE_REVISION, HEAD_REVISION, read_current_revision
+from scripts.cutover_alembic_baseline import collect_active_revision_ids, cutover_database
 
 
 def _postgres_server_binaries_available() -> bool:
@@ -167,8 +167,9 @@ def test_cutover_stamps_legacy_sqlite_and_backfills_latest_baseline_artifacts(tm
     assert "source" in session_columns
 
 
-def test_cutover_skips_active_revision_when_schema_complete(tmp_path):
-    """A DB already on baseline with all current objects is a no-op."""
+@pytest.mark.parametrize("revision", [BASELINE_REVISION, HEAD_REVISION])
+def test_cutover_skips_active_revision_when_schema_complete(tmp_path, revision):
+    """A DB already on baseline or any post-baseline revision is a no-op."""
     db_path = tmp_path / "active.db"
     conn = sqlite3.connect(db_path)
     conn.executescript(
@@ -203,7 +204,7 @@ def test_cutover_skips_active_revision_when_schema_complete(tmp_path):
         CREATE TABLE tool_account_mapping_rules (id INTEGER PRIMARY KEY);
         CREATE TABLE compliance_reports (id INTEGER PRIMARY KEY);
         CREATE TABLE alembic_version (version_num TEXT PRIMARY KEY);
-        INSERT INTO alembic_version(version_num) VALUES ('{BASELINE_REVISION}');
+        INSERT INTO alembic_version(version_num) VALUES ('{revision}');
         """
     )
     conn.commit()
@@ -217,7 +218,7 @@ def test_cutover_skips_active_revision_when_schema_complete(tmp_path):
         engine.dispose()
 
     assert changed is False
-    assert actions == [f"already on active revision {BASELINE_REVISION}"]
+    assert actions == [f"already on active revision {revision}"]
 
 
 def test_cutover_active_revision_backfills_newly_absorbed_objects(tmp_path):
@@ -304,6 +305,25 @@ def test_cutover_rejects_unknown_revision(tmp_path):
                 cutover_database(connection)
     finally:
         engine.dispose()
+
+
+def test_collect_active_revision_ids_includes_post_baseline_lineage():
+    """The active-lineage allowlist must cover post-baseline revisions.
+
+    Regression guard for the failure where the cutover refusal guard hard-coded
+    only the baseline revision: DBs already migrated to head were rejected.
+    The collector scans the live migrations/versions directory, so new
+    post-baseline migrations are picked up without editing the cutover script.
+    """
+    active_ids = collect_active_revision_ids()
+
+    # The post-baseline head (added by the auto_provision_users fix) must be
+    # recognised as an active revision so a head-stamped DB is a cutover no-op.
+    assert HEAD_REVISION in active_ids
+    # The baseline pins its revision to the BASELINE_REVISION symbol rather
+    # than a literal, so the collector does not surface it; the caller unions
+    # it in explicitly. Legacy ids must never leak into the active set.
+    assert BASELINE_REVISION not in active_ids
 
 
 def test_cutover_dry_run_reports_actions_without_mutating_schema(tmp_path):

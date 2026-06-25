@@ -994,7 +994,7 @@ class TestOrchestratorDevelopment:
         assert "Detailed implementation plan" in prompt
 
     def test_development_fails_sets_error(self):
-        """Failed development sets workflow to failed with error message."""
+        """Failed development with no code changes sets workflow to failed."""
         wf = _make_workflow(current_phase="development", status="developing")
         orch, mock_repo = self._make_orchestrator(wf)
         orch._runner = MagicMock()
@@ -1003,6 +1003,9 @@ class TestOrchestratorDevelopment:
         )
         orch._gh.get_current_commit.return_value = ""
         orch._gh.get_diff_stats.return_value = {}
+        # The agent produced nothing: no new commit AND no uncommitted changes,
+        # so the dev phase must fail rather than be salvaged (issue #723).
+        orch._gh.has_uncommitted_changes.return_value = False
 
         orch._do_development(wf)
 

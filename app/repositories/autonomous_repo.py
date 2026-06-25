@@ -390,6 +390,30 @@ class AutonomousWorkflowRepository:
             """
         )
 
+    def get_paused_workflows(self, quota_prefix: str = "") -> list:
+        """Get paused workflows, optionally filtered to a quota-pause reason.
+
+        With ``quota_prefix`` empty this returns every paused workflow. With a
+        prefix it filters in SQL (``error_message LIKE 'prefix%'``) so the
+        auto-resume scan stays cheap and doesn't grow with the full paused set.
+        """
+        if quota_prefix:
+            return self.db.fetch_all(
+                """
+                SELECT * FROM autonomous_workflows
+                WHERE status = 'paused' AND error_message LIKE ? ESCAPE '\\'
+                ORDER BY created_at ASC
+                """,
+                (f"{escape_like(quota_prefix)}%",),
+            )
+        return self.db.fetch_all(
+            """
+            SELECT * FROM autonomous_workflows
+            WHERE status = 'paused'
+            ORDER BY created_at ASC
+            """
+        )
+
     def get_queued_workflows(self) -> list:
         """Get workflows that are queued behind another workflow in the same batch."""
         return self.db.fetch_all(
@@ -652,8 +676,16 @@ class AutonomousWorkflowRepository:
                     now,
                     now,
                 ]
+                # Copied milestones become the child workflow's own history. They
+                # are not the fork point this child originated from, so the
+                # ancestor's fork_workflow_id (which points at a *sibling*
+                # workflow, e.g. an earlier fork) must not be carried over —
+                # otherwise a later fork from this child misattributes its split
+                # to the ancestor's branch point. See PR #1243 review.
+                source_milestone = dict(ms)
+                source_milestone["fork_workflow_id"] = ""
                 for f in fields:
-                    col_values.append(ms.get(f, ""))
+                    col_values.append(source_milestone.get(f, ""))
 
                 cursor.execute(
                     adapt_sql(

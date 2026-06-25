@@ -19,6 +19,7 @@ Environment=AI_TOKEN_WEB_PORT=__PORT__
 Environment=AI_TOKEN_WEB_HOST=__HOST__
 Environment=HOME=__HOME__
 Environment=SECRET_KEY=__SECRET_KEY__
+Environment=WORKSPACE_BASE_DIR=__WORKSPACE_BASE_DIR__
 
 # Security settings
 NoNewPrivileges=true

@@ -133,6 +133,11 @@ const SmtpConfig = lazy(() =>
     default: m.SmtpConfig,
   }))
 );
+const ForceChangePasswordModal = lazy(() =>
+  import('@/components/features/ForceChangePasswordModal').then((m) => ({
+    default: m.ForceChangePasswordModal,
+  }))
+);
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -356,68 +361,75 @@ const AppContent: React.FC = () => {
   }, []);
 
   return (
-    <Routes>
-      {/* Work Mode Routes - All users */}
-      <Route path="/work/*" element={<WorkRoutes />} />
+    <>
+      {/* Force change password modal - shown when must_change_password is true */}
+      <Suspense fallback={null}>
+        <ForceChangePasswordModal />
+      </Suspense>
 
-      {/* Manage Mode Routes - Admin only */}
-      <Route
-        path="/manage/*"
-        element={isAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
-      />
+      <Routes>
+        {/* Work Mode Routes - All users */}
+        <Route path="/work/*" element={<WorkRoutes />} />
 
-      {/* Legacy Routes - redirect based on user role */}
-      <Route
-        path="/dashboard"
-        element={
-          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route
-        path="/messages"
-        element={
-          isAdmin ? <Navigate to="/manage/messages" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route
-        path="/analysis"
-        element={
-          isAdmin ? <Navigate to="/manage/analysis" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route
-        path="/management"
-        element={
-          isAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route
-        path="/security"
-        element={
-          isAdmin ? <Navigate to="/manage/security" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route path="/workspace" element={<Navigate to="/work" replace />} />
-      <Route path="/sessions" element={<Navigate to="/work/sessions" replace />} />
-      <Route path="/prompts" element={<Navigate to="/work/prompts" replace />} />
+        {/* Manage Mode Routes - Admin only */}
+        <Route
+          path="/manage/*"
+          element={isAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
+        />
 
-      {/* Report - Keep as standalone for now */}
-      <Route path="/report" element={<LegacyAppContent />} />
+        {/* Legacy Routes - redirect based on user role */}
+        <Route
+          path="/dashboard"
+          element={
+            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route
+          path="/messages"
+          element={
+            isAdmin ? <Navigate to="/manage/messages" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route
+          path="/analysis"
+          element={
+            isAdmin ? <Navigate to="/manage/analysis" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route
+          path="/management"
+          element={
+            isAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route
+          path="/security"
+          element={
+            isAdmin ? <Navigate to="/manage/security" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route path="/workspace" element={<Navigate to="/work" replace />} />
+        <Route path="/sessions" element={<Navigate to="/work/sessions" replace />} />
+        <Route path="/prompts" element={<Navigate to="/work/prompts" replace />} />
 
-      {/* Default redirect - Admin goes to manage mode, others go to work mode */}
-      <Route
-        path="/"
-        element={
-          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
-        }
-      />
-      <Route
-        path="*"
-        element={
-          isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
-        }
-      />
-    </Routes>
+        {/* Report - Keep as standalone for now */}
+        <Route path="/report" element={<LegacyAppContent />} />
+
+        {/* Default redirect - Admin goes to manage mode, others go to work mode */}
+        <Route
+          path="/"
+          element={
+            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+          }
+        />
+        <Route
+          path="*"
+          element={
+            isAdmin ? <Navigate to="/manage/dashboard" replace /> : <Navigate to="/work" replace />
+          }
+        />
+      </Routes>
+    </>
   );
 };
 

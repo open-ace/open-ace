@@ -287,6 +287,8 @@ export const useAppStore = create<AppState>()(
 export const useUser = () => useAppStore((state) => state.user);
 export const useIsAuthenticated = () => useAppStore((state) => state.isAuthenticated);
 export const useAuthLoading = () => useAppStore((state) => state.authLoading);
+export const useMustChangePassword = () =>
+  useAppStore((state) => state.user?.must_change_password ?? false);
 export const useTheme = () => useAppStore((state) => state.theme);
 export const useLanguage = () => useAppStore((state) => state.language);
 export const useSidebarCollapsed = () => useAppStore((state) => state.sidebarCollapsed);

@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, governanceApi, complianceApi } from '@/api';
+import { adminApi, governanceApi, complianceApi, tenantApi } from '@/api';
 import {
   aiAgentSettingsApi,
   type AiAgentSettings,
@@ -20,10 +20,10 @@ import type {
 } from '@/api';
 
 // User Management Hooks
-export function useUsers() {
+export function useUsers(tenantId?: number) {
   return useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => adminApi.getUsers(),
+    queryKey: ['admin', 'users', tenantId],
+    queryFn: () => adminApi.getUsers(tenantId),
   });
 }
 
@@ -65,6 +65,20 @@ export function useUpdateUserPassword() {
   return useMutation({
     mutationFn: ({ userId, password }: { userId: number; password: string }) =>
       adminApi.updateUserPassword(userId, password),
+  });
+}
+
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: (userId: number) => adminApi.resetUserPassword(userId),
+  });
+}
+
+// Tenant Management Hooks
+export function useTenants() {
+  return useQuery({
+    queryKey: ['admin', 'tenants'],
+    queryFn: () => tenantApi.listTenants(),
   });
 }
 

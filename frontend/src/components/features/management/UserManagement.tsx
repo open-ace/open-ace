@@ -8,9 +8,10 @@ import {
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
-  useUpdateUserPassword,
+  useResetUserPassword,
   usePageRefresh,
   useSecuritySettings,
+  useTenants,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -32,12 +33,18 @@ import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
 
 export const UserManagement: React.FC = () => {
   const language = useLanguage();
-  const { data: users, isLoading, isError, error, refetch } = useUsers();
+  const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(undefined);
+  const { data: users, isLoading, isError, error, refetch } = useUsers(selectedTenantId);
   const { data: securitySettings } = useSecuritySettings();
+  const { data: tenantsData } = useTenants();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
-  const updateUserPassword = useUpdateUserPassword();
+  const resetUserPassword = useResetUserPassword();
+
+  // Temporary password modal state
+  const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
+  const [tempPassword, setTempPassword] = useState<string>('');
 
   // Page refresh control - manual refresh for user management
   const pageRefresh = usePageRefresh({
@@ -60,6 +67,7 @@ export const UserManagement: React.FC = () => {
     role: 'user',
     system_account: '',
     is_active: true,
+    tenant_id: undefined,
   });
 
   const roleOptions = [
@@ -72,6 +80,10 @@ export const UserManagement: React.FC = () => {
     { value: 'true', label: t('active', language) },
     { value: 'false', label: t('inactive', language) },
   ];
+
+  const tenantFormOptions = tenantsData?.tenants
+    ? tenantsData.tenants.map((t) => ({ value: String(t.id), label: t.name }))
+    : [];
 
   // Password policy validation
   const validatePasswordPolicy = (password: string): string | null => {
@@ -136,6 +148,7 @@ export const UserManagement: React.FC = () => {
       role: 'user',
       system_account: '',
       is_active: true,
+      tenant_id: selectedTenantId,
     });
     setShowModal(true);
   };
@@ -151,6 +164,7 @@ export const UserManagement: React.FC = () => {
       role: user.role,
       system_account: user.system_account ?? '',
       is_active: user.is_active,
+      tenant_id: user.tenant_id,
     });
     setShowModal(true);
   };
@@ -167,6 +181,7 @@ export const UserManagement: React.FC = () => {
       role: 'user',
       system_account: '',
       is_active: true,
+      tenant_id: undefined,
     });
   };
 
@@ -191,18 +206,11 @@ export const UserManagement: React.FC = () => {
         setFormError(passwordError);
         return;
       }
-    } else if (formData.password && formData.password.trim() !== '') {
-      // Optional password update for existing user - validate with policy
-      const passwordError = validatePasswordPolicy(formData.password);
-      if (passwordError) {
-        setFormError(passwordError);
+
+      if (formData.password !== formData.confirm_password) {
+        setFormError(t('passwordMismatch', language) ?? 'Passwords do not match');
         return;
       }
-    }
-
-    if (formData.password && formData.password !== formData.confirm_password) {
-      setFormError(t('passwordMismatch', language) ?? 'Passwords do not match');
-      return;
     }
 
     try {
@@ -216,14 +224,6 @@ export const UserManagement: React.FC = () => {
           is_active: formData.is_active,
         };
         await updateUser.mutateAsync({ userId: editingUser.id, data: updateData });
-
-        // Update password if provided
-        if (formData.password && formData.password.trim() !== '') {
-          await updateUserPassword.mutateAsync({
-            userId: editingUser.id,
-            password: formData.password,
-          });
-        }
       } else {
         // Create new user
         await createUser.mutateAsync(formData);
@@ -251,6 +251,23 @@ export const UserManagement: React.FC = () => {
     }
   };
 
+  const handleResetPassword = async (userId: number) => {
+    try {
+      const result = await resetUserPassword.mutateAsync(userId);
+      if (result.temporary_password) {
+        setTempPassword(result.temporary_password);
+        setShowTempPasswordModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to reset password:', err);
+    }
+  };
+
+  const handleCloseTempPasswordModal = () => {
+    setShowTempPasswordModal(false);
+    setTempPassword('');
+  };
+
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {
       case 'admin':
@@ -270,12 +287,24 @@ export const UserManagement: React.FC = () => {
     return <Error message={error?.message || t('error', language)} onRetry={() => refetch()} />;
   }
 
+  // Tenant filter options
+  const tenantFilterOptions = [
+    { value: '', label: t('allTenants', language) ?? 'All Tenants' },
+    ...(tenantsData?.tenants?.map((t) => ({ value: String(t.id), label: t.name })) ?? []),
+  ];
+
   return (
     <div className="user-management">
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('userList', language)}</h2>
         <div className="d-flex gap-2">
+          <Select
+            options={tenantFilterOptions}
+            value={selectedTenantId ? String(selectedTenantId) : ''}
+            onChange={(value) => setSelectedTenantId(value ? Number(value) : undefined)}
+            placeholder={t('selectTenant', language) ?? 'Select Tenant'}
+          />
           <PageRefreshControl
             refresh={pageRefresh}
             compact={true}
@@ -304,6 +333,7 @@ export const UserManagement: React.FC = () => {
                 <th>{t('toolAccounts', language)}</th>
                 <th>{language === 'zh' ? '映射规则' : 'Mapping Rules'}</th>
                 <th>{t('tableRole', language)}</th>
+                <th>{t('tenant', language) ?? 'Tenant'}</th>
                 <th>{t('tableStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
                 <th>{t('tableActions', language)}</th>
@@ -330,6 +360,7 @@ export const UserManagement: React.FC = () => {
                   <td>
                     <Badge variant={getRoleBadgeVariant(user.role)}>{user.role}</Badge>
                   </td>
+                  <td>{user.tenant_name ?? '-'}</td>
                   <td>
                     <Badge variant={user.is_active ? 'success' : 'secondary'}>
                       {user.is_active ? t('active', language) : t('inactive', language)}
@@ -344,6 +375,15 @@ export const UserManagement: React.FC = () => {
                         onClick={() => handleOpenEdit(user)}
                       >
                         <i className="bi bi-pencil" />
+                      </Button>
+                      <Button
+                        variant="outline-warning"
+                        size="sm"
+                        onClick={() => handleResetPassword(user.id)}
+                        disabled={resetUserPassword.isPending}
+                        title={t('resetPassword', language) ?? 'Reset Password'}
+                      >
+                        <i className="bi bi-key" />
                       </Button>
                       <Button
                         variant="outline-danger"
@@ -436,6 +476,17 @@ export const UserManagement: React.FC = () => {
                 }
               />
             </div>
+            <div className="col-md-6">
+              <label className="form-label">{t('tenant', language) ?? 'Tenant'}</label>
+              <Select
+                options={tenantFormOptions}
+                value={formData.tenant_id ? String(formData.tenant_id) : ''}
+                onChange={(value) =>
+                  setFormData({ ...formData, tenant_id: value ? Number(value) : undefined })
+                }
+                placeholder={t('selectTenant', language) ?? 'Select Tenant'}
+              />
+            </div>
             {editingUser && (
               <div className="col-md-6">
                 <label className="form-label">{t('activationStatus', language)}</label>
@@ -471,37 +522,50 @@ export const UserManagement: React.FC = () => {
                 </div>
               </>
             )}
-            {editingUser && (
-              <>
-                <div className="col-12">
-                  <hr className="my-2" />
-                  <small className="text-muted d-block mb-2">{t('passwordHint', language)}</small>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">{t('newPassword', language)}</label>
-                  <TextInput
-                    type="password"
-                    value={formData.password}
-                    onChange={(value: string) => setFormData({ ...formData, password: value })}
-                    placeholder={t('enterPassword', language)}
-                  />
-                  <PasswordPolicyHint />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">{t('confirmPassword', language)}</label>
-                  <TextInput
-                    type="password"
-                    value={formData.confirm_password ?? ''}
-                    onChange={(value: string) =>
-                      setFormData({ ...formData, confirm_password: value })
-                    }
-                    placeholder={t('confirmPassword', language)}
-                  />
-                </div>
-              </>
-            )}
           </div>
         </form>
+      </Modal>
+
+      {/* Temporary Password Modal */}
+      <Modal
+        isOpen={showTempPasswordModal}
+        onClose={handleCloseTempPasswordModal}
+        title={t('temporaryPassword', language) ?? 'Temporary Password'}
+        size="md"
+        footer={
+          <Button variant="primary" onClick={handleCloseTempPasswordModal}>
+            {t('close', language)}
+          </Button>
+        }
+      >
+        <div className="alert alert-warning mb-3">
+          <i className="bi bi-exclamation-triangle-fill me-2" />
+          {t('tempPasswordWarning', language) ??
+            'Please share this password securely with the user. They will be required to change it on first login.'}
+        </div>
+        <div className="mb-3">
+          <label className="form-label">
+            {t('temporaryPasswordLabel', language) ?? 'Temporary Password'}
+          </label>
+          <div className="input-group">
+            <input
+              type="text"
+              className="form-control"
+              value={tempPassword}
+              readOnly
+              style={{ fontWeight: 'bold', fontSize: '1.2em' }}
+            />
+            <Button
+              variant="outline-secondary"
+              onClick={() => {
+                navigator.clipboard.writeText(tempPassword);
+              }}
+              title={t('copyToClipboard', language) ?? 'Copy to clipboard'}
+            >
+              <i className="bi bi-clipboard" />
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

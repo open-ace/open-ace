@@ -1028,7 +1028,13 @@ class AutonomousOrchestrator:
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
-            self._link_session_to_current_milestone(result.session_id)
+            # Link the milestone card to the REAL claude session id (not the
+            # per-call wrapper uuid), so all milestones sharing a session line
+            # (e.g. plan_created/plan_refined/dev on the "main" line) show the
+            # SAME id and the card's "view session" points to the right transcript.
+            # Falls back to the wrapper uuid when the real id isn't resolved yet.
+            link_session_id = result.source_session_id or result.session_id
+            self._link_session_to_current_milestone(link_session_id)
             # Always update the session line with the real CLI session id.
             # Resume can fail silently (e.g. the prior session died after a
             # crash/timeout), in which case the agent falls back to a fresh
@@ -2205,27 +2211,57 @@ class AutonomousOrchestrator:
                 )
                 return
 
+        # Salvage logic (issue #723): the dev agent may report failure
+        # (success=False) even though it produced real work this session — most
+        # commonly a subprocess timeout where claude-code finished and committed
+        # but never emitted a closing `result` event, or an API error that
+        # landed after the commit. When ``sha_changed`` proves the agent
+        # committed code, treat the round as completed instead of discarding
+        # hours of work. Only the no-commit case (handled at the ``not
+        # sha_changed`` branch above) is a true failure.
+        #
+        # Note (scope): ``sha_changed`` is set both by an explicit agent commit
+        # AND by the auto-commit of uncommitted changes above. So a failed agent
+        # that left half-finished edits is also salvaged and forwarded to the
+        # test phase. This is intentional: the test phase is the gate that
+        # catches broken/half-finished code, so salvaging lets the workflow
+        # progress to that gate rather than dying on a late subprocess error.
+        salvaged = (not result.success) and bool(sha_changed)
+        if salvaged:
+            logger.warning(
+                "Dev agent reported failure (%s) but produced a new commit %s "
+                "this session — salvaging development and proceeding to tests",
+                result.error,
+                (commit_sha or "")[:8],
+            )
+
         dev_result_summary = self._build_dev_result_summary(
             self._artifact_text(result),
             diff_stats,
             commit_sha,
-            result.success,
+            result.success or salvaged,
         )
+
+        milestone_error = ""
+        if salvaged:
+            milestone_error = f"Salvaged after agent error: {result.error or ''}".strip()
+        elif result.error:
+            milestone_error = result.error
 
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
             {
-                "status": "completed" if result.success else "failed",
+                "status": "completed" if (result.success or salvaged) else "failed",
                 "session_id": result.session_id,
                 "result_summary": dev_result_summary,
                 "tldr": self._artifact_tldr(result),
                 "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                 "diff_stats": json.dumps(diff_stats),
-                "error_message": result.error or "",
+                "error_message": milestone_error,
             },
         )
 
-        if not result.success:
+        if not result.success and not salvaged:
             self._update_workflow(
                 {"status": "failed", "error_message": f"Development failed: {result.error}"}
             )

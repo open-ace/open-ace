@@ -350,139 +350,22 @@ class SessionManager:
         return cursor.fetchone() is not None
 
     def _ensure_tables(self) -> None:
-        """Ensure required tables exist."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        """Ensure required tables exist from the authoritative schema (#1273).
 
-        # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
-        id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        Loads schema-sqlite.sql / schema-postgres.sql via the centralized
+        load_schema_from_file(), which is the single source of truth. This
+        replaces the former hand-maintained CREATE TABLE + alter_columns list
+        that had drifted from the authoritative schema (missing project_id,
+        project_path, request_count, etc.). Idempotent (CREATE IF NOT EXISTS).
+        """
+        from app.repositories.schema_init import load_schema_from_file
 
-        # Create agent_sessions table
-        cursor.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS agent_sessions (
-                id {id_type},
-                session_id TEXT NOT NULL UNIQUE,
-                session_type TEXT DEFAULT 'chat',
-                title TEXT,
-                tool_name TEXT NOT NULL,
-                host_name TEXT DEFAULT 'localhost',
-                user_id INTEGER,
-                status TEXT DEFAULT 'active',
-                context TEXT,
-                settings TEXT,
-                total_tokens INTEGER DEFAULT 0,
-                total_input_tokens INTEGER DEFAULT 0,
-                total_output_tokens INTEGER DEFAULT 0,
-                message_count INTEGER DEFAULT 0,
-                model TEXT,
-                tags TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP,
-                expires_at TIMESTAMP,
-                cli_session_id TEXT DEFAULT ''
-            )
-        """
-        )
-
-        # Create session_messages table
-        cursor.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS session_messages (
-                id {id_type},
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT,
-                tokens_used INTEGER DEFAULT 0,
-                model TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                source_timestamp TIMESTAMP,
-                metadata TEXT,
-                milestone_id TEXT DEFAULT '',
-                source TEXT DEFAULT '',
-                external_message_id TEXT DEFAULT '',
-                content_blocks TEXT,
-                FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
-            )
-        """
-        )
-
-        # Create indexes
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_sessions_session_id
-            ON agent_sessions(session_id)
-        """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id
-            ON agent_sessions(user_id)
-        """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
-            ON agent_sessions(status)
-        """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_sessions_tool_name
-            ON agent_sessions(tool_name)
-        """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_session_messages_session_id
-            ON session_messages(session_id)
-        """
-        )
-
-        # Add remote workspace columns if not present.
-        # Use a check-first strategy so PostgreSQL never enters a failed
-        # transaction (a single "column already exists" error aborts the whole
-        # transaction in PG and breaks subsequent statements). SQLite tolerates
-        # the try/except fallback, but check-first works for both backends.
-        alter_columns = [
-            ("agent_sessions", "workspace_type", "TEXT DEFAULT 'local'"),
-            ("agent_sessions", "remote_machine_id", "TEXT"),
-            ("agent_sessions", "request_count", "INTEGER DEFAULT 0"),
-            ("agent_sessions", "paused_at", "TIMESTAMP"),
-            ("agent_sessions", "cli_session_id", "TEXT DEFAULT ''"),
-            ("session_messages", "milestone_id", "TEXT DEFAULT '' NOT NULL"),
-            ("session_messages", "source_timestamp", "TIMESTAMP"),
-            ("session_messages", "source", "TEXT DEFAULT '' NOT NULL"),
-            ("session_messages", "external_message_id", "TEXT DEFAULT ''"),
-            ("session_messages", "content_blocks", "TEXT"),
-        ]
-        for table, column, definition in alter_columns:
-            if not self._column_exists(cursor, table, column):
-                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-        # Add newer indexes only when missing (CREATE INDEX IF NOT EXISTS is
-        # also valid on both backends, but check-first keeps PG transactions
-        # healthy when a prior statement in another caller failed).
-        if not self._index_exists(
-            cursor, "session_messages", "idx_session_messages_external_message_id"
-        ):
-            cursor.execute(
-                """
-                CREATE INDEX idx_session_messages_external_message_id
-                ON session_messages(session_id, external_message_id)
-            """
-            )
-        if not self._index_exists(cursor, "session_messages", "idx_session_messages_source"):
-            cursor.execute(
-                """
-                CREATE INDEX idx_session_messages_source
-                ON session_messages(session_id, source)
-            """
-            )
-
-        conn.commit()
-        conn.close()
+        # Pin the dialect from THIS module's is_postgresql (tests monkeypatch it
+        # here, not in schema_init.database), and convert the sqlite db_path to a
+        # db_url. Postgres relies on DATABASE_URL (db_url=None).
+        dialect = "postgresql" if is_postgresql() else "sqlite"
+        db_url = f"sqlite:///{self.db_path}" if dialect == "sqlite" and self.db_path else None
+        load_schema_from_file(db_url=db_url, dialect=dialect)
 
     @staticmethod
     def _extract_external_message_id(metadata: Optional[dict[str, Any]]) -> str:
@@ -738,6 +621,37 @@ class SessionManager:
         conn.close()
 
         return success
+
+    def list_cli_session_ids_for_project(self, project_path: str) -> set[str]:
+        """Return all non-empty ``cli_session_id`` values for sessions in a project.
+
+        Used by the autonomous runner's mtime fallback to EXCLUDE sessions already
+        bound to a workflow's session lines (main/review/test). Without this, a
+        shared "main" session — continuously appended and thus always newest by
+        mtime — gets wrongly picked for a fresh review/test line, collapsing the
+        3-session topology (issue #723).
+        """
+        if not project_path:
+            return set()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                f"""SELECT DISTINCT cli_session_id FROM agent_sessions
+                    WHERE project_path = {_param()} AND cli_session_id IS NOT NULL
+                      AND cli_session_id != ''""",
+                (project_path,),
+            )
+            return {
+                (row["cli_session_id"] if not isinstance(row, (tuple, list)) else row[0])
+                for row in cursor.fetchall()
+                if (row["cli_session_id"] if not isinstance(row, (tuple, list)) else row[0])
+            }
+        except Exception:
+            logger.warning("Failed to list cli_session_ids for project", exc_info=True)
+            return set()
+        finally:
+            conn.close()
 
     ALLOWED_UPDATE_FIELDS = {
         "status",

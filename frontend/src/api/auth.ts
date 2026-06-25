@@ -85,4 +85,18 @@ export const authApi = {
     const response = await apiClient.delete<{ success: boolean }>('/api/user/avatar');
     return response;
   },
+
+  /**
+   * Change password
+   */
+  async changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ success: boolean; message?: string }> {
+    const response = await apiClient.post<{ success: boolean; message?: string }>(
+      '/api/auth/change-password',
+      { current_password: currentPassword, new_password: newPassword }
+    );
+    return response;
+  },
 };

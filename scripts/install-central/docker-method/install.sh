@@ -2391,6 +2391,8 @@ upgrade_deployment() {
                     if [ -n "$home_files" ]; then
                         print_info "发现容器内 home 目录数据，正在迁移..."
                         mkdir -p "$DEPLOY_DIR/data/home"
+                        # Set permissions for /home directory (Issue #1249)
+                        chmod 755 "$DEPLOY_DIR/data/home"
 
                         for user_dir in $home_files; do
                             local target_dir="$DEPLOY_DIR/data/home/$user_dir"
@@ -2486,6 +2488,8 @@ upgrade_deployment() {
     mkdir -p "$DEPLOY_DIR"/logs
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         mkdir -p "$DEPLOY_DIR"/data/home
+        # Set permissions for /home directory (Issue #1249)
+        chmod 755 "$DEPLOY_DIR"/data/home
     fi
     print_success "持久化目录创建完成"
 
@@ -2706,9 +2710,11 @@ create_directories() {
     # This ensures user home directories persist across container restarts
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         mkdir -p "$DEPLOY_DIR"/data/home
-        # Set restrictive permissions for sensitive user data (Issue #1209 review)
-        chmod 700 "$DEPLOY_DIR"/data/home
-        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 700)"
+        # Set permissions for /home directory (Issue #1249)
+        # /home should be 755 (enterable by all users)
+        # Individual /home/<user> directories will be 700 (private, set by useradd -m)
+        chmod 755 "$DEPLOY_DIR"/data/home
+        print_info "  - $DEPLOY_DIR/data/home (多用户 home 目录, 权限 755)"
     fi
 
     print_success "目录创建完成"
@@ -2861,6 +2867,10 @@ $workspace_config,
   }
 }
 EOF
+
+    # Set permissions for config.json (Issue #1252)
+    # This file contains sensitive information: database password, token secret, etc.
+    chmod 600 "$config_file"
 
     print_success "配置文件创建完成: $config_file"
     print_info "  - 主机名: $HOST_NAME"
@@ -3019,6 +3029,10 @@ volumes:
   postgres-data:
     driver: local
 EOF
+
+    # Set permissions for docker-compose.yml (Issue #1253)
+    # This file contains sensitive information: database password, secret key, etc.
+    chmod 600 "$compose_file"
 
     print_success "Docker Compose 配置创建完成"
 }

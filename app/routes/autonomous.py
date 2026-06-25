@@ -119,6 +119,28 @@ def _resolve_milestone_session_id(milestone: dict[str, Any]) -> str:
     return milestone.get("review_session_id") or milestone.get("session_id") or ""
 
 
+def _enforce_quota_gate(user_id: int) -> Response | None:
+    """Fail-closed quota pre-check for workflow creation paths.
+
+    Autonomous dev consumes tokens that bypass the LLM proxy (local agents
+    connect to the model API directly), so the proxy's 429 can't bound them —
+    enforce here instead. Returns a 429 ``Response`` to short-circuit the
+    caller when the user is over quota *or* the quota check itself errors
+    (fail-closed); returns ``None`` to proceed. Shared by ``create_workflow``
+    and ``fork_milestone`` so the fork path can't bypass the gate.
+    """
+    try:
+        from app.modules.governance.quota_manager import QuotaManager
+
+        quota_result = QuotaManager().check_quota(user_id)
+        if not quota_result["allowed"]:
+            return jsonify({"error": quota_result["reason"] or "Quota exceeded"}), 429
+    except Exception as exc:
+        logger.error("Quota check failed, denying workflow creation for safety: %s", exc)
+        return jsonify({"error": "Quota check unavailable - request denied for safety"}), 429
+    return None
+
+
 def _enrich_milestones_with_usage(
     workflow_id: str, milestones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -405,6 +427,11 @@ def create_workflow():
     # Rate limit: max 10 workflows per user per hour
     if not _workflow_rate_limiter.is_allowed(user_id):
         return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
+
+    # Quota gate (fail-closed): over-quota users may not create workflows.
+    quota_rejection = _enforce_quota_gate(user_id)
+    if quota_rejection is not None:
+        return quota_rejection
 
     # Validate remote machine admin permission
     workspace_type = data.get("workspace_type", "local")
@@ -957,6 +984,16 @@ def fork_milestone(workflow_id, milestone_id):
         return jsonify({"error": "Milestone not found"}), 404
     if milestone.get("status") == "cancelled":
         return jsonify({"error": "Cannot fork from a cancelled milestone"}), 400
+
+    # Quota gate (fail-closed): forking creates a runnable workflow, so the
+    # owner must pass the same check as create_workflow. Forks call
+    # create_workflow() on the repo directly, bypassing the route handler,
+    # so the gate must be applied here explicitly.
+    owner_id = workflow.get("user_id")
+    if owner_id is not None:
+        quota_rejection = _enforce_quota_gate(int(owner_id))
+        if quota_rejection is not None:
+            return quota_rejection
 
     data = request.get_json(silent=True) or {}
     user_feedback = data.get("user_feedback", "").strip()

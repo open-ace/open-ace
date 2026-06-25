@@ -41,6 +41,9 @@ export interface CreateTenantRequest {
   contact_email?: string;
   contact_name?: string;
   trial_days?: number;
+  admin_username?: string;
+  admin_password?: string;
+  admin_email?: string;
 }
 
 export interface UpdateTenantRequest {

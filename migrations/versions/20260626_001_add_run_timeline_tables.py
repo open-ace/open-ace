@@ -1,8 +1,8 @@
 """add run timeline tables
 
-Revision ID: 20260624_001_add_run_timeline_tables
-Revises: baseline_2026_06_23
-Create Date: 2026-06-24
+Revision ID: 20260626_001_add_run_timeline_tables
+Revises: 001_fix_auto_provision
+Create Date: 2026-06-26
 
 Adds the persisted remote-session run timeline:
 - agent_runs         (1:1 with agent_sessions; run_id == session_id)
@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
-revision: str = "20260624_001_add_run_timeline_tables"
-down_revision: str | None = "baseline_2026_06_23"
+revision: str = "20260626_001_add_run_timeline_tables"
+down_revision: str | None = "001_fix_auto_provision"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

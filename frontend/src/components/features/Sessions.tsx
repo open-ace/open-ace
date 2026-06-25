@@ -580,9 +580,22 @@ const SessionCard: React.FC<SessionCardProps> = ({
   resumeRemoteMutation,
 }) => {
   const isRemote = session.workspace_type === 'remote';
+  // A CLI-imported session: local + no cli_session_id + completed. The fetcher
+  // (scripts/fetch_*.py) never sets cli_session_id (not in its INSERT column
+  // list); the runtime runner backfills it for local claude-code sessions.
+  // workspace_type gates out remote/terminal (also empty cli_session_id).
+  // NOTE: deliberately NOT gated on message_count — the fetcher sets
+  // message_count>0 and inserts session_messages, so that gate would match
+  // nothing (false negatives). See #1272 review.
+  const isImported =
+    session.workspace_type === 'local' && !session.cli_session_id && session.status === 'completed';
   return (
     <div
-      className={cn('session-item card mb-2', isSelected && 'border-primary')}
+      className={cn(
+        'session-item card mb-2',
+        isSelected && 'border-primary',
+        isImported && 'session-imported'
+      )}
       onClick={onClick}
       style={{ cursor: 'pointer' }}
     >
@@ -614,6 +627,12 @@ const SessionCard: React.FC<SessionCardProps> = ({
               <Badge variant="info">
                 <i className="bi bi-cloud-fill me-1" />
                 {session.machine_name ?? 'Remote'}
+              </Badge>
+            )}
+            {isImported && (
+              <Badge variant="secondary">
+                <i className="bi bi-archive me-1" />
+                {t('cliImported', language)}
               </Badge>
             )}
           </div>

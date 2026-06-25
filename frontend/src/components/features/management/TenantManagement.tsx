@@ -82,6 +82,12 @@ export const TenantManagement: React.FC = () => {
     contact_email: '',
     contact_name: '',
   });
+  const [createAdminAccount, setCreateAdminAccount] = useState(false);
+  const [adminFormData, setAdminFormData] = useState({
+    admin_username: '',
+    admin_password: '',
+    admin_email: '',
+  });
   const [quotaData, setQuotaData] = useState({
     daily_token_limit: 1,
     monthly_token_limit: 30,
@@ -154,6 +160,12 @@ export const TenantManagement: React.FC = () => {
       contact_email: '',
       contact_name: '',
     });
+    setCreateAdminAccount(false);
+    setAdminFormData({
+      admin_username: '',
+      admin_password: '',
+      admin_email: '',
+    });
     setShowModal(true);
   };
 
@@ -166,6 +178,12 @@ export const TenantManagement: React.FC = () => {
       plan: tenant.plan,
       contact_email: tenant.contact_email ?? '',
       contact_name: tenant.contact_name ?? '',
+    });
+    setCreateAdminAccount(false);
+    setAdminFormData({
+      admin_username: '',
+      admin_password: '',
+      admin_email: '',
     });
     setShowModal(true);
   };
@@ -190,6 +208,12 @@ export const TenantManagement: React.FC = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingTenant(null);
+    setCreateAdminAccount(false);
+    setAdminFormData({
+      admin_username: '',
+      admin_password: '',
+      admin_email: '',
+    });
   };
 
   const handleCloseQuotaModal = () => {
@@ -203,11 +227,36 @@ export const TenantManagement: React.FC = () => {
       return;
     }
 
+    // Validate admin account fields if creating admin
+    if (!editingTenant && createAdminAccount) {
+      if (!adminFormData.admin_username.trim()) {
+        setFormError(t('adminUsernameRequired', language));
+        return;
+      }
+      if (!adminFormData.admin_password.trim()) {
+        setFormError(t('adminPasswordRequired', language));
+        return;
+      }
+      if (adminFormData.admin_password.length < 8) {
+        setFormError(t('passwordTooShort', language));
+        return;
+      }
+    }
+
     try {
       if (editingTenant) {
         await tenantApi.updateTenant(editingTenant.id, formData as UpdateTenantRequest);
       } else {
-        await tenantApi.createTenant(formData);
+        // Include admin account fields when creating tenant
+        const createData: CreateTenantRequest = {
+          ...formData,
+          ...(createAdminAccount && {
+            admin_username: adminFormData.admin_username,
+            admin_password: adminFormData.admin_password,
+            admin_email: adminFormData.admin_email || undefined,
+          }),
+        };
+        await tenantApi.createTenant(createData);
       }
       handleCloseModal();
       fetchTenants();
@@ -579,6 +628,75 @@ export const TenantManagement: React.FC = () => {
                 placeholder={t('enterContactName', language)}
               />
             </div>
+            {/* Admin Account Creation - Only for new tenants */}
+            {!editingTenant && (
+              <>
+                <div className="col-12">
+                  <hr className="my-2" />
+                  <div className="form-check">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      id="createAdminAccount"
+                      checked={createAdminAccount}
+                      onChange={(e) => setCreateAdminAccount(e.target.checked)}
+                    />
+                    <label className="form-check-label" htmlFor="createAdminAccount">
+                      {t('createAdminAccount', language) ?? 'Create Admin Account'}
+                    </label>
+                  </div>
+                </div>
+                {createAdminAccount && (
+                  <>
+                    <div className="col-md-6">
+                      <label className="form-label">
+                        {t('adminUsername', language) ?? 'Admin Username'} *
+                      </label>
+                      <TextInput
+                        value={adminFormData.admin_username}
+                        onChange={(value: string) =>
+                          setAdminFormData({ ...adminFormData, admin_username: value })
+                        }
+                        placeholder={t('enterUsername', language)}
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">
+                        {t('adminPassword', language) ?? 'Admin Password'} *
+                      </label>
+                      <TextInput
+                        type="password"
+                        value={adminFormData.admin_password}
+                        onChange={(value: string) =>
+                          setAdminFormData({ ...adminFormData, admin_password: value })
+                        }
+                        placeholder={t('enterPassword', language)}
+                      />
+                      <small className="text-muted">
+                        {t('passwordMinLength', language) ?? 'Minimum 8 characters'}
+                      </small>
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">
+                        {t('adminEmail', language) ?? 'Admin Email'}
+                      </label>
+                      <TextInput
+                        type="email"
+                        value={adminFormData.admin_email}
+                        onChange={(value: string) =>
+                          setAdminFormData({ ...adminFormData, admin_email: value })
+                        }
+                        placeholder={t('enterEmail', language)}
+                      />
+                      <small className="text-muted">
+                        {t('adminEmailOptional', language) ??
+                          'Optional, will be auto-generated if empty'}
+                      </small>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
         </form>
       </Modal>

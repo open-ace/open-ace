@@ -18,6 +18,8 @@ export interface AdminUser {
   monthly_token_quota?: number;
   daily_request_quota?: number;
   monthly_request_quota?: number;
+  tenant_id?: number;
+  tenant_name?: string;
 }
 
 export interface CreateUserRequest {
@@ -26,6 +28,7 @@ export interface CreateUserRequest {
   password: string;
   role?: 'admin' | 'user' | 'viewer';
   system_account?: string;
+  tenant_id?: number;
 }
 
 export interface UpdateUserRequest {
@@ -35,6 +38,7 @@ export interface UpdateUserRequest {
   is_active?: boolean;
   system_account?: string;
   password?: string;
+  tenant_id?: number;
 }
 
 export interface UpdateQuotaRequest {
@@ -122,8 +126,9 @@ export interface SecuritySettings {
 // API
 export const adminApi = {
   // User Management
-  async getUsers(): Promise<AdminUser[]> {
-    return apiClient.get<AdminUser[]>('/api/admin/users');
+  async getUsers(tenantId?: number): Promise<AdminUser[]> {
+    const queryParams = tenantId ? { tenant_id: String(tenantId) } : undefined;
+    return apiClient.get<AdminUser[]>('/api/admin/users', queryParams);
   },
 
   async createUser(data: CreateUserRequest): Promise<{ success: boolean; user_id: number }> {
@@ -140,6 +145,18 @@ export const adminApi = {
 
   async updateUserPassword(userId: number, password: string): Promise<{ success: boolean }> {
     return apiClient.put<{ success: boolean }>(`/api/admin/users/${userId}/password`, { password });
+  },
+
+  async resetUserPassword(userId: number): Promise<{
+    success: boolean;
+    temporary_password: string;
+    message?: string;
+  }> {
+    return apiClient.post<{
+      success: boolean;
+      temporary_password: string;
+      message?: string;
+    }>(`/api/admin/users/${userId}/reset-password`);
   },
 
   // Quota Management

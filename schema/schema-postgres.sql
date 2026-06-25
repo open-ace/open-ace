@@ -1076,9 +1076,9 @@ CREATE TABLE tenant_settings (
     custom_branding boolean DEFAULT false,
     branding_name character varying(100),
     branding_logo_url character varying(500),
+    auto_provision_users boolean DEFAULT false,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    auto_provision_users integer DEFAULT 0
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE SEQUENCE tenant_settings_id_seq

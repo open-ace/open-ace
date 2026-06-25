@@ -191,6 +191,23 @@ export const translations: Record<Language, Translations> = {
     passwordRequired: 'Password is required',
     passwordTooShort: 'Password must be at least 8 characters',
     passwordMismatch: 'Passwords do not match',
+    // Password reset
+    resetPassword: 'Reset Password',
+    temporaryPassword: 'Temporary Password',
+    tempPasswordWarning:
+      'Please share this password securely with the user. They will be required to change it on first login.',
+    copyToClipboard: 'Copy to clipboard',
+    // Force password change
+    changePassword: 'Change Password',
+    changePasswordRequired: 'Change Password Required',
+    mustChangePasswordHint:
+      'Your password was reset by an administrator. You must change it before continuing.',
+    currentPassword: 'Current Password',
+    currentPasswordRequired: 'Current password is required',
+    newPasswordRequired: 'New password is required',
+    enterCurrentPassword: 'Enter current password',
+    enterNewPassword: 'Enter new password',
+    failedToChangePassword: 'Failed to change password',
     failedToSaveUser: 'Failed to save user',
     enterUsername: 'Enter username',
     enterEmail: 'Enter email',
@@ -452,6 +469,7 @@ export const translations: Record<Language, Translations> = {
     restoreToWorkspace: 'Restore to Workspace',
     sessionRestored: 'Session restored to workspace',
     restoredSession: 'Restored Session',
+    cliImported: 'Local CLI History',
     // Issue #669: Session terminated recreation
     sessionTerminated: 'Session Process Terminated',
     sessionTerminatedCanResume:
@@ -691,6 +709,15 @@ export const translations: Record<Language, Translations> = {
     ssoRequiresTenant:
       'SSO requires a tenant. Please contact administrator to set up a tenant for your account.',
     selectTenant: 'Select Tenant',
+    allTenants: 'All Tenants',
+    tenant: 'Tenant',
+    createAdminAccount: 'Create Admin Account',
+    adminUsername: 'Admin Username',
+    adminPassword: 'Admin Password',
+    adminEmail: 'Admin Email',
+    adminEmailOptional: 'Optional, will be auto-generated if empty',
+    adminUsernameRequired: 'Admin username is required',
+    adminPasswordRequired: 'Admin password is required',
     tenantSelectionHint: 'Select a tenant to manage its SSO settings',
     noTenantsAvailable: 'No tenants available',
     dataRetention: 'Data Retention',
@@ -810,7 +837,6 @@ export const translations: Record<Language, Translations> = {
     smtpNotVerified: 'SMTP server not verified. Please test connection first.',
     enterSenderEmail: 'Please enter sender email address',
     testEmailSent: 'Test Email Sent',
-    currentPassword: 'Current password',
     confirmDeleteSmtpConfig: 'Are you sure you want to delete SMTP configuration?',
     smtpConfigDeleted: 'SMTP Configuration Deleted',
     smtpConfigDeletedDesc: 'SMTP configuration has been deleted',
@@ -1644,6 +1670,7 @@ export const translations: Record<Language, Translations> = {
     tableStatus: '状态',
     tableCreatedAt: '创建时间',
     tableActions: '操作',
+
     linuxAccount: '系统账号',
     toolAccounts: '工具账号',
     toolAccount: '工具账号',
@@ -1672,6 +1699,21 @@ export const translations: Record<Language, Translations> = {
     passwordRequired: '密码不能为空',
     passwordTooShort: '密码至少需要8个字符',
     passwordMismatch: '两次输入的密码不一致',
+    // Password reset
+    resetPassword: '重置密码',
+    temporaryPassword: '临时密码',
+    tempPasswordWarning: '请将此密码安全地分享给用户。用户首次登录时必须修改此密码。',
+    copyToClipboard: '复制到剪贴板',
+    // Force password change
+    changePassword: '修改密码',
+    changePasswordRequired: '需要修改密码',
+    mustChangePasswordHint: '您的密码已被管理员重置。必须修改密码后才能继续操作。',
+    currentPassword: '当前密码',
+    currentPasswordRequired: '当前密码不能为空',
+    newPasswordRequired: '新密码不能为空',
+    enterCurrentPassword: '请输入当前密码',
+    enterNewPassword: '请输入新密码',
+    failedToChangePassword: '修改密码失败',
     failedToSaveUser: '保存用户失败',
     enterUsername: '请输入用户名',
     enterEmail: '请输入邮箱',
@@ -1928,6 +1970,7 @@ export const translations: Record<Language, Translations> = {
     restoreToWorkspace: '恢复到工作区',
     sessionRestored: '会话已恢复到工作区',
     restoredSession: '恢复的会话',
+    cliImported: '本地 CLI 历史',
     // Issue #669: Session terminated recreation
     sessionTerminated: '会话进程已终止',
     sessionTerminatedCanResume: '检测到可恢复的对话历史，是否尝试恢复上下文？',
@@ -2157,6 +2200,15 @@ export const translations: Record<Language, Translations> = {
     noTenantConfigured: '未配置租户',
     ssoRequiresTenant: 'SSO 需要租户。请联系管理员为您的账户设置租户。',
     selectTenant: '选择租户',
+    allTenants: '所有租户',
+    tenant: '租户',
+    createAdminAccount: '创建管理员账号',
+    adminUsername: '管理员用户名',
+    adminPassword: '管理员密码',
+    adminEmail: '管理员邮箱',
+    adminEmailOptional: '可选，如不填写将自动生成',
+    adminUsernameRequired: '管理员用户名为必填项',
+    adminPasswordRequired: '管理员密码为必填项',
     tenantSelectionHint: '选择一个租户来管理其 SSO 设置',
     noTenantsAvailable: '没有可用的租户',
     dataRetention: '数据保留',
@@ -2273,7 +2325,6 @@ export const translations: Record<Language, Translations> = {
     smtpNotVerified: 'SMTP 服务器未验证。请先测试连接。',
     enterSenderEmail: '请输入发件人邮箱地址',
     testEmailSent: '测试邮件已发送',
-    currentPassword: '当前密码',
     confirmDeleteSmtpConfig: '确定要删除 SMTP 配置吗？',
     smtpConfigDeleted: 'SMTP 配置已删除',
     smtpConfigDeletedDesc: 'SMTP 配置已删除',
@@ -3084,6 +3135,7 @@ export const translations: Record<Language, Translations> = {
     tableStatus: 'ステータス',
     tableCreatedAt: '作成日時',
     tableActions: 'アクション',
+
     linuxAccount: 'システムアカウント',
     newPassword: '新しいパスワード',
     confirmPassword: 'パスワード確認',
@@ -3101,6 +3153,23 @@ export const translations: Record<Language, Translations> = {
     passwordRequired: 'パスワードは必須です',
     passwordTooShort: 'パスワードは8文字以上必要です',
     passwordMismatch: 'パスワードが一致しません',
+    // Password reset
+    resetPassword: 'パスワードリセット',
+    temporaryPassword: '一時パスワード',
+    tempPasswordWarning:
+      'このパスワードをユーザーに安全に共有してください。ユーザーは初回ログイン時にパスワードを変更する必要があります。',
+    copyToClipboard: 'クリップボードにコピー',
+    // Force password change
+    changePassword: 'パスワード変更',
+    changePasswordRequired: 'パスワード変更が必要',
+    mustChangePasswordHint:
+      'パスワードが管理者によってリセットされました。続行する前にパスワードを変更する必要があります。',
+    currentPassword: '現在のパスワード',
+    currentPasswordRequired: '現在のパスワードは必須です',
+    newPasswordRequired: '新しいパスワードは必須です',
+    enterCurrentPassword: '現在のパスワードを入力',
+    enterNewPassword: '新しいパスワードを入力',
+    failedToChangePassword: 'パスワードの変更に失敗しました',
     failedToSaveUser: 'ユーザーの保存に失敗しました',
     enterUsername: 'ユーザー名を入力',
     enterEmail: 'メールを入力',
@@ -4099,6 +4168,7 @@ export const translations: Record<Language, Translations> = {
     cliTool: 'CLI ツール',
     machine: 'マシン',
     started: '開始',
+    cliImported: 'ローカル CLI 履歴',
   },
   ko: {
     // Common
@@ -4248,6 +4318,7 @@ export const translations: Record<Language, Translations> = {
     tableStatus: '상태',
     tableCreatedAt: '생성일',
     tableActions: '작업',
+
     linuxAccount: '시스템 계정',
     newPassword: '새 비밀번호',
     confirmPassword: '비밀번호 확인',
@@ -4265,6 +4336,23 @@ export const translations: Record<Language, Translations> = {
     passwordRequired: '비밀번호는 필수입니다',
     passwordTooShort: '비밀번호는 8자 이상이어야 합니다',
     passwordMismatch: '비밀번호가 일치하지 않습니다',
+    // Password reset
+    resetPassword: '비밀번호 재설정',
+    temporaryPassword: '임시 비밀번호',
+    tempPasswordWarning:
+      '이 비밀번호를 사용자에게 안전하게 공유하세요. 사용자는 첫 로그인 시 비밀번호를 변경해야 합니다.',
+    copyToClipboard: '클립보드에 복사',
+    // Force password change
+    changePassword: '비밀번호 변경',
+    changePasswordRequired: '비밀번호 변경 필요',
+    mustChangePasswordHint:
+      '비밀번호가 관리자에 의해 재설정되었습니다. 계속하기 전에 비밀번호를 변경해야 합니다.',
+    currentPassword: '현재 비밀번호',
+    currentPasswordRequired: '현재 비밀번호는 필수입니다',
+    newPasswordRequired: '새 비밀번호는 필수입니다',
+    enterCurrentPassword: '현재 비밀번호 입력',
+    enterNewPassword: '새 비밀번호 입력',
+    failedToChangePassword: '비밀번호 변경 실패',
     failedToSaveUser: '사용자 저장 실패',
     enterUsername: '사용자 이름 입력',
     enterEmail: '이메일 입력',
@@ -5265,6 +5353,7 @@ export const translations: Record<Language, Translations> = {
     cliTool: 'CLI 도구',
     machine: '머신',
     started: '시작',
+    cliImported: '로컬 CLI 기록',
   },
 };
 
