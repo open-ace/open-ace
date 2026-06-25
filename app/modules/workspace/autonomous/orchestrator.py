@@ -1028,7 +1028,13 @@ class AutonomousOrchestrator:
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
-            self._link_session_to_current_milestone(result.session_id)
+            # Link the milestone card to the REAL claude session id (not the
+            # per-call wrapper uuid), so all milestones sharing a session line
+            # (e.g. plan_created/plan_refined/dev on the "main" line) show the
+            # SAME id and the card's "view session" points to the right transcript.
+            # Falls back to the wrapper uuid when the real id isn't resolved yet.
+            link_session_id = result.source_session_id or result.session_id
+            self._link_session_to_current_milestone(link_session_id)
             # Always update the session line with the real CLI session id.
             # Resume can fail silently (e.g. the prior session died after a
             # crash/timeout), in which case the agent falls back to a fresh

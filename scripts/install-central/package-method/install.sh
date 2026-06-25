@@ -1337,6 +1337,7 @@ WORKSPACE_PORT_RANGE_END="3200"
 WORKSPACE_MAX_INSTANCES="30"
 WORKSPACE_IDLE_TIMEOUT="30"
 WORKSPACE_URL=""      # Workspace URL (will be set based on host_name or server_url)
+WORKSPACE_BASE_DIR="/home"  # Default workspace base directory for Package version
 
 # Upgrade systemd service switch decision (set in verify_upgrade_systemd_config)
 UPGRADE_SWITCH_SERVICE="no"
@@ -2058,6 +2059,7 @@ install_systemd_service() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template" > "$service_file"
 
     if [ $? -ne 0 ]; then
@@ -2165,6 +2167,7 @@ install_systemd_service_remote() {
         -e "s|__PYTHON__|$python_path|g" \
         -e "s|__HOME__|$home_dir|g" \
         -e "s|__SECRET_KEY__|$secret_key|g" \
+        -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
         "$service_template")
 
     # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
@@ -2943,6 +2946,13 @@ install_local() {
                     sed -i 's/NoNewPrivileges=false/NoNewPrivileges=true/' "$service_file"
                 fi
 
+                # Update or add WORKSPACE_BASE_DIR (Issue #1217)
+                if grep -q "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null; then
+                    sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR|" "$service_file"
+                else
+                    sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR" "$service_file"
+                fi
+
                 print_success "Service configuration updated (SECRET_KEY preserved)"
             fi
 
@@ -2953,6 +2963,23 @@ install_local() {
                 local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
                 sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
                 print_info "Generated SECRET_KEY for Flask encryption"
+            fi
+
+            # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
+            local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            if [ -z "$current_workspace_base" ]; then
+                print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
+                # Determine WORKSPACE_BASE_DIR based on service user
+                local service_user=$(grep "^User=" "$service_file" | cut -d'=' -f2)
+                local upgrade_workspace_base="/home"
+                if [ "$service_user" != "root" ] && [ -n "$service_user" ]; then
+                    local user_home=$(getent passwd "$service_user" | cut -d: -f6)
+                    if [ -n "$user_home" ]; then
+                        upgrade_workspace_base="$user_home"
+                    fi
+                fi
+                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$upgrade_workspace_base" "$service_file"
+                print_info "Set WORKSPACE_BASE_DIR=$upgrade_workspace_base (Issue #1217)"
             fi
 
             print_info "Restarting open-ace service..."
@@ -4100,6 +4127,14 @@ do_upgrade_remote() {
             print_info "Restarting systemd service on remote..."
             ssh "$remote" "sudo systemctl restart open-ace.service"
         fi
+
+        # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
+        local current_workspace_base=$(ssh "$remote" "grep '^Environment=WORKSPACE_BASE_DIR=' $service_file 2>/dev/null | cut -d'=' -f3")
+        if [ -z "$current_workspace_base" ]; then
+            print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service on remote..."
+            ssh "$remote" "sudo sed -i '/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR' $service_file && sudo systemctl daemon-reload && sudo systemctl restart open-ace.service"
+            print_info "Set WORKSPACE_BASE_DIR=$WORKSPACE_BASE_DIR"
+        fi
     fi
 }
 
@@ -4146,6 +4181,7 @@ show_help() {
     echo "  WORKSPACE_PORT_RANGE_END=3200    # Port pool end"
     echo "  WORKSPACE_MAX_INSTANCES=30       # Max concurrent instances"
     echo "  WORKSPACE_IDLE_TIMEOUT=30        # Idle timeout (minutes)"
+    echo "  WORKSPACE_BASE_DIR=/home         # Workspace base directory (default: /home)"
     echo ""
     echo "Database Configuration:"
     echo "  If DB_HOST and DB_PASSWORD are set, the installer will use existing database."

@@ -20,6 +20,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,21 @@ from app.modules.workspace.autonomous.artifact_text import pick_best_artifact_te
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 logger = logging.getLogger(__name__)
+
+
+def _iso_to_epoch(ts: str) -> float | None:
+    """Parse a claude JSONL ISO timestamp to epoch seconds.
+
+    Claude timestamps look like ``2026-06-24T12:39:05.000Z``. Returns None on
+    any parse failure so callers can skip filtering rather than crash.
+    """
+    if not ts:
+        return None
+    try:
+        # fromisoformat doesn't accept a trailing 'Z' until 3.11; strip it.
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
 
 
 # Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
@@ -127,6 +143,9 @@ class _LocalSession:
     sdk_initialized: threading.Event = field(default_factory=threading.Event)
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
+    # Distinct assistant message_ids counted toward request_count (dedup, since
+    # claude emits multiple assistant events per message: thinking then text).
+    _counted_message_ids: set = field(default_factory=set)
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
 
 
@@ -572,12 +591,19 @@ class AutonomousAgentRunner:
         self,
         encoded_project_path: str,
         min_mtime_epoch: float,
+        bound_cli_session_ids: set[str] | None = None,
     ) -> str:
         """Find the latest Claude JSONL session created for the active worktree.
 
         This is best-effort discovery based on the encoded worktree path and file mtime.
         It assumes only one local autonomous Claude task is creating a new session for a
         given worktree at a time; concurrent tasks on the same worktree can still race.
+
+        ``bound_cli_session_ids`` excludes files belonging to sessions already bound to
+        another session line (main/review/test). Without this, a shared "main" session —
+        which is continuously appended across milestones and thus always has the newest
+        mtime — would be wrongly picked for a fresh review/test line, collapsing the
+        3-session topology into one (issue #723).
         """
         if not encoded_project_path:
             return ""
@@ -594,16 +620,133 @@ class AutonomousAgentRunner:
                     stat = candidate.stat()
                 except OSError:
                     continue
-                if (
+                if not (
                     stat.st_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
                     and stat.st_mtime >= latest_mtime
                 ):
-                    latest_file = candidate
-                    latest_mtime = stat.st_mtime
+                    continue
+                # Exclude files whose session id is already bound to another line
+                # (e.g. the always-being-written main session). This prevents the
+                # shared main session from being re-picked for a fresh review/test
+                # line and collapsing the 3-session design (#723).
+                if bound_cli_session_ids:
+                    sid = self._peek_jsonl_session_id(candidate)
+                    if sid and sid in bound_cli_session_ids:
+                        continue
+                latest_file = candidate
+                latest_mtime = stat.st_mtime
         except OSError:
             return ""
 
         return latest_file.stem if latest_file else ""
+
+    @staticmethod
+    def _peek_jsonl_session_id(filepath: Path) -> str:
+        """Read the session id from the first record of a Claude JSONL file.
+
+        Claude writes the session uuid as ``sessionId`` (and sometimes ``uuid``)
+        on every record; we only read the first non-empty line to identify the
+        file's owning session without parsing the whole transcript.
+        """
+        try:
+            with open(filepath, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    sid = ""
+                    if isinstance(rec, dict):
+                        sid = (rec.get("sessionId") or rec.get("uuid") or "").strip()
+                    if sid:
+                        return sid
+                    break
+        except OSError:
+            pass
+        return ""
+
+    def _replay_usage_from_jsonl(self, session: _LocalSession, cli_session_id: str) -> None:
+        """Replay token/request usage from the claude session JSONL.
+
+        Used on the timeout path when the subprocess did real work but never
+        emitted a closing ``result`` event (so ``session.total_tokens`` is 0).
+        Reads the JSONL for ``cli_session_id`` and accumulates usage from
+        records whose timestamp is at/after this call's ``started_at_epoch``,
+        filling ``total_tokens``/``request_count`` so the milestone records the
+        real cost instead of 0/0 (#723).
+
+        Only fills in values when the live counters are zero (timeout), so a
+        normal completed run is never overwritten.
+        """
+        if not cli_session_id or not session.encoded_project_path:
+            return
+        jsonl_path = (
+            Path.home()
+            / ".claude"
+            / "projects"
+            / session.encoded_project_path
+            / f"{cli_session_id}.jsonl"
+        )
+        if not jsonl_path.is_file():
+            return
+        # Accumulate usage per distinct message_id. Claude repeats the FULL
+        # message usage on every block-line of a message (thinking line, text
+        # line, ...), so summing raw rows would double/triple count. Take the
+        # max usage per message_id (each row carries the same totals for that
+        # message), then sum across distinct messages.
+        per_msg: dict[str, dict[str, int]] = {}
+        started = session.started_at_epoch
+        try:
+            with open(jsonl_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    # Only count records from this call onward.
+                    ts = rec.get("timestamp", "")
+                    ts_epoch = _iso_to_epoch(ts)
+                    if ts_epoch is not None and ts_epoch < started:
+                        continue
+                    if rec.get("type") == "assistant":
+                        msg = rec.get("message", {}) or {}
+                        mid = msg.get("id") or ""
+                        usage = msg.get("usage") or {}
+                        if isinstance(usage, dict):
+                            row_in = usage.get("input_tokens", 0) or 0
+                            row_out = usage.get("output_tokens", 0) or 0
+                            cur = per_msg.get(mid, {"in": 0, "out": 0})
+                            # max per message_id (rows repeat the same totals)
+                            cur["in"] = max(cur["in"], row_in)
+                            cur["out"] = max(cur["out"], row_out)
+                            per_msg[mid] = cur
+        except OSError:
+            logger.warning("Failed to replay usage JSONL for session %s", cli_session_id[:8])
+            return
+        in_t = sum(v["in"] for v in per_msg.values())
+        out_t = sum(v["out"] for v in per_msg.values())
+        requests = len(per_msg)
+        if in_t or out_t or requests:
+            session.total_input_tokens = in_t
+            session.total_output_tokens = out_t
+            session.total_tokens = in_t + out_t
+            if session.request_count == 0:
+                session.request_count = requests
+            logger.info(
+                "Replayed timeout usage from JSONL: in=%d out=%d req=%d (session=%s)",
+                in_t,
+                out_t,
+                requests,
+                cli_session_id[:8],
+            )
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:
         """Resolve the real sidebar Claude session id for a workflow-owned line."""
@@ -622,9 +765,18 @@ class AutonomousAgentRunner:
             # control_response covers the vast majority of cases; if this fires
             # and the guessed id is wrong, it can get pinned to a session line
             # and propagated via --resume. Warn so it's traceable.
+            # Exclude sessions already bound to another line (main/review/test):
+            # a shared main session is continuously appended and would otherwise
+            # always win the mtime race, collapsing the 3-session design (#723).
+            bound_ids = set()
+            if self.session_manager:
+                bound_ids = self.session_manager.list_cli_session_ids_for_project(
+                    session.project_path
+                )
             persisted_id = self._find_latest_claude_session_id(
                 session.encoded_project_path,
                 session.started_at_epoch,
+                bound_cli_session_ids=bound_ids,
             )
             logger.warning(
                 "Using mtime fallback to resolve session (control_response missed) — "
@@ -1181,6 +1333,19 @@ class AutonomousAgentRunner:
             )
 
         if not completed:
+            # Timeout: the claude subprocess may have done real work (and
+            # consumed tokens) without ever emitting the closing `result` event,
+            # leaving session.total_tokens==0 / request_count==0. Recover the
+            # real usage by replaying the session JSONL for records written
+            # after this call started, so the milestone/session don't record a
+            # zero-cost round (issue #723: dev timed out with 0/0 but actually
+            # produced a 3721-line commit costing ~370K tokens).
+            if (
+                session.total_tokens == 0
+                and resolved_session_id
+                and self._uses_sidebar_session_source(cli_tool, workspace_type)
+            ):
+                self._replay_usage_from_jsonl(session, resolved_session_id)
             return _build_agent_task_result(
                 session_id=session_id,
                 tracking_session_id=session_id,
@@ -2052,6 +2217,15 @@ class AutonomousAgentRunner:
                         text_delta = _extract_visible_text(content)
                         if text_delta:
                             session.assistant_text += text_delta
+                        # Count one request per distinct assistant message (by
+                        # message_id), aligning with the session-detail口径
+                        # (fetch dedups assistant turns by message_id). Claude
+                        # --print emits one `result` summarizing all turns, so
+                        # counting on `result` would always yield 1 regardless
+                        # of how many model turns happened (#723).
+                        if message_id and message_id not in session._counted_message_ids:
+                            session._counted_message_ids.add(message_id)
+                            session.request_count += 1
                         # Record in event log for ordered message persistence
                         if text_delta:
                             session.event_log.append(
@@ -2096,7 +2270,9 @@ class AutonomousAgentRunner:
                             )
 
                     elif msg_type == "result":
-                        # End of turn - extract usage via shared parser
+                        # End of turn - extract usage via shared parser.
+                        # request_count is counted per assistant message_id above
+                        # (not here), since one --print result summarizes all turns.
                         usage = _extract_stream_usage(session.cli_tool, parsed)
                         if usage:
                             session.total_input_tokens += usage["input"]
@@ -2104,7 +2280,14 @@ class AutonomousAgentRunner:
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )
-                        session.request_count += 1
+                        # Fallback: if no assistant turn carried a message_id
+                        # (older/non-Claude adapters, or chunks without id),
+                        # count this result as one request so request accounting
+                        # doesn't silently drop to 0. When ids WERE seen, turns
+                        # were already counted per-id above and result must NOT
+                        # bump (it summarizes the whole --print run).
+                        if not session._counted_message_ids and session.request_count == 0:
+                            session.request_count += 1
                         self._sync_sidebar_session_totals(session, status="active")
                         session.completed.set()
                         # Emit usage activity for real-time token display
@@ -2133,6 +2316,17 @@ class AutonomousAgentRunner:
                                 cli_sid = inner.get("session_id", "")
                                 if cli_sid and not session.cli_session_id:
                                     session.cli_session_id = cli_sid
+                                elif not cli_sid and not session.cli_session_id:
+                                    # Initialize succeeded but no session_id — the
+                                    # SDK response shape may have changed. Log so the
+                                    # mtime fallback (next resort) is traceable rather
+                                    # than silently degrading (#723).
+                                    logger.warning(
+                                        "control_response initialize success but no "
+                                        "session_id (workflow=%s); raw=%s",
+                                        session.workflow_id,
+                                        str(parsed)[:300],
+                                    )
                             session.sdk_initialized.set()
 
                     elif msg_type == "control_request":
