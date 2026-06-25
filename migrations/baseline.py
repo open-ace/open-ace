@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
 BASELINE_REVISION = "baseline_2026_06_23"
-HEAD_REVISION = BASELINE_REVISION
+HEAD_REVISION = "001_fix_auto_provision"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE_SCHEMA_DIR = _PROJECT_ROOT / "schema" / "baselines"
