@@ -1701,552 +1701,414 @@ ALTER TABLE ONLY workflow_milestones
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
 
 
---
---
 
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
 
 
---
---
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
 
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
 
 
---
---
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions USING btree (user_id);
 
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
 
---
---
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
 
---
---
 
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
 
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
 
 
---
---
 
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
 
 CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 
 
---
---
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
 
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
 
 
---
---
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
 
 
---
---
 
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_business_project_members_business_project_id ON business_project_members USING btree (business_project_id);
 
 CREATE INDEX idx_business_project_members_user_id ON business_project_members USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
 
---
---
 
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 
 
---
---
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
 
 
---
---
 
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
 
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
 
 
---
---
 
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
 
 
---
---
 
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
 
 
---
---
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats USING btree (date);
 
 
---
---
 
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats USING btree (date, hour);
 
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats USING btree (hour);
 
 
---
---
 
 CREATE INDEX idx_insights_reports_user_date ON insights_reports USING btree (user_id, start_date, end_date);
 
 CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
 
 
---
---
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts USING btree (locked_until);
 
 CREATE INDEX idx_machine_assignments_user_id ON machine_assignments USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_mapping_rules_active ON tool_account_mapping_rules USING btree (is_active, priority);
 
 CREATE INDEX idx_mapping_rules_user_id ON tool_account_mapping_rules USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_messages_agent_session_id ON daily_messages USING btree (agent_session_id);
 
 CREATE INDEX idx_messages_agent_session_project ON daily_messages USING btree (agent_session_id, project_path);
 
 
---
---
 
 CREATE INDEX idx_messages_conv_history ON daily_messages USING btree (agent_session_id, conversation_id, feishu_conversation_id, tool_name, host_name, sender_name, date, "timestamp", tokens_used, input_tokens, output_tokens, sender_id);
 
 CREATE INDEX idx_messages_conversation ON daily_messages USING btree (date, conversation_id, agent_session_id);
 
 
---
---
 
 CREATE INDEX idx_messages_date_role_sender_prefix ON daily_messages USING btree (date, role, sender_name varchar_pattern_ops);
 
 CREATE INDEX idx_messages_date_role_timestamp ON daily_messages USING btree (date, role, "timestamp" DESC);
 
 
---
---
 
 CREATE INDEX idx_messages_date_sender_id ON daily_messages USING btree (date, sender_id);
 
 CREATE INDEX idx_messages_date_tool_host ON daily_messages USING btree (date, tool_name, host_name);
 
 
---
---
 
 CREATE INDEX idx_messages_deleted ON daily_messages USING btree (deleted_at);
 
 CREATE INDEX idx_messages_host_name ON daily_messages USING btree (host_name);
 
 
---
---
 
 CREATE INDEX idx_messages_project_path ON daily_messages USING btree (project_path);
 
 CREATE INDEX idx_messages_sender_date_role ON daily_messages USING btree (sender_name, date, role);
 
 
---
---
 
 CREATE INDEX idx_messages_sender_id ON daily_messages USING btree (sender_id);
 
 CREATE INDEX idx_messages_sender_name ON daily_messages USING btree (sender_name) WHERE (sender_name IS NOT NULL);
 
 
---
---
 
 CREATE INDEX idx_messages_session_list_covering ON daily_messages USING btree (agent_session_id, tool_name, host_name, sender_name) INCLUDE ("timestamp", tokens_used, input_tokens, output_tokens, sender_id, date) WHERE (agent_session_id IS NOT NULL);
 
 CREATE INDEX idx_messages_timestamp ON daily_messages USING btree ("timestamp");
 
 
---
---
 
 CREATE INDEX idx_messages_tool_name ON daily_messages USING btree (tool_name);
 
 CREATE INDEX idx_messages_usage_trend_covering ON daily_messages USING btree (date, role, sender_name) INCLUDE (tokens_used) WHERE ((role)::text = 'assistant'::text);
 
 
---
---
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages USING btree (user_id, date, role) INCLUDE (tokens_used) WHERE ((user_id IS NOT NULL) AND ((role)::text = 'assistant'::text));
 
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (workflow_id, phase, status);
 
 
---
---
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
 
 CREATE INDEX idx_projects_business_project_id ON projects USING btree (business_project_id);
 
 
---
---
 
 CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
 
 
---
---
 
 CREATE INDEX idx_projects_path ON projects USING btree (path);
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates USING btree (author_id);
 
 
---
---
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates USING btree (category);
 
 CREATE INDEX idx_prompt_templates_public ON prompt_templates USING btree (is_public);
 
 
---
---
 
 CREATE INDEX idx_quota_alerts_created ON quota_alerts USING btree (created_at);
 
 CREATE INDEX idx_quota_alerts_unack ON quota_alerts USING btree (acknowledged, created_at);
 
 
---
---
 
 CREATE INDEX idx_quota_alerts_user ON quota_alerts USING btree (user_id);
 
 CREATE INDEX idx_quota_usage_date ON quota_usage USING btree (date);
 
 
---
---
 
 CREATE INDEX idx_quota_usage_user ON quota_usage USING btree (user_id);
 
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens USING btree (token_hash);
 
 
---
---
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree (hostname, tenant_id);
 
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (machine_id);
 
 
---
---
 
 CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
 
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
 
 
---
---
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
 
 
---
---
 
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
 
---
---
 
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
 
---
---
 
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
 
 
---
---
 
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
 
 
---
---
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
 
 
---
---
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
 
 
---
---
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
 
---
---
 
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
 
---
---
 
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
 
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
 
 
---
---
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
 
 
---
---
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
 
 
---
---
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (date, tool_name, host_name);
 
 
---
---
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
 CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
 
 
---
---
 
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary USING btree (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name)::text <> ''::text) AND ((host_name)::text !~~ '<%>'::text) AND ((length((host_name)::text) >= 1) AND (length((host_name)::text) <= 253)));
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
 
 
---
---
 
 CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
 
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
 
 
---
---
 
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
 
 
---
---
 
 CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
 
 CREATE INDEX idx_users_active ON users USING btree (is_active);
 
 
---
---
 
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
 
 CREATE INDEX idx_users_email ON users USING btree (email);
 
 
---
---
 
 CREATE INDEX idx_users_role ON users USING btree (role);
 
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
 
 
---
---
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
 
 
---
---
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
 
---
---
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
 
 
---
---
 
 ALTER TABLE ONLY anomaly_status
     ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
