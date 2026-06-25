@@ -113,18 +113,22 @@ generate_default_config() {
     SERVER_IP="${SERVER_IP:-host.docker.internal}"
     PORT="${PORT:-5000}"
 
+    # Get hostname dynamically (matches install.sh behavior)
+    HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
+
     # Generate random token secret and upload auth key (32 chars hex)
     TOKEN_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
     UPLOAD_AUTH_KEY=$(python3 -c "import secrets; print(secrets.token_hex(16))")
 
     # Generate default config (matches install.sh defaults)
     # Note: DATABASE_URL env var takes precedence over config file for database connection
+    # Database credentials use docker-compose.yml defaults (${DB_USER:-ace}, etc.)
     cat > "$CONFIG_FILE" << CONFIG_EOF
 {
-  "host_name": "docker-container",
+  "host_name": "$HOST_NAME",
   "database": {
     "type": "postgresql",
-    "url": "postgresql://ace:ace-secret@postgres:5432/ace"
+    "url": "postgresql://\${DB_USER:-ace}:\${DB_PASSWORD:-ace-secret}@postgres:5432/\${DB_NAME:-ace}"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
@@ -151,16 +155,16 @@ generate_default_config() {
     "openclaw": {
       "enabled": true,
       "token_env": "OPENCLAW_TOKEN",
-      "gateway_url": "http://localhost:18789",
-      "hostname": "docker-container"
+      "gateway_url": "http://${SERVER_IP}:18789",
+      "hostname": "$HOST_NAME"
     },
     "claude": {
       "enabled": true,
-      "hostname": "docker-container"
+      "hostname": "$HOST_NAME"
     },
     "qwen": {
       "enabled": true,
-      "hostname": "docker-container"
+      "hostname": "$HOST_NAME"
     }
   },
   "cron": {
