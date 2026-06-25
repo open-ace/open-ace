@@ -580,7 +580,15 @@ const SessionCard: React.FC<SessionCardProps> = ({
   resumeRemoteMutation,
 }) => {
   const isRemote = session.workspace_type === 'remote';
-  const isImported = !session.cli_session_id && session.status === 'completed';
+  // A CLI-imported session: local + no cli_session_id + completed + no
+  // session_messages. cli_session_id is only written for local claude-code
+  // sessions at runtime, so without the workspace_type/message_count gates
+  // every completed remote/terminal session would be mis-flagged.
+  const isImported =
+    session.workspace_type === 'local' &&
+    !session.cli_session_id &&
+    session.status === 'completed' &&
+    (session.message_count ?? 0) === 0;
   return (
     <div
       className={cn(

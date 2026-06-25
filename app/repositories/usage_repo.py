@@ -1116,6 +1116,32 @@ class UsageRepository:
         # Session usage from agent_sessions (includes local, remote, and terminal sessions)
         # Note: WebUI creates 'local' sessions, CLI via remote mode creates 'remote' sessions,
         # and terminal sessions have workspace_type='terminal'
+        session_tokens, session_requests = self._session_usage(user_id, start_date, end_date)
+
+        local_tokens = int(local_row["tokens"]) if local_row else 0
+        local_requests = int(local_row["requests"]) if local_row else 0
+
+        return {
+            "tokens": local_tokens + session_tokens,
+            "requests": local_requests + session_requests,
+            "local_tokens": local_tokens,
+            "local_requests": local_requests,
+            "remote_tokens": session_tokens,  # Keep legacy field name for compatibility
+            "remote_requests": session_requests,  # Keep legacy field name for compatibility
+        }
+
+    def _session_usage(
+        self,
+        user_id: int,
+        start_date: str,
+        end_date: str,
+    ) -> tuple[int, int]:
+        """Query agent_sessions for session-backed tokens/requests in a window.
+
+        Shared by get_combined_usage (Manage page) and get_session_only_usage
+        (Work page) so the workspace_type/date/request-subquery filter lives in
+        one place — see #1272 review (avoid two copies drifting).
+        """
         session_row = self.db.fetch_one(
             """
             SELECT
@@ -1132,20 +1158,9 @@ class UsageRepository:
         """,
             (user_id, start_date, end_date),
         )
-
-        local_tokens = int(local_row["tokens"]) if local_row else 0
-        local_requests = int(local_row["requests"]) if local_row else 0
         session_tokens = int(session_row["tokens"]) if session_row else 0
         session_requests = int(session_row["requests"]) if session_row else 0
-
-        return {
-            "tokens": local_tokens + session_tokens,
-            "requests": local_requests + session_requests,
-            "local_tokens": local_tokens,
-            "local_requests": local_requests,
-            "remote_tokens": session_tokens,  # Keep legacy field name for compatibility
-            "remote_requests": session_requests,  # Keep legacy field name for compatibility
-        }
+        return session_tokens, session_requests
 
     def get_session_only_usage(
         self,
@@ -1172,26 +1187,7 @@ class UsageRepository:
             Dict with tokens, requests, and per-source breakdown (local_* are
             always 0 here since daily_messages is excluded).
         """
-        session_row = self.db.fetch_one(
-            """
-            SELECT
-                COALESCE(SUM(total_tokens), 0) as tokens,
-                COALESCE(SUM(
-                    (SELECT COUNT(*) FROM session_messages sm
-                     WHERE sm.session_id = agent_sessions.session_id
-                       AND sm.role = 'assistant')
-                ), 0) as requests
-            FROM agent_sessions
-            WHERE user_id = ?
-              AND workspace_type IN ('local', 'remote', 'terminal')
-              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
-        """,
-            (user_id, start_date, end_date),
-        )
-
-        session_tokens = int(session_row["tokens"]) if session_row else 0
-        session_requests = int(session_row["requests"]) if session_row else 0
-
+        session_tokens, session_requests = self._session_usage(user_id, start_date, end_date)
         return {
             "tokens": session_tokens,
             "requests": session_requests,
