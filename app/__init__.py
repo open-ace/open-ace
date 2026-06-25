@@ -195,6 +195,7 @@ def register_blueprints(app):
     from app.routes.api_keys import api_keys_bp
     from app.routes.auth import auth_bp
     from app.routes.autonomous import autonomous_bp
+    from app.routes.business_projects import business_projects_bp
     from app.routes.compliance import compliance_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
@@ -244,6 +245,7 @@ def register_blueprints(app):
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
     app.register_blueprint(smtp_config_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
+    app.register_blueprint(business_projects_bp)
 
     logger.info("All blueprints registered")
 

@@ -138,6 +138,13 @@ const navSections: NavSection[] = [
         icon: 'bi-folder',
         path: '/manage/projects',
       },
+      {
+        id: 'business-projects',
+        label: 'businessProjectManagement',
+        icon: 'bi-diagram-3',
+        path: '/manage/business-projects',
+        adminOnly: true,
+      },
     ],
   },
   {

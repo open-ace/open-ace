@@ -118,6 +118,11 @@ const ProjectManagement = lazy(() =>
     default: m.ProjectManagement,
   }))
 );
+const BusinessProjectManagement = lazy(() =>
+  import('@/components/features/management/BusinessProjectManagement').then((m) => ({
+    default: m.BusinessProjectManagement,
+  }))
+);
 const RemoteMachineManagement = lazy(() =>
   import('@/components/features/management/RemoteMachineManagement').then((m) => ({
     default: m.RemoteMachineManagement,
@@ -327,6 +332,7 @@ const ManageRoutes: React.FC = () => {
 
           {/* Projects */}
           <Route path="/projects" element={<ProjectManagement />} />
+          <Route path="/business-projects" element={<BusinessProjectManagement />} />
 
           {/* Remote Workspace */}
           <Route path="/remote/machines" element={<RemoteMachineManagement />} />
