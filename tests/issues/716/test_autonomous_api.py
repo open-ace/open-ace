@@ -737,6 +737,16 @@ class TestCancelMilestone:
 class TestForkMilestone:
     """Tests for POST /api/autonomous/workflows/<id>/milestones/<mid>/fork."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """These tests exercise fork logic, not the quota gate. Stub the
+        QuotaManager to allow-by-default so the gate doesn't reach the
+        environment's default DB and spuriously 429 the fork."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
+
     def test_fork_milestone(self, client):
         repo = _make_repo()
         repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
