@@ -37,16 +37,22 @@ _SPEC.loader.exec_module(tbc)
 
 class TestTbl001Text:
     def test_flags_daily_messages_in_comment(self):
-        # TBL001 bans the token even in comments.
-        lines = "# Work page must not read daily_messages analysis table\n"
-        hits = [i for i, ln in enumerate(lines.splitlines(), 1) if "daily_messages" in ln]
-        assert hits, "a daily_messages comment must be flagged at the text level"
+        # TBL001 bans the token even in comments — exercise the real checker.
+        content = "# Work page must not read daily_messages analysis table\n"
+        violations = tbc.check_tbl001_text_content(content, "app/routes/quota.py")
+        assert len(violations) == 1
+        assert violations[0].rule == "TBL001"
+
+    def test_flags_daily_messages_in_code(self):
+        content = "rows = db.fetch_all('SELECT * FROM daily_messages')\n"
+        violations = tbc.check_tbl001_text_content(content, "app/routes/quota.py")
+        assert len(violations) == 1
 
     def test_clean_work_route_no_violation(self):
         content = (
             "# No mention of the forbidden table\nresult = usage_repo.get_session_only_usage()\n"
         )
-        violations = [ln for ln in content.splitlines() if "daily_messages" in ln]
+        violations = tbc.check_tbl001_text_content(content, "app/routes/quota.py")
         assert violations == []
 
 

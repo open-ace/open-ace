@@ -25,7 +25,8 @@ Two architectural rules (#1125 / docs/cn/workspace-session-data-contract.md):
 A violation is signed ``rule|file|symbol`` (no line number, to survive drift),
 mirrors the api_security_scanner baseline convention, and the guard exits 1 on
 any non-baselined violation so pre-commit / CI block the change. Use
-``--baseline`` to regenerate the suppression file.
+``--baseline`` to print the suppression JSON to stdout (redirect to
+``scripts/lint/.table_boundary_baseline`` to regenerate it).
 
 Run:  python3 scripts/lint/table_boundary_checker.py [--baseline]
 """
@@ -44,6 +45,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BASELINE_PATH = PROJECT_ROOT / "scripts" / "lint" / ".table_boundary_baseline"
 
 # Work-scope route files (workspace_bp / quota_bp blueprints).
+# Assumption: the Work-page frontend only fetches usage data through these two
+# blueprints. Other routes that legitimately read daily_messages via
+# UsageRepository (admin.py, governance.py, usage.py, report.py) belong to the
+# Manage/analysis domain and are correctly excluded. If the Work page ever
+# fetches usage from another route, add it here or the guard's coverage
+# silently narrows.
 WORK_ROUTE_FILES = {
     "app/routes/workspace.py",
     "app/routes/quota.py",
@@ -186,21 +193,37 @@ def check_tbl001_text(work_files: set[str]) -> list[BoundaryViolation]:
         path = PROJECT_ROOT / rel
         if not path.exists():
             continue
-        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if "daily_messages" in line:
-                violations.append(
-                    BoundaryViolation(
-                        rule="TBL001",
-                        file=rel,
-                        symbol="",
-                        message=(
-                            f"line {i}: Work route references 'daily_messages' "
-                            "(analysis fact table must not be read by Workspace "
-                            "runtime per #1125)"
-                        ),
-                    )
-                )
+        violations.extend(_check_tbl001_text_content(path.read_text(encoding="utf-8"), rel))
     return violations
+
+
+def _check_tbl001_text_content(content: str, rel: str) -> list[BoundaryViolation]:
+    """Scan pre-read file content for any 'daily_messages' token.
+
+    Split out so tests can pass synthetic content without touching the filesystem.
+    Any occurrence — code, comment, or string — is a violation: the rule bans the
+    token outright so it stays self-documenting in Work route files.
+    """
+    violations = []
+    for i, line in enumerate(content.splitlines(), 1):
+        if "daily_messages" in line:
+            violations.append(
+                BoundaryViolation(
+                    rule="TBL001",
+                    file=rel,
+                    symbol="",
+                    message=(
+                        f"line {i}: Work route references 'daily_messages' "
+                        "(analysis fact table must not be read by Workspace "
+                        "runtime per #1125)"
+                    ),
+                )
+            )
+    return violations
+
+
+# Test-facing alias.
+check_tbl001_text_content = _check_tbl001_text_content
 
 
 def check_tbl001_callgraph(
@@ -233,7 +256,16 @@ def check_tbl001_callgraph(
 
 
 def check_tbl002(manage_files: set[str]) -> list[BoundaryViolation]:
-    """TBL002: Manage route must not write session_messages / agent_sessions."""
+    """TBL002: Manage route must not write session_messages / agent_sessions.
+
+    Inline-DML only: detects ``INSERT/UPDATE/DELETE`` against the runtime
+    tables written directly in the route file. Indirect writes (e.g. a Manage
+    route calling ``message_repo.save_message`` or SessionManager) are NOT
+    covered — there is no write-side call-graph today. This is acceptable
+    because admin.py/governance.py currently neither read nor write these
+    tables; if that changes, add a write-side call-graph analogous to
+    check_tbl001_callgraph.
+    """
     violations = []
     for rel in manage_files:
         path = PROJECT_ROOT / rel
@@ -306,7 +338,7 @@ def generate_baseline(violations: list[BoundaryViolation]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Table boundary checker (#1125)")
     parser.add_argument(
-        "files", nargs="*", help="Ignored (kept for pre-compat compat). Scans fixed route sets."
+        "files", nargs="*", help="Ignored (kept for pre-commit compat). Scans fixed route sets."
     )
     parser.add_argument("--baseline", action="store_true", help="Generate baseline to stdout")
     args = parser.parse_args()
