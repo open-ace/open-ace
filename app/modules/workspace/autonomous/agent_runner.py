@@ -572,12 +572,19 @@ class AutonomousAgentRunner:
         self,
         encoded_project_path: str,
         min_mtime_epoch: float,
+        bound_cli_session_ids: set[str] | None = None,
     ) -> str:
         """Find the latest Claude JSONL session created for the active worktree.
 
         This is best-effort discovery based on the encoded worktree path and file mtime.
         It assumes only one local autonomous Claude task is creating a new session for a
         given worktree at a time; concurrent tasks on the same worktree can still race.
+
+        ``bound_cli_session_ids`` excludes files belonging to sessions already bound to
+        another session line (main/review/test). Without this, a shared "main" session —
+        which is continuously appended across milestones and thus always has the newest
+        mtime — would be wrongly picked for a fresh review/test line, collapsing the
+        3-session topology into one (issue #723).
         """
         if not encoded_project_path:
             return ""
@@ -594,16 +601,53 @@ class AutonomousAgentRunner:
                     stat = candidate.stat()
                 except OSError:
                     continue
-                if (
+                if not (
                     stat.st_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
                     and stat.st_mtime >= latest_mtime
                 ):
-                    latest_file = candidate
-                    latest_mtime = stat.st_mtime
+                    continue
+                # Exclude files whose session id is already bound to another line
+                # (e.g. the always-being-written main session). This prevents the
+                # shared main session from being re-picked for a fresh review/test
+                # line and collapsing the 3-session design (#723).
+                if bound_cli_session_ids:
+                    sid = self._peek_jsonl_session_id(candidate)
+                    if sid and sid in bound_cli_session_ids:
+                        continue
+                latest_file = candidate
+                latest_mtime = stat.st_mtime
         except OSError:
             return ""
 
         return latest_file.stem if latest_file else ""
+
+    @staticmethod
+    def _peek_jsonl_session_id(filepath: Path) -> str:
+        """Read the session id from the first record of a Claude JSONL file.
+
+        Claude writes the session uuid as ``sessionId`` (and sometimes ``uuid``)
+        on every record; we only read the first non-empty line to identify the
+        file's owning session without parsing the whole transcript.
+        """
+        try:
+            with open(filepath, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    sid = ""
+                    if isinstance(rec, dict):
+                        sid = (rec.get("sessionId") or rec.get("uuid") or "").strip()
+                    if sid:
+                        return sid
+                    break
+        except OSError:
+            pass
+        return ""
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:
         """Resolve the real sidebar Claude session id for a workflow-owned line."""
@@ -622,9 +666,18 @@ class AutonomousAgentRunner:
             # control_response covers the vast majority of cases; if this fires
             # and the guessed id is wrong, it can get pinned to a session line
             # and propagated via --resume. Warn so it's traceable.
+            # Exclude sessions already bound to another line (main/review/test):
+            # a shared main session is continuously appended and would otherwise
+            # always win the mtime race, collapsing the 3-session design (#723).
+            bound_ids = set()
+            if self.session_manager:
+                bound_ids = self.session_manager.list_cli_session_ids_for_project(
+                    session.project_path
+                )
             persisted_id = self._find_latest_claude_session_id(
                 session.encoded_project_path,
                 session.started_at_epoch,
+                bound_cli_session_ids=bound_ids,
             )
             logger.warning(
                 "Using mtime fallback to resolve session (control_response missed) — "
@@ -2133,6 +2186,17 @@ class AutonomousAgentRunner:
                                 cli_sid = inner.get("session_id", "")
                                 if cli_sid and not session.cli_session_id:
                                     session.cli_session_id = cli_sid
+                                elif not cli_sid and not session.cli_session_id:
+                                    # Initialize succeeded but no session_id — the
+                                    # SDK response shape may have changed. Log so the
+                                    # mtime fallback (next resort) is traceable rather
+                                    # than silently degrading (#723).
+                                    logger.warning(
+                                        "control_response initialize success but no "
+                                        "session_id (workflow=%s); raw=%s",
+                                        session.workflow_id,
+                                        str(parsed)[:300],
+                                    )
                             session.sdk_initialized.set()
 
                     elif msg_type == "control_request":

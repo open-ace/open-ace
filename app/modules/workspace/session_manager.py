@@ -739,6 +739,37 @@ class SessionManager:
 
         return success
 
+    def list_cli_session_ids_for_project(self, project_path: str) -> set[str]:
+        """Return all non-empty ``cli_session_id`` values for sessions in a project.
+
+        Used by the autonomous runner's mtime fallback to EXCLUDE sessions already
+        bound to a workflow's session lines (main/review/test). Without this, a
+        shared "main" session — continuously appended and thus always newest by
+        mtime — gets wrongly picked for a fresh review/test line, collapsing the
+        3-session topology (issue #723).
+        """
+        if not project_path:
+            return set()
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                f"""SELECT DISTINCT cli_session_id FROM agent_sessions
+                    WHERE project_path = {_param()} AND cli_session_id IS NOT NULL
+                      AND cli_session_id != ''""",
+                (project_path,),
+            )
+            return {
+                (row["cli_session_id"] if not isinstance(row, (tuple, list)) else row[0])
+                for row in cursor.fetchall()
+                if (row["cli_session_id"] if not isinstance(row, (tuple, list)) else row[0])
+            }
+        except Exception:
+            logger.warning("Failed to list cli_session_ids for project", exc_info=True)
+            return set()
+        finally:
+            conn.close()
+
     ALLOWED_UPDATE_FIELDS = {
         "status",
         "workspace_type",
