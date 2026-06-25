@@ -25,6 +25,9 @@
   "autonomous": {
     "enabled": false
   },
+  "run_timeline": {
+    "enabled": false
+  },
   "tools": {
     "openclaw": {
       "enabled": true,

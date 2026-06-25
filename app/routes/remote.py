@@ -24,13 +24,14 @@ from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import _extract_token, _load_user_from_token, admin_required
+from app.auth.decorators import _extract_token, admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
+from app.modules.workspace.session_access import _set_user_from_token, _set_user_from_webui_token
 from app.modules.workspace.terminal_store import terminal_info_store
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ def load_user():
     Most remote endpoints require authentication. Returns 401 if no valid
     session token is provided. WebSocket, agent, and LLM-proxy endpoints
     use their own auth (JWT tokens) and are exempted.
+
+    Token / WebUI-token loading is shared with the run-timeline blueprint via
+    ``session_access``; only the remote-specific exemption list and the
+    terminal-status proxy-token special case live here.
     """
     # Skip auth for CORS preflight requests
     if request.method == "OPTIONS":
@@ -91,19 +96,15 @@ def load_user():
     if request.path.startswith("/api/remote/agent/files/"):
         return
 
-    token = _extract_token()
+    # Shared session/Authorization-token loading.
+    if _set_user_from_token():
+        return None  # Authenticated
 
-    if token:
-        user = _load_user_from_token(token)
-        if user:
-            g.user = user
-            g.user_id = user.get("id")
-            g.user_role = user.get("role")
-            return None  # Authenticated
-
-    # Special case: WebSocket proxy token for terminal status endpoint
-    # The WebSocket proxy process uses its own token (stored in terminal_info_store)
-    # to fetch terminal info for connecting to the remote terminal server
+    # Special case: WebSocket proxy token for terminal status endpoint.
+    # The WebSocket proxy process uses its own token (stored in
+    # terminal_info_store) to fetch terminal info for connecting to the remote
+    # terminal server. This sits between the session-token and WebUI-token
+    # fallbacks, so it cannot be folded into the shared load_remote_user().
     if request.path.startswith("/api/remote/terminal/") and request.path.endswith("/status"):
         from app.modules.workspace.terminal_store import terminal_info_store
 
@@ -112,6 +113,7 @@ def load_user():
         if len(path_parts) >= 5:
             terminal_id = path_parts[4]
             machine_id = request.args.get("machine_id", "")
+            token = _extract_token()
             if machine_id and token:
                 info = terminal_info_store.get(machine_id, terminal_id)
                 if info:
@@ -124,31 +126,9 @@ def load_user():
                         logger.info("Proxy token authenticated for terminal %s", terminal_id[:8])
                         return None  # Authenticated as proxy
 
-    # Fallback: try WebUI token validation (for iframe requests from qwen-code-webui)
-    url_token = request.args.get("token")
-    if url_token:
-        try:
-            from app.services.webui_manager import WebUIManager
-
-            webui_manager = WebUIManager()
-            is_valid, user_id, error = webui_manager.validate_token(url_token)
-            if is_valid and user_id:
-                from app.repositories.user_repo import UserRepository
-
-                user_repo = UserRepository()
-                user_data = user_repo.get_user_by_id(user_id)
-                if user_data:
-                    g.user = {
-                        "id": user_id,
-                        "username": user_data.get("username"),
-                        "email": user_data.get("email"),
-                        "role": user_data.get("role"),
-                    }
-                    g.user_id = user_id
-                    g.user_role = user_data.get("role")
-                    return None
-        except Exception as e:
-            logger.warning("Failed to validate URL token: %s", e)
+    # Shared WebUI URL-token fallback (iframe requests from qwen-code-webui).
+    if _set_user_from_webui_token():
+        return None
 
     return jsonify({"error": "Authentication required"}), 401
 
@@ -271,25 +251,9 @@ def _require_machine_admin(machine_id):
 
 def _check_session_access(session_id):
     """Check session access: owner, system admin, or machine admin. Returns (session_status, error)."""
-    session_mgr = get_remote_session_manager()
-    status = session_mgr.get_session_status(session_id)
-    if not status:
-        return None, (jsonify({"error": "Session not found"}), 404)
-    # System admin
-    if g.user.get("role") == "admin":
-        return status, None
-    # Session owner
-    session = session_mgr._session_manager.get_session(session_id)
-    if session and session.user_id == g.user["id"]:
-        return status, None
-    # Machine admin
-    mid = status.get("machine_id")
-    if mid:
-        mgr = get_remote_agent_manager()
-        perm = mgr.get_user_permission(mid, g.user["id"])
-        if perm == "admin":
-            return status, None
-    return None, (jsonify({"error": "Access denied"}), 403)
+    from app.modules.workspace.session_access import check_session_access
+
+    return check_session_access(session_id)
 
 
 # ==================== Machine Management (Admin) ====================
@@ -784,21 +748,19 @@ def send_permission_response(session_id):
     tool_name = data.get("tool_name", "")
     message = data.get("message")
 
-    # Queue the permission_response command for the agent
-    agent_mgr = get_remote_agent_manager()
-    cmd = {
-        "type": "command",
-        "command": "permission_response",
-        "session_id": session_id,
-        "behavior": behavior,
-        "tool_name": tool_name,
-    }
-    if request_id:
-        cmd["request_id"] = request_id
-    if message:
-        cmd["message"] = message
-
-    agent_mgr.send_command(session_info.get("machine_id", ""), cmd)
+    # Route through the session manager so the durable approval record and the
+    # permission_answered event are persisted alongside the command, with the
+    # operator identity (decided_by) captured from the auth state.
+    session_mgr = get_remote_session_manager()
+    session_mgr.respond_to_permission(
+        session_id,
+        request_id,
+        behavior,
+        tool_name,
+        message,
+        decided_by=g.user.get("id") if g.get("user") else None,
+        decided_by_name=g.user.get("username") if g.get("user") else None,
+    )
 
     return jsonify({"success": True})
 

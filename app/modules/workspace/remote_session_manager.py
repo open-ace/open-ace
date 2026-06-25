@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+from app.modules.workspace.run_timeline import get_run_recorder
 from app.modules.workspace.session_manager import SessionManager
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
@@ -53,6 +54,36 @@ class RemoteSessionManager:
         self._user_repo = UserRepository()
         # Cache user names to avoid repeated lookups
         self._user_name_cache: dict[int, str] = {}
+        # Persisted run/event timeline recorder. No-op when the feature is
+        # disabled (run_timeline.enabled=false); see app/modules/workspace/run_timeline.
+        self._run_recorder = get_run_recorder()
+
+    def _timeline(self, method: str, *args: Any, **kwargs: Any) -> None:
+        """Single integration seam to the run-timeline recorder.
+
+        Every lifecycle/output hook funnels through here instead of scattering
+        ``if not self._run_recorder.is_noop`` guards across the manager.
+        Removing the feature therefore means deleting this method (and the
+        ``self._run_recorder`` init above) — there is nothing else to strip. The
+        internal short-circuit keeps a disabled recorder free of even building
+        the call, and the recorder itself is non-blocking regardless.
+
+        Never raises, even on the hot path: an unknown/typo'd method name or an
+        unexpected recorder failure is swallowed so stdout handling is never
+        interrupted. (The recorder methods already catch internally; this is the
+        belt-and-suspenders for the ``_timeline`` call site itself.)
+        """
+        recorder = self._run_recorder
+        if recorder.is_noop:
+            return
+        fn = getattr(recorder, method, None)
+        if fn is None:
+            logger.warning("run_timeline: unknown recorder method %r ignored", method)
+            return
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:  # pragma: no cover - defensive, hot path must never raise
+            logger.debug("run_timeline: recorder %s failed: %s", method, e)
 
     def create_remote_session(
         self,
@@ -255,6 +286,21 @@ class RemoteSessionManager:
         # Cache the initial permission mode (default if not specified)
         self._session_permission_modes[session_id] = permission_mode or "default"
 
+        # Record the durable run + session_created event (no-op when disabled).
+        # The manager already has full attribution here, so pass it explicitly
+        # and let the recorder cache it per-run (plan §2.3 attribution source map).
+        self._timeline(
+            "record_session_created",
+            session_id,
+            user_id=user_id,
+            tenant_id=effective_tenant_id,
+            machine_id=machine_id,
+            tool_name=tool_name,
+            provider=provider,
+            cli_tool=cli_tool,
+            model=model,
+        )
+
         return {
             "session_id": session_id,
             "machine_id": machine_id,
@@ -344,6 +390,8 @@ class RemoteSessionManager:
             "content": content,
         }
 
+        self._timeline("record_event", session_id, "user_message", role="user", content=content)
+
         return self._agent_manager.send_command(machine_id, command)
 
     def update_permission_mode(self, session_id: str, permission_mode: str) -> bool:
@@ -388,6 +436,56 @@ class RemoteSessionManager:
         self._session_permission_modes[session_id] = permission_mode or "default"
         logger.info(f"Updated permission_mode for {session_id[:8]}: {new_mode}")
 
+        return True
+
+    def respond_to_permission(
+        self,
+        session_id: str,
+        request_id: Optional[str],
+        behavior: str,
+        tool_name: str = "",
+        message: Optional[str] = None,
+        *,
+        decided_by: Optional[int] = None,
+        decided_by_name: Optional[str] = None,
+    ) -> bool:
+        """Send a permission response (approve/deny) to the remote agent.
+
+        Centralises the response path so the durable approval record and the
+        ``permission_answered`` event are recorded alongside the command dispatch
+        (the route previously dispatched directly and captured no operator
+        identity). ``decided_by`` / ``decided_by_name`` are injected from the
+        Flask auth state by the caller.
+        """
+        machine_id = self._get_machine_id(session_id)
+
+        # Record the durable approval response first (no-op when disabled).
+        self._timeline(
+            "record_approval_response",
+            session_id,
+            request_id,
+            behavior,
+            decided_by=decided_by,
+            decided_by_name=decided_by_name,
+            message=message,
+        )
+
+        if not machine_id:
+            return False
+
+        command: dict[str, Any] = {
+            "type": "command",
+            "command": "permission_response",
+            "session_id": session_id,
+            "behavior": behavior,
+            "tool_name": tool_name,
+        }
+        if request_id:
+            command["request_id"] = request_id
+        if message:
+            command["message"] = message
+
+        self._agent_manager.send_command(machine_id, command)
         return True
 
     def update_model(self, session_id: str, model: str) -> bool:
@@ -440,6 +538,7 @@ class RemoteSessionManager:
 
         self._agent_manager.send_command(machine_id, command)
         logger.info("Sent abort_request for session %s (reason=%s)", session_id[:8], reason)
+        self._timeline("record_event", session_id, "request_aborted", metadata={"reason": reason})
         return True
 
     def stop_session(self, session_id: str) -> bool:
@@ -461,6 +560,7 @@ class RemoteSessionManager:
         self._agent_manager.unbind_session(session_id)
 
         logger.info(f"Stopped remote session {session_id}")
+        self._timeline("record_run_status", session_id, "completed")
         return True
 
     def pause_session(self, session_id: str) -> bool:
@@ -482,6 +582,7 @@ class RemoteSessionManager:
             session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
             self._session_manager.update_session(session)
 
+        self._timeline("record_run_status", session_id, "pause")
         return True
 
     def resume_session(self, session_id: str) -> bool:
@@ -503,6 +604,7 @@ class RemoteSessionManager:
             session.paused_at = None
             self._session_manager.update_session(session)
 
+        self._timeline("record_run_status", session_id, "resume")
         return True
 
     def get_session_status(self, session_id: str) -> Optional[dict[str, Any]]:
@@ -763,6 +865,32 @@ class RemoteSessionManager:
                 self._session_manager.increment_session_usage(session_id, message_delta=1)
             self._save_to_daily_messages(session_id, "assistant", text)
 
+            # Record assistant_output once per turn (not per stdout chunk) and
+            # derive tool_use events from the accumulated content blocks. These
+            # run on the stdout hot path, so the recorder enqueues them to its
+            # background writer rather than blocking on DB I/O.
+            self._timeline(
+                "record_event",
+                session_id,
+                "assistant_output",
+                role="assistant",
+                content=text,
+                metadata={"content_blocks": blocks} if blocks else None,
+            )
+            for block in blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    self._timeline(
+                        "record_event",
+                        session_id,
+                        "tool_use",
+                        event_subtype=block.get("name"),
+                        metadata={
+                            "tool_use_id": block.get("id"),
+                            "name": block.get("name"),
+                            "input": block.get("input"),
+                        },
+                    )
+
     def process_usage_report(
         self, session_id: str, tokens: dict[str, int], requests: int = 1
     ) -> None:
@@ -783,6 +911,10 @@ class RemoteSessionManager:
             total_input_delta=input_tokens,
             total_output_delta=output_tokens,
         )
+
+        # Record the durable usage event with model/provider attribution
+        # (key_id is NULL phase 1 — the agent does not report which key it used).
+        self._timeline("record_usage", session_id, tokens, requests)
 
         # Record usage in QuotaManager
         if session.user_id:
@@ -829,6 +961,9 @@ class RemoteSessionManager:
             session_id[:8],
             control_request.get("request", {}).get("subtype"),
         )
+
+        # Persist the durable approval (pending) + permission_requested event.
+        self._timeline("record_approval_request", session_id, control_request)
 
     def process_request_state(
         self,
@@ -904,6 +1039,13 @@ class RemoteSessionManager:
             self._session_permission_modes.pop(session_id, None)
 
         self._session_manager.update_session(session)
+
+        # Record terminal lifecycle events (stop / error). The "completed/exited"
+        # branch keeps the session active, so only genuine stops/errors are logged.
+        if session.status == "completed":
+            self._timeline("record_run_status", session_id, "stopped")
+        elif session.status == "error":
+            self._timeline("record_run_status", session_id, "error")
 
     def _cli_tool_to_provider(self, cli_tool: str) -> str:
         """Map CLI tool name to LLM provider name."""

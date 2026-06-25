@@ -13,6 +13,7 @@ import type { BadgeVariant } from './Badge';
 import { formatDateTime, formatTimestampWithSeconds, formatTokens } from '@/utils';
 import { useRemoteSession } from '@/hooks';
 import type { AgentSession, SessionMessage, ContentBlock } from '@/api/sessions';
+import { RunTimeline } from './RunTimeline';
 
 interface SessionDetailContentProps {
   session: AgentSession;
@@ -246,6 +247,12 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
       {/* Remote Output */}
       {session.workspace_type === 'remote' && (
         <RemoteOutputSection sessionId={session.session_id} language={language} />
+      )}
+
+      {/* Persisted run timeline (provenance). Self-hides when the backend
+          run_timeline feature flag is disabled, so it is safe to mount here. */}
+      {session.workspace_type === 'remote' && (
+        <RunTimeline sessionId={session.session_id} language={language} />
       )}
 
       {/* Restore Button */}

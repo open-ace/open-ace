@@ -89,6 +89,8 @@ export {
   useStopRemoteSession,
   usePauseRemoteSession,
   useResumeRemoteSession,
+  useRunEvents,
+  useRunApprovals,
 } from './useRemote';
 
 export {

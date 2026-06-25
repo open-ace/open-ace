@@ -4,6 +4,68 @@
 
 -- Setup session
 
+CREATE TABLE agent_approvals (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ request_id text NOT NULL,
+ run_id text,
+ session_id text,
+ tool_name text,
+ request_subtype text,
+ request_details text,
+ status text DEFAULT 'pending',
+ decision text,
+ decided_by integer,
+ decided_by_name text,
+ decision_metadata text,
+ requested_at TIMESTAMP,
+ decided_at TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_run_events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_id text,
+ session_id text,
+ event_type text DEFAULT '' NOT NULL,
+ event_subtype text,
+ role text,
+ content text,
+ tool_name text,
+ provider text,
+ model text,
+ key_id text,
+ user_id integer,
+ tenant_id integer,
+ machine_id text,
+ metadata text,
+ event_ts TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ run_id text NOT NULL,
+ session_id text NOT NULL,
+ user_id integer,
+ tenant_id integer,
+ machine_id text,
+ tool_name text,
+ provider text,
+ cli_tool text,
+ model text,
+ status text DEFAULT 'active',
+ started_at TIMESTAMP,
+ ended_at TIMESTAMP,
+ total_tokens integer DEFAULT 0,
+ total_input_tokens integer DEFAULT 0,
+ total_output_tokens integer DEFAULT 0,
+ total_requests integer DEFAULT 0,
+ metadata text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE agent_sessions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  session_id text NOT NULL,
@@ -810,6 +872,10 @@ CREATE TABLE workflow_milestones (
  tldr text DEFAULT '' NOT NULL
 );
 
+CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
+
+CREATE UNIQUE INDEX agent_runs_run_id_key ON agent_runs (run_id);
+
 CREATE UNIQUE INDEX agent_sessions_session_id_key ON agent_sessions (session_id);
 
 CREATE UNIQUE INDEX agent_tokens_token_hash_key ON agent_tokens (token_hash);
@@ -887,6 +953,18 @@ CREATE UNIQUE INDEX users_username_key ON users (username);
 CREATE UNIQUE INDEX web_user_auth_sessions_session_token_key ON web_user_auth_sessions (session_token);
 
 CREATE UNIQUE INDEX workflow_milestones_milestone_id_key ON workflow_milestones (milestone_id);
+
+CREATE INDEX idx_agent_approvals_run_id ON agent_approvals (run_id);
+
+CREATE INDEX idx_agent_approvals_session_id ON agent_approvals (session_id);
+
+CREATE INDEX idx_agent_approvals_status ON agent_approvals (status);
+
+CREATE UNIQUE INDEX idx_agent_runs_session_id ON agent_runs (session_id);
+
+CREATE INDEX idx_agent_runs_status ON agent_runs (status);
+
+CREATE INDEX idx_agent_runs_user_id ON agent_runs (user_id);
 
 CREATE INDEX idx_agent_sessions_project ON agent_sessions (project_id);
 
@@ -1045,6 +1123,14 @@ CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines (hostname, t
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines (machine_id);
 
 CREATE INDEX idx_remote_machines_status ON remote_machines (status);
+
+CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
+
+CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
+
+CREATE INDEX idx_run_events_run_id ON agent_run_events (run_id);
+
+CREATE INDEX idx_run_events_session_id ON agent_run_events (session_id, id);
 
 CREATE INDEX idx_security_settings_key ON security_settings (setting_key);
 

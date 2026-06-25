@@ -64,6 +64,12 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
         ).fetchone()
         is not None
     )
+    has_run_timeline = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_run_events'"
+        ).fetchone()
+        is not None
+    )
     columns = set()
     if has_session_messages:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(session_messages)")}
@@ -71,10 +77,11 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     conn.close()
 
     assert version is not None
-    # HEAD_REVISION is updated to 001_fix_auto_provision after post-baseline migration
-    assert version[0] == "001_fix_auto_provision"
+    # run_timeline migration chains after 001_fix_auto_provision (single head)
+    assert version[0] == "20260626_001_add_run_timeline_tables"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
     assert has_compliance_reports is True
+    assert has_run_timeline is True
     assert "auto_mapping_enabled" in user_columns

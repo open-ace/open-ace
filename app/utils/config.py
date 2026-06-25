@@ -76,6 +76,17 @@ def is_autonomous_enabled() -> bool:
     return bool(get_config_value("autonomous", "enabled", False))
 
 
+def is_run_timeline_enabled() -> bool:
+    """Check whether the persisted remote-session run timeline feature is enabled.
+
+    Mirrors ``is_autonomous_enabled``: reads ``run_timeline.enabled`` from
+    config.json (60 s TTL cache). When disabled the recorder is a no-op and
+    the timeline API returns ``{disabled: true}``. Strictly mirrors autonomous
+    (no env bypass) so the whole feature is easy to remove later.
+    """
+    return bool(get_config_value("run_timeline", "enabled", False))
+
+
 # ── AI GitHub Account env cache ───────────────────────────────────
 # Avoids a DB query on every subprocess.run() inside GitHubOps.
 # Simple two-variable cache: data + timestamp, guarded by _cache_lock.

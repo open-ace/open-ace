@@ -116,6 +116,100 @@ export interface SessionModelsResponse {
   ha_pool_token?: string;
 }
 
+// ==================== Run Timeline Types ====================
+
+/** Persisted provenance record: one per remote session. */
+export interface AgentRun {
+  run_id: string;
+  session_id: string;
+  user_id: number | null;
+  tenant_id: number | null;
+  machine_id: string | null;
+  tool_name: string | null;
+  provider: string | null;
+  cli_tool: string | null;
+  model: string | null;
+  status: string;
+  started_at: string | null;
+  ended_at: string | null;
+  total_tokens: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_requests: number;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** One append-only entry in a run's timeline. */
+export interface RunEvent {
+  id: number | null;
+  run_id: string;
+  session_id: string;
+  event_type: string;
+  event_subtype: string | null;
+  role: string | null;
+  content: string | null;
+  tool_name: string | null;
+  provider: string | null;
+  model: string | null;
+  key_id: string | null;
+  user_id: number | null;
+  tenant_id: number | null;
+  machine_id: string | null;
+  metadata: Record<string, unknown>;
+  event_ts: string | null;
+  created_at: string | null;
+}
+
+/** A durable permission request + its response. */
+export interface AgentApproval {
+  id: number | null;
+  request_id: string;
+  run_id: string;
+  session_id: string;
+  tool_name: string | null;
+  request_subtype: string | null;
+  request_details: Record<string, unknown>;
+  status: string;
+  decision: string | null;
+  decided_by: number | null;
+  decided_by_name: string | null;
+  decision_metadata: Record<string, unknown>;
+  requested_at: string | null;
+  decided_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface RunTimelineParams {
+  limit?: number;
+  offset?: number;
+  /** Event id cursor for live streaming (only events after this id). */
+  after?: number;
+  event_type?: string;
+  order?: 'asc' | 'desc';
+}
+
+export interface RunEventsResponse {
+  success: boolean;
+  /** Present (true) when the run_timeline feature flag is disabled. */
+  disabled?: boolean;
+  run: AgentRun | null;
+  events: RunEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RunApprovalsResponse {
+  success: boolean;
+  /** Present (true) when the run_timeline feature flag is disabled. */
+  disabled?: boolean;
+  approvals: AgentApproval[];
+  total: number;
+}
+
 // ==================== API Methods ====================
 
 export const remoteApi = {
@@ -273,5 +367,23 @@ export const remoteApi = {
     return apiClient.get(`/api/remote/terminal/${terminalId}/status`, {
       machine_id: machineId,
     });
+  },
+
+  // Run timeline (persisted provenance). Returns { disabled: true } when the
+  // backend feature flag run_timeline.enabled is off, so the UI can hide itself.
+  getRunEvents(sessionId: string, params?: RunTimelineParams): Promise<RunEventsResponse> {
+    const query: Record<string, string> = {};
+    // typeof checks include 0 (a valid limit/offset/after value) but exclude
+    // undefined/null.
+    if (typeof params?.limit === 'number') query.limit = String(params.limit);
+    if (typeof params?.offset === 'number') query.offset = String(params.offset);
+    if (typeof params?.after === 'number') query.after = String(params.after);
+    if (params?.event_type) query.event_type = params.event_type;
+    if (params?.order) query.order = params.order;
+    return apiClient.get(`/api/remote/sessions/${sessionId}/events`, query);
+  },
+
+  getRunApprovals(sessionId: string): Promise<RunApprovalsResponse> {
+    return apiClient.get(`/api/remote/sessions/${sessionId}/approvals`);
   },
 };
