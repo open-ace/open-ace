@@ -2391,6 +2391,8 @@ upgrade_deployment() {
                     if [ -n "$home_files" ]; then
                         print_info "发现容器内 home 目录数据，正在迁移..."
                         mkdir -p "$DEPLOY_DIR/data/home"
+                        # Set permissions for /home directory (Issue #1249)
+                        chmod 755 "$DEPLOY_DIR/data/home"
 
                         for user_dir in $home_files; do
                             local target_dir="$DEPLOY_DIR/data/home/$user_dir"
@@ -2486,6 +2488,8 @@ upgrade_deployment() {
     mkdir -p "$DEPLOY_DIR"/logs
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         mkdir -p "$DEPLOY_DIR"/data/home
+        # Set permissions for /home directory (Issue #1249)
+        chmod 755 "$DEPLOY_DIR"/data/home
     fi
     print_success "持久化目录创建完成"
 
