@@ -34,6 +34,7 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
+from shared.utils import warn_if_skipped_message_has_text
 
 
 def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
@@ -920,7 +921,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                         # Note: metadata is TEXT type, use LIKE pattern matching instead of JSONB ->>
                         if msg_id and has_external_message_id:
                             check_sql = f"""
-                                SELECT id FROM session_messages
+                                SELECT id, content FROM session_messages
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND external_message_id = {placeholder}
@@ -930,7 +931,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                             # Pattern match for message_id in JSON-like metadata string
                             escaped_msg_id = escape_like(str(msg_id))
                             check_sql = f"""
-                                SELECT id FROM session_messages
+                                SELECT id, content FROM session_messages
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND metadata LIKE {placeholder}
@@ -947,7 +948,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                             )
                         else:
                             check_sql = f"""
-                                SELECT id FROM session_messages
+                                SELECT id, content FROM session_messages
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND timestamp = {placeholder}
@@ -1040,6 +1041,18 @@ def update_agent_sessions_stats(messages: list) -> int:
                                     ),
                                 )
                             messages_inserted += 1
+                        else:
+                            # Observability (#723): a row for this
+                            # (session, role, message_id) already exists and is
+                            # being skipped. If the incoming line carries real
+                            # text that the existing row lacks, that text would
+                            # be SILENTLY DROPPED — the exact regression this
+                            # PR fixes for claude's multi-line-per-message format.
+                            # Log it so a future format change in any tool is
+                            # caught instead of silently losing content.
+                            warn_if_skipped_message_has_text(
+                                existing, msg, session_id, msg_id, "fetch_claude"
+                            )
 
                     except Exception as e:
                         if (
