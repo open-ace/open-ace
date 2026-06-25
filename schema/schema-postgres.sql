@@ -1960,6 +1960,8 @@ CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (w
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
 
+CREATE INDEX idx_projects_business_project_id ON projects USING btree (business_project_id);
+
 CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
 
 
