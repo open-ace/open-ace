@@ -279,7 +279,6 @@ CREATE SEQUENCE autonomous_workflows_id_seq
     CACHE 1;
 
 ALTER SEQUENCE autonomous_workflows_id_seq OWNED BY autonomous_workflows.id;
-
 CREATE TABLE business_project_members (
     id integer NOT NULL,
     business_project_id integer NOT NULL,
@@ -296,7 +295,6 @@ CREATE SEQUENCE business_project_members_id_seq
     CACHE 1;
 
 ALTER SEQUENCE business_project_members_id_seq OWNED BY business_project_members.id;
-
 CREATE TABLE business_projects (
     id integer NOT NULL,
     name character varying(200) NOT NULL,
@@ -319,7 +317,6 @@ CREATE SEQUENCE business_projects_id_seq
     CACHE 1;
 
 ALTER SEQUENCE business_projects_id_seq OWNED BY business_projects.id;
-
 CREATE TABLE compliance_reports (
     id integer NOT NULL,
     report_id text NOT NULL,
@@ -1775,11 +1772,13 @@ CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
 
+
 --
 --
 CREATE INDEX idx_business_project_members_business_project_id ON business_project_members USING btree (business_project_id);
 
 CREATE INDEX idx_business_project_members_user_id ON business_project_members USING btree (user_id);
+
 
 --
 --
