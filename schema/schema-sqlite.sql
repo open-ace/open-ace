@@ -954,10 +954,6 @@ CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
 
-CREATE INDEX idx_business_project_members_business_project_id ON business_project_members (business_project_id);
-
-CREATE INDEX idx_business_project_members_user_id ON business_project_members (user_id);
-
 CREATE INDEX idx_daily_stats_date ON daily_stats (date);
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats (date, tool_name);
