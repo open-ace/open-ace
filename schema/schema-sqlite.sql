@@ -187,23 +187,23 @@ CREATE TABLE autonomous_workflows (
 );
 
 CREATE TABLE business_project_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    business_project_id integer NOT NULL,
-    user_id integer NOT NULL,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ business_project_id integer NOT NULL,
+ user_id integer NOT NULL,
+ added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE business_projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT NOT NULL,
-    description text,
-    key_patterns text,
-    is_active INTEGER DEFAULT 1 NOT NULL,
-    created_by integer,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMP
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ name TEXT NOT NULL,
+ code TEXT NOT NULL,
+ description text,
+ key_patterns text,
+ is_active INTEGER DEFAULT 1 NOT NULL,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ deleted_at TIMESTAMP
 );
 
 CREATE TABLE compliance_reports (
