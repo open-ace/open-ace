@@ -247,6 +247,18 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
     mkdir -p "$WORKSPACE_DIR"
 
+    # Fix /home directory permissions (Issue #1249)
+    # When data/home is mounted as /home, restrictive 700 permissions prevent
+    # users from accessing their own home directories. /home should be 755
+    # (enterable by all), while /home/<user> remains 700 (private to user).
+    if [ -d "/home" ]; then
+        home_perms=$(stat -c "%a" /home 2>/dev/null || echo "unknown")
+        if [ "$home_perms" != "755" ] && [ "$home_perms" != "unknown" ]; then
+            chmod 755 /home
+            echo "  Fixed /home permissions: $home_perms -> 755"
+        fi
+    fi
+
     # Sync workspace users from database to container
     # This creates OS users for each database user with system_account
     if [ -n "$DATABASE_URL" ]; then
