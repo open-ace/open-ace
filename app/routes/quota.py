@@ -89,25 +89,23 @@ def check_quota():
             return jsonify({"error": "User not found"}), 404
 
         username = user.get("username", "")
-        system_account = user.get("system_account") or username
 
-        # Get today's usage combining local CLI and remote proxy
+        # Get today's usage — session-only (agent_sessions) per #1125: the Work
+        # page must not read the daily_messages analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
-        today_combined = usage_repo.get_combined_usage(
+        today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=today,
             end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
 
-        # Get monthly usage combining local CLI and remote proxy
+        # Get monthly usage — session-only (same #1125 rationale).
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
-        monthly_combined = usage_repo.get_combined_usage(
+        monthly_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=month_start,
             end_date=today,
         )
@@ -132,7 +130,7 @@ def check_quota():
 
         response = {
             "user_id": user_id,
-            "username": g.user.get("username"),
+            "username": username,
             "daily": {
                 "tokens": {
                     "used": today_tokens,
@@ -216,27 +214,23 @@ def get_quota_status():
             return jsonify({"error": "User not found"}), 404
 
         username = user.get("username", "")
-        # Use system_account for matching sender_name if available
-        # sender_name format: {system_account}-{hostname}-{tool}
-        system_account = user.get("system_account") or username
 
-        # Get today's usage combining local CLI and remote proxy
+        # Get today's usage — session-only (agent_sessions) per #1125: the Work
+        # page must not read the daily_messages analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
-        today_combined = usage_repo.get_combined_usage(
+        today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=today,
             end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
 
-        # Get monthly usage combining local CLI and remote proxy
+        # Get monthly usage — session-only (same #1125 rationale).
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
-        monthly_combined = usage_repo.get_combined_usage(
+        monthly_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=month_start,
             end_date=today,
         )
@@ -423,26 +417,22 @@ def webui_quota_check():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        username = user.get("username", "")
-        system_account = user.get("system_account") or username
-
-        # Get today's usage combining local CLI and remote proxy
+        # Get today's usage — session-only (agent_sessions) per #1125: the Work
+        # page must not read the daily_messages analysis fact table.
         today = datetime.now().strftime("%Y-%m-%d")
-        today_combined = usage_repo.get_combined_usage(
+        today_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=today,
             end_date=today,
         )
         today_requests = today_combined["requests"]
         today_tokens = today_combined["tokens"]
 
-        # Get monthly usage combining local CLI and remote proxy
+        # Get monthly usage — session-only (same #1125 rationale).
         now = datetime.now()
         month_start = now.replace(day=1).strftime("%Y-%m-%d")
-        monthly_combined = usage_repo.get_combined_usage(
+        monthly_combined = usage_repo.get_session_only_usage(
             user_id=user_id,
-            system_account=system_account,
             start_date=month_start,
             end_date=today,
         )

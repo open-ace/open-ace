@@ -37,6 +37,7 @@ interface SessionItem {
   requests: number;
   workspace_type?: string;
   machine_name?: string;
+  isImported?: boolean; // CLI-imported session (no cli_session_id + completed)
   firstMessage?: string; // First user message preview (truncated to 100 chars)
 }
 
@@ -165,6 +166,7 @@ export const SessionList: React.FC<SessionListProps> = ({ collapsed = false, onS
         requests: session.request_count ?? 0,
         workspace_type: session.workspace_type,
         machine_name: session.machine_name,
+        isImported: !session.cli_session_id && session.status === 'completed',
         firstMessage: session.first_message, // First user message preview
       };
 
@@ -385,11 +387,13 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
         {sessions.map((session) => (
           <li key={session.id}>
             <button
-              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''}`}
+              className={`session-item w-100 p-2 ${selectedSessionId === session.id ? 'selected' : ''} ${session.isImported ? 'session-imported' : ''}`}
               onClick={() => onSessionClick(session.id)}
             >
               <span className="session-id text-truncate">
-                {session.workspace_type === 'terminal' ? (
+                {session.isImported ? (
+                  <i className="bi bi-archive text-muted me-1" title="本地 CLI 历史导入" />
+                ) : session.workspace_type === 'terminal' ? (
                   <i className="bi bi-terminal-fill text-info me-1" title="Web Terminal" />
                 ) : session.workspace_type === 'remote' ? (
                   <i

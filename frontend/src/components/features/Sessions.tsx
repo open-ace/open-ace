@@ -580,9 +580,14 @@ const SessionCard: React.FC<SessionCardProps> = ({
   resumeRemoteMutation,
 }) => {
   const isRemote = session.workspace_type === 'remote';
+  const isImported = !session.cli_session_id && session.status === 'completed';
   return (
     <div
-      className={cn('session-item card mb-2', isSelected && 'border-primary')}
+      className={cn(
+        'session-item card mb-2',
+        isSelected && 'border-primary',
+        isImported && 'session-imported',
+      )}
       onClick={onClick}
       style={{ cursor: 'pointer' }}
     >
@@ -614,6 +619,12 @@ const SessionCard: React.FC<SessionCardProps> = ({
               <Badge variant="info">
                 <i className="bi bi-cloud-fill me-1" />
                 {session.machine_name ?? 'Remote'}
+              </Badge>
+            )}
+            {isImported && (
+              <Badge variant="secondary">
+                <i className="bi bi-archive me-1" />
+                {t('cliImported', language)}
               </Badge>
             )}
           </div>

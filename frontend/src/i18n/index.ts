@@ -469,6 +469,7 @@ export const translations: Record<Language, Translations> = {
     restoreToWorkspace: 'Restore to Workspace',
     sessionRestored: 'Session restored to workspace',
     restoredSession: 'Restored Session',
+    cliImported: 'Local CLI History',
     // Issue #669: Session terminated recreation
     sessionTerminated: 'Session Process Terminated',
     sessionTerminatedCanResume:
@@ -1942,6 +1943,7 @@ export const translations: Record<Language, Translations> = {
     restoreToWorkspace: '恢复到工作区',
     sessionRestored: '会话已恢复到工作区',
     restoredSession: '恢复的会话',
+    cliImported: '本地 CLI 历史',
     // Issue #669: Session terminated recreation
     sessionTerminated: '会话进程已终止',
     sessionTerminatedCanResume: '检测到可恢复的对话历史，是否尝试恢复上下文？',
@@ -4083,6 +4085,7 @@ export const translations: Record<Language, Translations> = {
     toolAccountRequired: 'ツールアカウントは必須です',
     addToolAccountSuccess: 'ツールアカウントが正常に追加されました',
     addToolAccountFailed: 'ツールアカウントの追加に失敗しました',
+    cliImported: 'ローカル CLI 履歴',
   },
   ko: {
     // Common
@@ -5238,6 +5241,7 @@ export const translations: Record<Language, Translations> = {
     toolAccountRequired: '도구 계정은 필수입니다',
     addToolAccountSuccess: '도구 계정이 성공적으로 추가되었습니다',
     addToolAccountFailed: '도구 계정 추가 실패',
+    cliImported: '로컬 CLI 기록',
   },
 };
 

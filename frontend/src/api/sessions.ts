@@ -30,6 +30,7 @@ export interface AgentSession {
   project_path?: string;
   workspace_type?: 'local' | 'remote' | 'terminal';
   remote_machine_id?: string;
+  cli_session_id?: string;
   machine_name?: string;
   first_message?: string; // First user message preview (for tooltip)
   messages: SessionMessage[];

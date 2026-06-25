@@ -1147,6 +1147,60 @@ class UsageRepository:
             "remote_requests": session_requests,  # Keep legacy field name for compatibility
         }
 
+    def get_session_only_usage(
+        self,
+        user_id: int,
+        start_date: str,
+        end_date: str,
+    ) -> dict:
+        """Get usage from agent_sessions only (no daily_messages).
+
+        Used by the Work-page quota display so Workspace runtime does not read
+        the daily_messages analysis fact table (#1125: analysis tables must not
+        participate in Workspace runtime display). Counts all session-backed
+        spend across workspace_type local/remote/terminal, which covers WebUI,
+        autonomous, remote, and terminal sessions. get_combined_usage (which
+        adds a daily_messages leg) is retained for the Manage/analysis page,
+        which #1125 whitelists on the analysis tables.
+
+        Args:
+            user_id: User ID.
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+
+        Returns:
+            Dict with tokens, requests, and per-source breakdown (local_* are
+            always 0 here since daily_messages is excluded).
+        """
+        session_row = self.db.fetch_one(
+            """
+            SELECT
+                COALESCE(SUM(total_tokens), 0) as tokens,
+                COALESCE(SUM(
+                    (SELECT COUNT(*) FROM session_messages sm
+                     WHERE sm.session_id = agent_sessions.session_id
+                       AND sm.role = 'assistant')
+                ), 0) as requests
+            FROM agent_sessions
+            WHERE user_id = ?
+              AND workspace_type IN ('local', 'remote', 'terminal')
+              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
+        """,
+            (user_id, start_date, end_date),
+        )
+
+        session_tokens = int(session_row["tokens"]) if session_row else 0
+        session_requests = int(session_row["requests"]) if session_row else 0
+
+        return {
+            "tokens": session_tokens,
+            "requests": session_requests,
+            "local_tokens": 0,
+            "local_requests": 0,
+            "remote_tokens": session_tokens,  # legacy field name for compatibility
+            "remote_requests": session_requests,
+        }
+
     def get_user_daily_detail(
         self,
         user_id: int,
