@@ -12,7 +12,6 @@ import logging
 import os
 import platform
 import pwd
-import re
 import secrets
 import socket
 import subprocess
@@ -26,6 +25,9 @@ from typing import Any, Optional, cast
 
 import gevent
 from gevent import lock as gevent_lock
+
+from app.utils.workspace import ensure_system_user as _ensure_user_shared
+from app.utils.workspace import run_as_root_if_needed
 
 logger = logging.getLogger(__name__)
 
@@ -682,14 +684,24 @@ class WebUIManager:
 
         # Change log directory ownership to system_account (Linux/macOS only)
         # This allows webui to create additional log files if needed
+        # Issue #1262: Use sudo when running as non-root user
         if self._platform in ("linux", "darwin"):
-            try:
-                pw_info = pwd.getpwnam(system_account)
-                os.chown(webui_log_dir, pw_info.pw_uid, pw_info.pw_gid)
-            except KeyError:
-                logger.warning(f"User '{system_account}' not found, skipping chown")
-            except OSError as e:
-                logger.warning(f"Failed to chown log dir: {e}")
+            if os.geteuid() != 0:
+                # Non-root user: use sudo chown
+                result = run_as_root_if_needed(
+                    ["chown", f"{system_account}:{system_account}", webui_log_dir]
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Failed to chown log dir: {result.stderr}")
+            else:
+                # Root user: direct chown
+                try:
+                    pw_info = pwd.getpwnam(system_account)
+                    os.chown(webui_log_dir, pw_info.pw_uid, pw_info.pw_gid)
+                except KeyError:
+                    logger.warning(f"User '{system_account}' not found, skipping chown")
+                except OSError as e:
+                    logger.warning(f"Failed to chown log dir: {e}")
 
         # Ensure PATH can resolve the `node` binary while preserving the host's
         # inherited PATH. Prepend the standard system directories so Docker
@@ -876,55 +888,16 @@ class WebUIManager:
         Ensure a system user exists for workspace operations.
         Creates the OS user if it doesn't exist.
 
+        Reuses the ensure_system_user function from app/utils/workspace.py
+        to avoid code duplication and ensure consistent behavior.
+
         Args:
             system_account: Username for the system account.
 
         Returns:
             True if user exists or was created successfully.
         """
-        # Validate username format (Linux useradd requirements)
-        # - Must start with a lowercase letter or underscore
-        # - Can contain lowercase letters, digits, underscores, and dashes
-        # - Maximum 32 characters
-        # - No spaces or special characters
-
-        if not system_account:
-            logger.error("Empty username provided")
-            return False
-
-        if len(system_account) > 32:
-            logger.error(f"Username too long (max 32 chars): {system_account}")
-            return False
-
-        # Linux username pattern: [a-z_][a-z0-9_-]*
-        if not re.match(r"^[a-z_][a-z0-9_-]*$", system_account):
-            logger.error(f"Invalid username format: {system_account}")
-            return False
-
-        # macOS doesn't have useradd — skip system user creation
-        if platform.system() == "Darwin":
-            logger.debug(f"Skipping system user creation on macOS for: {system_account}")
-            return True
-
-        # Check if user already exists
-        result = subprocess.run(["id", system_account], capture_output=True, text=True)
-        if result.returncode == 0:
-            return True
-
-        # Create user with home directory
-        logger.info(f"Creating system user: {system_account}")
-        result = subprocess.run(
-            ["useradd", "-m", "-s", "/bin/bash", system_account],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            logger.error(f"Failed to create system user {system_account}: {result.stderr}")
-            return False
-
-        logger.info(f"System user {system_account} created successfully")
-        return True
+        return _ensure_user_shared(system_account)
 
     def _stop_instance_internal(self, user_id: int):
         """

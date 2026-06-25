@@ -1779,8 +1779,9 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
         webui_local_rule="$run_user ALL=(ALL) NOPASSWD: $webui_local_path *"
     fi
 
-    # 【修复 P2】增加 chown 和通配符 *，与 docker-entrypoint.sh 保持一致
-    local utility_rule="$run_user ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *"
+    # 【修复 Issue #1262】使用 Cmnd_Alias 引用，避免重复定义命令列表
+    # utility_rule 在用户规则中引用 OPENACE_UTILS Cmnd_Alias
+    local utility_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_UTILS"
 
     # Build current user's complete rule block
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
@@ -1804,6 +1805,14 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
 # secure_path overrides PATH for sudo commands, so we must include /usr/local/bin here
 # Order matters: /usr/local/bin first ensures newer Node.js is found before legacy versions
 Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
+
+    # 【修复 Issue #1262】Cmnd_Alias 独立定义，避免重复
+    # 所有命令必须添加 * 后缀以允许任意参数（如 'test -r', 'chown user:group path'）
+    # useradd 和 id 命令用于 Package 版 multi-user mode 创建系统用户（代码层面验证 uid >= 1000）
+    local cmnd_alias_section="# Utility commands for multi-user workspace operations
+# Commands must have '*' suffix to allow arguments (Issue #1262)
+# useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
@@ -1894,10 +1903,13 @@ ${line}"
         print_info "Updating sudoers configuration for user '$run_user'..."
     fi
 
-    # Combine final content: header + defaults + other users' rules + current user's rules
+    # Combine final content: header + defaults + cmnd_alias + other users' rules + current user's rules
+    # 【修复 Issue #1262】添加 cmnd_alias_section，确保 Cmnd_Alias 在用户规则之前定义
     local sudoers_content="${header}
 
-${defaults_section}"
+${defaults_section}
+
+${cmnd_alias_section}"
 
     if [ -n "$other_user_rules" ]; then
         sudoers_content="${sudoers_content}
