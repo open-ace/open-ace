@@ -14,6 +14,7 @@ import pytest
 import sqlalchemy as sa
 
 from migrations.baseline import BASELINE_REVISION, HEAD_REVISION, read_current_revision
+from migrations.version_table import VERSION_NUM_LENGTH
 from scripts.cutover_alembic_baseline import collect_active_revision_ids, cutover_database
 
 
@@ -522,3 +523,103 @@ def test_cutover_postgres_backfills_legacy_schema(tmp_path):
     assert "source" in session_columns
     assert has_mapping_rules == 1
     assert has_compliance == 1
+
+
+def test_cutover_postgres_widens_narrow_version_num_column(tmp_path):
+    """A legacy varchar(32) alembic_version column must be widened to 64.
+
+    Older databases created ``alembic_version.version_num`` as ``varchar(32)``
+    (Alembic's historical default). The post-baseline lineage uses revision ids
+    longer than 32 chars (e.g. ``20260626_001_add_run_timeline_tables``), which
+    overflow the column and abort ``alembic upgrade head``. The cutover widens
+    the column to ``VERSION_NUM_LENGTH`` even when the DB is already on an
+    active revision, so this stamps head and asserts the column grows.
+    """
+    long_revision = "20260626_001_add_run_timeline_tables"
+    with _temporary_postgres_database(tmp_path) as database_url:
+        engine = sa.create_engine(database_url)
+        try:
+            with engine.begin() as connection:
+                # Minimal schema so cutover's formal-table gate passes.
+                for table_name in (
+                    "agent_tokens",
+                    "ai_agent_settings",
+                    "autonomous_workflows",
+                    "compliance_reports",
+                    "email_notification_logs",
+                    "registration_tokens",
+                    "smtp_settings",
+                    "tool_account_mapping_rules",
+                    "workflow_events",
+                    "workflow_milestones",
+                ):
+                    connection.exec_driver_sql(f"CREATE TABLE {table_name} (id SERIAL PRIMARY KEY)")
+                # Legacy narrow version column stamped with a short revision.
+                connection.exec_driver_sql(
+                    "CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"
+                )
+                connection.execute(
+                    sa.text("INSERT INTO alembic_version(version_num) VALUES ('7bcf07ee658e')")
+                )
+
+            with engine.begin() as connection:
+                changed, actions = cutover_database(connection)
+                width = connection.execute(
+                    sa.text(
+                        """
+                        SELECT character_maximum_length
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'alembic_version'
+                          AND column_name = 'version_num'
+                        """
+                    )
+                ).scalar()
+                # Prove the column is now wide enough to hold a long
+                # post-baseline revision (the exact failure this fixes).
+                connection.execute(
+                    sa.text(f"UPDATE alembic_version SET version_num = '{long_revision}'")
+                )
+                revision = read_current_revision(connection)
+        finally:
+            engine.dispose()
+
+    assert any("widened alembic_version.version_num" in a for a in actions)
+    assert changed is True
+    assert width == VERSION_NUM_LENGTH
+    # The widened column now holds a long revision id without truncation.
+    assert revision == long_revision
+
+
+def test_cutover_dry_run_reports_version_column_widening(tmp_path):
+    """Dry-run must report the would-widen action for a narrow column."""
+    with _temporary_postgres_database(tmp_path) as database_url:
+        engine = sa.create_engine(database_url)
+        try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"
+                )
+                connection.execute(
+                    sa.text("INSERT INTO alembic_version(version_num) VALUES ('7bcf07ee658e')")
+                )
+            with engine.begin() as connection:
+                changed, actions = cutover_database(connection, dry_run=True)
+                width = connection.execute(
+                    sa.text(
+                        """
+                        SELECT character_maximum_length
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'alembic_version'
+                          AND column_name = 'version_num'
+                        """
+                    )
+                ).scalar()
+        finally:
+            engine.dispose()
+
+    assert any("would widen alembic_version.version_num" in a for a in actions)
+    assert changed is True
+    # Dry-run must not mutate the schema.
+    assert width == 32
