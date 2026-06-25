@@ -7,18 +7,43 @@
 
 import React, { useState } from 'react';
 import { Modal, Button, TextInput } from '@/components/common';
-import { useAuth, useLanguage, useMustChangePassword } from '@/hooks';
+import { useAuth, useLanguage, useMustChangePassword, useSecuritySettings } from '@/hooks';
 import { t } from '@/i18n';
 
 export const ForceChangePasswordModal: React.FC = () => {
   const language = useLanguage();
   const mustChangePassword = useMustChangePassword();
   const { changePassword, isChangingPassword, changePasswordError } = useAuth();
+  const { data: securitySettings } = useSecuritySettings();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Password policy hint component
+  const PasswordPolicyHint = () => {
+    const policy = securitySettings;
+    if (!policy) return null;
+
+    const requirements: string[] = [];
+    requirements.push(`${t('passwordMinLength', language)}: ${policy.password_min_length ?? 8}`);
+    if (policy.password_require_uppercase) requirements.push(t('requireUppercase', language));
+    if (policy.password_require_lowercase) requirements.push(t('requireLowercase', language));
+    if (policy.password_require_number) requirements.push(t('requireNumber', language));
+    if (policy.password_require_special) requirements.push(t('requireSpecial', language));
+
+    return (
+      <div className="password-policy-hint text-muted small mt-1">
+        <div>{t('passwordRequirements', language)}:</div>
+        <ul className="mb-0 ps-3" style={{ fontSize: '0.85em' }}>
+          {requirements.map((req, idx) => (
+            <li key={idx}>{req}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
 
   const handleSubmit = async () => {
     setError(null);
@@ -79,7 +104,7 @@ export const ForceChangePasswordModal: React.FC = () => {
           'Your password was reset by an administrator. You must change it before continuing.'}
       </div>
 
-      {(error || changePasswordError) && (
+      {(error ?? changePasswordError) && (
         <div className="alert alert-danger mb-3" role="alert">
           <i className="bi bi-exclamation-triangle-fill me-2" />
           {error ?? (changePasswordError as Error)?.message}
@@ -104,6 +129,7 @@ export const ForceChangePasswordModal: React.FC = () => {
           onChange={(value: string) => setNewPassword(value)}
           placeholder={t('enterNewPassword', language) ?? 'Enter new password'}
         />
+        <PasswordPolicyHint />
       </div>
 
       <div className="mb-3">
