@@ -328,14 +328,19 @@ class AutonomousScheduler:
         # (the auto-resume predicate keys on it) but avoid the doubled-up
         # "Quota exceeded: Token quota exceeded: …" the banner would otherwise
         # show. check_quota returns "<X> quota exceeded. Used: …"; collapse the
-        # redundant "quota exceeded" so the marker prefix isn't repeated.
+        # redundant "quota exceeded" (and its trailing punctuation) so the marker
+        # prefix isn't repeated and the banner reads cleanly, e.g.
+        # "Quota exceeded: Token. Used: 950000/1000000".
         normalized = (reason or "Quota exceeded").strip()
         if normalized.lower().startswith(QUOTA_PAUSE_REASON_PREFIX.lower()):
             full_reason = normalized  # already starts with the marker
         else:
             collapsed = re.sub(
-                r"\s*quota\s+exceeded\s*", " ", normalized, flags=re.IGNORECASE
-            ).strip(" :.")
+                r"\s*quota\s+exceeded\s*[.,:;]?\s*",
+                ". ",
+                normalized,
+                flags=re.IGNORECASE,
+            ).strip(" .")
             full_reason = f"{QUOTA_PAUSE_REASON_PREFIX}: {collapsed}"
         try:
             _pause_running_task(workflow_id)
