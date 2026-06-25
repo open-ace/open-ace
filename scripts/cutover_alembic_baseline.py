@@ -21,7 +21,9 @@ from migrations.baseline import (
     read_current_revision,
     stamp_revision,
     table_exists,
+    version_table_exists,
 )
+from migrations.version_table import VERSION_NUM_LENGTH
 from scripts.shared.db import _get_db_url
 
 FORMAL_PRODUCT_TABLES = (
@@ -429,6 +431,48 @@ def ensure_compliance_reports_table(connection: sa.Connection) -> bool:
     return True
 
 
+def _alembic_version_too_narrow(connection: sa.Connection) -> bool:
+    """Return whether alembic_version.version_num is narrower than needed."""
+    if not version_table_exists(connection):
+        return False
+    if connection.dialect.name != "postgresql":
+        # SQLite stores version_num as TEXT, so it is never too narrow.
+        return False
+    result = connection.execute(
+        sa.text(
+            """
+            SELECT character_maximum_length
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'alembic_version'
+              AND column_name = 'version_num'
+            """
+        )
+    ).scalar()
+    return result is not None and result < VERSION_NUM_LENGTH
+
+
+def ensure_alembic_version_width(connection: sa.Connection) -> bool:
+    """Widen ``alembic_version.version_num`` so long revision ids fit.
+
+    Older databases created ``alembic_version.version_num`` as ``varchar(32)``
+    (Alembic's historical default). The post-baseline lineage uses longer,
+    human-readable revision ids (e.g. ``20260626_001_add_run_timeline_tables``)
+    that overflow that column and abort ``alembic upgrade head`` with
+    ``StringDataRightTruncation``. The fresh-DB path already widens the column
+    to ``VERSION_NUM_LENGTH`` via ``install_wide_version_table``; this brings
+    legacy DBs up to the same width idempotently. Runs on every cutover so even
+    DBs already on an active revision get their column widened.
+    """
+    if not _alembic_version_too_narrow(connection):
+        return False
+    connection.exec_driver_sql(
+        f"ALTER TABLE alembic_version "
+        f"ALTER COLUMN version_num TYPE VARCHAR({VERSION_NUM_LENGTH})"
+    )
+    return True
+
+
 def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tuple[bool, list[str]]:
     """Cut over a legacy database to the baseline revision."""
     # The active lineage includes the baseline plus every post-baseline
@@ -456,6 +500,10 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
         return False, actions
 
     if dry_run:
+        if _alembic_version_too_narrow(connection):
+            actions.append(
+                f"would widen alembic_version.version_num to VARCHAR({VERSION_NUM_LENGTH})"
+            )
         if not _column_exists(connection, "users", "system_account"):
             actions.append("would backfill users.system_account")
         if not _column_exists(connection, "session_messages", "source"):
@@ -479,6 +527,9 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
     # baseline content can evolve without minting a new revision, so being on
     # the active revision is not proof the schema is complete.
     changed = False
+    if ensure_alembic_version_width(connection):
+        actions.append(f"widened alembic_version.version_num to VARCHAR({VERSION_NUM_LENGTH})")
+        changed = True
     if ensure_system_account_column(connection):
         actions.append("backfilled users.system_account")
         changed = True
