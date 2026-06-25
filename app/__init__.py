@@ -6,8 +6,9 @@ This module provides the Flask application factory for the Open ACE platform.
 
 import logging
 import os
+import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -109,6 +110,17 @@ def create_app(config=None):
 def register_error_handlers(app):
     """Register error handlers for the application."""
 
+    @app.before_request
+    def assign_request_id():
+        """Propagate or generate a per-request correlation id (X-Request-ID)."""
+        g.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+
+    @app.after_request
+    def echo_request_id(response):
+        """Echo the correlation id on the response for client-side tracing."""
+        response.headers["X-Request-ID"] = getattr(g, "request_id", "")
+        return response
+
     @app.after_request
     def add_cors_headers(response):
         """Add CORS headers for iframe integration with qwen-code-webui."""
@@ -165,8 +177,8 @@ def register_error_handlers(app):
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
                     response.headers["Access-Control-Allow-Credentials"] = "true"
                     return response
-            except:
-                pass
+            except Exception:
+                logger.debug("Failed to parse CORS origin header", exc_info=True)
         return jsonify({"status": "ok"}), 200
 
     @app.errorhandler(HTTPException)
@@ -179,7 +191,7 @@ def register_error_handlers(app):
     @app.errorhandler(Exception)
     def handle_generic_exception(e):
         """Handle unexpected exceptions."""
-        logger.exception("Unexpected error occurred")
+        logger.exception("Unexpected error occurred [request_id=%s]", getattr(g, "request_id", "-"))
         if request.path.startswith("/api/"):
             return jsonify({"error": "Internal server error"}), 500
         raise e

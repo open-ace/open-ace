@@ -17,7 +17,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout, WorkLayout, ManageLayout } from '@/components/layout';
 import { Login } from '@/components/features/Login';
 import { LogoutSuccess } from '@/components/features/LogoutSuccess';
-import { LoadingOverlay, PageSkeleton, useToast } from '@/components/common';
+import {
+  LoadingOverlay,
+  PageSkeleton,
+  useToast,
+  ToastHost,
+  ConfirmHost,
+} from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
@@ -444,6 +450,8 @@ export const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastHost />
+      <ConfirmHost />
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={<Login />} />

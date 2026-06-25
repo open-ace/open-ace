@@ -1,9 +1,19 @@
 /**
  * Toast Component - Notification toast with animations
+ *
+ * Global toast system backed by a singleton Zustand store.
+ *
+ * Why a global store: the previous `useToast` hook held toasts in component-level
+ * state, so each caller owned a private `toasts` array and only components that
+ * rendered their own `<ToastContainer/>` ever displayed anything. By moving the
+ * state to a single store and mounting one `<ToastHost/>` at the app root, every
+ * `toast.success/error/...` call is visible globally regardless of which
+ * component triggered it.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { create } from 'zustand';
 import { cn } from '@/utils';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -76,7 +86,8 @@ const Toast: React.FC<ToastProps> = ({ id, type, title, message, duration = 5000
 };
 
 /**
- * Toast Container - Manages multiple toasts
+ * Toast Container - Renders a list of toasts into a portal.
+ * Presentational component; reads nothing from the store itself.
  */
 interface ToastContainerProps {
   toasts: ToastData[];
@@ -110,55 +121,62 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
 };
 
 /**
- * useToast Hook - Easy toast management
+ * Global toast store - single source of truth for all toasts in the app.
  */
-import { useState as useHookState, useCallback as useHookCallback } from 'react';
+interface ToastStore {
+  toasts: ToastData[];
+  addToast: (toast: Omit<ToastData, 'id'>) => string;
+  removeToast: (id: string) => void;
+  clearToasts: () => void;
+  success: (title: string, message?: string, duration?: number) => string;
+  error: (title: string, message?: string, duration?: number) => string;
+  warning: (title: string, message?: string, duration?: number) => string;
+  info: (title: string, message?: string, duration?: number) => string;
+}
 
-export const useToast = () => {
-  const [toasts, setToasts] = useHookState<ToastData[]>([]);
+const generateId = (): string => `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-  const addToast = useHookCallback((toast: Omit<ToastData, 'id'>) => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    setToasts((prev) => [...prev, { ...toast, id }]);
+export const useToastStore = create<ToastStore>((set, get) => ({
+  toasts: [],
+  addToast: (toast) => {
+    const id = generateId();
+    set((state) => ({ toasts: [...state.toasts, { ...toast, id }] }));
     return id;
-  }, []);
+  },
+  removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+  clearToasts: () => set({ toasts: [] }),
+  success: (title, message, duration) =>
+    get().addToast({ type: 'success', title, message, duration }),
+  error: (title, message, duration) => get().addToast({ type: 'error', title, message, duration }),
+  warning: (title, message, duration) =>
+    get().addToast({ type: 'warning', title, message, duration }),
+  info: (title, message, duration) => get().addToast({ type: 'info', title, message, duration }),
+}));
 
-  const removeToast = useHookCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+/**
+ * Stable singleton API. Returning the same object reference every call keeps
+ * `toast` stable in effect dependency arrays (callers only invoke actions, they
+ * never read state from it), so existing `const toast = useToast()` call sites
+ * keep working unchanged.
+ */
+const toastApi: Omit<ToastStore, 'toasts' | 'clearToasts'> = {
+  addToast: (toast) => useToastStore.getState().addToast(toast),
+  removeToast: (id) => useToastStore.getState().removeToast(id),
+  success: (title, message, duration) => useToastStore.getState().success(title, message, duration),
+  error: (title, message, duration) => useToastStore.getState().error(title, message, duration),
+  warning: (title, message, duration) => useToastStore.getState().warning(title, message, duration),
+  info: (title, message, duration) => useToastStore.getState().info(title, message, duration),
+};
 
-  const success = useHookCallback(
-    (title: string, message?: string, duration?: number) =>
-      addToast({ type: 'success', title, message, duration }),
-    [addToast]
-  );
+export const useToast = () => toastApi;
 
-  const error = useHookCallback(
-    (title: string, message?: string, duration?: number) =>
-      addToast({ type: 'error', title, message, duration }),
-    [addToast]
-  );
-
-  const warning = useHookCallback(
-    (title: string, message?: string, duration?: number) =>
-      addToast({ type: 'warning', title, message, duration }),
-    [addToast]
-  );
-
-  const info = useHookCallback(
-    (title: string, message?: string, duration?: number) =>
-      addToast({ type: 'info', title, message, duration }),
-    [addToast]
-  );
-
-  return {
-    toasts,
-    addToast,
-    removeToast,
-    success,
-    error,
-    warning,
-    info,
-    ToastContainer: () => <ToastContainer toasts={toasts} onClose={removeToast} />,
-  };
+/**
+ * ToastHost - Mount ONCE at the app root. Subscribes to the global store and
+ * renders all active toasts. Replaces the per-component `toast.ToastContainer()`
+ * pattern that only worked where explicitly rendered.
+ */
+export const ToastHost: React.FC = () => {
+  const toasts = useToastStore((state) => state.toasts);
+  const removeToast = useToastStore((state) => state.removeToast);
+  return <ToastContainer toasts={toasts} onClose={removeToast} />;
 };

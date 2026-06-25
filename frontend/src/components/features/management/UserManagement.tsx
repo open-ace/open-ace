@@ -26,6 +26,7 @@ import {
   Badge,
   PageRefreshControl,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
 import { createMatcherConfig } from '@/utils';
@@ -241,8 +242,9 @@ export const UserManagement: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDelete = async (userId: number) => {
-    if (window.confirm(t('confirmDeleteUser', language))) {
+    if (await confirm({ message: t('confirmDeleteUser', language), variant: 'danger' })) {
       try {
         await deleteUser.mutateAsync(userId);
       } catch (err) {

@@ -35,7 +35,7 @@ import {
   Badge,
   PageRefreshControl,
 } from '@/components/common';
-import { useToast } from '@/components/common';
+import { useToast, useConfirm } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
 import type {
   ContentFilterRule,
@@ -195,8 +195,9 @@ export const SecurityCenter: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDeleteRule = async (ruleId: number) => {
-    if (window.confirm(t('confirmDeleteRule', language))) {
+    if (await confirm({ message: t('confirmDeleteRule', language), variant: 'danger' })) {
       try {
         await deleteRule.mutateAsync(ruleId);
       } catch (err) {

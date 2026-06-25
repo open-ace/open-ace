@@ -1,0 +1,56 @@
+name: Security Audit
+
+# Periodic dependency vulnerability scan (pip-audit + npm audit).
+# Runs on a weekly schedule and on manual dispatch. Audit steps use
+# continue-on-error so the workflow surfaces findings in its logs without
+# blocking PRs; Dependabot handles the actual dependency bumps.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday ~06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python dependencies
+        continue-on-error: true
+        run: pip-audit -r requirements.txt
+
+  npm:
+    name: npm audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit npm dependencies
+        continue-on-error: true
+        run: npm audit --omit=dev

@@ -4,7 +4,7 @@ import { resolve } from 'path';
 import { vitePluginPreload } from './vite-plugin-preload';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   // 项目根目录
   root: '.',
 
@@ -41,8 +41,8 @@ export default defineConfig({
     outDir: '../static/js/dist',
     emptyOutDir: true,
 
-    // 生成 source map 用于调试
-    sourcemap: true,
+    // 仅本地开发服务器生成 source map；生产构建关闭以避免源码泄露
+    sourcemap: command === 'serve',
 
     // 代码分割策略
     rollupOptions: {
@@ -162,4 +162,4 @@ export default defineConfig({
 
   // PWA 配置 - 复制 public 目录资源
   publicDir: 'public',
-});
+}));
