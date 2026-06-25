@@ -186,6 +186,28 @@ CREATE TABLE autonomous_workflows (
  test_session_id text DEFAULT '' NOT NULL
 );
 
+-- Business Project Members (Issue #871)
+CREATE TABLE business_project_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_project_id integer NOT NULL,
+    user_id integer NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- Business Projects (Issue #871)
+CREATE TABLE business_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT NOT NULL,
+    description text,
+    key_patterns text,
+    is_active INTEGER DEFAULT 1 NOT NULL,
+    created_by integer,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP
+);
+
 CREATE TABLE compliance_reports (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  report_id text NOT NULL,
@@ -371,29 +393,7 @@ CREATE TABLE projects (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
  is_shared INTEGER DEFAULT 0 NOT NULL,
- business_project_id integer REFERENCES business_projects(id) ON DELETE SET NULL
-);
-
--- Business Projects (Issue #871)
-CREATE TABLE business_projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT NOT NULL UNIQUE,
-    description text,
-    key_patterns text,
-    is_active INTEGER DEFAULT 1 NOT NULL,
-    created_by integer,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMP
-);
-
--- Business Project Members (Issue #871)
-CREATE TABLE business_project_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    business_project_id integer NOT NULL REFERENCES business_projects(id) ON DELETE CASCADE,
-    user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+ business_project_id integer
 );
 
 CREATE TABLE prompt_templates (
