@@ -17,6 +17,7 @@ SQLite database to prove the layers compose correctly.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -29,13 +30,34 @@ import app.repositories.database as db_mod
 
 @pytest.fixture(autouse=True)
 def _patch_db_compat():
-    with patch.object(db_mod, "is_postgresql", return_value=False):
-        orig = db_mod.adapt_sql
-        db_mod.adapt_sql = lambda q: q  # type: ignore[assignment]
-        try:
+    """Force SQLite mode for every test, regardless of the host's DB config.
+
+    ``api_key_proxy`` and ``remote_agent_manager`` bind ``is_postgresql`` by
+    name (``from app.repositories.database import is_postgresql``), so patching
+    ``db_mod.is_postgresql`` alone does not reach them — they would still read
+    the live config and connect to a real PostgreSQL instance (and leak state
+    when other ``*_pg`` integration tests run first in the same session). We
+    therefore patch the name on every module that imports it directly, plus
+    ``get_database_url`` on the config module, so the proxy/manager use the
+    isolated temp SQLite database the fixtures create.
+    """
+    import scripts.shared.config as config_mod
+    from app.modules.workspace import api_key_proxy as akp
+    from app.modules.workspace import remote_agent_manager as ram
+
+    orig_adapt = db_mod.adapt_sql
+    db_mod.adapt_sql = lambda q: q  # type: ignore[assignment]
+    try:
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(db_mod, "is_postgresql", return_value=False))
+            stack.enter_context(patch.object(akp, "is_postgresql", return_value=False))
+            stack.enter_context(patch.object(ram, "is_postgresql", return_value=False))
+            stack.enter_context(
+                patch.object(config_mod, "get_database_url", return_value="sqlite:///test.db")
+            )
             yield
-        finally:
-            db_mod.adapt_sql = orig
+    finally:
+        db_mod.adapt_sql = orig_adapt
 
 
 @pytest.fixture
