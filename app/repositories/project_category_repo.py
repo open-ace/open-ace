@@ -7,7 +7,7 @@ Issue #1278: Data access for project categories
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from app.models.project_category import ProjectCategory
 from app.repositories.database import Database
