@@ -47,6 +47,12 @@ export const Button: React.FC<ButtonProps> = ({
   'data-testid': testId,
   title,
 }) => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (onClick) {
+      onClick(e);
+    }
+  };
+
   return (
     <button
       type={type}
@@ -61,7 +67,7 @@ export const Button: React.FC<ButtonProps> = ({
         className
       )}
       disabled={disabled || loading}
-      onClick={onClick}
+      onClick={handleClick}
     >
       {loading ? (
         <>
