@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { Modal, Button, TextInput } from '@/components/common';
+import { Modal, Button, TextInput, PasswordPolicyHint } from '@/components/common';
 import { AvatarUploader } from './AvatarUploader';
 import { useLanguage, useAppStore, useUser } from '@/store';
 import {
@@ -45,30 +45,6 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
-  // Password policy hint component
-  const PasswordPolicyHint = () => {
-    const policy = securitySettings;
-    if (!policy) return null;
-
-    const requirements: string[] = [];
-    requirements.push(`${t('passwordMinLength', language)}: ${policy.password_min_length ?? 8}`);
-    if (policy.password_require_uppercase) requirements.push(t('requireUppercase', language));
-    if (policy.password_require_lowercase) requirements.push(t('requireLowercase', language));
-    if (policy.password_require_number) requirements.push(t('requireNumber', language));
-    if (policy.password_require_special) requirements.push(t('requireSpecial', language));
-
-    return (
-      <div className="password-policy-hint text-muted small mt-1">
-        <div>{t('passwordRequirements', language)}:</div>
-        <ul className="mb-0 ps-3" style={{ fontSize: '0.85em' }}>
-          {requirements.map((req, idx) => (
-            <li key={idx}>{req}</li>
-          ))}
-        </ul>
-      </div>
-    );
-  };
-
   const handlePasswordChange = useCallback(async () => {
     setPasswordError(null);
 
@@ -82,9 +58,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
       return;
     }
 
-    if (newPassword.length < (securitySettings?.password_min_length ?? 8)) {
+    const minLength = securitySettings?.password_min_length ?? 8;
+    if (newPassword.length < minLength) {
       setPasswordError(
-        t('passwordTooShort', language) ?? `Password must be at least ${securitySettings?.password_min_length ?? 8} characters`
+        t('passwordTooShort', language) ?? `Password must be at least ${minLength} characters`
       );
       return;
     }
@@ -110,7 +87,15 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
         'Failed to change password';
       setPasswordError(errorMessage);
     }
-  }, [currentPassword, newPassword, confirmPassword, changePassword, securitySettings, toast, language]);
+  }, [
+    currentPassword,
+    newPassword,
+    confirmPassword,
+    changePassword,
+    securitySettings,
+    toast,
+    language,
+  ]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -281,9 +266,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
               </div>
 
               <div className="mb-3">
-                <label className="form-label">
-                  {t('newPassword', language) ?? 'New Password'}
-                </label>
+                <label className="form-label">{t('newPassword', language) ?? 'New Password'}</label>
                 <TextInput
                   type="password"
                   value={newPassword}

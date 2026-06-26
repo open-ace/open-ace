@@ -276,6 +276,8 @@ def api_auth_check():
         "Authorization", ""
     ).replace("Bearer ", "")
 
+    logger.debug(f"Auth check request from {request.remote_addr}, token present: {bool(token)}")
+
     if not token:
         return jsonify({"authenticated": False})
 
