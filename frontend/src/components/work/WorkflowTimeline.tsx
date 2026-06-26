@@ -589,7 +589,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const renderDefinitionRows = (
     rows: Array<[string, unknown]>,
-    snapshot: WorkflowDefinitionSnapshot
+    snapshot: WorkflowDefinitionSnapshot,
+    showBatch = true
   ) => (
     <div className="row g-2">
       {rows.map(([label, value]) => (
@@ -600,7 +601,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
         </div>
       ))}
-      {snapshot.batch_id && (
+      {showBatch && snapshot.batch_id && (
         <div className="col-12">
           <div className="border rounded p-2">
             <div className="text-muted small mb-1">{t('autoBatchInfo', language)}</div>
@@ -2438,7 +2439,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       [t('autoRepoUrl', language), deriveRepoUrl()],
                       [t('autoBranchName', language), workflow.branch_name],
                     ],
-                    snapshot
+                    snapshot,
+                    false
                   )}
                 </div>
               </div>
