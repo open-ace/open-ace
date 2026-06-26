@@ -1332,6 +1332,9 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
             "models": [],
             "messages": [],
             "last_timestamp": None,
+            # Model on the message with the strictly-greatest timestamp
+            # (most-recently-used); see update_session_last_seen. NOT list[-1].
+            "last_model": None,
             "seen_message_ids": set(),
             "seen_request_ids": set(),
         }
@@ -1365,11 +1368,8 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
 
         session_stats[session_id]["messages"].append(msg)
 
-        timestamp = msg.get("timestamp")
-        if timestamp:
-            current_last = session_stats[session_id]["last_timestamp"]
-            if current_last is None or timestamp > current_last:
-                session_stats[session_id]["last_timestamp"] = timestamp
+        # Advance last-seen timestamp + model together (shared logic).
+        utils.update_session_last_seen(session_stats[session_id], msg.get("timestamp"), model)
 
     if not session_stats:
         return 0
@@ -1424,8 +1424,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder})
                     """
-                    # Use the most recently seen model (last in list)
-                    model = stats["models"][-1] if stats["models"] else None
+                    model = stats["last_model"]
                     _execute(
                         cursor,
                         insert_sql,
@@ -1449,7 +1448,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                     updated += 1
                 else:
                     # Update existing session
-                    model = stats["models"][-1] if stats["models"] else None
+                    model = stats["last_model"]
                     session_updated_at = stats["last_timestamp"] or now
                     sql = f"""
                         UPDATE agent_sessions

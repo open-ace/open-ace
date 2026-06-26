@@ -227,3 +227,48 @@ def warn_if_skipped_message_has_text(
     except Exception:
         # Observability must never break a fetch run.
         pass
+
+
+def update_session_last_seen(stats: dict, timestamp: Any, model: Optional[str]) -> None:
+    """Advance a per-session stats entry's last-seen timestamp and model.
+
+    Single source of truth for how every fetcher derives the model stored on
+    ``agent_sessions``: a session shows its *most-recently-used* model instead
+    of a lexicographic one (``MAX(model)`` / ``sorted(set)[0]``) or an
+    iteration-order one (``list[-1]``).
+
+    Two independent trackers (so a modelless turn — e.g. a user message — never
+    shadows or clears the model actually in use):
+
+      * ``last_timestamp`` — greatest timestamp of ANY message, advanced on a
+        strict ``>`` (first-seen on tie, unchanged from the pre-fix contract).
+        Used for the session's ``updated_at``.
+      * ``last_model`` (with internal ``last_model_ts``) — model of the most
+        recent MODEL-BEARING message, compared by *its own* timestamp with
+        ``>=`` (last-seen on tie among model-bearing messages). A message with
+        a falsy/None model never touches ``last_model``.
+
+    Comparing the model against its own timestamp (not the all-message
+    ``last_timestamp``) is what keeps the result correct when a modelless
+    message carries a timestamp newer than the latest model-bearing message —
+    and independent of how ``messages`` is pre-sorted by the caller.
+
+    Args:
+        stats: A per-session stats dict whose factory initializes
+            ``last_timestamp`` and ``last_model`` to ``None``. ``last_model_ts``
+            is managed lazily by this helper (no factory change needed).
+        timestamp: The candidate message timestamp; ignored when falsy.
+        model: The candidate message model; ignored when falsy/None.
+    """
+    if not timestamp:
+        return
+    # last_timestamp: greatest timestamp of any message (for updated_at).
+    current_last = stats.get("last_timestamp")
+    if current_last is None or timestamp > current_last:
+        stats["last_timestamp"] = timestamp
+    # last_model: model of the most-recent MODEL-BEARING message by its own ts.
+    if model:
+        best_model_ts = stats.get("last_model_ts")
+        if best_model_ts is None or timestamp >= best_model_ts:
+            stats["last_model"] = model
+            stats["last_model_ts"] = timestamp

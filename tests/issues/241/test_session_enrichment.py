@@ -233,7 +233,9 @@ class TestEnrichmentLogic:
                       SUM(input_tokens) as input_tokens,
                       SUM(output_tokens) as output_tokens,
                       SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as req_count,
-                      MAX(model) as model
+                      (SELECT dm2.model FROM daily_messages dm2
+                       WHERE dm2.agent_session_id = daily_messages.agent_session_id
+                       ORDER BY dm2.timestamp DESC LIMIT 1) as model
                FROM daily_messages WHERE agent_session_id = ?""",
             (sid,),
         ).fetchone()
@@ -308,20 +310,45 @@ class TestEnrichmentLogic:
         assert max(sm_row["cnt"], dm_row["cnt"]) == 20
 
     def test_model_from_daily_messages(self, db_connection):
-        """Model should be populated from daily_messages when agent_sessions has none."""
+        """Model must be the MOST-RECENTLY-USED by timestamp, not MAX(model).
+
+        Two models with distinct timestamps where the lexicographically-LARGER
+        model is the OLDER message: MAX(model) would pick the wrong ("zzz-old")
+        row. The timestamp-ordered selection picks the newer "aaa-new" — the
+        same most-recently-used semantics every fetcher now uses via
+        shared.utils.update_session_last_seen.
+        """
         conn = db_connection
         sid = "test-model-dm"
 
         _insert_session(conn, sid, message_count=0, total_tokens=0, model=None)
 
-        _insert_daily_message(conn, sid, "user", "hi", tokens=10, model="glm-5")
-        _insert_daily_message(conn, sid, "assistant", "hello", tokens=20, model="glm-5")
+        # Older message: lexicographically-larger model. Newer message:
+        # lexicographically-smaller model. (helper _insert_daily_message does
+        # not accept a timestamp, so insert directly to control ordering.)
+        conn.execute(
+            "INSERT INTO daily_messages "
+            "(date, tool_name, message_id, role, content, tokens_used, model, "
+            " timestamp, agent_session_id) "
+            "VALUES (?, 'qwen', ?, ?, ?, ?, ?, ?, ?)",
+            ("2026-05-02", "m_old", "assistant", "old", 20, "zzz-old", "2026-05-02T09:00:00", sid),
+        )
+        conn.execute(
+            "INSERT INTO daily_messages "
+            "(date, tool_name, message_id, role, content, tokens_used, model, "
+            " timestamp, agent_session_id) "
+            "VALUES (?, 'qwen', ?, ?, ?, ?, ?, ?, ?)",
+            ("2026-05-02", "m_new", "assistant", "new", 20, "aaa-new", "2026-05-02T10:00:00", sid),
+        )
+        conn.commit()
 
+        # Most-recently-used model via timestamp (NOT MAX(model)).
         row = conn.execute(
-            "SELECT MAX(model) as model FROM daily_messages WHERE agent_session_id = ?",
+            "SELECT model FROM daily_messages "
+            "WHERE agent_session_id = ? ORDER BY timestamp DESC LIMIT 1",
             (sid,),
         ).fetchone()
-        assert row["model"] == "glm-5"
+        assert row["model"] == "aaa-new"
 
 
 class TestSessionMessageObjectType:
