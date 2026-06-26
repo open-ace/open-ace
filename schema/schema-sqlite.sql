@@ -424,6 +424,16 @@ CREATE TABLE notification_preferences (
  email_verified INTEGER DEFAULT 0
 );
 
+CREATE TABLE project_categories (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ name text NOT NULL,
+ key_patterns text NOT NULL,
+ sort_order integer DEFAULT 0,
+ is_active INTEGER DEFAULT 1,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE projects (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  path TEXT NOT NULL,
@@ -435,18 +445,6 @@ CREATE TABLE projects (
  is_active INTEGER DEFAULT 1 NOT NULL,
  is_shared INTEGER DEFAULT 0 NOT NULL
 );
-
-CREATE TABLE project_categories (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- name TEXT NOT NULL,
- key_patterns TEXT NOT NULL,
- sort_order INTEGER DEFAULT 0,
- is_active INTEGER DEFAULT 1,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_project_categories_sort_order ON project_categories (sort_order);
 
 CREATE TABLE prompt_templates (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -676,8 +674,8 @@ CREATE TABLE teams (
 CREATE TABLE tenant_quotas (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
- daily_token_limit integer DEFAULT 1000000,
- monthly_token_limit integer DEFAULT 30000000,
+ daily_token_limit INTEGER DEFAULT 1000000,
+ monthly_token_limit INTEGER DEFAULT 30000000,
  daily_request_limit integer DEFAULT 10000,
  monthly_request_limit integer DEFAULT 300000,
  max_users integer DEFAULT 100,
@@ -1106,6 +1104,8 @@ CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, da
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
+
+CREATE INDEX idx_project_categories_sort_order ON project_categories (sort_order);
 
 CREATE INDEX idx_projects_created_by ON projects (created_by);
 
