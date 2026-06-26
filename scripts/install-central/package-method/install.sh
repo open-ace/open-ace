@@ -2965,21 +2965,18 @@ install_local() {
                 print_info "Generated SECRET_KEY for Flask encryption"
             fi
 
-            # Check if systemd service is missing WORKSPACE_BASE_DIR (Issue #1217)
+            # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308)
+            # WORKSPACE_BASE_DIR should always be /home for Package version
+            # This ensures user paths are /home/{username} instead of /home/{service_user}/{username}
             local current_workspace_base=$(grep "^Environment=WORKSPACE_BASE_DIR=" "$service_file" 2>/dev/null | cut -d'=' -f3)
             if [ -z "$current_workspace_base" ]; then
                 print_warning "Adding missing WORKSPACE_BASE_DIR to systemd service..."
-                # Determine WORKSPACE_BASE_DIR based on service user
-                local service_user=$(grep "^User=" "$service_file" | cut -d'=' -f2)
-                local upgrade_workspace_base="/home"
-                if [ "$service_user" != "root" ] && [ -n "$service_user" ]; then
-                    local user_home=$(getent passwd "$service_user" | cut -d: -f6)
-                    if [ -n "$user_home" ]; then
-                        upgrade_workspace_base="$user_home"
-                    fi
-                fi
-                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=$upgrade_workspace_base" "$service_file"
-                print_info "Set WORKSPACE_BASE_DIR=$upgrade_workspace_base (Issue #1217)"
+                sed -i "/^Environment=SECRET_KEY=/a Environment=WORKSPACE_BASE_DIR=/home" "$service_file"
+                print_info "Set WORKSPACE_BASE_DIR=/home (Issue #1217, #1308)"
+            elif [ "$current_workspace_base" != "/home" ]; then
+                print_warning "Fixing incorrect WORKSPACE_BASE_DIR (was: $current_workspace_base)..."
+                sed -i "s|^Environment=WORKSPACE_BASE_DIR=.*|Environment=WORKSPACE_BASE_DIR=/home|" "$service_file"
+                print_info "Fixed WORKSPACE_BASE_DIR=/home (Issue #1308)"
             fi
 
             print_info "Restarting open-ace service..."
