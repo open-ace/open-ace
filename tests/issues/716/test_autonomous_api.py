@@ -1245,7 +1245,13 @@ class TestGetMilestoneSession:
         ]
 
     def test_get_session_prefers_actual_cli_session_when_mapped(self, client):
-        """Returns the real Claude session when the milestone session is a tracking row."""
+        """Returns the real Claude session when the milestone session is a tracking row.
+
+        The actual session is a shared transcript across milestones, so its
+        messages are returned unfiltered (no message_milestone_id) — otherwise
+        messages with a NULL/other milestone_id would be dropped and the viewer
+        would show only "Status".
+        """
         repo = _make_repo()
         repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
         repo.get_milestone.return_value = {
@@ -1273,9 +1279,10 @@ class TestGetMilestoneSession:
         data = resp.get_json()
         assert data["success"] is True
         assert data["session"]["session_id"] == "actual-456"
+        # actual session lookup returns the full transcript (no milestone filter)
         assert mock_sm.get_session.call_args_list == [
             (("track-123",), {}),
-            (("actual-456",), {"include_messages": True, "message_milestone_id": "ms-1"}),
+            (("actual-456",), {"include_messages": True}),
         ]
 
     def test_get_session_no_session_id(self, client):
