@@ -131,7 +131,7 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, script_dir)
 from shared import db
-from shared.utils import warn_if_skipped_message_has_text
+from shared.utils import update_session_last_seen, warn_if_skipped_message_has_text
 
 
 def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
@@ -834,6 +834,9 @@ def update_agent_sessions_stats(messages: list) -> int:
             "models": set(),
             "messages": [],  # Store messages for session_messages table
             "last_timestamp": None,  # Track the latest message timestamp
+            # Model on the message with the strictly-greatest timestamp
+            # (most-recently-used); see update_session_last_seen. NOT lexicographic.
+            "last_model": None,
             "seen_message_ids": set(),
             "seen_request_ids": set(),
         }
@@ -873,12 +876,8 @@ def update_agent_sessions_stats(messages: list) -> int:
         # Store message for session_messages insertion
         session_stats[session_id]["messages"].append(msg)
 
-        # Update last_timestamp to the latest message timestamp
-        timestamp = msg.get("timestamp")
-        if timestamp:
-            current_last = session_stats[session_id]["last_timestamp"]
-            if current_last is None or timestamp > current_last:
-                session_stats[session_id]["last_timestamp"] = timestamp
+        # Advance last-seen timestamp + model together (shared logic).
+        update_session_last_seen(session_stats[session_id], msg.get("timestamp"), model)
 
     if not session_stats:
         return 0
@@ -940,7 +939,7 @@ def update_agent_sessions_stats(messages: list) -> int:
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
                                 {placeholder}, {placeholder}, {placeholder}, {placeholder})
                     """
-                    model = sorted(stats["models"])[0] if stats["models"] else None
+                    model = stats["last_model"]
                     _execute(
                         cursor,
                         insert_sql,
@@ -963,11 +962,8 @@ def update_agent_sessions_stats(messages: list) -> int:
                     )
                     updated += 1
                 else:
-                    # Get the most common model
-                    model = None
-                    if stats["models"]:
-                        # Just pick the first one since we can't determine frequency here
-                        model = sorted(stats["models"])[0]
+                    # Most-recently-used model (strict-greatest timestamp).
+                    model = stats["last_model"]
 
                     # Update agent_sessions table
                     # Use GREATEST/MAX to take the max value (avoid cumulative
