@@ -291,6 +291,7 @@ def api_auth_check():
 
     avatar_url = user_data.get("avatar_url") if user_data else None
     avatar_url = _validate_avatar_url(user_id, avatar_url)
+    must_change_password = bool(user_data.get("must_change_password")) if user_data else False
 
     response_data = {
         "authenticated": True,
@@ -301,6 +302,7 @@ def api_auth_check():
             "role": session.get("role"),
             "tenant_id": session.get("tenant_id"),
             "avatar_url": avatar_url,
+            "must_change_password": must_change_password,
         },
     }
 
