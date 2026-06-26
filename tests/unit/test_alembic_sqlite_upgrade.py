@@ -84,7 +84,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     conn.close()
 
     assert version is not None
-    # project_categories migration chains after content_language (single head)
+    # project_categories migration chains after status_index (single head)
+    # Chain: 001_run_timeline -> 002_content_language -> 003_status_index -> 001_add_project_categories
     assert version[0] == "001_add_project_categories"
     if has_session_messages:
         assert "source" in columns
@@ -93,5 +94,64 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     assert has_run_timeline is True
     assert has_project_categories is True
     assert "auto_mapping_enabled" in user_columns
-    # content_language column added by 20260626_002 (#1284)
+    # content_language column added by 20260626_002 (#1287)
     assert "content_language" in aw_columns
+
+
+def test_workflow_status_index_created_after_upgrade(tmp_path, monkeypatch):
+    """The 20260626_003 migration must add idx_workflows_status_created on SQLite."""
+    db_path = tmp_path / "fresh.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    shared_db._db_url_cache = None
+
+    project_root = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    command.upgrade(alembic_cfg, "head")
+
+    conn = sqlite3.connect(db_path)
+    has_index = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_workflows_status_created'"
+        ).fetchone()
+        is not None
+    )
+    conn.close()
+    assert has_index is True
+
+
+def test_workflow_status_index_downgrade_is_symmetric(tmp_path, monkeypatch):
+    """Downgrading past 20260626_003 must drop the index; re-upgrade recreates it."""
+    db_path = tmp_path / "fresh.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    shared_db._db_url_cache = None
+
+    project_root = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "20260626_002_workflow_content_language")
+
+    conn = sqlite3.connect(db_path)
+    has_index = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_workflows_status_created'"
+        ).fetchone()
+        is not None
+    )
+    version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+    conn.close()
+
+    assert has_index is False
+    assert version[0] == "20260626_002_workflow_content_language"
+
+    # Re-upgrade recreates the index (idempotent round-trip)
+    command.upgrade(alembic_cfg, "head")
+    conn = sqlite3.connect(db_path)
+    has_index_again = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_workflows_status_created'"
+        ).fetchone()
+        is not None
+    )
+    conn.close()
+    assert has_index_again is True

@@ -1,7 +1,7 @@
 """Add project_categories table for categorized workspace grouping
 
 Revision ID: 001_add_project_categories
-Revises: 20260626_002_workflow_content_language
+Revises: 20260626_003_add_workflow_status_index
 Create Date: 2026-06-26
 
 Issue: #1278
@@ -21,7 +21,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = "001_add_project_categories"
-down_revision: Union[str, None] = "20260626_002_workflow_content_language"
+down_revision: Union[str, None] = "20260626_003_add_workflow_status_index"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

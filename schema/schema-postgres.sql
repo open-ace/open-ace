@@ -2348,21 +2348,27 @@ CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batc
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
 
+CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
+
+
+--
+--
+
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
-
-
---
---
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (path) WHERE (is_active IS TRUE);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
+
+
+--
+--
 
 ALTER TABLE ONLY anomaly_status
     ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);

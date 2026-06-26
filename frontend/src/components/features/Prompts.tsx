@@ -29,6 +29,7 @@ import {
   useToast,
   Pagination,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 
 const ITEMS_PER_PAGE = 20;
@@ -136,11 +137,14 @@ export const Prompts: React.FC = () => {
     setSelectedTemplate(null);
   };
 
+  const confirm = useConfirm();
   const handleDelete = async (id: number) => {
     if (
-      !window.confirm(
-        t('confirmDeletePrompt', language) || 'Are you sure you want to delete this prompt?'
-      )
+      !(await confirm({
+        message:
+          t('confirmDeletePrompt', language) || 'Are you sure you want to delete this prompt?',
+        variant: 'danger',
+      }))
     ) {
       return;
     }

@@ -28,6 +28,9 @@ pip install -r requirements.txt
 # Initialize configuration
 python3 cli.py config init
 
+# Apply database migrations (required before first start)
+alembic upgrade head
+
 # Start web server
 python3 server.py
 

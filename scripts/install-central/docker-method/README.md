@@ -2,7 +2,7 @@
 
 本目录包含 Open ACE 的 Docker 部署相关脚本。
 
-## 快速部署
+## 快速部署（推荐）
 
 ### 1. 构建并启动
 
@@ -11,9 +11,10 @@
 docker compose up -d --build
 ```
 
-这将启动：
-- **open-ace-web**: Web 应用（端口 5000）
-- **open-ace-postgres**: PostgreSQL 数据库（内部端口 5432）
+这将：
+- 本地构建 open-ace 镜像
+- 启动 open-ace 容器（端口 5000）
+- 启动 PostgreSQL 数据库（内部端口 5432）
 
 ### 2. 访问应用
 

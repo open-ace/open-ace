@@ -22,6 +22,7 @@ import {
   Modal,
   Badge,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import {
   complianceApi,
   type RetentionRule,
@@ -238,8 +239,9 @@ export const DataRetention: React.FC = () => {
   };
 
   // Execute cleanup
+  const confirm = useConfirm();
   const handleExecuteCleanup = async () => {
-    if (!window.confirm(t('confirmCleanup', language))) return;
+    if (!(await confirm({ message: t('confirmCleanup', language), variant: 'warning' }))) return;
     setIsRunning(true);
     try {
       await complianceApi.runCleanup(false);

@@ -619,9 +619,44 @@ class TestGetTimeline:
         data = resp.get_json()
         assert len(data["milestones"]) == 2
         assert data["milestones"][0]["llm_session_id"] == "sess-plan"
+        assert data["milestones"][0]["actual_llm_session_id"] == "sess-plan"
         assert data["milestones"][0]["llm_total_tokens"] == 1234
         assert data["milestones"][0]["llm_request_count"] == 7
         assert data["milestones"][1]["llm_total_tokens"] == 0
+
+    def test_get_timeline_exposes_actual_llm_session_id(self, client):
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.list_milestones.return_value = [
+            {
+                "milestone_id": "ms-1",
+                "phase": "planning",
+                "status": "completed",
+                "session_id": "track-1",
+            }
+        ]
+        repo.get_milestone_usage_summary.return_value = {
+            "ms-1": {
+                "llm_session_id": "track-1",
+                "llm_total_tokens": 100,
+                "llm_request_count": 2,
+            }
+        }
+
+        session_row = MagicMock()
+        session_row.cli_session_id = "actual-claude-1"
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                with patch("app.modules.workspace.session_manager.SessionManager") as mock_sm_cls:
+                    mock_sm = MagicMock()
+                    mock_sm.get_session.return_value = session_row
+                    mock_sm_cls.return_value = mock_sm
+                    resp = client.get("/api/autonomous/workflows/wf-1/timeline")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["milestones"][0]["llm_session_id"] == "track-1"
+        assert data["milestones"][0]["actual_llm_session_id"] == "actual-claude-1"
 
     def test_get_timeline_backfills_diff_stats_per_milestone(self, client):
         repo = _make_repo()
@@ -1204,9 +1239,44 @@ class TestGetMilestoneSession:
         data = resp.get_json()
         assert data["success"] is True
         assert data["session"]["session_id"] == "sess-123"
-        mock_sm.get_session.assert_called_once_with(
-            "sess-123", include_messages=True, message_milestone_id="ms-1"
-        )
+        assert mock_sm.get_session.call_args_list == [
+            (("sess-123",), {}),
+            (("sess-123",), {"include_messages": True, "message_milestone_id": "ms-1"}),
+        ]
+
+    def test_get_session_prefers_actual_cli_session_when_mapped(self, client):
+        """Returns the real Claude session when the milestone session is a tracking row."""
+        repo = _make_repo()
+        repo.get_workflow.return_value = {"workflow_id": "wf-1", "user_id": 1}
+        repo.get_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": "wf-1",
+            "session_id": "track-123",
+        }
+        tracking_session = MagicMock()
+        tracking_session.cli_session_id = "actual-456"
+        actual_session = {
+            "session_id": "actual-456",
+            "status": "completed",
+            "messages": [{"role": "assistant", "content": "Full transcript"}],
+        }
+        with _mock_auth():
+            with patch("app.routes.autonomous.auto_repo", repo):
+                with patch("app.modules.workspace.session_manager.SessionManager") as mock_sm_cls:
+                    mock_sm = MagicMock()
+                    mock_sm.get_session.side_effect = [tracking_session, actual_session]
+                    mock_sm_cls.return_value = mock_sm
+
+                    resp = client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/session")
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["session"]["session_id"] == "actual-456"
+        assert mock_sm.get_session.call_args_list == [
+            (("track-123",), {}),
+            (("actual-456",), {"include_messages": True, "message_milestone_id": "ms-1"}),
+        ]
 
     def test_get_session_no_session_id(self, client):
         """Returns null session when milestone has no session_id."""

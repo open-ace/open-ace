@@ -1241,6 +1241,8 @@ CREATE INDEX idx_workflows_batch_order ON autonomous_workflows (batch_id, batch_
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows (parent_workflow_id);
 
+CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, created_at);
+
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);

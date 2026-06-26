@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Button, TextInput, Modal, Badge, useToast } from '@/components/common';
+import { Button, TextInput, Modal, Badge, useToast, useConfirm } from '@/components/common';
 import {
   toolAccountsApi,
   type ToolAccount,
@@ -90,8 +90,9 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
     }
   };
 
+  const confirm = useConfirm();
   const handleDeleteAccount = async (id: number) => {
-    if (!window.confirm(t('confirmDelete', language))) return;
+    if (!(await confirm({ message: t('confirmDelete', language), variant: 'danger' }))) return;
 
     try {
       await toolAccountsApi.delete(id);

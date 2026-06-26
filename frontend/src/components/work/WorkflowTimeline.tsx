@@ -894,7 +894,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const latestMilestoneWithSession = [...milestones]
     .reverse()
     .find(
-      (milestone) => milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id
+      (milestone) =>
+        milestone.actual_llm_session_id ??
+        milestone.llm_session_id ??
+        milestone.review_session_id ??
+        milestone.session_id
     );
   const latestFailedMilestone = [...milestones]
     .reverse()
@@ -1126,7 +1130,10 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     const diffStats = parseDiffStats(milestone.diff_stats);
     const milestoneTime = formatMilestoneTime(getMilestoneAnchorTime(milestone));
     const llmSessionId =
-      milestone.llm_session_id ?? milestone.review_session_id ?? milestone.session_id;
+      milestone.actual_llm_session_id ??
+      milestone.llm_session_id ??
+      milestone.review_session_id ??
+      milestone.session_id;
     const llmTotalTokens = milestone.llm_total_tokens ?? 0;
     const llmRequestCount = milestone.llm_request_count ?? 0;
     const showUsageMetrics = !!llmSessionId || llmTotalTokens > 0 || llmRequestCount > 0;
@@ -1907,6 +1914,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     setViewingSession({
                       milestoneId: latestMilestoneWithSession.milestone_id,
                       sessionId:
+                        latestMilestoneWithSession.actual_llm_session_id ??
                         latestMilestoneWithSession.llm_session_id ??
                         latestMilestoneWithSession.review_session_id ??
                         latestMilestoneWithSession.session_id ??
