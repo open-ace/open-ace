@@ -101,7 +101,20 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   );
   const createWorkflow = useCreateWorkflow();
 
-  const tools = toolsData?.tools ?? [];
+  // Agent tool dropdown order. OpenClaw is intentionally hidden from the
+  // autonomous workflow dialog (not a supported autonomous tool), and the
+  // remaining tools are ordered for consistent presentation regardless of the
+  // backend /tools ordering.
+  const tools = useMemo(() => {
+    const ORDER = ['claude-code', 'codex', 'qwen-code-cli', 'zcode'];
+    return (toolsData?.tools ?? [])
+      .filter((tool) => tool.id !== 'openclaw')
+      .sort((a, b) => {
+        const ia = ORDER.indexOf(a.id);
+        const ib = ORDER.indexOf(b.id);
+        return (ia === -1 ? ORDER.length : ia) - (ib === -1 ? ORDER.length : ib);
+      });
+  }, [toolsData]);
   const models = modelsData?.models ?? [];
   const isCreating = createWorkflow.isPending;
 
@@ -389,9 +402,8 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               ) : (
                 <>
                   <option value="claude-code">Claude Code</option>
-                  <option value="qwen-code-cli">Qwen Code</option>
                   <option value="codex">Codex CLI</option>
-                  <option value="openclaw">OpenClaw</option>
+                  <option value="qwen-code-cli">Qwen Code</option>
                   <option value="zcode">ZCode</option>
                 </>
               )}
