@@ -76,7 +76,12 @@ export const InsightsReport: React.FC = () => {
       setReport(null);
 
       try {
-        const result = await insightsApi.generateReport(startDate, endDate, language, controller.signal);
+        const result = await insightsApi.generateReport(
+          startDate,
+          endDate,
+          language,
+          controller.signal
+        );
 
         if (result && 'error' in result && result.error === 'insufficient_data') {
           setInsufficientData(true);
@@ -109,25 +114,28 @@ export const InsightsReport: React.FC = () => {
   );
 
   // View a specific history report
-  const viewHistoryReport = useCallback(async (item: InsightsHistoryItem) => {
-    setIsLoading(true);
-    setError(null);
-    setInsufficientData(false);
+  const viewHistoryReport = useCallback(
+    async (item: InsightsHistoryItem) => {
+      setIsLoading(true);
+      setError(null);
+      setInsufficientData(false);
 
-    try {
-      const result = await insightsApi.generateReport(item.start_date, item.end_date, language);
-      if (result && 'error' in result && result.error === 'insufficient_data') {
-        setInsufficientData(true);
-        return;
+      try {
+        const result = await insightsApi.generateReport(item.start_date, item.end_date, language);
+        if (result && 'error' in result && result.error === 'insufficient_data') {
+          setInsufficientData(true);
+          return;
+        }
+        setReport(result as InsightsReportData);
+      } catch (err) {
+        const error = err as { message?: string };
+        setError(error?.message ?? 'Failed to load report');
+      } finally {
+        setIsLoading(false);
       }
-      setReport(result as InsightsReportData);
-    } catch (err) {
-      const error = err as { message?: string };
-      setError(error?.message ?? 'Failed to load report');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [language]);
+    },
+    [language]
+  );
 
   // Delete a report
   const deleteReport = useCallback(
