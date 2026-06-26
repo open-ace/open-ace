@@ -210,6 +210,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen } = useAppStore();
   const timelineBodyRef = useRef<HTMLDivElement>(null);
+  // Registry of milestone card DOM nodes keyed by milestone_id, used to scroll
+  // a specific card into view (e.g. the "view latest milestone" header button).
+  const milestoneCardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -941,8 +944,57 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     workflow.status === 'waiting'
   );
 
+  // Callback ref: registers a milestone card node by id, and clears it on
+  // unmount so the map never holds detached nodes.
+  const registerMilestoneCard = useCallback(
+    (milestoneId: string) => (node: HTMLElement | null) => {
+      const refs = milestoneCardRefs.current;
+      if (node) {
+        refs.set(milestoneId, node);
+      } else {
+        refs.delete(milestoneId);
+      }
+    },
+    []
+  );
+
   const toggleExpandMilestone = (milestoneId: string) => {
-    setExpandedMilestone((current) => (current === milestoneId ? null : milestoneId));
+    setExpandedMilestone((current) => {
+      const willCollapse = current === milestoneId;
+      // Treat any manual milestone interaction as an opt-out from the
+      // auto-expand of the active card: collapsing the active card, or
+      // deliberately opening a different one. Otherwise the auto-expand
+      // effect would immediately re-open the active card and prevent the
+      // user from reviewing any other milestone while the workflow runs.
+      if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+        userCollapsedActiveMilestone.current = true;
+      } else if (willCollapse) {
+        userCollapsedActiveMilestone.current = true;
+      }
+      return willCollapse ? null : milestoneId;
+    });
+  };
+
+  // Expand a milestone and scroll its card into view. Used by the header
+  // "view latest milestone" button so the expanded failure detail is visible,
+  // not just expanded off-screen. Uses rAF so the expand re-render (which may
+  // change the card's height) lands before we scroll, avoiding a stale offset.
+  const expandAndScrollToMilestone = (milestoneId: string) => {
+    // This is a deliberate user action (header "view latest milestone"
+    // button). If it targets a non-active card, opt out of the auto-expand
+    // so the effect doesn't immediately yank back to the active card.
+    // (currentActiveMilestoneId is declared further down; this closure only
+    // runs on click, so the late binding resolves correctly at call time.)
+    if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+      userCollapsedActiveMilestone.current = true;
+    }
+    setExpandedMilestone(milestoneId);
+    window.requestAnimationFrame(() => {
+      milestoneCardRefs.current.get(milestoneId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
   };
 
   const closeViewingContent = () => {
@@ -1002,6 +1054,36 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           activities[activities.length - 1].timestamp ?? '',
         ].join(':')
       : '';
+
+  // The milestone currently being executed (in_progress on the active round),
+  // mirroring the isCurrentActiveMilestone check inside renderMilestoneCard.
+  const currentActiveMilestoneId = useMemo(() => {
+    const found = milestones.find(
+      (m) => m.status === 'in_progress' && (m.dev_round || 1) === workflow.dev_round
+    );
+    return found?.milestone_id ?? null;
+  }, [milestones, workflow.dev_round]);
+
+  // Track whether the user has manually collapsed the current active card, so
+  // the auto-expand below doesn't fight a deliberate collapse. Reset whenever
+  // the active milestone changes.
+  const userCollapsedActiveMilestone = useRef(false);
+  useEffect(() => {
+    userCollapsedActiveMilestone.current = false;
+  }, [currentActiveMilestoneId]);
+
+  // Auto-expand the active milestone card so its live AI activity is visible
+  // alongside the auto-scroll-to-bottom behavior. Only fires when a *new*
+  // active milestone appears; respects a manual collapse within the same card.
+  useEffect(() => {
+    if (
+      currentActiveMilestoneId &&
+      !userCollapsedActiveMilestone.current &&
+      expandedMilestone !== currentActiveMilestoneId
+    ) {
+      setExpandedMilestone(currentActiveMilestoneId);
+    }
+  }, [currentActiveMilestoneId, expandedMilestone]);
 
   useEffect(() => {
     setShouldAutoScroll(true);
@@ -1264,6 +1346,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return (
       <article
         key={milestone.milestone_id}
+        ref={!compact ? registerMilestoneCard(milestone.milestone_id) : undefined}
         className={`timeline-milestone-card ${
           compact ? 'timeline-milestone-card--compact' : ''
         } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusDisplay.tone}`}
@@ -1913,7 +1996,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <button
                   type="button"
                   className="timeline-inline-link"
-                  onClick={() => setExpandedMilestone(latestFailedMilestone.milestone_id)}
+                  onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
                 >
                   {t('autoOpenLatestMilestone', language)}
                 </button>
