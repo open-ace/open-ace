@@ -52,6 +52,7 @@ def generate_report():
         data = request.get_json(silent=True) or {}
         start_date = data.get("start_date")
         end_date = data.get("end_date")
+        language = data.get("language", "zh")  # Default to Chinese
 
         if not start_date or not end_date:
             end = datetime.now()
@@ -64,6 +65,7 @@ def generate_report():
             user_id=user_id,
             start_date=start_date,
             end_date=end_date,
+            language=language,
         )
 
         if error:

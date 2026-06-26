@@ -76,7 +76,7 @@ export const InsightsReport: React.FC = () => {
       setReport(null);
 
       try {
-        const result = await insightsApi.generateReport(startDate, endDate, controller.signal);
+        const result = await insightsApi.generateReport(startDate, endDate, language, controller.signal);
 
         if (result && 'error' in result && result.error === 'insufficient_data') {
           setInsufficientData(true);
@@ -105,7 +105,7 @@ export const InsightsReport: React.FC = () => {
         setIsLoading(false);
       }
     },
-    [dateRange]
+    [dateRange, language]
   );
 
   // View a specific history report
@@ -115,7 +115,7 @@ export const InsightsReport: React.FC = () => {
     setInsufficientData(false);
 
     try {
-      const result = await insightsApi.generateReport(item.start_date, item.end_date);
+      const result = await insightsApi.generateReport(item.start_date, item.end_date, language);
       if (result && 'error' in result && result.error === 'insufficient_data') {
         setInsufficientData(true);
         return;
@@ -127,7 +127,7 @@ export const InsightsReport: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [language]);
 
   // Delete a report
   const deleteReport = useCallback(
