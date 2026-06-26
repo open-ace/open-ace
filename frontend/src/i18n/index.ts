@@ -1492,6 +1492,7 @@ export const translations: Record<Language, Translations> = {
     autoIgnoredIssueTokens: 'Ignored tokens',
     autoParsedIssueSelectors: 'Parsed issue selectors',
     autoCreationParameters: 'Creation parameters',
+    autoRuntimeInfo: 'Runtime info',
     autoYes: 'Yes',
     autoNo: 'No',
     // Run Timeline (provenance) — Remote Agent sessions
@@ -2961,6 +2962,7 @@ export const translations: Record<Language, Translations> = {
     autoIgnoredIssueTokens: '忽略的输入',
     autoParsedIssueSelectors: '解析出的 Issue',
     autoCreationParameters: '创建参数',
+    autoRuntimeInfo: '运行时信息',
     autoYes: '是',
     autoNo: '否',
     // Run Timeline（运行时间线）— 远程代理会话
@@ -4140,6 +4142,7 @@ export const translations: Record<Language, Translations> = {
     autoIgnoredIssueTokens: '無視された入力',
     autoParsedIssueSelectors: '解析された Issue',
     autoCreationParameters: '作成パラメータ',
+    autoRuntimeInfo: '実行時情報',
     autoYes: 'はい',
     autoNo: 'いいえ',
     toolAccountRequired: 'ツールアカウントは必須です',
@@ -5327,6 +5330,7 @@ export const translations: Record<Language, Translations> = {
     autoIgnoredIssueTokens: '무시된 입력',
     autoParsedIssueSelectors: '파싱된 Issue',
     autoCreationParameters: '생성 매개변수',
+    autoRuntimeInfo: '런타임 정보',
     autoYes: '예',
     autoNo: '아니요',
     toolAccountRequired: '도구 계정은 필수입니다',

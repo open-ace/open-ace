@@ -305,6 +305,26 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     }
     return '';
   }, []);
+
+  // Derive the GitHub repo URL from the workflow / snapshot, falling back to
+  // stripping it off the PR url. Intentionally uses `||` (not `??`): an empty
+  // string repo url is falsy-but-not-nullish, so `??` would short-circuit on
+  // it and never reach the PR-url derivation — leaving local projects (which
+  // never captured a repo url at creation) with a permanently empty repo url.
+  /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
+  const deriveRepoUrl = useCallback(
+    () =>
+      normalizeGithubRepoUrl(
+        workflow.project_repo_url ||
+          definitionSnapshot?.project_repo_url ||
+          (workflow.github_pr_url
+            ? workflow.github_pr_url.replace(/\/pull\/\d+(?:[/?#].*)?$/i, '')
+            : '')
+      ),
+    [normalizeGithubRepoUrl, workflow.project_repo_url, definitionSnapshot, workflow.github_pr_url]
+  );
+  /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
+
   const resolvedIssueUrl = useMemo(() => {
     const directUrl =
       workflow.requirements_issue_url ??
@@ -319,13 +339,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     }
 
     const issueNumber = workflow.github_issue_number;
-    const repoUrl = normalizeGithubRepoUrl(
-      workflow.project_repo_url ??
-        definitionSnapshot?.project_repo_url ??
-        (workflow.github_pr_url
-          ? workflow.github_pr_url.replace(/\/pull\/\d+(?:[/?#].*)?$/i, '')
-          : '')
-    );
+    const repoUrl = deriveRepoUrl();
     if (!issueNumber || !repoUrl) {
       return '';
     }
@@ -333,12 +347,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return `${repoUrl}/issues/${issueNumber}`;
   }, [
     definitionSnapshot?.parsed_issue_selectors,
-    definitionSnapshot?.project_repo_url,
     definitionSnapshot?.resolved_issue_url,
-    normalizeGithubRepoUrl,
+    deriveRepoUrl,
     workflow.github_issue_number,
-    workflow.github_pr_url,
-    workflow.project_repo_url,
     workflow.requirements_issue_url,
   ]);
 
@@ -578,7 +589,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const renderDefinitionRows = (
     rows: Array<[string, unknown]>,
-    snapshot: WorkflowDefinitionSnapshot
+    snapshot: WorkflowDefinitionSnapshot,
+    showBatch = true
   ) => (
     <div className="row g-2">
       {rows.map(([label, value]) => (
@@ -589,7 +601,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           </div>
         </div>
       ))}
-      {snapshot.batch_id && (
+      {showBatch && snapshot.batch_id && (
         <div className="col-12">
           <div className="border rounded p-2">
             <div className="text-muted small mb-1">{t('autoBatchInfo', language)}</div>
@@ -2349,16 +2361,16 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               [t('autoAgentTool', language), snapshot.cli_tool],
               [t('autoModel', language), snapshot.model ?? t('autoDefaultModel', language)],
               [t('autoWorkspaceType', language), snapshot.workspace_type],
-              [t('autoRemoteMachine', language), snapshot.remote_machine_id],
               [t('autoProjectPath', language), snapshot.project_path],
-              [t('autoRepoUrl', language), snapshot.project_repo_url],
+              [t('autoRemoteMachine', language), snapshot.remote_machine_id],
               [t('autoBranchStrategy', language), snapshot.branch_strategy],
+              [t('autoRepoUrl', language), snapshot.project_repo_url],
               [t('autoBranchName', language), snapshot.branch_name],
+              [t('autoMergeAfterPR', language), snapshot.auto_merge],
               [t('autoMaxPlanRounds', language), snapshot.max_plan_rounds],
               [t('autoMaxPRReviewRounds', language), snapshot.max_pr_review_rounds],
-              [t('autoMergeAfterPR', language), snapshot.auto_merge],
               [t('autoResolvedIssue', language), snapshot.resolved_issue_number],
-              [t('autoResolvedIssueUrl', language), snapshot.resolved_issue_url],
+              [t('autoResolvedIssueUrl', language), resolvedIssueUrl],
             ];
 
             return (
@@ -2418,6 +2430,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     {t('autoCreationParameters', language)}
                   </div>
                   {renderDefinitionRows(creationRows, snapshot)}
+                </div>
+
+                <div>
+                  <div className="text-muted small mb-2">{t('autoRuntimeInfo', language)}</div>
+                  {renderDefinitionRows(
+                    [
+                      [t('autoRepoUrl', language), deriveRepoUrl()],
+                      [t('autoBranchName', language), workflow.branch_name],
+                    ],
+                    snapshot,
+                    false
+                  )}
                 </div>
               </div>
             );
