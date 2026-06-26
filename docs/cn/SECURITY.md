@@ -251,7 +251,7 @@ def session_view(session_id):
 | 格式 | `<base64url(payload)>.<hex签名>` |
 | 签名 | 用加密密钥做 HMAC-SHA256 |
 | Payload | `user_id`、`session_id`、`tenant_id`、`provider`、`session_type`、`exp`、`jti`，可选 HA 元数据 |
-| 有效期 | 随调用点不同——工作区会话用 **15 分钟**；终端会话与默认最长 24 小时。 |
+| 有效期 | 随调用点不同——agent、终端、webui 会话默认 **24 小时**（1440 分钟）；HA-pool 令牌用 **15 分钟**。 |
 | 校验 | 常数时间签名比较（`hmac.compare_digest`）+ 过期检查 +（agent 会话）活跃会话检查 |
 
 签名不符、`exp` 已过或后端会话不再 `active`/`paused` 的令牌都会被拒。

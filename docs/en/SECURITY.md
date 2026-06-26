@@ -251,7 +251,7 @@ After a machine is registered and a user starts a session, the server issues a *
 | Format | `<base64url(payload)>.<hex_signature>` |
 | Signature | HMAC-SHA256 using the encryption key |
 | Payload | `user_id`, `session_id`, `tenant_id`, `provider`, `session_type`, `exp`, `jti`, optional HA metadata |
-| Validity | Call-site dependent — workspace sessions use **15 minutes**; terminal sessions and the default use up to 24 hours. |
+| Validity | Call-site dependent — **24 hours** (1440 min) by default for agent, terminal, and webui sessions; the HA-pool token uses **15 minutes**. |
 | Validation | Constant-time signature comparison (`hmac.compare_digest`) + expiry check + (for agent sessions) active-session check |
 
 Validation rejects tokens whose signature does not match, whose `exp` has passed, or whose backing session is no longer `active`/`paused`.
