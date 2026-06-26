@@ -19,7 +19,7 @@ from typing import Any, Optional, Union, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
-from app.utils.tool_names import normalize_tool_name
+from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
 try:
     import tomllib
@@ -660,10 +660,26 @@ class APIKeyProxyService:
             except json.JSONDecodeError:
                 cli_settings = {}
 
-            # Get tool-specific settings from cli_settings.
-            # Try the original tool_name key first, then the canonical form,
-            # so that cli_settings keyed by either "codex" or "codex-cli" are found.
-            tool_settings = cli_settings.get(tool_name, cli_settings.get(canonical_tool, {}))
+            # Get tool-specific settings from cli_settings. The cli_settings
+            # subkey may be stored under any of the tool's alias forms — e.g.
+            # qwen-code keys sometimes store settings under "qwen-code" even
+            # when the request tool_name is "qwen-code-cli" (canonical "qwen").
+            # Try the request name, then every alias, so a mismatch between the
+            # requested form and the stored key doesn't silently drop the model
+            # list (which left qwen-code/codex dropdowns showing only "default").
+            alias_candidates = [tool_name]
+            alias_candidates.extend(TOOL_NAME_ALIASES.get(canonical_tool, []))
+            seen_keys: set[str] = set()
+            tool_settings: Any = {}
+            for candidate in alias_candidates:
+                key = candidate.strip().lower()
+                if not key or key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                value = cli_settings.get(candidate) or cli_settings.get(key)
+                if value:
+                    tool_settings = value
+                    break
 
             settings = self._build_cli_settings_for_tool(tool_name, tool_settings)
             rank = (-priority, -weight, key_id)
@@ -1012,6 +1028,28 @@ class APIKeyProxyService:
                 if name:
                     models.append({"id": name, "name": name})
             return models
+
+        if canonical == "codex":
+            # codex settings are stored as TOML (parsed to a dict). Models live
+            # in a top-level ``model`` field (the active model) and optionally
+            # model ids under ``model_providers.*`` entries. Unlike qwen's
+            # camelCase ``modelProviders.<provider> = [{id,...}]`` list shape,
+            # codex's TOML uses snake_case ``model_providers`` whose values are
+            # provider definitions, so the generic branch below never matched.
+            codex_models: list[dict[str, Any]] = []
+            seen_codex: set[str] = set()
+            top_model = settings.get("model")
+            if isinstance(top_model, str) and top_model.strip():
+                mid = top_model.strip()
+                codex_models.append({"id": mid, "name": mid})
+                seen_codex.add(mid)
+            for provider in (settings.get("model_providers") or {}).values():
+                if isinstance(provider, dict):
+                    mid = str(provider.get("id") or provider.get("model") or "").strip()
+                    if mid and mid not in seen_codex:
+                        codex_models.append({"id": mid, "name": mid})
+                        seen_codex.add(mid)
+            return codex_models
 
         # qwen / codex / future tools: flatten every modelProviders subkey.
         models = []

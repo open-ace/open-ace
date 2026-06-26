@@ -184,6 +184,128 @@ class TestValidateCliSettingsPayload:
         assert "Invalid Codex settings TOML" in error
 
 
+class TestExtractModelsForTool:
+    """Test _extract_models_for_tool across tool-specific config shapes.
+
+    Covers two regressions that left dropdowns showing only "default":
+    - codex stores TOML (snake_case ``model_providers`` + top-level ``model``),
+      not qwen's camelCase ``modelProviders.<provider> = [{id,...}]`` list.
+    - claude/zcode/qwen extraction must remain unchanged.
+    """
+
+    def test_codex_extracts_top_level_model_from_toml(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Parsed TOML shape (as produced by _parse_codex_settings).
+        settings = {
+            "model_provider": "openace",
+            "model": "glm-5",
+            "model_providers": {"openace": {"name": "Open ACE Proxy", "wire_api": "responses"}},
+        }
+        models = APIKeyProxyService._extract_models_for_tool("codex", settings)
+        assert [m["id"] for m in models] == ["glm-5"]
+
+    def test_codex_dedups_model_across_top_and_provider(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        settings = {
+            "model": "glm-5",
+            "model_providers": {
+                "openace": {"id": "glm-5", "name": "dup"},
+                "other": {"model": "glm-6"},
+            },
+        }
+        models = APIKeyProxyService._extract_models_for_tool("codex", settings)
+        # glm-5 from top-level + provider id dedups to one; glm-6 from provider.model
+        assert [m["id"] for m in models] == ["glm-5", "glm-6"]
+
+    def test_qwen_extracts_camel_case_model_providers(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        settings = {
+            "modelProviders": {
+                "openai": [
+                    {"id": "glm-5", "name": "glm-5"},
+                    {"id": "glm-5.1", "name": "glm-5.1"},
+                ]
+            }
+        }
+        models = APIKeyProxyService._extract_models_for_tool("qwen", settings)
+        assert [m["id"] for m in models] == ["glm-5", "glm-5.1"]
+
+
+class TestCollectToolKeySettingsAlias:
+    """Test that cli_settings subkeys are found under any alias form.
+
+    Regression: when the request tool_name was "qwen-code-cli" (canonical
+    "qwen") but the stored cli_settings subkey was "qwen-code", the lookup
+    only tried the request name and the canonical name and missed the stored
+    key, dropping all models from the dropdown.
+    """
+
+    def _svc_with_single_key(self, cli_settings: dict, cli_tools: list[str]):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = APIKeyProxyService.__new__(APIKeyProxyService)
+        svc._get_connection = lambda: None  # type: ignore[attr-defined]
+
+        rows = [
+            {
+                "id": 1,
+                "provider": "zai",
+                "encrypted_key": "",
+                "base_url": "",
+                "cli_tools": __import__("json").dumps(cli_tools),
+                "cli_settings": __import__("json").dumps(cli_settings),
+                "priority": 0,
+                "weight": 100,
+            }
+        ]
+
+        class _FakeCursor:
+            def execute(self, *a, **kw):
+                pass
+
+            def fetchall(self):
+                return rows
+
+        class _FakeConn:
+            def cursor(self):
+                return _FakeCursor()
+
+            def close(self):
+                pass
+
+        svc._get_connection = lambda: _FakeConn()  # type: ignore[attr-defined]
+        return svc
+
+    def test_qwen_code_cli_finds_settings_stored_under_qwen_code(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = self._svc_with_single_key(
+            {"qwen-code": {"modelProviders": {"openai": [{"id": "glm-5", "name": "glm-5"}]}}},
+            ["qwen-code"],
+        )
+        ranked = svc._collect_tool_key_settings(
+            tenant_id=1, tool_name="qwen-code-cli", scope="local"
+        )
+        assert len(ranked) == 1
+        models = APIKeyProxyService._extract_models_for_tool("qwen", ranked[0][1])
+        assert [m["id"] for m in models] == ["glm-5"]
+
+    def test_codex_cli_finds_settings_stored_under_codex_cli(self):
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        svc = self._svc_with_single_key(
+            {"codex-cli": 'model = "glm-5"\nmodel_provider = "openace"'},
+            ["codex-cli"],
+        )
+        ranked = svc._collect_tool_key_settings(tenant_id=1, tool_name="codex", scope="local")
+        assert len(ranked) == 1
+        models = APIKeyProxyService._extract_models_for_tool("codex", ranked[0][1])
+        assert [m["id"] for m in models] == ["glm-5"]
+
+
 class TestToolModelPool:
     """Test HA model-pool construction for integrated qwen sessions."""
 
