@@ -125,27 +125,13 @@
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# 拉取预构建镜像并启动（包含 PostgreSQL 数据库）
-docker compose up -d
+# 构建并启动
+docker compose up -d --build
 
 # 访问 http://localhost:5000
 ```
 
-> 💡 预构建镜像托管在 Docker Hub (openace/open-ace)
->
-> 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
-
-<details>
-<summary>本地构建（开发者可选）</summary>
-
-如需本地构建镜像：
-
-```bash
-docker build -t open-ace:dev --target production .
-IMAGE_NAME=open-ace:dev docker compose up -d
-```
-
-</details>
+> 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
 
 ### 方式二：源码安装
 
@@ -442,27 +428,13 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# Pull pre-built image and start (includes PostgreSQL database)
-docker compose up -d
+# Build and start
+docker compose up -d --build
 
 # Visit http://localhost:5000
 ```
 
-> 💡 Pre-built image hosted on GitHub Container Registry (ghcr.io/open-ace/open-ace)
->
-> For production deployment, see [Deployment Guide](scripts/install-central/docker-method/README.md)
-
-<details>
-<summary>Local Build (Optional for Developers)</summary>
-
-To build the image locally:
-
-```bash
-docker build -t open-ace:dev --target production .
-IMAGE_NAME=open-ace:dev docker compose up -d
-```
-
-</details>
+> 💡 For production deployment, see [Deployment Guide](docs/en/DEPLOYMENT.md)
 
 ### Option 2: From Source
 

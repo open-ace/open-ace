@@ -4,15 +4,15 @@
 
 ## 快速部署（推荐）
 
-### 1. 拉取镜像并启动
+### 1. 构建并启动
 
 ```bash
 # 在项目根目录执行
-docker compose up -d
+docker compose up -d --build
 ```
 
 这将：
-- 从 Docker Hub 拉取预构建镜像 (openace/open-ace)
+- 本地构建 open-ace 镜像
 - 启动 open-ace 容器（端口 5000）
 - 启动 PostgreSQL 数据库（内部端口 5432）
 
