@@ -1,8 +1,29 @@
 # Open ACE - AI Computing Explorer
 # Docker build for production deployment
 #
-# Frontend is pre-built on the host (npm run build) before docker build.
-# This avoids npm issues on certain architectures (e.g., ARM64 podman).
+# Frontend is built inside Docker (Issue #1260: one-click deploy support)
+
+# =============================================================================
+# Frontend Build Stage (Issue #1260)
+# =============================================================================
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Configure npm mirror for Chinese network
+RUN npm config set registry https://registry.npmmirror.com/
+
+# Copy frontend source
+COPY frontend/package.json frontend/package-lock.json* ./
+
+# Install dependencies
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+# Copy frontend source files
+COPY frontend/ .
+
+# Build frontend (outputs to ../static/js/dist/)
+RUN npm run build
 
 # =============================================================================
 # Python Build Stage
@@ -99,8 +120,11 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code (includes pre-built frontend in static/js/dist/)
+# Copy application code
 COPY --chown=open-ace:open-ace . .
+
+# Copy frontend build output from frontend-builder stage (Issue #1260)
+COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./static/js/dist
 
 # Copy and set up entrypoint script
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/

@@ -1,24 +1,38 @@
 # Open ACE - AI Computing Explorer - Docker Compose Configuration
 # For production deployment with PostgreSQL database
 #
-# Usage:
-#   docker compose up -d                          # Basic deployment
-#   docker compose --profile production up -d     # With nginx reverse proxy
+# One-click deploy (Issue #1260):
+#   git clone https://github.com/open-ace/open-ace.git
+#   cd open-ace
+#   docker compose up -d --build
+#   # Access http://localhost:5000
+#
+# Pull pre-built image from Docker Hub:
+#   docker compose up -d
+#
+# With nginx reverse proxy:
+#   docker compose --profile production up -d
 #
 # Multi-user workspace:
 #   WORKSPACE_MULTI_USER_MODE=true docker compose up -d
 #   Then create users via admin API — system users are auto-created in container
+#
+# Developer build (for local testing):
+#   docker build -t open-ace:dev --target production .
+#   IMAGE_NAME=open-ace:dev docker compose up -d
 
 services:
   # ===========================================================================
   # Main Application
   # ===========================================================================
   open-ace:
+    # One-click deploy: docker compose up -d --build
+    # Pull pre-built image: docker compose up -d (without --build)
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    image: ${IMAGE_NAME:-open-ace:latest}
+    image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
     ports:
@@ -38,10 +52,19 @@ services:
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
+      # Server IP for URL configuration (Issue #1260)
+      # Defaults to host.docker.internal for one-click deploy
+      # Users can override via .env file for production
+      - SERVER_IP=${SERVER_IP:-host.docker.internal}
+    # Allow container to access host network (Issue #1260)
+    # Required for host.docker.internal on Linux Docker 20.10+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      # CONFIG_DIR: Container runs as root (required for multi-user workspace mode)
-      # ~/.open-ace expands to /root/.open-ace when running as root
-      - ./config:/root/.open-ace:ro
+      # Config: Use named volume for persistence (Issue #1260)
+      # Entrypoint will auto-generate config.json if not exists
+      # Users can mount custom config: - ./my-config.json:/root/.open-ace/config.json:ro
+      - config-data:/root/.open-ace
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
@@ -111,6 +134,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
@@ -128,6 +152,8 @@ networks:
 # Volumes
 # =============================================================================
 volumes:
+  config-data:
+    driver: local
   postgres-data:
     driver: local
   workspace-data:

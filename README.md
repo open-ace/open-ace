@@ -118,14 +118,14 @@
 
 ## 🚀 5 分钟快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：一键部署（推荐）
 
 ```bash
 # 克隆项目
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# 构建并启动（包含 PostgreSQL 数据库）
+# 构建并启动
 docker compose up -d --build
 
 # 访问 http://localhost:5000
@@ -421,20 +421,20 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 
 ## 🚀 Quick Start in 5 Minutes
 
-### Option 1: Docker (Recommended)
+### Option 1: One-click Deploy (Recommended)
 
 ```bash
 # Clone the project
 git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
-# Build and start (includes PostgreSQL database)
+# Build and start
 docker compose up -d --build
 
 # Visit http://localhost:5000
 ```
 
-> 💡 For production deployment, see [Deployment Guide](scripts/install-central/docker-method/README.md)
+> 💡 For production deployment, see [Deployment Guide](docs/en/DEPLOYMENT.md)
 
 ### Option 2: From Source
 
