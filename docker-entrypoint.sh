@@ -110,9 +110,17 @@ generate_default_config() {
     mkdir -p "$CONFIG_DIR"
 
     # Auto-detect SERVER_IP if not configured (Issue #1306)
-    # hostname -I returns all IPs, take the first non-localhost one
+    # Reference: scripts/install-central/docker-method/install.sh
     if [ -z "$SERVER_IP" ]; then
-        SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1") {print $i; exit}}')
+        # Method 1: hostname -I (returns all IPs, filter localhost and link-local)
+        SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./)) {print $i; exit}}')
+        
+        # Method 2: ip route get 1 (fallback, more reliable in some environments)
+        if [ -z "$SERVER_IP" ]; then
+            SERVER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
+        fi
+        
+        # Final fallback
         if [ -z "$SERVER_IP" ]; then
             echo "WARNING: Could not auto-detect SERVER_IP, falling back to host.docker.internal"
             SERVER_IP="host.docker.internal"
