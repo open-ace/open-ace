@@ -26,11 +26,24 @@ Usage:
 import sys
 from pathlib import Path
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
 
 def main() -> int:
+    # alembic is an optional dependency for this check's environments (e.g. the
+    # CI lint job runs pre-commit without installing requirements). Import
+    # lazily and warn-only when absent — the authoritative check runs in the
+    # dedicated migration-graph CI job, mirroring how check-schema-sync.sh
+    # degrades when alembic isn't installed.
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+    except ImportError:
+        print(
+            "WARNING: alembic not installed; skipping single-head check. "
+            "The migration-graph CI job runs the authoritative check.",
+            file=sys.stderr,
+        )
+        return 0
+
     # Resolve alembic.ini from the current directory so the check works inside
     # the temporary pre-merged tree assembled by the CI workflow.
     cfg_path = Path("alembic.ini")
