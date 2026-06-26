@@ -59,11 +59,13 @@ export const insightsApi = {
   async generateReport(
     startDate?: string,
     endDate?: string,
+    language?: string,
     signal?: AbortSignal
   ): Promise<InsightsReport | InsightsGenerateResponse> {
     const body: Record<string, string> = {};
     if (startDate) body.start_date = startDate;
     if (endDate) body.end_date = endDate;
+    if (language) body.language = language;
     return apiClient.post<InsightsReport | InsightsGenerateResponse>(
       '/api/insights/generate',
       body,

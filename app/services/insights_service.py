@@ -73,7 +73,7 @@ class InsightsService:
         return api_key, base_url
 
     def generate_insights(
-        self, user_id: int, start_date: str, end_date: str
+        self, user_id: int, start_date: str, end_date: str, language: str = "zh"
     ) -> tuple[Optional[dict], Optional[str]]:
         """
         Generate insights report for a user's conversations.
@@ -82,6 +82,7 @@ class InsightsService:
             user_id: User ID.
             start_date: Start date (YYYY-MM-DD).
             end_date: End date (YYYY-MM-DD).
+            language: Output language (zh, en, ja, ko). Defaults to "zh".
 
         Returns:
             Tuple[Optional[Dict], Optional[str]]: (report_data, None) on success
@@ -127,8 +128,8 @@ class InsightsService:
             return None, "API key not configured"
 
         # 7. Build prompt
-        system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(stats, conversations)
+        system_prompt = self._build_system_prompt(language)
+        user_prompt = self._build_user_prompt(stats, conversations, language)
 
         # 8. Call AI API
         try:
@@ -169,8 +170,18 @@ class InsightsService:
 
         return report_data, None
 
-    def _build_system_prompt(self) -> str:
-        """Build the system prompt for AI analysis."""
+    def _build_system_prompt(self, language: str = "zh") -> str:
+        """Build the system prompt for AI analysis based on language."""
+        prompts = {
+            "zh": self._build_chinese_system_prompt(),
+            "en": self._build_english_system_prompt(),
+            "ja": self._build_japanese_system_prompt(),
+            "ko": self._build_korean_system_prompt(),
+        }
+        return prompts.get(language, prompts["zh"])
+
+    def _build_chinese_system_prompt(self) -> str:
+        """Build Chinese system prompt."""
         return """你是一位AI使用效率分析专家。你的任务是分析用户与AI的对话数据，评估用户的AI使用效率，并给出个性化的改进建议。
 
 请严格按照以下JSON格式输出分析结果：
@@ -208,21 +219,141 @@ class InsightsService:
 - 建议包含可操作的示例
 - 使用中文输出"""
 
-    def _build_user_prompt(self, stats: dict, conversations: list) -> str:
-        """Build the user prompt with conversation data."""
-        stats_summary = f"""## 用户对话统计（分析周期内）
+    def _build_english_system_prompt(self) -> str:
+        """Build English system prompt."""
+        return """You are an AI usage efficiency analysis expert. Your task is to analyze user-AI conversation data, evaluate the user's AI usage efficiency, and provide personalized improvement suggestions.
 
-- 总会话数：{stats.get("total_conversations", 0)}
-- 总消息数：{stats.get("total_messages", 0)}
-- 总Token消耗：{stats.get("total_tokens", 0)}
-- 平均每会话消息数：{stats.get("avg_messages_per_conversation", 0)}
+Please output the analysis results strictly in the following JSON format:
+{
+    "overall_score": <integer score 1-10>,
+    "overall_assessment": "<overall assessment text>",
+    "strengths": ["<strength1>", "<strength2>", ...],
+    "areas_for_improvement": ["<improvement1>", "<improvement2>", ...],
+    "suggestions": [
+        {
+            "title": "<suggestion title>",
+            "description": "<detailed description>",
+            "example": "<specific improvement example>"
+        },
+        ...
+    ]
+}
+
+Analysis dimensions:
+1. **Clarity**: Whether the user's questions are clear and easy for AI to understand
+2. **Context**: Whether the user provides sufficient background information and context
+3. **Efficiency**: Whether the user can communicate efficiently with AI, avoiding ineffective repetition
+4. **Prompt Quality**: Whether the user's prompts are structured, specific, and targeted
+5. **Adaptability**: Whether the user can adjust their questioning style based on AI feedback
+
+Scoring criteria:
+- 8-10: Excellent, can efficiently utilize AI
+- 5-7: Good, has room for improvement
+- 1-4: Needs to improve AI usage skills
+
+Please ensure:
+- Fair and objective scoring
+- Specific and targeted strengths
+- Feasible improvement directions
+- Suggestions include actionable examples
+- Output in English"""
+
+    def _build_japanese_system_prompt(self) -> str:
+        """Build Japanese system prompt."""
+        return """あなたはAI使用効率分析の専門家です。ユーザーとAIの会話データを分析し、ユーザーのAI使用効率を評価し、個別の改善提案を提供することがあなたの任务です。
+
+以下のJSON形式で分析結果を出力してください：
+{
+    "overall_score": <1-10の整数スコア>,
+    "overall_assessment": "<総合評価テキスト>",
+    "strengths": ["<強み1>", "<強み2>", ...],
+    "areas_for_improvement": ["<改善点1>", "<改善点2>", ...],
+    "suggestions": [
+        {
+            "title": "<提案タイトル>",
+            "description": "<詳細な説明>",
+            "example": "<具体的な改善例>"
+        },
+        ...
+    ]
+}
+
+分析の観点：
+1. **明確性**：ユーザーの質問が明確でAIが理解しやすいか
+2. **コンテキスト**：ユーザーが十分な背景情報とコンテキストを提供しているか
+3. **効率性**：ユーザーが効率的にAIとコミュニケーションでき、無効な繰り返しを避けているか
+4. **プロンプト品質**：ユーザーのプロンプトが構造化され、具体的で、ターゲットを持っているか
+5. **適応性**：ユーザーがAIのフィードバックに基づいて質問スタイルを調整できるか
+
+評価基準：
+- 8-10：優秀、AIを効率的に活用できる
+- 5-7：良好、改善の余地がある
+- 1-4：AI使用スキルの向上が必要
+
+以下を確保してください：
+- 公平で客観的な評価
+- 具体的でターゲットを持った強み
+- 実現可能な改善方向
+- 実行可能な例を含む提案
+- 日本語で出力"""
+
+    def _build_korean_system_prompt(self) -> str:
+        """Build Korean system prompt."""
+        return """당신은 AI 사용 효율 분석 전문가입니다. 사용자와 AI의 대화 데이터를 분석하고, 사용자의 AI 사용 효율을 평가하고, 개인화된 개선 제안을 제공하는 것이 당신의 작업입니다.
+
+다음 JSON 형식으로 분석 결과를 출력하세요:
+{
+    "overall_score": <1-10 정수 점수>,
+    "overall_assessment": "<종합 평가 텍스트>",
+    "strengths": ["<강점1>", "<강점2>", ...],
+    "areas_for_improvement": ["<개선점1>", "<개선점2>", ...],
+    "suggestions": [
+        {
+            "title": "<제안 제목>",
+            "description": "<자세한 설명>",
+            "example": "<구체적인 개선 예시>"
+        },
+        ...
+    ]
+}
+
+분석 차원:
+1. **명확성**: 사용자의 질문이 명확하고 AI가 이해하기 쉬운지
+2. **컨텍스트**: 사용자가 충분한 배경 정보와 컨텍스트를 제공하는지
+3. **효율성**: 사용자가 AI와 효율적으로 통신하고 비효율적인 반복을 피하는지
+4. **프롬프트 품질**: 사용자의 프롬프트가 구조화되고, 구체적이고, 타겟이 있는지
+5. **적응성**: 사용자가 AI의 피드백을 기반으로 질문 스일을 조정할 수 있는지
+
+평가 기준:
+- 8-10: 우수, AI를 효율적으로 활용할 수 있음
+- 5-7: 양호, 개선 공간이 있음
+- 1-4: AI 사용 기술 향상 필요
+
+다음을 확인하세요:
+- 공정하고 객체적인 평가
+- 구체적이고 타겟이 있는 강점
+- 실현 가능한 개선 방향
+- 실행 가능한 예시를 포함한 제안
+- 한국어로 출력"""
+
+    def _build_user_prompt(self, stats: dict, conversations: list, language: str = "zh") -> str:
+        """Build the user prompt with conversation data based on language."""
+        # Get language-specific labels
+        labels = self._get_user_prompt_labels(language)
+
+        stats_summary = f"""## {labels['stats_title']}
+
+- {labels['total_conversations']}：{stats.get("total_conversations", 0)}
+- {labels['total_messages']}：{stats.get("total_messages", 0)}
+- {labels['total_tokens']}：{stats.get("total_tokens", 0)}
+- {labels['avg_messages']}：{stats.get("avg_messages_per_conversation", 0)}
 """
 
-        conversations_text = "## 抽样对话内容\n\n"
+        conversations_text = f"## {labels['sample_title']}\n\n"
         for i, conv in enumerate(conversations, 1):
-            conversations_text += f"### 会话 {i}\n"
+            conversations_text += f"### {labels['session']} {i}\n"
             for msg in conv.get("messages", []):
-                role_label = "用户" if msg["role"] == "user" else "AI助手"
+                role_label = labels['user'] if msg["role"] == "user" else labels['assistant']
                 conversations_text += f"**{role_label}**：{msg['content']}\n\n"
             conversations_text += "---\n\n"
 
@@ -230,7 +361,61 @@ class InsightsService:
 
 {conversations_text}
 
-请分析以上用户与AI的对话数据，给出AI使用效率的评估和改进建议。"""
+{labels['request']}"""
+
+    def _get_user_prompt_labels(self, language: str) -> dict:
+        """Get language-specific labels for user prompt."""
+        labels = {
+            "zh": {
+                "stats_title": "用户对话统计（分析周期内）",
+                "total_conversations": "总会话数",
+                "total_messages": "总消息数",
+                "total_tokens": "总Token消耗",
+                "avg_messages": "平均每会话消息数",
+                "sample_title": "抽样对话内容",
+                "session": "会话",
+                "user": "用户",
+                "assistant": "AI助手",
+                "request": "请分析以上用户与AI的对话数据，给出AI使用效率的评估和改进建议。",
+            },
+            "en": {
+                "stats_title": "User Conversation Statistics (Analysis Period)",
+                "total_conversations": "Total Conversations",
+                "total_messages": "Total Messages",
+                "total_tokens": "Total Token Consumption",
+                "avg_messages": "Avg Messages per Conversation",
+                "sample_title": "Sample Conversation Content",
+                "session": "Conversation",
+                "user": "User",
+                "assistant": "AI Assistant",
+                "request": "Please analyze the above user-AI conversation data and provide an evaluation of AI usage efficiency and improvement suggestions.",
+            },
+            "ja": {
+                "stats_title": "ユーザー会話統計（分析期間内）",
+                "total_conversations": "総会話数",
+                "total_messages": "総メッセージ数",
+                "total_tokens": "総Token消費",
+                "avg_messages": "平均会話メッセージ数",
+                "sample_title": "サンプル会話内容",
+                "session": "会話",
+                "user": "ユーザー",
+                "assistant": "AIアシスタント",
+                "request": "上記のユーザーとAIの会話データを分析し、AI使用効率の評価と改善提案を提供してください。",
+            },
+            "ko": {
+                "stats_title": "사용자 대화 통계 (분석 기간)",
+                "total_conversations": "총 대화 수",
+                "total_messages": "총 메시지 수",
+                "total_tokens": "총 Token 소비",
+                "avg_messages": "평균 대화 메시지 수",
+                "sample_title": "샘플 대화 내용",
+                "session": "대화",
+                "user": "사용자",
+                "assistant": "AI 도우미",
+                "request": "위의 사용자와 AI의 대화 데이터를 분석하고 AI 사용 효율 평가와 개선 제안을 제공하세요.",
+            },
+        }
+        return labels.get(language, labels["zh"])
 
     def _call_ai_api(
         self,
