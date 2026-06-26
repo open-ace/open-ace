@@ -109,8 +109,17 @@ generate_default_config() {
     # Create config directory
     mkdir -p "$CONFIG_DIR"
 
-    # Use SERVER_IP environment variable (default: host.docker.internal)
-    SERVER_IP="${SERVER_IP:-host.docker.internal}"
+    # Auto-detect SERVER_IP if not configured (Issue #1306)
+    # hostname -I returns all IPs, take the first non-localhost one
+    if [ -z "$SERVER_IP" ]; then
+        SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1") {print $i; exit}}')
+        if [ -z "$SERVER_IP" ]; then
+            echo "WARNING: Could not auto-detect SERVER_IP, falling back to host.docker.internal"
+            SERVER_IP="host.docker.internal"
+        else
+            echo "Auto-detected SERVER_IP: $SERVER_IP"
+        fi
+    fi
     PORT="${PORT:-5000}"
 
     # Get hostname dynamically (matches install.sh behavior)

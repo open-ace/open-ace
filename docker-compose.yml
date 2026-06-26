@@ -52,10 +52,10 @@ services:
       - WORKSPACE_BASE_DIR=/workspace
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
-      # Server IP for URL configuration (Issue #1260)
-      # Defaults to host.docker.internal for one-click deploy
-      # Users can override via .env file for production
-      - SERVER_IP=${SERVER_IP:-host.docker.internal}
+      # Server IP for URL configuration (Issue #1306)
+      # Auto-detected from hostname -I if not set
+      # Override via .env file if needed (e.g., SERVER_IP=192.168.1.169)
+      - SERVER_IP=${SERVER_IP:-}
     # Allow container to access host network (Issue #1260)
     # Required for host.docker.internal on Linux Docker 20.10+
     extra_hosts:
