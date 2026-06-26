@@ -1273,9 +1273,12 @@ class TestGetMilestoneSession:
         data = resp.get_json()
         assert data["success"] is True
         assert data["session"]["session_id"] == "actual-456"
+        # The resolved actual session is the real Claude transcript, shared
+        # across multiple milestones; its messages are not tagged per-milestone,
+        # so we return the full transcript (no message_milestone_id filter).
         assert mock_sm.get_session.call_args_list == [
             (("track-123",), {}),
-            (("actual-456",), {"include_messages": True, "message_milestone_id": "ms-1"}),
+            (("actual-456",), {"include_messages": True}),
         ]
 
     def test_get_session_no_session_id(self, client):
