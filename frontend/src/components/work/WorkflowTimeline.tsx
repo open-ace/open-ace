@@ -210,6 +210,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const workspaceFullscreen = useWorkspaceFullscreen();
   const { toggleWorkspaceFullscreen } = useAppStore();
   const timelineBodyRef = useRef<HTMLDivElement>(null);
+  // Registry of milestone card DOM nodes keyed by milestone_id, used to scroll
+  // a specific card into view (e.g. the "view latest milestone" header button).
+  const milestoneCardRefs = useRef<Map<string, HTMLElement>>(new Map());
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -941,9 +944,37 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     workflow.status === 'waiting'
   );
 
+  // Callback ref: registers a milestone card node by id, and clears it on
+  // unmount so the map never holds detached nodes.
+  const registerMilestoneCard = useCallback(
+    (milestoneId: string) => (node: HTMLElement | null) => {
+      const refs = milestoneCardRefs.current;
+      if (node) {
+        refs.set(milestoneId, node);
+      } else {
+        refs.delete(milestoneId);
+      }
+    },
+    []
+  );
+
   const toggleExpandMilestone = (milestoneId: string) => {
     setExpandedMilestone((current) => (current === milestoneId ? null : milestoneId));
   };
+
+  // Expand a milestone and scroll its card into view. Used by the header
+  // "view latest milestone" button so the expanded failure detail is visible,
+  // not just expanded off-screen. Uses rAF so the expand re-render (which may
+  // change the card's height) lands before we scroll, avoiding a stale offset.
+  const expandAndScrollToMilestone = useCallback((milestoneId: string) => {
+    setExpandedMilestone(milestoneId);
+    window.requestAnimationFrame(() => {
+      milestoneCardRefs.current.get(milestoneId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  }, []);
 
   const closeViewingContent = () => {
     setViewingContent(null);
@@ -1264,6 +1295,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return (
       <article
         key={milestone.milestone_id}
+        ref={!compact ? registerMilestoneCard(milestone.milestone_id) : undefined}
         className={`timeline-milestone-card ${
           compact ? 'timeline-milestone-card--compact' : ''
         } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusDisplay.tone}`}
@@ -1913,7 +1945,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <button
                   type="button"
                   className="timeline-inline-link"
-                  onClick={() => setExpandedMilestone(latestFailedMilestone.milestone_id)}
+                  onClick={() => expandAndScrollToMilestone(latestFailedMilestone.milestone_id)}
                 >
                   {t('autoOpenLatestMilestone', language)}
                 </button>
