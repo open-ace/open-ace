@@ -1,0 +1,90 @@
+name: Migration Graph
+
+# Guard the single-head invariant of the Alembic migration chain.
+#
+# Two parallel PRs can each fork off the same parent migration (both declaring
+# the same down_revision) without any git text conflict — each branch is
+# single-headed in isolation, so schema-sync and pre-commit cannot see the fork.
+# It only surfaces once the branches merge. This workflow catches it BEFORE
+# merge by assembling the pre-merged `migrations/versions/` tree (base branch +
+# PR's migration changes) and asserting exactly one Alembic head.
+#
+# See scripts/check_migration_heads.py for the checker this workflow runs.
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/versions/**'
+
+permissions:
+  contents: read
+
+jobs:
+  single-head:
+    name: Single migration head
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # need base-branch history + the PR merge-base
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Alembic
+        # Only alembic is needed: get_heads() parses migration modules but never
+        # opens a database or runs upgrade(). alembic pulls in sqlalchemy, which
+        # migrations/baseline.py imports at module load time.
+        run: pip install alembic
+
+      - name: Assemble pre-merged migration tree
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          MERGED_DIR="$RUNNER_TEMP/merged-migrations"
+          mkdir -p "$MERGED_DIR/migrations"
+
+          # Support files are identical across branches; copy from the checkout
+          # without ever mutating the checked-out working tree.
+          cp alembic.ini "$MERGED_DIR/"
+          cp migrations/baseline.py migrations/version_table.py "$MERGED_DIR/migrations/"
+
+          # 1) Start from the base branch's full versions/ directory. Read every
+          #    blob out of git ($BASE_REF) into the temp tree — never touch the
+          #    checkout itself, so later steps keep seeing the PR's files.
+          for f in $(git ls-tree -r --name-only "$BASE_REF" -- migrations/versions); do
+            mkdir -p "$MERGED_DIR/$(dirname "$f")"
+            git show "$BASE_REF:$f" > "$MERGED_DIR/$f"
+          done
+
+          # 2) Apply the PR's migration changes (added/modified/deleted since the
+          #    merge-base) on top, producing the post-merge versions/ tree.
+          MERGE_BASE="$(git merge-base "$BASE_REF" HEAD)"
+          echo "merge-base: $MERGE_BASE"
+          git diff --name-only --diff-filter=AMD "$MERGE_BASE" HEAD -- migrations/versions \
+            | while read -r f; do
+                if git cat-file -e "HEAD:$f" 2>/dev/null; then
+                  mkdir -p "$MERGED_DIR/$(dirname "$f")"
+                  git show "HEAD:$f" > "$MERGED_DIR/$f"
+                else
+                  rm -f "$MERGED_DIR/$f"
+                fi
+              done
+
+          echo "--- pre-merged versions/ contents ---"
+          ls -1 "$MERGED_DIR/migrations/versions/"
+          echo "MERGED_DIR=$MERGED_DIR" >> "$GITHUB_ENV"
+
+      - name: Assert single migration head
+        working-directory: ${{ env.MERGED_DIR }}
+        run: python "$GITHUB_WORKSPACE/scripts/check_migration_heads.py"
+
+      - name: Cleanup merged tree
+        if: always()
+        run: rm -rf "$MERGED_DIR"
