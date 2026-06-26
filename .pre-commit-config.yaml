@@ -16,6 +16,19 @@ repos:
         files: ^migrations/versions/.*\.py$
         pass_filenames: false
 
+      # Assert the migration graph has exactly one head.
+      # Note: this only sees the current working tree, so it catches a single
+      # branch forking its own chain — NOT the cross-branch fork that occurs
+      # when two PRs each fork off the same parent. That cross-branch case is
+      # guarded by .github/workflows/migration-graph.yml, which runs this same
+      # script against a pre-merged migration tree.
+      - id: check-migration-heads
+        name: Check single migration head
+        entry: python3 scripts/check_migration_heads.py
+        language: system
+        files: ^migrations/versions/.*\.py$
+        pass_filenames: false
+
       # Validate PostgreSQL schema for boolean field consistency
       - id: validate-schema
         name: Validate PostgreSQL schema boolean fields
