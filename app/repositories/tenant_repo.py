@@ -131,16 +131,10 @@ class TenantRepository:
                 # Insert tenant_settings
                 settings_dict = tenant.settings.to_dict()
                 # Both PostgreSQL and SQLite use integer for boolean fields in tenant_settings
-                content_filter_val = (
-                    1 if settings_dict.get("content_filter_enabled", True) else 0
-                )
-                audit_log_val = (
-                    1 if settings_dict.get("audit_log_enabled", True) else 0
-                )
+                content_filter_val = 1 if settings_dict.get("content_filter_enabled", True) else 0
+                audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
                 sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
-                auto_provision_val = (
-                    1 if settings_dict.get("auto_provision_users", False) else 0
-                )
+                auto_provision_val = 1 if settings_dict.get("auto_provision_users", False) else 0
 
                 cursor.execute(
                     adapt_sql(
