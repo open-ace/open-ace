@@ -24,7 +24,6 @@ import {
   Error,
   EmptyState,
   Badge,
-  PageRefreshControl,
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
@@ -297,23 +296,46 @@ export const UserManagement: React.FC = () => {
 
   return (
     <div className="user-management">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2>{t('userList', language)}</h2>
-        <div className="d-flex gap-2">
+      {/* Header - 顶部操作栏优化 */}
+      <div className="d-flex align-items-center gap-3 mb-4">
+        {/* 左侧：标题 */}
+        <h2 className="mb-0 fs-5 fw-semibold">{t('userList', language)}</h2>
+
+        {/* 中间：筛选控件 */}
+        <div className="d-flex align-items-center">
           <Select
             options={tenantFilterOptions}
             value={selectedTenantId ? String(selectedTenantId) : ''}
             onChange={(value) => setSelectedTenantId(value ? Number(value) : undefined)}
             placeholder={t('selectTenant', language) ?? 'Select Tenant'}
+            size="sm"
+            style={{ minWidth: '140px', maxWidth: '200px' }}
           />
-          <PageRefreshControl
-            refresh={pageRefresh}
-            compact={true}
-            showAutoRefreshToggle={false}
-            showIntervalSelector={false}
-            showLastRefreshTime={true}
-          />
+        </div>
+
+        {/* 右侧：操作按钮 */}
+        <div className="d-flex align-items-center gap-2 ms-auto">
+          {/* 刷新按钮：简约图标轻按钮 */}
+          <button
+            type="button"
+            className="btn btn-sm p-1 border-0"
+            onClick={() => refetch()}
+            disabled={pageRefresh.isRefreshing}
+            title={t('refresh', language)}
+            style={{
+              color: '#6c757d',
+              backgroundColor: 'transparent',
+              borderRadius: '4px',
+              lineHeight: '1',
+            }}
+          >
+            <i
+              className={`bi bi-arrow-clockwise ${pageRefresh.isRefreshing ? 'spinner-border spinner-border-sm' : ''}`}
+              style={{ fontSize: '1rem' }}
+            />
+          </button>
+
+          {/* 添加用户按钮：柔和圆角主色按钮 */}
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>
             <i className="bi bi-plus-lg me-1" />
             {t('addUser', language)}
