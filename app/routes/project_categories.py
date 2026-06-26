@@ -34,7 +34,7 @@ def _authenticate_user():
     return jsonify({"error": "Authentication required"}), 401
 
 
-@project_categories_bp.route("/api/project-categories", methods=["GET"])
+@project_categories_bp.route("/project-categories", methods=["GET"])
 def list_categories():
     """List all project categories."""
     categories = category_repo.list_categories(active_only=False)
@@ -46,7 +46,7 @@ def list_categories():
     )
 
 
-@project_categories_bp.route("/api/project-categories", methods=["POST"])
+@project_categories_bp.route("/project-categories", methods=["POST"])
 def create_category():
     """Create a new category (admin only)."""
     if g.user.get("role") != "admin":
@@ -72,7 +72,7 @@ def create_category():
     return jsonify({"error": "Failed to create category"}), 500
 
 
-@project_categories_bp.route("/api/project-categories/<int:category_id>", methods=["PUT"])
+@project_categories_bp.route("/project-categories/<int:category_id>", methods=["PUT"])
 def update_category(category_id):
     """Update a category (admin only)."""
     if g.user.get("role") != "admin":
@@ -104,7 +104,7 @@ def update_category(category_id):
     return jsonify({"error": "Failed to update category"}), 500
 
 
-@project_categories_bp.route("/api/project-categories/<int:category_id>", methods=["DELETE"])
+@project_categories_bp.route("/project-categories/<int:category_id>", methods=["DELETE"])
 def delete_category(category_id):
     """Delete a category (admin only)."""
     if g.user.get("role") != "admin":
