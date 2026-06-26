@@ -1027,20 +1027,21 @@ class AutonomousOrchestrator:
                     if cli_session_id:
                         resume_target = cli_session_id
                     else:
-                        # Mapping lost: keep the 3-session design by re-probing
-                        # and rebinding the real CLI id to this line on the next
-                        # run, rather than faking a resume with the tracking id.
+                        # Mapping lost: keep this SAME session line stable and
+                        # re-probe/rebind the real CLI id onto it on the next
+                        # run, rather than creating a new wrapper line or faking
+                        # a resume with the tracking id.
                         logger.warning(
                             "Claude session line %s has no cli_session_id mapping "
-                            "(tracking=%s); starting fresh and rebinding",
+                            "(tracking=%s); starting fresh on the same line",
                             session_line,
                             existing[:8],
                         )
-                        return str(uuid.uuid4()), None, False
+                        return existing, None, False
                 except Exception:
                     logger.warning("Failed to resolve Claude resume target", exc_info=True)
-                    return str(uuid.uuid4()), None, False
-            return str(uuid.uuid4()), resume_target, True
+                    return existing, None, False
+            return existing, resume_target, True
         return str(uuid.uuid4()), None, False
 
     @staticmethod
@@ -1165,17 +1166,16 @@ class AutonomousOrchestrator:
             # Falls back to the wrapper uuid when the real id isn't resolved yet.
             link_session_id = result.source_session_id or result.session_id
             self._link_session_to_current_milestone(link_session_id)
-            # Always update the session line with the real CLI session id.
-            # Resume can fail silently (e.g. the prior session died after a
-            # crash/timeout), in which case the agent falls back to a fresh
-            # session/create and returns a new id. If we don't overwrite here,
-            # subsequent milestones resume the stale dead id forever (#525).
+            # Persist the stable tracking id for this line. Fresh lines write
+            # their first tracking id here; established lines keep reusing the
+            # same wrapper row across milestones so timeline/session identity
+            # does not drift with every resume attempt.
             field = SESSION_LINE_FIELDS.get(session_line)
             if field:
                 self._update_workflow({field: result.session_id})
                 # Keep the in-memory wf dict in sync so the next _resolve_session_line
                 # call in the same phase (e.g. planning → finalize) sees the updated
-                # session id and resumes it instead of creating a new session.
+                # line identity and resumes it instead of rotating wrappers.
                 wf[field] = result.session_id
 
         # Transient API error retry (429 / 5xx / overload) — exponential

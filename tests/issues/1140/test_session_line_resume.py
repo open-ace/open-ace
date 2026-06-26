@@ -82,6 +82,7 @@ def test_resolve_session_line_resume_with_fresh_wf():
     sid, resume_sid, resume = orch._resolve_session_line(wf, "main")
     assert resume is True
     assert resume_sid == "sess_planning_fresh"
+    assert sid == "sess_planning_fresh"
 
 
 def test_resolve_session_line_review_independent_from_main():
@@ -112,6 +113,7 @@ def test_resolve_session_line_uses_claude_cli_session_mapping():
     sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
 
     assert resume is True
+    assert sid == "wf-main-track"
     assert resume_sid == "claude-sidebar-real"
 
 
@@ -126,16 +128,17 @@ def test_resolve_session_line_reads_authoritative_cli_session_column():
         session_id="wf-main-track", cli_session_id="claude-real-999"
     )
 
-    _, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
+    sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
     assert resume is True
+    assert sid == "wf-main-track"
     assert resume_sid == "claude-real-999"
 
 
 def test_resolve_session_line_missing_mapping_starts_fresh_not_fake():
     """A Claude line whose cli_session_id mapping is lost must NOT disguise the
     tracking id as a resume target. Return resume=False so ``_run_local``
-    re-probes the real CLI id and rebinds it to this same line — strict
-    3-session topology, no fake resume, no 4th session (#1200)."""
+    re-probes the real CLI id and rebinds it to this SAME line, instead of
+    rotating to a fresh wrapper session."""
     from app.modules.workspace.session_manager import AgentSession
 
     db_state = {"main_session_id": "wf-main-track", "cli_tool": "claude-code"}
@@ -148,5 +151,21 @@ def test_resolve_session_line_missing_mapping_starts_fresh_not_fake():
     sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "main")
     assert resume is False
     assert resume_sid is None
-    # A fresh tracking id is minted; the stale tracking id is never used to resume.
-    assert sid != "wf-main-track"
+    assert sid == "wf-main-track"
+
+
+def test_resolve_session_line_keeps_tracking_id_stable_across_resume():
+    """An established line should reuse its original tracking id on later rounds."""
+    from app.modules.workspace.session_manager import AgentSession
+
+    db_state = {"review_session_id": "wf-review-track", "cli_tool": "claude-code"}
+    orch, _ = _make_orchestrator(db_state)
+    orch._runner.session_manager.get_session.return_value = AgentSession(
+        session_id="wf-review-track", cli_session_id="claude-review-real"
+    )
+
+    sid, resume_sid, resume = orch._resolve_session_line(dict(db_state), "review")
+
+    assert resume is True
+    assert sid == "wf-review-track"
+    assert resume_sid == "claude-review-real"
