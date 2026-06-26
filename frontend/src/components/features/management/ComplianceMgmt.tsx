@@ -25,6 +25,7 @@ import {
   PageRefreshControl,
   useToast,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import { ReportPreviewModal } from './ReportPreviewModal';
 import { CleanupPreviewContent } from '@/components/features/compliance/CleanupPreviewContent';
 import { formatDateTime, createMatcherConfig } from '@/utils';
@@ -437,8 +438,9 @@ export const ComplianceMgmt: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleExecuteCleanup = async () => {
-    if (!window.confirm(t('confirmCleanup', language))) return;
+    if (!(await confirm({ message: t('confirmCleanup', language), variant: 'danger' }))) return;
     setIsRunning(true);
     try {
       const result = await complianceApi.runCleanup(false);
@@ -991,9 +993,6 @@ export const ComplianceMgmt: React.FC = () => {
 
       {/* Tab Content */}
       {activeTab === 'reports' ? renderReportsTab() : renderRetentionTab()}
-
-      {/* Toast notifications for cleanup feedback (portals to document.body) */}
-      {toast.ToastContainer()}
     </div>
   );
 };

@@ -13,7 +13,9 @@ export { Pagination } from './Pagination';
 
 // New Phase 5 components
 export { Modal, ConfirmModal } from './Modal';
-export { ToastContainer, useToast } from './Toast';
+export { ConfirmHost, useConfirm } from './Confirm';
+export type { ConfirmOptions, ConfirmVariant } from './Confirm';
+export { ToastContainer, ToastHost, useToast } from './Toast';
 export type { ToastData, ToastType } from './Toast';
 export { Tooltip } from './Tooltip';
 export type { TooltipPlacement } from './Tooltip';

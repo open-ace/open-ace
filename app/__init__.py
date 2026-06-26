@@ -4,10 +4,14 @@ Open ACE - Flask Application Factory
 This module provides the Flask application factory for the Open ACE platform.
 """
 
+from __future__ import annotations
+
 import logging
 import os
+import re
+import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -16,6 +20,27 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Cap for client-supplied request ids; the correlation id is echoed into the
+# response header and written to logs, so a multi-kB value is an abuse vector.
+REQUEST_ID_MAX_LENGTH = 128
+# C0 control chars (incl. CR/LF) + DEL. Stripped from the inbound X-Request-ID
+# to defeat header-injection (CRLF smuggling) and log-injection (log forging).
+_REQUEST_ID_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_request_id(value: str | None) -> str:
+    """Make a client-supplied request id safe to echo back and log.
+
+    The X-Request-ID is trusted enough to propagate verbatim into the response
+    header and the error log, so any control characters (notably CRLF) are a
+    header/log-injection surface. Strip control chars, trim whitespace, and cap
+    the length; return an empty string when nothing usable remains.
+    """
+    if not value:
+        return ""
+    cleaned = _REQUEST_ID_CONTROL_CHARS.sub("", value).strip()
+    return cleaned[:REQUEST_ID_MAX_LENGTH]
 
 
 def create_app(config=None):
@@ -109,6 +134,23 @@ def create_app(config=None):
 def register_error_handlers(app):
     """Register error handlers for the application."""
 
+    @app.before_request
+    def assign_request_id():
+        """Propagate or generate a per-request correlation id (X-Request-ID).
+
+        A client-supplied id is sanitized first (control chars stripped, length
+        capped) because it is echoed on the response and written to logs; if the
+        sanitized value is empty we fall back to a generated id.
+        """
+        sanitized = _sanitize_request_id(request.headers.get("X-Request-ID"))
+        g.request_id = sanitized or uuid.uuid4().hex
+
+    @app.after_request
+    def echo_request_id(response):
+        """Echo the correlation id on the response for client-side tracing."""
+        response.headers["X-Request-ID"] = getattr(g, "request_id", "")
+        return response
+
     @app.after_request
     def add_cors_headers(response):
         """Add CORS headers for iframe integration with qwen-code-webui."""
@@ -165,8 +207,8 @@ def register_error_handlers(app):
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
                     response.headers["Access-Control-Allow-Credentials"] = "true"
                     return response
-            except:
-                pass
+            except Exception:
+                logger.debug("Failed to parse CORS origin header", exc_info=True)
         return jsonify({"status": "ok"}), 200
 
     @app.errorhandler(HTTPException)
@@ -179,7 +221,7 @@ def register_error_handlers(app):
     @app.errorhandler(Exception)
     def handle_generic_exception(e):
         """Handle unexpected exceptions."""
-        logger.exception("Unexpected error occurred")
+        logger.exception("Unexpected error occurred [request_id=%s]", getattr(g, "request_id", "-"))
         if request.path.startswith("/api/"):
             return jsonify({"error": "Internal server error"}), 500
         raise e

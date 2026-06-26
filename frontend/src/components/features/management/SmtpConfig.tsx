@@ -11,7 +11,16 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Card, Button, TextInput, Loading, Error, Badge, useToast } from '@/components/common';
+import {
+  Card,
+  Button,
+  TextInput,
+  Loading,
+  Error,
+  Badge,
+  useToast,
+  useConfirm,
+} from '@/components/common';
 import { smtpConfigApi, type SMTPConfig, type EmailStatistics } from '@/api/smtpConfig';
 
 export const SmtpConfig: React.FC = () => {
@@ -157,8 +166,10 @@ export const SmtpConfig: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDelete = async () => {
-    if (!window.confirm(t('confirmDeleteSmtpConfig', language))) return;
+    if (!(await confirm({ message: t('confirmDeleteSmtpConfig', language), variant: 'danger' })))
+      return;
 
     try {
       await smtpConfigApi.deleteConfig();

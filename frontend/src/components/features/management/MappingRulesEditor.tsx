@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Button, TextInput, Modal, Badge, useToast } from '@/components/common';
+import { Button, TextInput, Modal, Badge, useToast, useConfirm } from '@/components/common';
 import { mappingRulesApi, type MappingRule } from '@/api/mappingRules';
 
 // Match types with display names
@@ -116,8 +116,9 @@ export const MappingRulesEditor: React.FC<MappingRulesEditorProps> = ({
     }
   };
 
+  const confirm = useConfirm();
   const handleDeleteRule = async (id: number) => {
-    if (!window.confirm(language === 'zh' ? '确认删除此规则？' : 'Delete this rule?')) return;
+    if (!(await confirm({ message: t('confirmDeleteRule', language), variant: 'danger' }))) return;
 
     try {
       await mappingRulesApi.deleteRule(id);

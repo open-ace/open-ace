@@ -27,6 +27,7 @@ import {
   useToast,
   PageRefreshControl,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
 import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
@@ -335,8 +336,9 @@ export const QuotaAlerts: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDeleteAlert = async (alertId: string) => {
-    if (!window.confirm(t('confirmDeleteAlert', language))) return;
+    if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' }))) return;
     try {
       await alertsApi.deleteAlert(alertId);
       setAlerts((prev) => prev.filter((a) => a.id !== alertId));

@@ -31,6 +31,7 @@ import {
   SessionDetailContent,
   Pagination,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDateTime, formatTokens, formatToolName } from '@/utils';
 import type { AgentSession, SessionFilters } from '@/api/sessions';
@@ -219,11 +220,14 @@ export const Sessions: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDelete = async (sessionId: string) => {
     if (
-      window.confirm(
-        t('confirmDeleteSession', language) ?? 'Are you sure you want to delete this session?'
-      )
+      await confirm({
+        message:
+          t('confirmDeleteSession', language) ?? 'Are you sure you want to delete this session?',
+        variant: 'danger',
+      })
     ) {
       await deleteMutation.mutateAsync(sessionId);
       if (selectedSessionId === sessionId) {

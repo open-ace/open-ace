@@ -29,6 +29,7 @@ import {
   Badge,
   useToast,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import {
   ssoApi,
   tenantApi,
@@ -251,8 +252,10 @@ export const SSOSettings: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleDisable = async (providerName: string) => {
-    if (!window.confirm(t('confirmDisableProvider', language))) return;
+    if (!(await confirm({ message: t('confirmDisableProvider', language), variant: 'warning' })))
+      return;
     try {
       await ssoApi.disableProvider(providerName);
       fetchProviders();

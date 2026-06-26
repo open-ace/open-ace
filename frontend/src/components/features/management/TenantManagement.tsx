@@ -25,6 +25,7 @@ import {
   Badge,
   PageRefreshControl,
 } from '@/components/common';
+import { useConfirm } from '@/components/common';
 import { tenantApi, type Tenant, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
 import { formatDateTime } from '@/utils';
 import { usePageRefresh } from '@/hooks';
@@ -295,8 +296,10 @@ export const TenantManagement: React.FC = () => {
     }
   };
 
+  const confirm = useConfirm();
   const handleSuspend = async (tenant: Tenant) => {
-    if (!window.confirm(t('confirmSuspendTenant', language))) return;
+    if (!(await confirm({ message: t('confirmSuspendTenant', language), variant: 'warning' })))
+      return;
     try {
       await tenantApi.suspendTenant(tenant.id);
       fetchTenants();
@@ -315,7 +318,8 @@ export const TenantManagement: React.FC = () => {
   };
 
   const handleDelete = async (tenant: Tenant) => {
-    if (!window.confirm(t('confirmDeleteTenant', language))) return;
+    if (!(await confirm({ message: t('confirmDeleteTenant', language), variant: 'danger' })))
+      return;
     try {
       await tenantApi.deleteTenant(tenant.id);
       fetchTenants();
