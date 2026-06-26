@@ -117,6 +117,45 @@ class SessionProcess:
         self._stdout_thread.start()
         self._stderr_thread.start()
 
+    @staticmethod
+    def _extract_stream_session_id(parsed: dict[str, Any]) -> str:
+        """Best-effort extraction of Claude's real session_id from a stream event."""
+        if not isinstance(parsed, dict):
+            return ""
+
+        candidates: list[Any] = [parsed.get("session_id")]
+        response = parsed.get("response", {}) or {}
+        if isinstance(response, dict):
+            candidates.append(response.get("session_id"))
+            inner_response = response.get("response", {}) or {}
+            if isinstance(inner_response, dict):
+                candidates.append(inner_response.get("session_id"))
+
+        for candidate in candidates:
+            session_id = str(candidate or "").strip()
+            if session_id:
+                return session_id
+        return ""
+
+    def _capture_cli_session_id(self, parsed: dict[str, Any], source: str) -> str:
+        """Store the authoritative Claude session_id when the stream exposes it."""
+        if self.cli_tool != "claude-code":
+            return ""
+
+        cli_session_id = self._extract_stream_session_id(parsed)
+        if not cli_session_id:
+            return ""
+
+        if cli_session_id != self._cli_session_id:
+            self._cli_session_id = cli_session_id
+            logger.info(
+                "Captured Claude session_id from %s for session %s -> %s",
+                source,
+                self.session_id[:8],
+                cli_session_id[:8],
+            )
+        return cli_session_id
+
     def _read_stream(self, stream: Any, stream_name: str) -> None:
         """
         Continuously read lines from a subprocess stream and forward them
@@ -149,10 +188,11 @@ class SessionProcess:
                                 subtype = resp.get("subtype")
                                 if subtype == "success":
                                     # Extract CLI's internal session_id for --resume
-                                    inner_resp = resp.get("response", {})
-                                    cli_sid = inner_resp.get("session_id")
+                                    cli_sid = self._capture_cli_session_id(
+                                        parsed,
+                                        "control_response.initialize",
+                                    )
                                     if cli_sid:
-                                        self._cli_session_id = cli_sid
                                         logger.info(
                                             "SDK initialization complete for session %s (CLI session_id: %s)",
                                             self.session_id[:8],
@@ -179,11 +219,19 @@ class SessionProcess:
                             self.permission_callback(self.session_id, parsed)
                             continue
 
-                        # Handle result messages — extract token usage
-                        if msg_type == "result" and self.usage_callback:
-                            tokens = self._extract_stream_usage(self.cli_tool, parsed)
-                            if tokens and (tokens["input"] or tokens["output"]):
-                                self.usage_callback(self.session_id, tokens)
+                        if msg_type in {"system", "initialized"} and (
+                            msg_type == "initialized" or parsed.get("subtype") == "initialized"
+                        ):
+                            self._capture_cli_session_id(parsed, "system.initialized")
+
+                        # Handle result messages — capture session_id and
+                        # extract token usage when requested.
+                        if msg_type == "result":
+                            self._capture_cli_session_id(parsed, "result")
+                            if self.usage_callback:
+                                tokens = self._extract_stream_usage(self.cli_tool, parsed)
+                                if tokens and (tokens["input"] or tokens["output"]):
+                                    self.usage_callback(self.session_id, tokens)
                     except (json.JSONDecodeError, ValueError):
                         pass
 

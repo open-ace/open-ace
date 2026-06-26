@@ -1260,7 +1260,11 @@ def get_milestone_session(workflow_id, milestone_id):
     actual_session_id = _resolve_actual_session_id(session_id, sm)
 
     if actual_session_id and actual_session_id != session_id:
-        session_data = sm.get_session(actual_session_id, include_messages=True)
+        session_data = sm.get_session(
+            actual_session_id,
+            include_messages=True,
+            message_milestone_id=milestone_id,
+        )
         if session_data:
             return jsonify({"success": True, "session": session_data})
 

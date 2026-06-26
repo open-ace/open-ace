@@ -571,6 +571,51 @@ class AutonomousAgentRunner:
         return workspace_type == "local" and cli_tool == "claude-code"
 
     @staticmethod
+    def _extract_stream_session_id(parsed: dict[str, Any]) -> str:
+        """Best-effort extraction of Claude's real session_id from a stream event."""
+        if not isinstance(parsed, dict):
+            return ""
+
+        candidates: list[Any] = [parsed.get("session_id")]
+        response = parsed.get("response", {}) or {}
+        if isinstance(response, dict):
+            candidates.append(response.get("session_id"))
+            inner_response = response.get("response", {}) or {}
+            if isinstance(inner_response, dict):
+                candidates.append(inner_response.get("session_id"))
+
+        for candidate in candidates:
+            session_id = str(candidate or "").strip()
+            if session_id:
+                return session_id
+        return ""
+
+    def _capture_cli_session_id(
+        self,
+        session: _LocalSession,
+        parsed: dict[str, Any],
+        source: str,
+    ) -> str:
+        """Persist the authoritative Claude session_id when the stream exposes it."""
+        if not self._uses_sidebar_session_source(session.cli_tool, session.workspace_type):
+            return ""
+
+        cli_session_id = self._extract_stream_session_id(parsed)
+        if not cli_session_id:
+            return ""
+
+        if cli_session_id != session.cli_session_id:
+            session.cli_session_id = cli_session_id
+            logger.info(
+                "Captured Claude session_id from %s (workflow=%s tracking=%s cli=%s)",
+                source,
+                session.workflow_id,
+                (session.session_id or "")[:8],
+                cli_session_id[:8],
+            )
+        return cli_session_id
+
+    @staticmethod
     def _encode_project_path(project_path: str) -> str:
         """Best-effort match for the encoded project path used by Claude session history.
 
@@ -2270,6 +2315,7 @@ class AutonomousAgentRunner:
                             )
 
                     elif msg_type == "result":
+                        self._capture_cli_session_id(session, parsed, "result")
                         # End of turn - extract usage via shared parser.
                         # request_count is counted per assistant message_id above
                         # (not here), since one --print result summarizes all turns.
@@ -2303,6 +2349,10 @@ class AutonomousAgentRunner:
                                 },
                             )
 
+                    elif msg_type in {"system", "initialized"}:
+                        if msg_type == "initialized" or parsed.get("subtype") == "initialized":
+                            self._capture_cli_session_id(session, parsed, "system.initialized")
+
                     elif msg_type == "control_response":
                         # Capture the real Claude session_id from the SDK
                         # initialize response (mirrors remote executor.py).
@@ -2312,11 +2362,12 @@ class AutonomousAgentRunner:
                             and resp.get("request_id") == session.init_request_id
                         ):
                             if resp.get("subtype") == "success":
-                                inner = resp.get("response", {}) or {}
-                                cli_sid = inner.get("session_id", "")
-                                if cli_sid and not session.cli_session_id:
-                                    session.cli_session_id = cli_sid
-                                elif not cli_sid and not session.cli_session_id:
+                                cli_sid = self._capture_cli_session_id(
+                                    session,
+                                    parsed,
+                                    "control_response.initialize",
+                                )
+                                if not cli_sid and not session.cli_session_id:
                                     # Initialize succeeded but no session_id — the
                                     # SDK response shape may have changed. Log so the
                                     # mtime fallback (next resort) is traceable rather

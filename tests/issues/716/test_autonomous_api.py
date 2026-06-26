@@ -1273,7 +1273,7 @@ class TestGetMilestoneSession:
         assert data["session"]["session_id"] == "actual-456"
         assert mock_sm.get_session.call_args_list == [
             (("track-123",), {}),
-            (("actual-456",), {"include_messages": True}),
+            (("actual-456",), {"include_messages": True, "message_milestone_id": "ms-1"}),
         ]
 
     def test_get_session_no_session_id(self, client):
