@@ -959,7 +959,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   );
 
   const toggleExpandMilestone = (milestoneId: string) => {
-    setExpandedMilestone((current) => (current === milestoneId ? null : milestoneId));
+    setExpandedMilestone((current) => {
+      const willCollapse = current === milestoneId;
+      // Remember a manual collapse of the active card so the auto-expand
+      // effect doesn't immediately re-open it.
+      if (willCollapse && milestoneId === currentActiveMilestoneId) {
+        userCollapsedActiveMilestone.current = true;
+      }
+      return willCollapse ? null : milestoneId;
+    });
   };
 
   // Expand a milestone and scroll its card into view. Used by the header
@@ -1033,6 +1041,36 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           activities[activities.length - 1].timestamp ?? '',
         ].join(':')
       : '';
+
+  // The milestone currently being executed (in_progress on the active round),
+  // mirroring the isCurrentActiveMilestone check inside renderMilestoneCard.
+  const currentActiveMilestoneId = useMemo(() => {
+    const found = milestones.find(
+      (m) => m.status === 'in_progress' && (m.dev_round || 1) === workflow.dev_round
+    );
+    return found?.milestone_id ?? null;
+  }, [milestones, workflow.dev_round]);
+
+  // Track whether the user has manually collapsed the current active card, so
+  // the auto-expand below doesn't fight a deliberate collapse. Reset whenever
+  // the active milestone changes.
+  const userCollapsedActiveMilestone = useRef(false);
+  useEffect(() => {
+    userCollapsedActiveMilestone.current = false;
+  }, [currentActiveMilestoneId]);
+
+  // Auto-expand the active milestone card so its live AI activity is visible
+  // alongside the auto-scroll-to-bottom behavior. Only fires when a *new*
+  // active milestone appears; respects a manual collapse within the same card.
+  useEffect(() => {
+    if (
+      currentActiveMilestoneId &&
+      !userCollapsedActiveMilestone.current &&
+      expandedMilestone !== currentActiveMilestoneId
+    ) {
+      setExpandedMilestone(currentActiveMilestoneId);
+    }
+  }, [currentActiveMilestoneId, expandedMilestone]);
 
   useEffect(() => {
     setShouldAutoScroll(true);
