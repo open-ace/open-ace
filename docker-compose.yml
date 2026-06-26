@@ -2,8 +2,13 @@
 # For production deployment with PostgreSQL database
 #
 # One-click deploy (Issue #1260):
-#   docker compose up -d                          # Pull from Docker Hub and start
+#   git clone https://github.com/open-ace/open-ace.git
+#   cd open-ace
+#   docker compose up -d --build
 #   # Access http://localhost:5000
+#
+# Pull pre-built image from Docker Hub:
+#   docker compose up -d
 #
 # With nginx reverse proxy:
 #   docker compose --profile production up -d
@@ -21,8 +26,12 @@ services:
   # Main Application
   # ===========================================================================
   open-ace:
-    # Pull pre-built image from Docker Hub (Issue #1260)
-    # For local development: build with docker build and set IMAGE_NAME
+    # One-click deploy: docker compose up -d --build
+    # Pull pre-built image: docker compose up -d (without --build)
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
     image: ${IMAGE_NAME:-openace/open-ace:latest}
     container_name: open-ace
     restart: unless-stopped
