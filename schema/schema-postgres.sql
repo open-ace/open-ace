@@ -2449,75 +2449,107 @@ ALTER TABLE ONLY workflow_milestones
 
 -- ── Central policy & approval MVP (policy.enabled) ──────────────────────
 -- Canonical definition: Alembic migration 20260626_005_add_policy_tables.py.
--- Inline SERIAL form is valid standalone; regenerate via
--- scripts/rebuild_schema_snapshots.py to obtain canonical pg_dump form.
 CREATE TABLE policy_rules (
-    id SERIAL PRIMARY KEY,
-    rule_key TEXT NOT NULL,
-    name TEXT NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1,
-    is_current BOOLEAN DEFAULT TRUE,
-    enabled BOOLEAN DEFAULT TRUE,
-    tenant_id INTEGER,
-    project_path TEXT,
-    machine_id TEXT,
-    user_id INTEGER,
-    team_id TEXT,
-    policy_type TEXT NOT NULL,
-    pattern_type TEXT DEFAULT 'glob',
-    pattern TEXT,
-    value_list TEXT,
-    tool_name TEXT,
-    action TEXT,
-    effect TEXT NOT NULL,
-    priority INTEGER DEFAULT 100,
-    is_default BOOLEAN DEFAULT FALSE,
-    approval_ttl_seconds INTEGER,
-    created_by INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    superseded_at TIMESTAMP,
-    description TEXT
+    id integer NOT NULL,
+    rule_key text NOT NULL,
+    name text NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    is_current boolean DEFAULT true,
+    enabled boolean DEFAULT true,
+    tenant_id integer,
+    project_path text,
+    machine_id text,
+    user_id integer,
+    team_id text,
+    policy_type text NOT NULL,
+    pattern_type text DEFAULT 'glob'::text,
+    pattern text,
+    value_list text,
+    tool_name text,
+    action text,
+    effect text NOT NULL,
+    priority integer DEFAULT 100,
+    is_default boolean DEFAULT false,
+    approval_ttl_seconds integer,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    superseded_at timestamp without time zone,
+    description text
 );
 
-CREATE UNIQUE INDEX idx_policy_rules_key_version ON policy_rules (rule_key, version);
+CREATE SEQUENCE policy_rules_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
 
-CREATE INDEX idx_policy_rules_key_current ON policy_rules (rule_key, is_current);
-
-CREATE INDEX idx_policy_rules_current_enabled ON policy_rules (is_current, enabled);
+ALTER SEQUENCE policy_rules_id_seq OWNED BY policy_rules.id;
 
 CREATE TABLE policy_decisions (
-    id SERIAL PRIMARY KEY,
-    decision_id TEXT NOT NULL UNIQUE,
-    request_id TEXT,
-    run_id TEXT,
-    session_id TEXT,
-    tenant_id INTEGER,
-    workspace_scope TEXT,
-    machine_id TEXT,
-    model TEXT,
-    provider TEXT,
-    tool_name TEXT,
-    action TEXT,
-    resource_target TEXT,
-    args_digest TEXT,
-    normalization_profile_id TEXT,
-    normalization_profile_version INTEGER,
-    fingerprint_hash TEXT,
-    policy_rule_id INTEGER,
-    policy_rule_version INTEGER,
-    decision TEXT NOT NULL,
-    reason TEXT,
-    reviewer_identity TEXT,
-    issued_at TIMESTAMP,
-    expires_at TIMESTAMP,
-    consumed_at TIMESTAMP,
-    remote_response_id TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id integer NOT NULL,
+    decision_id text NOT NULL,
+    request_id text,
+    run_id text,
+    session_id text,
+    tenant_id integer,
+    workspace_scope text,
+    machine_id text,
+    model text,
+    provider text,
+    tool_name text,
+    action text,
+    resource_target text,
+    args_digest text,
+    normalization_profile_id text,
+    normalization_profile_version integer,
+    fingerprint_hash text,
+    policy_rule_id integer,
+    policy_rule_version integer,
+    decision text NOT NULL,
+    reason text,
+    reviewer_identity text,
+    issued_at timestamp without time zone,
+    expires_at timestamp without time zone,
+    consumed_at timestamp without time zone,
+    remote_response_id text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
+CREATE SEQUENCE policy_decisions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
 
-CREATE INDEX idx_policy_decisions_session_id ON policy_decisions (session_id);
+ALTER SEQUENCE policy_decisions_id_seq OWNED BY policy_decisions.id;
 
-CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
+ALTER TABLE ONLY policy_rules ALTER COLUMN id SET DEFAULT nextval('policy_rules_id_seq'::regclass);
+
+ALTER TABLE ONLY policy_decisions ALTER COLUMN id SET DEFAULT nextval('policy_decisions_id_seq'::regclass);
+
+ALTER TABLE ONLY policy_rules
+    ADD CONSTRAINT policy_rules_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY policy_decisions
+    ADD CONSTRAINT policy_decisions_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY policy_rules
+    ADD CONSTRAINT policy_rules_rule_key_version_key UNIQUE (rule_key, version);
+
+ALTER TABLE ONLY policy_decisions
+    ADD CONSTRAINT policy_decisions_decision_id_key UNIQUE (decision_id);
+
+CREATE INDEX idx_policy_rules_key_current ON policy_rules USING btree (rule_key, is_current);
+
+CREATE INDEX idx_policy_rules_current_enabled ON policy_rules USING btree (is_current, enabled);
+
+CREATE INDEX idx_policy_decisions_request_id ON policy_decisions USING btree (request_id);
+
+CREATE INDEX idx_policy_decisions_session_id ON policy_decisions USING btree (session_id);
+
+CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions USING btree (fingerprint_hash);

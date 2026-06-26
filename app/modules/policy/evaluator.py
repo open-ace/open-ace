@@ -294,8 +294,6 @@ class PolicyEvaluator:
         resource_target: str | None,
     ) -> bool:
         ptype = rule.policy_type
-        if ptype in (PatternType.GLOB.value, PatternType.REGEX.value):
-            pass  # pattern_type, not policy_type
 
         if ptype in ("model", "provider"):
             value = ctx.model if ptype == "model" else ctx.provider

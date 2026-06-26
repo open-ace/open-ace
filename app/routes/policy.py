@@ -84,6 +84,14 @@ def _parse_rule_body(data: dict):
     if value_list is not None and not isinstance(value_list, list):
         return None, "value_list must be a list"
 
+    # Pattern-based types must carry a matcher (value_list and/or pattern) so a
+    # rule can never silently match everything (e.g. an effect=deny model rule
+    # with no filter would deny ALL models). tool_action may omit both — it then
+    # acts as a pure tool/action filter (review minor).
+    _PATTERN_BASED = ("model", "provider", "file_path", "command")
+    if policy_type in _PATTERN_BASED and not pattern and not value_list:
+        return None, f"{policy_type} rules require a pattern or value_list"
+
     fields = {
         "rule_key": rule_key,
         "name": name,

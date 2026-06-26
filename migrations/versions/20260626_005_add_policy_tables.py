@@ -71,7 +71,7 @@ def upgrade() -> None:
             """
             CREATE TABLE IF NOT EXISTS policy_decisions (
                 id SERIAL PRIMARY KEY,
-                decision_id TEXT NOT NULL UNIQUE,
+                decision_id TEXT NOT NULL,
                 request_id TEXT,
                 run_id TEXT,
                 session_id TEXT,
@@ -137,7 +137,7 @@ def upgrade() -> None:
             """
             CREATE TABLE IF NOT EXISTS policy_decisions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                decision_id TEXT NOT NULL UNIQUE,
+                decision_id TEXT NOT NULL,
                 request_id TEXT,
                 run_id TEXT,
                 session_id TEXT,
@@ -169,8 +169,12 @@ def upgrade() -> None:
         )
 
     op.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_rules_key_version "
+        "CREATE UNIQUE INDEX IF NOT EXISTS policy_rules_rule_key_version_key "
         "ON policy_rules (rule_key, version)"
+    )
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS policy_decisions_decision_id_key "
+        "ON policy_decisions (decision_id)"
     )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_policy_rules_key_current "

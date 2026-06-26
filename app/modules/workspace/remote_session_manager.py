@@ -641,7 +641,16 @@ class RemoteSessionManager:
         """
         machine_id = self._get_machine_id(session_id)
 
-        # Record the durable approval response first (no-op when disabled).
+        # Single consume point: enforce the policy decision's binding BEFORE
+        # recording the response, so the audited behavior reflects what is
+        # actually enforced (consume may fail-closed to deny on replay / expiry
+        # / error). No-op when policy is disabled or no decision row exists.
+        behavior = self._enforce_policy_consume(
+            session_id, request_id, behavior, decided_by, decided_by_name
+        )
+
+        # Record the durable approval response with the actually-enforced
+        # behavior (no-op when the recorder is disabled).
         self._timeline(
             "record_approval_response",
             session_id,
@@ -650,12 +659,6 @@ class RemoteSessionManager:
             decided_by=decided_by,
             decided_by_name=decided_by_name,
             message=message,
-        )
-
-        # Single consume point: enforce the policy decision's binding. No-op
-        # when policy is disabled or no decision row exists for this request.
-        behavior = self._enforce_policy_consume(
-            session_id, request_id, behavior, decided_by, decided_by_name
         )
 
         if not machine_id:
@@ -686,9 +689,19 @@ class RemoteSessionManager:
     ) -> str:
         """Atomically consume the policy decision for ``request_id``.
 
-        Returns the (possibly overridden) behavior to dispatch. On consume
-        failure the behavior is forced to ``deny`` (fail closed). Returns the
-        behavior unchanged when policy is disabled or no decision exists.
+        Returns the (possibly overridden) behavior to dispatch. Fail-closed to
+        ``deny`` on consume failure (already-consumed / expired) OR on any
+        exception (e.g. transient DB error) — matching the evaluator's
+        fail-closed posture (review S2). Returns ``behavior`` unchanged only
+        when policy is disabled or no decision row exists (a human approving a
+        pre-policy request is not blocked).
+
+        Note (review S3): server-side consume enforces single-use
+        (``consumed_at``) + expiry only. The stored ``fingerprint_hash`` is the
+        decision's binding-of-record (audit) but is NOT re-verified here —
+        ``respond_to_permission`` has no access to the live request args to
+        recompute it. Live fingerprint re-verification is the deferred Phase-2
+        CLI-side pre-side-effect recheck (honest-client boundary, plan §2.6).
         """
         if self._policy_evaluator.is_noop or not request_id:
             return behavior
@@ -706,20 +719,23 @@ class RemoteSessionManager:
                 decision.decision_id,
                 resolved_decision=behavior,
                 reviewer_identity=reviewer,
-                fingerprint_hash=decision.fingerprint_hash,
             )
             if not ok:
                 logger.warning(
-                    "Policy consume failed (expired/consumed/drifted) for "
-                    "request %s in session %s; failing closed to deny",
+                    "Policy consume failed (expired/consumed) for request %s in "
+                    "session %s; failing closed to deny",
                     request_id,
                     session_id[:8],
                 )
                 return "deny"
             return behavior
-        except Exception as e:  # pragma: no cover - defensive: never break dispatch
-            logger.warning("Policy consume check raised for request %s: %s", request_id, e)
-            return behavior
+        except Exception as e:  # pragma: no cover - defensive: fail-closed
+            logger.warning(
+                "Policy consume raised for request %s: %s; failing closed to deny",
+                request_id,
+                e,
+            )
+            return "deny"
 
     def update_model(self, session_id: str, model: str) -> bool:
         """Switch the model of an active remote session."""

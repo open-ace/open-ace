@@ -93,7 +93,7 @@ def get_ddl_statements() -> list[str]:
             description TEXT
         )
         """,
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_rules_key_version "
+        "CREATE UNIQUE INDEX IF NOT EXISTS policy_rules_rule_key_version_key "
         "ON policy_rules (rule_key, version)",
         "CREATE INDEX IF NOT EXISTS idx_policy_rules_key_current "
         "ON policy_rules (rule_key, is_current)",
@@ -102,7 +102,7 @@ def get_ddl_statements() -> list[str]:
         f"""
         CREATE TABLE IF NOT EXISTS policy_decisions (
             id {pk_type},
-            decision_id TEXT NOT NULL UNIQUE,
+            decision_id TEXT NOT NULL,
             request_id TEXT,
             run_id TEXT,
             session_id TEXT,
@@ -131,6 +131,8 @@ def get_ddl_statements() -> list[str]:
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
+        "CREATE UNIQUE INDEX IF NOT EXISTS policy_decisions_decision_id_key "
+        "ON policy_decisions (decision_id)",
         "CREATE INDEX IF NOT EXISTS idx_policy_decisions_request_id "
         "ON policy_decisions (request_id)",
         "CREATE INDEX IF NOT EXISTS idx_policy_decisions_session_id "
@@ -140,7 +142,7 @@ def get_ddl_statements() -> list[str]:
     ]
 
 
-__all__: list[str | Any] = [
+__all__: list[str] = [
     "is_policy_enabled",
     "get_ddl_statements",
     "get_evaluator",

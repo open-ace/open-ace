@@ -237,6 +237,143 @@ class TestConsumeChokepoint:
         cmd2 = mgr._agent_manager.send_command.call_args.args[1]
         assert cmd2["behavior"] == "deny"
 
+    def test_consume_exception_fails_closed_to_deny(self, policy_db):
+        # S2: a transient DB error during consume must fail closed (deny), not
+        # dispatch the (unrecorded) approval — matching the evaluator's posture.
+        from datetime import timedelta
+
+        from app.modules.policy.models import PolicyRule, _utcnow_naive
+
+        rules = [
+            PolicyRule(
+                rule_key="approve",
+                name="approve",
+                policy_type="tool_action",
+                effect="require_approval",
+                tool_name="Bash",
+                priority=10,
+                id=1,
+                version=1,
+            ),
+        ]
+        mgr, repo = _make_manager(policy_db, enabled=True, rules=rules)
+        repo.insert_decision(
+            request_id="rq-boom",
+            run_id="sess",
+            session_id="sess",
+            decision="require_human",
+            fingerprint_hash="h",
+            expires_at=_utcnow_naive() + timedelta(hours=1),
+        )
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("db down")
+
+        repo.get_decision_by_request = _boom
+        mgr.respond_to_permission(
+            "sess", "rq-boom", "allow", "Bash", decided_by=1, decided_by_name="alice"
+        )
+        cmd = mgr._agent_manager.send_command.call_args.args[1]
+        assert cmd["behavior"] == "deny"  # fail-closed, not the requested allow
+
+    def test_consume_does_not_reverify_fingerprint(self, policy_db):
+        # S3: server-side consume enforces single-use + expiry only; the stored
+        # fingerprint_hash is audit-only and is NOT re-passed (no live args to
+        # recompute it at the dispatch point).
+        from app.modules.policy.models import PolicyRule
+
+        rules = [
+            PolicyRule(
+                rule_key="approve",
+                name="approve",
+                policy_type="tool_action",
+                effect="require_approval",
+                tool_name="Bash",
+                priority=10,
+                id=1,
+                version=1,
+            ),
+        ]
+        mgr, repo = _make_manager(policy_db, enabled=True, rules=rules)
+        mgr.process_permission_request("sess", _command_request(cmd="echo hi", request_id="rq-fp"))
+
+        original = repo.consume_decision
+        captured: list[dict] = []
+
+        def _spy(decision_id, **kwargs):
+            captured.append(kwargs)
+            return original(decision_id, **kwargs)
+
+        repo.consume_decision = _spy
+        mgr.respond_to_permission(
+            "sess", "rq-fp", "allow", "Bash", decided_by=1, decided_by_name="alice"
+        )
+        assert captured, "consume_decision must be called"
+        assert "fingerprint_hash" not in captured[0]
+
+    def test_replay_audit_records_enforced_deny(self, policy_db):
+        # S4: when a replayed approval fail-closes to deny, the durable
+        # approval response must record the actually-enforced "deny".
+        from app.modules.policy.models import PolicyRule
+
+        rules = [
+            PolicyRule(
+                rule_key="approve",
+                name="approve",
+                policy_type="tool_action",
+                effect="require_approval",
+                tool_name="Bash",
+                priority=10,
+                id=1,
+                version=1,
+            ),
+        ]
+        mgr, repo = _make_manager(policy_db, enabled=True, rules=rules)
+        mgr.process_permission_request("sess", _command_request(cmd="echo hi", request_id="rq-aud"))
+        mgr.respond_to_permission(
+            "sess", "rq-aud", "allow", "Bash", decided_by=1, decided_by_name="alice"
+        )
+        # replay → fail-closed deny
+        mgr._run_recorder.record_approval_response.reset_mock()
+        mgr.respond_to_permission(
+            "sess", "rq-aud", "allow", "Bash", decided_by=1, decided_by_name="alice"
+        )
+        # the recorded behavior is the enforced "deny", not the requested "allow"
+        recorded_behavior = mgr._run_recorder.record_approval_response.call_args.args[2]
+        assert recorded_behavior == "deny"
+
+
+class TestAutoAllowPath:
+    def test_auto_allow_bypasses_human_prompt(self, policy_db):
+        # An allow rule auto-resolves without buffering to the frontend.
+        from app.modules.policy.models import PolicyRule
+
+        rules = [
+            PolicyRule(
+                rule_key="allow-read",
+                name="allow read",
+                policy_type="tool_action",
+                effect="allow",
+                tool_name="Read",
+                priority=10,
+                id=1,
+                version=1,
+            ),
+        ]
+        mgr, repo = _make_manager(policy_db, enabled=True, rules=rules)
+        cr = {
+            "request_id": "rq-allow",
+            "request": {
+                "subtype": "permission",
+                "tool_name": "Read",
+                "input": {"file_path": "/a/b"},
+            },
+        }
+        mgr.process_permission_request("sess", cr)
+        mgr._agent_manager.buffer_output.assert_not_called()
+        cmd = mgr._agent_manager.send_command.call_args.args[1]
+        assert cmd["behavior"] == "allow"
+
 
 class TestFlagOff:
     def test_disabled_policy_buffers_legacy_no_auto_deny(self, policy_db):
@@ -316,3 +453,55 @@ class TestModelGate:
         mgr._session_manager.get_session.return_value = session
         assert mgr.update_model("sess", "gpt-4o") is True
         mgr._agent_manager.send_command.assert_called_once()
+
+
+class TestRuleValidation:
+    """Unit tests for the admin rule-body validator (no Flask/DB)."""
+
+    def _parse(self, **body):
+        from app.routes.policy import _parse_rule_body
+
+        return _parse_rule_body(body)
+
+    def test_pattern_based_rule_requires_matcher(self):
+        # A model deny rule with no value_list/pattern would silently match all
+        # models → rejected at creation (review minor).
+        fields, err = self._parse(
+            rule_key="deny-all", name="deny all", policy_type="model", effect="deny"
+        )
+        assert err == "model rules require a pattern or value_list"
+        assert fields is None
+
+    def test_pattern_based_rule_with_value_list_accepted(self):
+        fields, err = self._parse(
+            rule_key="allow-models",
+            name="allow models",
+            policy_type="model",
+            effect="allow",
+            value_list=["gpt-4o"],
+        )
+        assert err is None
+        assert fields["value_list"] == ["gpt-4o"]
+
+    def test_tool_action_filter_needs_no_pattern(self):
+        # tool_action without pattern/value_list is a pure tool/action filter.
+        fields, err = self._parse(
+            rule_key="approve-bash",
+            name="approve bash",
+            policy_type="tool_action",
+            effect="require_approval",
+            tool_name="Bash",
+        )
+        assert err is None
+
+    def test_invalid_regex_rejected_at_creation(self):
+        fields, err = self._parse(
+            rule_key="bad",
+            name="bad",
+            policy_type="command",
+            effect="deny",
+            pattern="(unclosed",
+            pattern_type="regex",
+        )
+        assert err is not None and "regex" in err
+        assert fields is None
