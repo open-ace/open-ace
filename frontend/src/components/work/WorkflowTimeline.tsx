@@ -961,9 +961,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const toggleExpandMilestone = (milestoneId: string) => {
     setExpandedMilestone((current) => {
       const willCollapse = current === milestoneId;
-      // Remember a manual collapse of the active card so the auto-expand
-      // effect doesn't immediately re-open it.
-      if (willCollapse && milestoneId === currentActiveMilestoneId) {
+      // Treat any manual milestone interaction as an opt-out from the
+      // auto-expand of the active card: collapsing the active card, or
+      // deliberately opening a different one. Otherwise the auto-expand
+      // effect would immediately re-open the active card and prevent the
+      // user from reviewing any other milestone while the workflow runs.
+      if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+        userCollapsedActiveMilestone.current = true;
+      } else if (willCollapse) {
         userCollapsedActiveMilestone.current = true;
       }
       return willCollapse ? null : milestoneId;
@@ -974,7 +979,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // "view latest milestone" button so the expanded failure detail is visible,
   // not just expanded off-screen. Uses rAF so the expand re-render (which may
   // change the card's height) lands before we scroll, avoiding a stale offset.
-  const expandAndScrollToMilestone = useCallback((milestoneId: string) => {
+  const expandAndScrollToMilestone = (milestoneId: string) => {
+    // This is a deliberate user action (header "view latest milestone"
+    // button). If it targets a non-active card, opt out of the auto-expand
+    // so the effect doesn't immediately yank back to the active card.
+    // (currentActiveMilestoneId is declared further down; this closure only
+    // runs on click, so the late binding resolves correctly at call time.)
+    if (currentActiveMilestoneId && milestoneId !== currentActiveMilestoneId) {
+      userCollapsedActiveMilestone.current = true;
+    }
     setExpandedMilestone(milestoneId);
     window.requestAnimationFrame(() => {
       milestoneCardRefs.current.get(milestoneId)?.scrollIntoView({
@@ -982,7 +995,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         block: 'start',
       });
     });
-  }, []);
+  };
 
   const closeViewingContent = () => {
     setViewingContent(null);
