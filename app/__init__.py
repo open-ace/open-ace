@@ -203,6 +203,7 @@ def register_blueprints(app):
     from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.messages import messages_bp
     from app.routes.pages import pages_bp
+    from app.routes.project_categories import project_categories_bp
     from app.routes.projects import projects_bp
     from app.routes.quota import quota_bp
     from app.routes.remote import remote_bp
@@ -237,6 +238,7 @@ def register_blueprints(app):
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
     app.register_blueprint(mapping_rules_bp)
     app.register_blueprint(projects_bp, url_prefix="/api")
+    app.register_blueprint(project_categories_bp, url_prefix="/api")
     app.register_blueprint(insights_bp, url_prefix="/api")
     app.register_blueprint(remote_bp, url_prefix="/api/remote")
     app.register_blueprint(api_keys_bp, url_prefix="/api")
