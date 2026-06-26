@@ -628,6 +628,33 @@ CREATE TABLE projects (
     is_shared boolean DEFAULT false NOT NULL
 );
 
+CREATE TABLE project_categories (
+    id integer NOT NULL,
+    name text NOT NULL,
+    key_patterns text NOT NULL,
+    sort_order integer DEFAULT 0,
+    is_active boolean DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE project_categories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE project_categories_id_seq OWNED BY project_categories.id;
+
+ALTER TABLE ONLY project_categories ALTER COLUMN id SET DEFAULT nextval('project_categories_id_seq'::regclass);
+
+ALTER TABLE ONLY project_categories
+    ADD CONSTRAINT project_categories_pkey PRIMARY KEY (id);
+
+CREATE INDEX idx_project_categories_sort_order ON project_categories USING btree (sort_order);
+
 CREATE SEQUENCE projects_id_seq
     AS integer
     START WITH 1

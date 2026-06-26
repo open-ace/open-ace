@@ -436,6 +436,18 @@ CREATE TABLE projects (
  is_shared INTEGER DEFAULT 0 NOT NULL
 );
 
+CREATE TABLE project_categories (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ name TEXT NOT NULL,
+ key_patterns TEXT NOT NULL,
+ sort_order INTEGER DEFAULT 0,
+ is_active INTEGER DEFAULT 1,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_project_categories_sort_order ON project_categories (sort_order);
+
 CREATE TABLE prompt_templates (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  name text NOT NULL,
