@@ -26,7 +26,11 @@ from app.auth.decorators import (
     check_machine_admin_permission,
     validate_session_token,
 )
-from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+from app.repositories.autonomous_repo import (
+    ALLOWED_CONTENT_LANGUAGES,
+    DEFAULT_CONTENT_LANGUAGE,
+    AutonomousWorkflowRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -397,6 +401,11 @@ def _workflow_response(workflow: dict | None) -> dict | None:
     normalized["definition_snapshot"] = _parse_definition_snapshot(
         normalized.get("definition_snapshot")
     )
+    # content_language fallback for legacy workflows created before the column
+    # existed (NULL/empty → default). Persisted AI content is unaffected; this
+    # only provides a sensible default for downstream consumers.
+    if normalized.get("content_language") not in ALLOWED_CONTENT_LANGUAGES:
+        normalized["content_language"] = DEFAULT_CONTENT_LANGUAGE
     return normalized
 
 
@@ -489,6 +498,15 @@ def create_workflow():
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
         "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
+        # Persist the workflow's content language at creation time. This is the
+        # source of truth for AI-authored content (plan/review/tldr) and does
+        # not change per viewer. Validate against the supported set; fall back
+        # to the default for anything missing/unknown.
+        "content_language": (
+            data.get("content_language")
+            if data.get("content_language") in ALLOWED_CONTENT_LANGUAGES
+            else DEFAULT_CONTENT_LANGUAGE
+        ),
     }
 
     try:
@@ -1030,6 +1048,9 @@ def fork_milestone(workflow_id, milestone_id):
         "fork_milestone_id": milestone_id,
         "user_feedback": user_feedback,
         "original_branch_name": workflow.get("branch_name", ""),
+        # Inherit the parent's content language so forked AI content stays
+        # consistent with the original workflow.
+        "content_language": workflow.get("content_language", "en"),
         # Start at the next phase (preparation handles worktree + phase jump)
         "status": "pending",
         "current_phase": "preparation",

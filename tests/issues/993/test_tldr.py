@@ -33,6 +33,7 @@ def _make_workflow(**overrides):
         "workspace_type": "local",
         "remote_machine_id": "",
         "permission_mode": "auto-edit",
+        "content_language": "zh",
     }
     base.update(overrides)
     return base
@@ -62,6 +63,14 @@ def _make_gh():
     gh.get_pr_diff.return_value = "FAKE_DIFF"
     gh.add_pr_comment.return_value = {}
     gh.add_issue_comment.return_value = {}
+    # Fix commits persist the resulting SHA + per-commit diff stats; stub both
+    # so the pr_updated milestone write doesn't try to json-serialize a mock.
+    gh.get_current_commit.return_value = "abc1234"
+    gh.get_commit_diff_stats.return_value = {
+        "additions": 5,
+        "deletions": 1,
+        "files": 1,
+    }
     return gh
 
 

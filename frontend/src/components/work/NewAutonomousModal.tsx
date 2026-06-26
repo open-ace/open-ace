@@ -208,6 +208,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       max_plan_rounds: maxPlanRounds,
       max_pr_review_rounds: maxPRReviewRounds,
       auto_merge: autoMerge,
+      // Persist the creator's current UI language as the workflow's content
+      // language. AI-authored content is generated in this language.
+      content_language: language,
     };
 
     try {

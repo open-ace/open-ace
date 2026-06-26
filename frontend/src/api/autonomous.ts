@@ -75,6 +75,9 @@ export interface AutonomousWorkflow {
   total_output_tokens: number;
   total_requests: number;
   error_message: string;
+  // Source of truth for AI-authored content language (en/zh/ja/ko). Generated
+  // once at creation; rendered verbatim regardless of the viewer's UI language.
+  content_language: string;
   parent_workflow_id: string | null;
   fork_milestone_id: string | null;
   user_feedback: string;
@@ -155,6 +158,9 @@ export interface CreateWorkflowRequest {
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
   auto_merge?: boolean; // Auto merge PR for batch workflows
+  // Persist the workflow's content language at creation time (en/zh/ja/ko).
+  // Defaults to the viewer's current UI language when omitted.
+  content_language?: string;
 }
 
 export interface WorkflowListParams {
