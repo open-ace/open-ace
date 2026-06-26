@@ -15,6 +15,7 @@ import {
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import { copyToClipboard } from '@/utils';
 import {
   Button,
   Modal,
@@ -25,7 +26,7 @@ import {
   EmptyState,
   Badge,
 } from '@/components/common';
-import { useConfirm } from '@/components/common';
+import { useConfirm, useToast } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
 import { createMatcherConfig } from '@/utils';
@@ -242,6 +243,7 @@ export const UserManagement: React.FC = () => {
   };
 
   const confirm = useConfirm();
+  const toast = useToast();
   const handleDelete = async (userId: number) => {
     if (await confirm({ message: t('confirmDeleteUser', language), variant: 'danger' })) {
       try {
@@ -581,8 +583,11 @@ export const UserManagement: React.FC = () => {
             />
             <Button
               variant="outline-secondary"
-              onClick={() => {
-                navigator.clipboard.writeText(tempPassword);
+              onClick={async () => {
+                const success = await copyToClipboard(tempPassword);
+                if (!success) {
+                  toast.error(t('copyFailed', language) || 'Copy failed');
+                }
               }}
               title={t('copyToClipboard', language) ?? 'Copy to clipboard'}
             >
