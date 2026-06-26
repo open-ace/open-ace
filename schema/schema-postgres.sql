@@ -1073,8 +1073,8 @@ ALTER SEQUENCE teams_id_seq OWNED BY teams.id;
 CREATE TABLE tenant_quotas (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
-    daily_token_limit integer DEFAULT 1000000,
-    monthly_token_limit integer DEFAULT 30000000,
+    daily_token_limit bigint DEFAULT 1000000,
+    monthly_token_limit bigint DEFAULT 30000000,
     daily_request_limit integer DEFAULT 10000,
     monthly_request_limit integer DEFAULT 300000,
     max_users integer DEFAULT 100,
