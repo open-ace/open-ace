@@ -20,6 +20,11 @@ export const ForceChangePasswordModal: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState(false);
+
+  const handleSkip = () => {
+    setSkipped(true);
+  };
 
   // Password policy hint component
   const PasswordPolicyHint = () => {
@@ -81,21 +86,26 @@ export const ForceChangePasswordModal: React.FC = () => {
     }
   };
 
-  // Don't render if not required
-  if (!mustChangePassword) {
+  // Don't render if not required or user skipped (will be reminded next login)
+  if (!mustChangePassword || skipped) {
     return null;
   }
 
   return (
     <Modal
       isOpen={true}
-      onClose={() => {}}
+      onClose={handleSkip}
       title={t('changePasswordRequired', language) ?? 'Change Password Required'}
       size="md"
       footer={
-        <Button variant="primary" onClick={handleSubmit} loading={isChangingPassword}>
-          {t('changePassword', language) ?? 'Change Password'}
-        </Button>
+        <>
+          <Button variant="outline-secondary" onClick={handleSkip}>
+            {t('skip', language) ?? 'Skip'}
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} loading={isChangingPassword}>
+            {t('changePassword', language) ?? 'Change Password'}
+          </Button>
+        </>
       }
     >
       <div className="alert alert-warning mb-3">
