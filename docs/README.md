@@ -21,6 +21,8 @@ Documentation files are in the [en/](en/) directory.
 | [**FRONTEND-GUIDE**](en/FRONTEND-GUIDE.md) | React/TypeScript frontend development guide |
 | [**REMOTE-AGENT**](en/REMOTE-AGENT.md) | Remote agent client — installation, configuration, CLI tools |
 | [**REMOTE-WORKSPACE**](en/REMOTE-WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API |
+| [**SECURITY**](en/SECURITY.md) | Security model — encryption, RBAC, auth, remote-machine defense in depth |
+| [**DEMO-10-MINUTES**](en/DEMO-10-MINUTES.md) | End-to-end walkthrough to a remote AI coding session |
 | [**DEPLOYMENT**](en/DEPLOYMENT.md) | Docker deployment and multi-user workspace setup |
 | [**KUBERNETES**](en/KUBERNETES.md) | Kubernetes deployment guide with manifests reference |
 | [**NGINX**](en/NGINX.md) | Nginx reverse proxy configuration for HTTPS and WebSocket |
@@ -60,6 +62,8 @@ Documentation files are in the [en/](en/) directory.
 | [**FRONTEND-GUIDE**](cn/FRONTEND-GUIDE.md) | React/TypeScript 前端开发指南 |
 | [**REMOTE-AGENT**](cn/REMOTE-AGENT.md) | 远程代理客户端 — 安装、配置、CLI 工具 |
 | [**REMOTE-WORKSPACE**](cn/REMOTE-WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API |
+| [**SECURITY**](cn/SECURITY.md) | 安全模型 — 加密、RBAC、认证与远程机器纵深防御 |
+| [**DEMO-10-MINUTES**](cn/DEMO-10-MINUTES.md) | 端到端体验远程 AI Coding Agent 的演练 |
 | [**DEPLOYMENT**](cn/DEPLOYMENT.md) | Docker 部署和多用户工作空间配置 |
 | [**KUBERNETES**](cn/KUBERNETES.md) | Kubernetes 部署指南及 manifests 参考 |
 | [**NGINX**](cn/NGINX.md) | Nginx 反向代理配置（HTTPS 和 WebSocket） |
@@ -87,8 +91,8 @@ Documentation files are in the [en/](en/) directory.
 ```
 docs/
 ├── README.md          ← You are here / 你在这里
-├── en/                # English documentation (15 files)
-├── cn/                # 中文文档（15 个文件）
+├── en/                # English documentation (17 files)
+├── cn/                # 中文文档（17 个文件）
 ├── marketing/         # Launch and outreach materials / 发布传播材料
 └── images/            # Documentation images / 文档图片
 ```

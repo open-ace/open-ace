@@ -298,6 +298,8 @@ open-ace/
 | [开发指南](docs/cn/DEVELOPMENT.md) | 参与开发 |
 | [远程工作区](docs/cn/REMOTE-WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
 | [远程 Agent](docs/cn/REMOTE-AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
+| [安全模型](docs/cn/SECURITY.md) | 加密、RBAC、认证与远程机器安全的纵深防御 |
+| [10 分钟演示](docs/cn/DEMO-10-MINUTES.md) | 端到端体验远程 AI Coding Agent 的演练 |
 | [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
 | [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考 |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
@@ -601,6 +603,8 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | [Development](docs/en/DEVELOPMENT.md) | Contributing guide |
 | [Remote Workspace](docs/en/REMOTE-WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
 | [Remote Agent](docs/en/REMOTE-AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
+| [Security Model](docs/en/SECURITY.md) | Encryption, RBAC, auth, and remote-machine defense in depth |
+| [10-Minute Demo](docs/en/DEMO-10-MINUTES.md) | End-to-end walkthrough to a remote AI coding session |
 | [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
 | [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
