@@ -116,6 +116,7 @@ export interface WorkflowMilestone {
   fork_workflow_id: string;
   metadata: string;
   llm_session_id?: string;
+  actual_llm_session_id?: string;
   llm_total_tokens?: number;
   llm_request_count?: number;
   started_at: string | null;

@@ -12,10 +12,12 @@ Run:
   python tests/189/test_workspace_navigation.py
 """
 
+import json
 import os
 import signal
 import sys
 import unittest
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(
@@ -114,6 +116,64 @@ class TestProcessExecutorInterruptSession(unittest.TestCase):
         ex = self._make_executor(sessions={"s1": mock_session})
         result = ex.interrupt_session("s1")
         self.assertFalse(result["success"])
+
+
+class TestSessionProcessCliSessionTracking(unittest.TestCase):
+    """Capture the real Claude session id from stdout events."""
+
+    def _make_session(self):
+        from executor import SessionProcess
+
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.returncode = None
+
+        return SessionProcess(
+            session_id="tracking-session-12345678",
+            process=mock_proc,
+            project_path="/tmp",
+            cli_tool="claude-code",
+            output_callback=MagicMock(),
+        )
+
+    def test_read_stream_captures_session_id_from_initialized_event(self):
+        sp = self._make_session()
+        stream = BytesIO(
+            (
+                json.dumps(
+                    {
+                        "type": "system",
+                        "subtype": "initialized",
+                        "session_id": "claude-init-123",
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+
+        sp._read_stream(stream, "stdout")
+
+        self.assertEqual(sp._cli_session_id, "claude-init-123")
+
+    def test_read_stream_captures_session_id_from_result_event(self):
+        sp = self._make_session()
+        stream = BytesIO(
+            (
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "session_id": "claude-result-456",
+                        "duration_ms": 42,
+                    }
+                )
+                + "\n"
+            ).encode()
+        )
+
+        sp._read_stream(stream, "stdout")
+
+        self.assertEqual(sp._cli_session_id, "claude-result-456")
 
 
 class TestAgentAbortRequest(unittest.TestCase):

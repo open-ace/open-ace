@@ -123,6 +123,52 @@ def _resolve_milestone_session_id(milestone: dict[str, Any]) -> str:
     return milestone.get("review_session_id") or milestone.get("session_id") or ""
 
 
+def _extract_cli_session_id(session_row: Any) -> str:
+    """Return the mapped real CLI session id for a workflow-owned session row."""
+    if not session_row:
+        return ""
+
+    cli_session_id = getattr(session_row, "cli_session_id", "")
+    if not cli_session_id and isinstance(session_row, dict):
+        cli_session_id = session_row.get("cli_session_id", "")
+    if cli_session_id:
+        return str(cli_session_id).strip()
+
+    context = getattr(session_row, "context", None)
+    if context is None and isinstance(session_row, dict):
+        context = session_row.get("context", {})
+    if isinstance(context, dict):
+        return str(context.get("cli_session_id", "") or "").strip()
+    return ""
+
+
+def _resolve_actual_session_id(
+    session_id: str, session_manager: Any | None, cache: dict[str, str] | None = None
+) -> str:
+    """Resolve a workflow-owned tracking session id to the real CLI session id."""
+    if not session_id:
+        return ""
+    if cache is not None and session_id in cache:
+        return cache[session_id]
+    if session_manager is None:
+        if cache is not None:
+            cache[session_id] = session_id
+        return session_id
+
+    actual_session_id = session_id
+    try:
+        session_row = session_manager.get_session(session_id)
+        cli_session_id = _extract_cli_session_id(session_row)
+        if cli_session_id:
+            actual_session_id = cli_session_id
+    except Exception:
+        logger.warning("Failed to resolve actual milestone session id", exc_info=True)
+
+    if cache is not None:
+        cache[session_id] = actual_session_id
+    return actual_session_id
+
+
 def _enforce_quota_gate(user_id: int) -> Response | None:
     """Fail-closed quota pre-check for workflow creation paths.
 
@@ -151,15 +197,26 @@ def _enrich_milestones_with_usage(
     """Attach per-milestone LLM usage/session metadata for the timeline UI."""
     repo = _get_repo()
     usage_by_milestone = repo.get_milestone_usage_summary(workflow_id, milestones)
+    session_manager = None
+    session_cache: dict[str, str] = {}
+    try:
+        from app.modules.workspace.session_manager import SessionManager
+
+        session_manager = SessionManager()
+    except Exception:
+        logger.warning("Failed to initialize SessionManager for milestone enrichment")
     enriched: list[dict[str, Any]] = []
     for milestone in milestones:
         milestone_id = milestone.get("milestone_id", "")
         usage = usage_by_milestone.get(milestone_id, {})
+        llm_session_id = usage.get("llm_session_id") or _resolve_milestone_session_id(milestone)
         enriched.append(
             {
                 **milestone,
-                "llm_session_id": usage.get("llm_session_id")
-                or _resolve_milestone_session_id(milestone),
+                "llm_session_id": llm_session_id,
+                "actual_llm_session_id": _resolve_actual_session_id(
+                    llm_session_id, session_manager, session_cache
+                ),
                 "llm_total_tokens": usage.get("llm_total_tokens", 0),
                 "llm_request_count": usage.get("llm_request_count", 0),
             }
@@ -1200,10 +1257,19 @@ def get_milestone_session(workflow_id, milestone_id):
     from app.modules.workspace.session_manager import SessionManager
 
     sm = SessionManager()
+    actual_session_id = _resolve_actual_session_id(session_id, sm)
+
+    if actual_session_id and actual_session_id != session_id:
+        session_data = sm.get_session(
+            actual_session_id,
+            include_messages=True,
+            message_milestone_id=milestone_id,
+        )
+        if session_data:
+            return jsonify({"success": True, "session": session_data})
+
     session_data = sm.get_session(
-        session_id,
-        include_messages=True,
-        message_milestone_id=milestone_id,
+        session_id, include_messages=True, message_milestone_id=milestone_id
     )
 
     return jsonify({"success": True, "session": session_data})
