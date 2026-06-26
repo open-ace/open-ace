@@ -1,7 +1,7 @@
 """Fix tenant_quotas integer overflow for PostgreSQL
 
 Revision ID: 20260626_004_fix_tenant_quotas_overflow
-Revises: 20260626_003_add_workflow_status_index
+Revises: 001_add_project_categories
 Create Date: 2026-06-26
 
 Issue: #1259
@@ -19,7 +19,7 @@ from typing import Sequence
 from alembic import op
 
 revision: str = "20260626_004_fix_tenant_quotas_overflow"
-down_revision: str | None = "20260626_003_add_workflow_status_index"
+down_revision: str | None = "001_add_project_categories"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
