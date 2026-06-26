@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.modules.policy.evaluator import NullPolicyEvaluator
 from app.modules.workspace.remote_session_manager import RemoteSessionManager
 from app.modules.workspace.run_timeline.recorder import NullRunRecorder
 
@@ -40,6 +41,9 @@ def manager(spy_recorder):
     mgr._agent_manager = MagicMock()
     mgr._session_permission_modes = {}
     mgr._run_recorder = spy_recorder
+    # Policy evaluator stands in for __init__'s get_evaluator(); Null mirrors
+    # the default disabled state so the consume chokepoint is a no-op here.
+    mgr._policy_evaluator = NullPolicyEvaluator()
     return mgr
 
 

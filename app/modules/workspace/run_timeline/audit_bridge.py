@@ -23,6 +23,7 @@ EVENT_AUDIT_MAP: dict[str, tuple[str, str]] = {
     "session_created": ("agent_session_create", "info"),
     "permission_requested": ("agent_permission_request", "info"),
     "permission_answered": ("agent_permission_response", "info"),
+    "policy_decision": ("agent_policy_decision", "info"),
     "stop": ("agent_session_stop", "info"),
     "error": ("agent_session_error", "error"),
     "request_aborted": ("agent_request_abort", "warning"),

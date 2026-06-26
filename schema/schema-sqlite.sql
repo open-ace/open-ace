@@ -1250,3 +1250,78 @@ CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type,
 CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
+
+-- ── Central policy & approval MVP (policy.enabled) ──────────────────────
+-- Canonical definition: Alembic migration 20260626_005_add_policy_tables.py.
+-- Regenerate via scripts/rebuild_schema_snapshots.py when a PG env is available.
+
+CREATE TABLE policy_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    is_current INTEGER DEFAULT 1,
+    enabled INTEGER DEFAULT 1,
+    tenant_id INTEGER,
+    project_path TEXT,
+    machine_id TEXT,
+    user_id INTEGER,
+    team_id TEXT,
+    policy_type TEXT NOT NULL,
+    pattern_type TEXT DEFAULT 'glob',
+    pattern TEXT,
+    value_list TEXT,
+    tool_name TEXT,
+    action TEXT,
+    effect TEXT NOT NULL,
+    priority INTEGER DEFAULT 100,
+    is_default INTEGER DEFAULT 0,
+    approval_ttl_seconds INTEGER,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    superseded_at TIMESTAMP,
+    description TEXT
+);
+
+CREATE TABLE policy_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    decision_id TEXT NOT NULL UNIQUE,
+    request_id TEXT,
+    run_id TEXT,
+    session_id TEXT,
+    tenant_id INTEGER,
+    workspace_scope TEXT,
+    machine_id TEXT,
+    model TEXT,
+    provider TEXT,
+    tool_name TEXT,
+    action TEXT,
+    resource_target TEXT,
+    args_digest TEXT,
+    normalization_profile_id TEXT,
+    normalization_profile_version INTEGER,
+    fingerprint_hash TEXT,
+    policy_rule_id INTEGER,
+    policy_rule_version INTEGER,
+    decision TEXT NOT NULL,
+    reason TEXT,
+    reviewer_identity TEXT,
+    issued_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    consumed_at TIMESTAMP,
+    remote_response_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_policy_rules_key_version ON policy_rules (rule_key, version);
+
+CREATE INDEX idx_policy_rules_key_current ON policy_rules (rule_key, is_current);
+
+CREATE INDEX idx_policy_rules_current_enabled ON policy_rules (is_current, enabled);
+
+CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
+
+CREATE INDEX idx_policy_decisions_session_id ON policy_decisions (session_id);
+
+CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
