@@ -353,7 +353,7 @@ Please ensure:
         for i, conv in enumerate(conversations, 1):
             conversations_text += f"### {labels['session']} {i}\n"
             for msg in conv.get("messages", []):
-                role_label = labels['user'] if msg["role"] == "user" else labels['assistant']
+                role_label = labels["user"] if msg["role"] == "user" else labels["assistant"]
                 conversations_text += f"**{role_label}**：{msg['content']}\n\n"
             conversations_text += "---\n\n"
 
