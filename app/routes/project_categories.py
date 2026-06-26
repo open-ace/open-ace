@@ -66,8 +66,9 @@ def create_category():
     category_id = category_repo.create_category(name, key_patterns, sort_order)
     if category_id:
         category = category_repo.get_category(category_id)
-        logger.info(f"Created project category '{name}' (id={category_id})")
-        return jsonify({"success": True, "category": category.to_dict()}), 201
+        if category:
+            logger.info(f"Created project category '{name}' (id={category_id})")
+            return jsonify({"success": True, "category": category.to_dict()}), 201
 
     return jsonify({"error": "Failed to create category"}), 500
 
@@ -98,8 +99,9 @@ def update_category(category_id):
 
     if success:
         category = category_repo.get_category(category_id)
-        logger.info(f"Updated project category {category_id} (name={category.name})")
-        return jsonify({"success": True, "category": category.to_dict()})
+        if category:
+            logger.info(f"Updated project category {category_id} (name={category.name})")
+            return jsonify({"success": True, "category": category.to_dict()})
 
     return jsonify({"error": "Failed to update category"}), 500
 

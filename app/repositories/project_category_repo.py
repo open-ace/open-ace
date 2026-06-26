@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from app.models.project_category import ProjectCategory
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,7 @@ class ProjectCategoryRepository:
         """List all project categories."""
         conditions = []
         if active_only:
-            if self.db.is_postgresql:
-                conditions.append("is_active IS TRUE")
-            else:
-                conditions.append("is_active = 1")
+            conditions.append(adapt_boolean_condition("is_active", True))
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = f"SELECT * FROM project_categories {where_clause} ORDER BY sort_order, name"
@@ -72,7 +69,7 @@ class ProjectCategoryRepository:
                     """,
                     (name, patterns_json, sort_order, now, now),
                 )
-                return cursor.lastrowid
+                return int(cursor.lastrowid or 0)
         except Exception as e:
             logger.error(f"Error creating category: {e}")
             return None
@@ -101,10 +98,7 @@ class ProjectCategoryRepository:
                 params.append(sort_order)
             if is_active is not None:
                 updates.append("is_active = ?")
-                if self.db.is_postgresql:
-                    params.append(is_active)
-                else:
-                    params.append(1 if is_active else 0)
+                params.append(adapt_boolean_value(is_active))
 
             if not updates:
                 return True
@@ -124,13 +118,8 @@ class ProjectCategoryRepository:
         """Delete a category (soft delete)."""
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
-            if self.db.is_postgresql:
-                query = (
-                    "UPDATE project_categories SET is_active = FALSE, updated_at = ? WHERE id = ?"
-                )
-            else:
-                query = "UPDATE project_categories SET is_active = 0, updated_at = ? WHERE id = ?"
-            self.db.execute(query, (now, category_id))
+            query = "UPDATE project_categories SET is_active = ?, updated_at = ? WHERE id = ?"
+            self.db.execute(query, (adapt_boolean_value(False), now, category_id))
             return True
         except Exception as e:
             logger.error(f"Error deleting category: {e}")
