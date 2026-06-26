@@ -45,7 +45,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Revert tenant_quotas token limit columns to integer for PostgreSQL."""
+    """Revert tenant_quotas token limit columns to integer for PostgreSQL.
+
+    WARNING: This downgrade will fail if any existing quota values exceed
+    PostgreSQL integer max value (2,147,483,647). Before downgrading, ensure
+    all tenant quota values are within the integer range, or update the
+    Enterprise plan's monthly_token_limit to a lower value.
+    """
     conn = op.get_bind()
     if conn.dialect.name != "postgresql":
         return
