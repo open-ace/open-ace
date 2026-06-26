@@ -58,17 +58,22 @@ jobs:
           # 1) Start from the base branch's full versions/ directory. Read every
           #    blob out of git ($BASE_REF) into the temp tree — never touch the
           #    checkout itself, so later steps keep seeing the PR's files.
-          for f in $(git ls-tree -r --name-only "$BASE_REF" -- migrations/versions); do
-            mkdir -p "$MERGED_DIR/$(dirname "$f")"
-            git show "$BASE_REF:$f" > "$MERGED_DIR/$f"
-          done
+          git ls-tree -r --name-only "$BASE_REF" -- migrations/versions \
+            | while IFS= read -r f; do
+                mkdir -p "$MERGED_DIR/$(dirname "$f")"
+                git show "$BASE_REF:$f" > "$MERGED_DIR/$f"
+              done
 
           # 2) Apply the PR's migration changes (added/modified/deleted since the
           #    merge-base) on top, producing the post-merge versions/ tree.
+          #    --no-renames decomposes a rename into delete(old)+add(new) so
+          #    --diff-filter=AMD applies both halves; with rename detection on
+          #    (the default), a rename would surface as status R and be dropped,
+          #    silently leaving the stale old path in the merged tree.
           MERGE_BASE="$(git merge-base "$BASE_REF" HEAD)"
           echo "merge-base: $MERGE_BASE"
-          git diff --name-only --diff-filter=AMD "$MERGE_BASE" HEAD -- migrations/versions \
-            | while read -r f; do
+          git diff --no-renames --name-only --diff-filter=AMD "$MERGE_BASE" HEAD -- migrations/versions \
+            | while IFS= read -r f; do
                 if git cat-file -e "HEAD:$f" 2>/dev/null; then
                   mkdir -p "$MERGED_DIR/$(dirname "$f")"
                   git show "HEAD:$f" > "$MERGED_DIR/$f"

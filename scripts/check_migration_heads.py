@@ -44,14 +44,16 @@ def main() -> int:
     if len(heads) != 1:
         print(
             f"FAIL: expected exactly 1 migration head, found {len(heads)}:"
-            f" a forked migration chain."
+            f" a forked migration chain.",
+            file=sys.stderr,
         )
         for head in heads:
-            print(f"  - {head}")
+            print(f"  - {head}", file=sys.stderr)
         print(
             "Two migrations share a down_revision. Rebase one onto the other so "
             "the chain stays linear (its down_revision must point at the other's "
-            "revision, not at their common parent)."
+            "revision, not at their common parent).",
+            file=sys.stderr,
         )
         return 1
 
