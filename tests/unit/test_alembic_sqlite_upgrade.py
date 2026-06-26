@@ -84,9 +84,9 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     conn.close()
 
     assert version is not None
-    # project_categories migration chains after status_index (single head)
-    # Chain: 001_run_timeline -> 002_content_language -> 003_status_index -> 001_add_project_categories
-    assert version[0] == "001_add_project_categories"
+    # Migration chain: 001_run_timeline -> 002_content_language -> 003_status_index
+    # -> 001_add_project_categories -> 004_fix_tenant_quotas_overflow
+    assert version[0] == "20260626_004_fix_tenant_quotas_overflow"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
