@@ -19,6 +19,18 @@ _AGENT_INTRO_PATTERNS = [
     # vocabulary, not intro narration.
     re.compile(r"^探索完成[^\n]*"),
     re.compile(r"^分析完成[^\n]*"),
+    # English narration openers (non-zh workflows). Only leading lines are
+    # scanned (see clean_agent_text guard), so these strip agent process
+    # chatter without touching the structured body.
+    re.compile(r"^let me [^\n]{0,40}[.!]", re.IGNORECASE),
+    re.compile(r"^i'll [^\n]{0,40}[.!]", re.IGNORECASE),
+    re.compile(r"^i will [^\n]{0,40}[.!]", re.IGNORECASE),
+    re.compile(r"^sure[,.]? [^\n]{0,40}[.!]", re.IGNORECASE),
+    re.compile(r"^okay[,.]? [^\n]{0,40}[.!]", re.IGNORECASE),
+    # Japanese / Korean narration openers.
+    re.compile(r"^では[、，]?[^\n]{0,30}[。！]"),
+    re.compile(r"^まず[^\n]{0,30}[。！]"),
+    re.compile(r"^그럼[^\n]{0,30}[다요.!?]"),
 ]
 
 _AGENT_CLOSING_PATTERNS = [
@@ -27,6 +39,11 @@ _AGENT_CLOSING_PATTERNS = [
     re.compile(r"按照[^\n]*流程"),
     re.compile(r"按照[^\n]*工作流"),
     re.compile(r"建议[：:]\s*$"),
+    # English closing prompts.
+    re.compile(r"^let me know if", re.IGNORECASE),
+    re.compile(r"^would you like me to", re.IGNORECASE),
+    re.compile(r"^should i (proceed|continue|start)", re.IGNORECASE),
+    re.compile(r"^next[, ]+steps?", re.IGNORECASE),
 ]
 
 _PROCESS_MARKERS = (

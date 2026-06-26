@@ -245,7 +245,8 @@ CREATE TABLE autonomous_workflows (
  agent_session_id text DEFAULT '' NOT NULL,
  main_session_id text DEFAULT '' NOT NULL,
  review_session_id text DEFAULT '' NOT NULL,
- test_session_id text DEFAULT '' NOT NULL
+ test_session_id text DEFAULT '' NOT NULL,
+ content_language text DEFAULT 'en' NOT NULL
 );
 
 CREATE TABLE compliance_reports (

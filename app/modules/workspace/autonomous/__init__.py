@@ -86,7 +86,8 @@ def get_ddl_statements():
             fork_milestone_id TEXT,
             user_feedback TEXT DEFAULT '',
             original_branch_name TEXT DEFAULT '',
-            transient_retry_count INTEGER DEFAULT 0
+            transient_retry_count INTEGER DEFAULT 0,
+            content_language TEXT DEFAULT 'en'
         )
         """,
     ]
@@ -98,6 +99,13 @@ def get_ddl_statements():
     # ignored on databases that already have the column.
     statements.append(
         "ALTER TABLE autonomous_workflows ADD COLUMN transient_retry_count INTEGER DEFAULT 0"
+    )
+    # content_language: persisted workflow content language (source of truth
+    # for AI-authored content). The authoritative path for existing Postgres
+    # databases is the Alembic migration; this ALTER mirrors the column for the
+    # SQLite dev path. See schema_init transaction-cascade caveat.
+    statements.append(
+        "ALTER TABLE autonomous_workflows ADD COLUMN content_language TEXT DEFAULT 'en'"
     )
     statements.extend(
         [

@@ -74,21 +74,25 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     if has_session_messages:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(session_messages)")}
     user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    aw_columns = {row[1] for row in conn.execute("PRAGMA table_info(autonomous_workflows)")}
     conn.close()
 
     assert version is not None
-    # head advances with each new migration; currently the status-index migration
-    assert version[0] == "20260626_002_add_workflow_status_index"
+    # head advances with each new migration; currently the status-index migration.
+    # Chain after merge of main (#1287 content_language): 001 -> 002_content_language -> 003_status_index
+    assert version[0] == "20260626_003_add_workflow_status_index"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
     assert has_compliance_reports is True
     assert has_run_timeline is True
     assert "auto_mapping_enabled" in user_columns
+    # content_language column added by 20260626_002 (#1287)
+    assert "content_language" in aw_columns
 
 
 def test_workflow_status_index_created_after_upgrade(tmp_path, monkeypatch):
-    """The 20260626_002 migration must add idx_workflows_status_created on SQLite."""
+    """The 20260626_003 migration must add idx_workflows_status_created on SQLite."""
     db_path = tmp_path / "fresh.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     shared_db._db_url_cache = None
@@ -109,7 +113,7 @@ def test_workflow_status_index_created_after_upgrade(tmp_path, monkeypatch):
 
 
 def test_workflow_status_index_downgrade_is_symmetric(tmp_path, monkeypatch):
-    """Downgrading past 20260626_002 must drop the index; re-upgrade recreates it."""
+    """Downgrading past 20260626_003 must drop the index; re-upgrade recreates it."""
     db_path = tmp_path / "fresh.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     shared_db._db_url_cache = None
@@ -118,7 +122,7 @@ def test_workflow_status_index_downgrade_is_symmetric(tmp_path, monkeypatch):
     alembic_cfg = Config(str(project_root / "alembic.ini"))
 
     command.upgrade(alembic_cfg, "head")
-    command.downgrade(alembic_cfg, "20260626_001_add_run_timeline_tables")
+    command.downgrade(alembic_cfg, "20260626_002_workflow_content_language")
 
     conn = sqlite3.connect(db_path)
     has_index = (
@@ -131,7 +135,7 @@ def test_workflow_status_index_downgrade_is_symmetric(tmp_path, monkeypatch):
     conn.close()
 
     assert has_index is False
-    assert version[0] == "20260626_001_add_run_timeline_tables"
+    assert version[0] == "20260626_002_workflow_content_language"
 
     # Re-upgrade recreates the index (idempotent round-trip)
     command.upgrade(alembic_cfg, "head")

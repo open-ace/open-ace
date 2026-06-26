@@ -356,7 +356,8 @@ CREATE TABLE autonomous_workflows (
     agent_session_id text DEFAULT ''::text NOT NULL,
     main_session_id text DEFAULT ''::text NOT NULL,
     review_session_id text DEFAULT ''::text NOT NULL,
-    test_session_id text DEFAULT ''::text NOT NULL
+    test_session_id text DEFAULT ''::text NOT NULL,
+    content_language text DEFAULT 'en'::text NOT NULL
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

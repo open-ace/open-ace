@@ -1,7 +1,7 @@
 """add autonomous_workflows status index
 
-Revision ID: 20260626_002_add_workflow_status_index
-Revises: 20260626_001_add_run_timeline_tables
+Revision ID: 20260626_003_add_workflow_status_index
+Revises: 20260626_002_workflow_content_language
 Create Date: 2026-06-26
 
 Adds a composite index on ``autonomous_workflows(status, created_at)`` to serve
@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
-revision: str = "20260626_002_add_workflow_status_index"
-down_revision: str | None = "20260626_001_add_run_timeline_tables"
+revision: str = "20260626_003_add_workflow_status_index"
+down_revision: str | None = "20260626_002_workflow_content_language"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
