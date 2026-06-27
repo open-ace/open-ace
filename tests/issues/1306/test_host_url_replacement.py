@@ -77,7 +77,7 @@ def test_get_user_webui_url_with_host_url():
     # Verify tokens are generated
     assert token1.startswith("1:0:")
     assert token2.startswith("1:0:")
-    print(f"✓ Tokens generated correctly")
+    print("✓ Tokens generated correctly")
 
 
 def test_get_user_webui_url_preserves_port_in_multi_user():
