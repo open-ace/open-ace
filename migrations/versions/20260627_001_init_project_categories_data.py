@@ -14,10 +14,13 @@ Default categories:
 - Testing: projects with test/tests/spec keywords
 """
 
-import sqlalchemy as sa
+import logging
 from typing import Sequence, Union
 
+import sqlalchemy as sa
 from alembic import op
+
+logger = logging.getLogger(__name__)
 
 revision: str = "20260627_001_init_project_categories"
 down_revision: Union[str, None] = "20260626_004_fix_tenant_quotas_overflow"
@@ -35,6 +38,7 @@ def upgrade() -> None:
     count = row[0] if row else 0
 
     if count > 0:
+        logger.info(f"project_categories already has {count} records, skipping initialization")
         return
 
     # Insert default categories
@@ -61,6 +65,8 @@ def upgrade() -> None:
             """
         )
 
+    logger.info("Initialized project_categories with default categories: Frontend, Backend, Testing")
+
 
 def downgrade() -> None:
     """Remove default project categories."""
@@ -72,3 +78,5 @@ def downgrade() -> None:
         AND key_patterns IN ('["frontend", "web", "ui"]', '["backend", "api", "server"]', '["test", "tests", "spec"]')
         """
     )
+
+    logger.info("Removed default project categories: Frontend, Backend, Testing")
