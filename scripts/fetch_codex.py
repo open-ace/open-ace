@@ -110,7 +110,7 @@ def find_codex_session_dir() -> Optional[Path]:
 
 
 def parse_timestamp(ts_str: str) -> str:
-    """Extract date (YYYY-MM-DD) from ISO timestamp string."""
+    """Extract date (YYYY-MM-DD) from ISO timestamp string, converting UTC to local time."""
     if not ts_str:
         return "unknown"
     try:
@@ -122,6 +122,8 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+            # UTC time - convert to local time for date extraction
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")

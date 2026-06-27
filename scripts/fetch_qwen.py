@@ -162,11 +162,17 @@ def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
 
 
 def parse_timestamp(ts_str: str) -> str:
-    """Extract date from ISO timestamp."""
+    """Extract date from ISO timestamp, converting UTC to local time.
+
+    This ensures consistency with get_today() which uses local time.
+    Fixes issue #1322: UTC/local time mismatch causing early morning
+    usage data to be stored under the previous day's date.
+    """
     if not ts_str:
         return "unknown"
     try:
         if ts_str.endswith("Z"):
+            # UTC time - convert to local time for date extraction
             if "." in ts_str:
                 base, rest = ts_str.rsplit(".", 1)
                 ms = rest.rstrip("Z")
@@ -174,8 +180,14 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+            # Convert UTC to local time
+            from datetime import timezone
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                from datetime import timezone
+                dt = dt.replace(tzinfo=timezone.utc).astimezone()
         return dt.strftime("%Y-%m-%d")
     except Exception:
         return "unknown"
