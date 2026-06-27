@@ -253,6 +253,49 @@ class WebUIManager:
         # Fallback: if URL lacks scheme, return original
         return url
 
+    def _replace_host_from_request(self, config_url: str, request_host_url: str) -> str:
+        """Replace hostname in config_url with hostname from request.
+
+        This ensures iframe URL uses the actual IP/hostname that user accessed,
+        not the container-detected IP which may be inaccessible from external browsers.
+
+        Used in Docker deployments where container cannot detect host's real IP.
+
+        Examples:
+            config_url="http://172.17.0.1", request_host_url="http://192.168.1.169:5000"
+            -> "http://192.168.1.169"
+
+            config_url="http://host.docker.internal", request_host_url="http://example.com"
+            -> "http://example.com"
+
+            config_url="http://[::1]", request_host_url="http://[2001:db8::1]:5000"
+            -> "http://[2001:db8::1]" (IPv6 preserved with brackets)
+
+        Args:
+            config_url: URL from config.json (may have wrong IP in Docker).
+            request_host_url: Host URL from Flask request (user's actual access URL).
+
+        Returns:
+            URL with hostname replaced from request, without port.
+        """
+        from urllib.parse import urlparse
+
+        config_parsed = urlparse(config_url)
+        request_parsed = urlparse(request_host_url)
+
+        # Use request's scheme and hostname, preserving config's scheme if request lacks it
+        scheme = request_parsed.scheme or config_parsed.scheme or "http"
+        hostname = request_parsed.hostname or config_parsed.hostname
+
+        if hostname:
+            # Check if hostname is IPv6 (contains colons and no dots)
+            # IPv6 addresses need to be wrapped in brackets in URLs
+            if ":" in hostname and "." not in hostname:
+                return f"{scheme}://[{hostname}]"
+            return f"{scheme}://{hostname}"
+        # Fallback: return original config_url if parsing fails
+        return self._remove_port_from_url(config_url)
+
     def start_cleanup_thread(self):
         """Start the background cleanup greenlet."""
         if self._cleanup_greenlet is not None:
@@ -432,7 +475,9 @@ class WebUIManager:
         except (ValueError, TypeError) as e:
             return False, None, f"Token parse error: {e}"
 
-    def get_user_webui_url(self, user_id: int, system_account: str) -> tuple[str, str]:
+    def get_user_webui_url(
+        self, user_id: int, system_account: str, host_url: Optional[str] = None
+    ) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
 
@@ -442,16 +487,24 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.169:5000").
+                      Used to replace container-detected IP with user's actual access IP.
+                      Required for Docker deployments where container cannot detect host's real IP.
 
         Returns:
             Tuple of (url, token).
         """
+        # Determine base URL: use request host if provided, otherwise use config
+        if host_url:
+            base_url = self._replace_host_from_request(self.config.url, host_url)
+        else:
+            base_url = self._remove_port_from_url(self.config.url)
+
         if not self.config.multi_user_mode:
             # Single-user mode: return configured URL with a generated token
             # The token is needed for iframe auth when making cross-origin API calls
-            # Remove port from URL to ensure correct iframe address
             token = self.generate_token(user_id, 0)
-            return self._remove_port_from_url(self.config.url), token
+            return base_url, token
 
         with self._lock:
             # Check if user already has an instance
@@ -459,6 +512,10 @@ class WebUIManager:
                 instance = self._instances[user_id]
                 if instance.is_alive():
                     instance.update_activity()
+                    # Use dynamic base_url if provided, otherwise use stored instance.url
+                    if host_url:
+                        url = f"{base_url}:{instance.port}"
+                        return url, instance.token
                     return instance.url, instance.token
                 else:
                     # Process declared dead after consecutive health check failures
@@ -475,16 +532,20 @@ class WebUIManager:
                 raise ValueError(f"Maximum instances ({self.config.max_instances}) reached")
 
             # Start new instance
-            instance = self._start_instance_internal(user_id, system_account)
+            instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
 
-    def _start_instance_internal(self, user_id: int, system_account: str) -> WebUIInstance:
+    def _start_instance_internal(
+        self, user_id: int, system_account: str, base_url: Optional[str] = None
+    ) -> WebUIInstance:
         """
         Start a webui instance for a user (internal, must be called with lock).
 
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            base_url: Optional base URL (already processed with host_url if provided).
+                      If None, uses config.url without port.
 
         Returns:
             WebUIInstance object.
@@ -498,8 +559,9 @@ class WebUIManager:
         # Generate token
         token = self.generate_token(user_id, port)
 
-        # Build URL (remove any existing port from config.url)
-        base_url = self._remove_port_from_url(self.config.url)
+        # Build URL using provided base_url or fallback to config.url
+        if base_url is None:
+            base_url = self._remove_port_from_url(self.config.url)
         url = f"{base_url}:{port}"
 
         # Start process
