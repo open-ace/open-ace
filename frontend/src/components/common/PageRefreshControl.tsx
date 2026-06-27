@@ -269,12 +269,10 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
         {hasDropdownContent ? (
           <button
             ref={dropdownButtonRef}
-            className={cn(
-              'btn btn-link btn-sm p-0',
-              isDropdownOpen && 'active'
-            )}
+            className={cn('btn btn-link btn-sm p-0', isDropdownOpen && 'active')}
             type="button"
             onClick={handleDropdownToggle}
+            aria-haspopup="true"
             aria-expanded={isDropdownOpen}
             title={buildTooltip()}
             data-testid="dropdown-toggle"
@@ -322,6 +320,8 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
                 ref={dropdownPanelRef}
                 className="page-refresh-dropdown-panel"
                 style={getDropdownPosition()}
+                role="menu"
+                aria-label={t('settings', language)}
                 data-testid="dropdown-panel"
               >
                 {showAutoRefreshToggle && (
@@ -334,10 +334,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
                         checked={autoRefresh}
                         onChange={(e) => setAutoRefresh(e.target.checked)}
                       />
-                      <label
-                        className="form-check-label"
-                        htmlFor={`${position}-auto-refresh`}
-                      >
+                      <label className="form-check-label" htmlFor={`${position}-auto-refresh`}>
                         {t('autoRefresh', language)}
                       </label>
                     </div>
@@ -358,6 +355,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
                           'page-refresh-dropdown-option',
                           interval === option.value && 'active'
                         )}
+                        role="menuitem"
                         onClick={() => handleIntervalSelect(option.value)}
                       >
                         {t(option.label, language)}
