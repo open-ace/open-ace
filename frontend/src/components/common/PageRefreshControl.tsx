@@ -7,10 +7,11 @@
  * - Manual refresh button with debounce
  * - Refresh status indicators (last/next refresh time)
  * - Error indicator
- * - Compact mode for mobile
+ * - Compact mode for mobile with Portal-based dropdown (z-index fixed)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/utils';
 import { useLanguage } from '@/hooks';
 import { t, type Language } from '@/i18n';
@@ -114,6 +115,9 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   const language = useLanguage();
   const [isButtonDisabled, setIsButtonDisabled] = useState(false);
   const [countdown, setCountdown] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownButtonRef = useRef<HTMLButtonElement>(null);
+  const dropdownPanelRef = useRef<HTMLDivElement>(null);
 
   const {
     isRefreshing,
@@ -158,6 +162,20 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
     return () => window.clearInterval(intervalId);
   }, [showNextRefreshTime, autoRefresh, nextRefreshTime]);
 
+  // Close dropdown on Escape key
+  useEffect(() => {
+    if (!isDropdownOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isDropdownOpen]);
+
   // Build tooltip content
   const buildTooltip = () => {
     const parts: string[] = [];
@@ -173,6 +191,31 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
     return parts.join('\n');
   };
 
+  // Calculate dropdown panel position
+  const getDropdownPosition = useCallback(() => {
+    if (!dropdownButtonRef.current) return { top: 0, left: 0 };
+
+    const buttonRect = dropdownButtonRef.current.getBoundingClientRect();
+    const panelWidth = 200; // Estimated panel width
+    const panelHeight = 300; // Estimated max panel height
+
+    // Default: show below the button, aligned to the right
+    let top = buttonRect.bottom + 8;
+    let left = buttonRect.right - panelWidth;
+
+    // Adjust if panel would go beyond viewport bottom
+    if (top + panelHeight > window.innerHeight) {
+      top = buttonRect.top - panelHeight - 8;
+    }
+
+    // Adjust if panel would go beyond viewport left
+    if (left < 0) {
+      left = buttonRect.left;
+    }
+
+    return { top, left };
+  }, []);
+
   // Position styles
   const positionStyles = {
     'top-right': 'position-absolute top-0 end-0',
@@ -183,8 +226,27 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   // Error indicator
   const hasError = showErrorIndicator && error && errorCount > 0;
 
+  // Check if dropdown has any content (auto refresh toggle or interval selector)
+  const hasDropdownContent = showAutoRefreshToggle || (showIntervalSelector && autoRefresh);
+
+  // Handle dropdown toggle
+  const handleDropdownToggle = () => {
+    setIsDropdownOpen((prev) => !prev);
+  };
+
+  // Handle backdrop click
+  const handleBackdropClick = () => {
+    setIsDropdownOpen(false);
+  };
+
+  // Handle interval selection
+  const handleIntervalSelect = (value: number) => {
+    setInterval(value);
+    setIsDropdownOpen(false);
+  };
+
   if (compact) {
-    // Compact mode: just icon buttons with dropdown
+    // Compact mode: icon buttons with Portal-based dropdown
     return (
       <div
         className={cn(
@@ -203,61 +265,30 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           />
         )}
 
-        {/* Dropdown for settings */}
-        <div className="dropdown">
+        {/* Dropdown toggle button - only render if there's content */}
+        {hasDropdownContent ? (
           <button
-            className="btn btn-link btn-sm p-0"
+            ref={dropdownButtonRef}
+            className={cn(
+              'btn btn-link btn-sm p-0',
+              isDropdownOpen && 'active'
+            )}
             type="button"
-            data-bs-toggle="dropdown"
-            aria-expanded="false"
+            onClick={handleDropdownToggle}
+            aria-expanded={isDropdownOpen}
             title={buildTooltip()}
             data-testid="dropdown-toggle"
           >
             <i className={cn('bi', autoRefresh ? 'bi-clock' : 'bi-clock-history')} />
           </button>
-          <ul className="dropdown-menu dropdown-menu-end">
-            {showAutoRefreshToggle && (
-              <li>
-                <div className="dropdown-item-text">
-                  <div className="form-check form-switch">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id={`${position}-auto-refresh`}
-                      checked={autoRefresh}
-                      onChange={(e) => setAutoRefresh(e.target.checked)}
-                    />
-                    <label className="form-check-label" htmlFor={`${position}-auto-refresh`}>
-                      {t('autoRefresh', language)}
-                    </label>
-                  </div>
-                </div>
-              </li>
-            )}
-            {showIntervalSelector && autoRefresh && (
-              <>
-                <li>
-                  <hr className="dropdown-divider" />
-                </li>
-                <li>
-                  <span className="dropdown-item-text small text-muted">
-                    {t('refreshInterval', language)}
-                  </span>
-                </li>
-                {intervalOptions.map((option) => (
-                  <li key={option.value}>
-                    <button
-                      className={cn('dropdown-item', interval === option.value && 'active')}
-                      onClick={() => setInterval(option.value)}
-                    >
-                      {t(option.label, language)}
-                    </button>
-                  </li>
-                ))}
-              </>
-            )}
-          </ul>
-        </div>
+        ) : (
+          /* Static clock icon when no dropdown content - shows last refresh time tooltip */
+          <i
+            className={cn('bi bi-clock-history', 'text-muted')}
+            title={buildTooltip()}
+            data-testid="refresh-clock-icon"
+          />
+        )}
 
         {/* Manual refresh button */}
         <button
@@ -274,6 +305,70 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
             )}
           />
         </button>
+
+        {/* Portal-rendered dropdown panel */}
+        {isDropdownOpen &&
+          createPortal(
+            <>
+              {/* Backdrop overlay */}
+              <div
+                className="page-refresh-dropdown-backdrop"
+                onClick={handleBackdropClick}
+                data-testid="dropdown-backdrop"
+              />
+
+              {/* Dropdown panel */}
+              <div
+                ref={dropdownPanelRef}
+                className="page-refresh-dropdown-panel"
+                style={getDropdownPosition()}
+                data-testid="dropdown-panel"
+              >
+                {showAutoRefreshToggle && (
+                  <div className="page-refresh-dropdown-item">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`${position}-auto-refresh`}
+                        checked={autoRefresh}
+                        onChange={(e) => setAutoRefresh(e.target.checked)}
+                      />
+                      <label
+                        className="form-check-label"
+                        htmlFor={`${position}-auto-refresh`}
+                      >
+                        {t('autoRefresh', language)}
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {showIntervalSelector && autoRefresh && (
+                  <>
+                    <div className="page-refresh-dropdown-divider" />
+                    <div className="page-refresh-dropdown-header">
+                      {t('refreshInterval', language)}
+                    </div>
+                    {intervalOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        className={cn(
+                          'page-refresh-dropdown-item',
+                          'page-refresh-dropdown-option',
+                          interval === option.value && 'active'
+                        )}
+                        onClick={() => handleIntervalSelect(option.value)}
+                      >
+                        {t(option.label, language)}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            </>,
+            document.body
+          )}
       </div>
     );
   }

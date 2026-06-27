@@ -1869,6 +1869,70 @@ table .latency-row:hover td {
   background: rgba(239, 68, 68, 0.1) !important;
 }
 
+/* PageRefreshControl Portal Dropdown Styles */
+.page-refresh-dropdown-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: var(--z-modal-backdrop);
+}
+
+.page-refresh-dropdown-panel {
+  position: fixed;
+  min-width: 180px;
+  max-width: 280px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs) 0;
+  z-index: var(--z-popover);
+  color: var(--text-primary);
+}
+
+.page-refresh-dropdown-item {
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--text-primary);
+  transition: background-color var(--transition-fast);
+}
+
+.page-refresh-dropdown-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.page-refresh-dropdown-item.active {
+  background: var(--color-primary);
+  color: var(--text-inverse);
+}
+
+.page-refresh-dropdown-item.active:hover {
+  background: var(--color-primary-hover);
+  color: var(--text-inverse);
+}
+
+.page-refresh-dropdown-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.page-refresh-dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: var(--spacing-xs) 0;
+}
+
+.page-refresh-dropdown-header {
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
 /* Fix for header dropdown button color */
 .header .dropdown-toggle {
   color: var(--text-primary) !important;
