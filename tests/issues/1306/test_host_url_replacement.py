@@ -5,6 +5,7 @@ instead of container-detected IP (from config.json).
 """
 
 import pytest
+
 from app.services.webui_manager import WebUIManager, WorkspaceConfig
 
 
