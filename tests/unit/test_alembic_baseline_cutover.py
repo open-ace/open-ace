@@ -19,15 +19,26 @@ from scripts.cutover_alembic_baseline import collect_active_revision_ids, cutove
 
 
 def _postgres_server_binaries_available() -> bool:
-    return all(
+    if not all(
         shutil.which(binary) is not None for binary in ("initdb", "pg_ctl", "createdb", "psql")
-    )
+    ):
+        return False
+    # initdb and Postgres peer auth require the current uid to resolve to a real
+    # OS user. In restricted sandboxes the running uid may have no passwd entry,
+    # which makes initdb fail at runtime ("could not look up effective user ID").
+    import pwd
+
+    try:
+        pwd.getpwuid(os.getuid())
+    except KeyError:
+        return False
+    return True
 
 
 @contextmanager
 def _temporary_postgres_database(tmp_path):
     if not _postgres_server_binaries_available():
-        pytest.skip("PostgreSQL server binaries are not available in this environment")
+        pytest.skip("PostgreSQL server binaries are not usable in this environment")
 
     cluster_dir = tmp_path / "pg-cluster"
     log_path = tmp_path / "postgres.log"
