@@ -77,7 +77,7 @@ export const TrendAnalysis: React.FC = () => {
   // Page refresh control - manual refresh for trend analysis
   const pageRefresh = usePageRefresh({
     page: '/manage/analysis/trend',
-    refreshKey: createMatcherConfig([['analysis', 'batch'], ['analysis', 'anomaly-trend']], 'prefix'),
+    refreshKey: createMatcherConfig([['analysis', 'batch']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
   });
