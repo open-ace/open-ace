@@ -943,6 +943,28 @@ CREATE SEQUENCE smtp_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE smtp_settings_id_seq OWNED BY smtp_settings.id;
+CREATE TABLE model_gateway_config (
+    id integer NOT NULL,
+    mode text DEFAULT 'direct',
+    base_url text,
+    encrypted_api_key text,
+    encryption_version integer DEFAULT 1,
+    model_prefix_mode boolean DEFAULT false,
+    model_prefix text,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE model_gateway_config_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE model_gateway_config_id_seq OWNED BY model_gateway_config.id;
 CREATE TABLE sso_identities (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -1459,6 +1481,8 @@ ALTER TABLE ONLY shared_sessions ALTER COLUMN id SET DEFAULT nextval('shared_ses
 
 ALTER TABLE ONLY smtp_settings ALTER COLUMN id SET DEFAULT nextval('smtp_settings_id_seq'::regclass);
 
+ALTER TABLE ONLY model_gateway_config ALTER COLUMN id SET DEFAULT nextval('model_gateway_config_id_seq'::regclass);
+
 ALTER TABLE ONLY sso_identities ALTER COLUMN id SET DEFAULT nextval('sso_identities_id_seq'::regclass);
 
 ALTER TABLE ONLY sso_providers ALTER COLUMN id SET DEFAULT nextval('sso_providers_id_seq'::regclass);
@@ -1736,6 +1760,9 @@ ALTER TABLE ONLY quota_usage
 
 ALTER TABLE ONLY smtp_settings
     ADD CONSTRAINT uq_smtp_settings_single PRIMARY KEY (id);
+
+ALTER TABLE ONLY model_gateway_config
+    ADD CONSTRAINT model_gateway_config_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY tenant_usage
     ADD CONSTRAINT uq_tenant_usage_tenant_date_new UNIQUE (tenant_id, date);

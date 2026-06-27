@@ -8,6 +8,12 @@ from typing import Any
 
 from flask import Response, jsonify, request, stream_with_context
 
+# ── Model-gateway seam (removable) ────────────────────────────────────────
+# When the LiteLLM-compatible model gateway is enabled, ``get_gateway_planner()``
+# returns a real planner and the seam below routes through it. Removing the
+# gateway feature = drop this import + the seam + the two _gateway_* helpers.
+from app.modules.workspace.model_gateway import get_gateway_planner
+
 logger = logging.getLogger(__name__)
 
 
@@ -298,6 +304,269 @@ def _record_llm_usage(
         logger.debug("Failed to record LLM usage", exc_info=True)
 
 
+def _emit_responses_sse(resp: Any, body: bytes | None) -> Response | None:
+    """Convert an upstream chat-completions response into a Responses-API SSE stream.
+
+    Used when a ``/responses`` request was rewritten to ``/chat/completions`` for a
+    non-OpenAI upstream. Returns the streaming ``Response`` on success, or ``None``
+    when conversion fails so the caller falls through to the normal finalize path
+    (mirrors the pre-extraction fall-through behavior exactly).
+    """
+    try:
+        import uuid as _uuid
+
+        cc_resp = resp.json()
+        response_id = f"resp_{cc_resp.get('id', 'default')}"
+        model = cc_resp.get("model", "")
+        output_text = ""
+        if cc_resp.get("choices"):
+            output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
+        usage = cc_resp.get("usage", {})
+        item_id = f"msg_{_uuid.uuid4().hex[:24]}"
+        events = [
+            {
+                "type": "response.created",
+                "response": {
+                    "id": response_id,
+                    "object": "response",
+                    "status": "in_progress",
+                    "model": model,
+                    "output": [],
+                    "usage": None,
+                },
+            },
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "message",
+                    "id": item_id,
+                    "status": "in_progress",
+                    "role": "assistant",
+                    "content": [],
+                },
+            },
+            {
+                "type": "response.content_part.added",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": ""},
+            },
+            {
+                "type": "response.output_text.delta",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": output_text,
+            },
+            {
+                "type": "response.output_text.done",
+                "output_index": 0,
+                "content_index": 0,
+                "text": output_text,
+            },
+            {
+                "type": "response.content_part.done",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": output_text},
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "type": "message",
+                    "id": item_id,
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": output_text}],
+                },
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": response_id,
+                    "object": "response",
+                    "status": "completed",
+                    "model": model,
+                    "output": [
+                        {
+                            "type": "message",
+                            "id": item_id,
+                            "status": "completed",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": output_text}],
+                        }
+                    ],
+                    "usage": (
+                        {
+                            "input_tokens": usage.get("prompt_tokens", 0),
+                            "output_tokens": usage.get("completion_tokens", 0),
+                            "total_tokens": usage.get("total_tokens", 0),
+                        }
+                        if usage
+                        else None
+                    ),
+                },
+            },
+        ]
+
+        def sse_stream(_events=events):
+            for event in _events:
+                yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+        return Response(
+            sse_stream(),
+            status=200,
+            content_type="text/event-stream",
+        )
+    except Exception as exc:
+        logger.error("Failed to convert CC response to Responses format: %s", exc)
+        return None
+
+
+def _finalize_upstream_response(
+    resp: Any,
+    body: bytes | None,
+    session_id: str,
+    user_id: int,
+    provider: str,
+    content_type: str | None = None,
+) -> Response:
+    """Stream or return an upstream response, recording LLM usage on completion.
+
+    Shared by the direct-provider path and the model-gateway path so response
+    handling + usage recording lives in exactly one place (this is the shared tail
+    that lets the gateway seam stay small and removable). For ``text/event-stream``
+    the usage is recorded after the stream drains; otherwise immediately.
+    """
+    if content_type is None:
+        content_type = resp.headers.get("Content-Type", "")
+
+    def generate(_resp=resp, _content_type=content_type, _body=body):
+        total_content = b""
+        for chunk in _resp.iter_content(chunk_size=4096):
+            total_content += chunk
+            yield chunk
+        try:
+            _record_llm_usage(
+                total_content,
+                session_id,
+                user_id,
+                provider,
+                _content_type,
+                request_body=_body,
+            )
+        except Exception as exc:
+            logger.error("Failed to record LLM usage: %s", exc)
+
+    response_headers = {}
+    for key, value in resp.headers.items():
+        if key.lower() in ("content-type", "x-request-id", "openai-organization"):
+            response_headers[key] = value
+
+    if "text/event-stream" in content_type:
+        return Response(
+            stream_with_context(generate()),
+            status=resp.status_code,
+            headers=response_headers,
+            content_type=content_type,
+        )
+
+    content = resp.content
+    try:
+        _record_llm_usage(content, session_id, user_id, provider, content_type, request_body=body)
+    except Exception as exc:
+        logger.error("Failed to record LLM usage: %s", exc)
+    return Response(
+        content,
+        status=resp.status_code,
+        headers=response_headers,
+        content_type=content_type,
+    )
+
+
+def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]:
+    """Sanitize an upstream gateway error so the gateway key never leaks.
+
+    Redacts any literal key occurrence, truncates to the existing 500-char peek
+    limit, and re-wraps into the standard ``{error:{message,type}}`` shape.
+    """
+    try:
+        content_type = resp.headers.get("Content-Type", "")
+        peek = resp.content[:500] if not content_type.startswith("text/event-stream") else b""
+        error_text = peek.decode("utf-8", errors="replace")
+        if gateway_key and gateway_key in error_text:
+            error_text = error_text.replace(gateway_key, "[REDACTED]")
+        logger.error("LLM proxy gateway error %d: %s", resp.status_code, error_text)
+        message = error_text or f"Gateway returned status {resp.status_code}"
+        return (
+            jsonify({"error": {"message": message, "type": "upstream_error"}}),
+            resp.status_code,
+        )
+    except Exception as exc:
+        logger.error("LLM proxy gateway error (sanitize failed): %s", exc)
+        return (
+            jsonify({"error": {"message": "Upstream gateway error", "type": "proxy_error"}}),
+            502,
+        )
+
+
+def _forward_via_gateway(
+    plan: Any,
+    *,
+    session_id: str,
+    user_id: int,
+    provider: str,
+) -> Response | tuple[Response, int]:
+    """Execute a single gateway attempt and return the finalized response.
+
+    Single attempt (no per-key HA failover — the gateway owns upstream keys),
+    gateway credentials + attribution headers. Quota was already checked upstream
+    of this call. Usage recording + streaming passthrough are handled by the
+    shared ``_finalize_upstream_response`` tail. Errors are sanitized via
+    ``_gateway_error_response`` so the gateway key never leaks (R7).
+    """
+    import requests as http_requests
+
+    try:
+        fwd_headers = {}
+        for key, value in request.headers:
+            if key.lower() in ("content-type", "accept", "user-agent"):
+                fwd_headers[key] = value
+        fwd_headers.update(plan.headers)
+        fwd_headers["Authorization"] = f"Bearer {plan.gateway_key}"
+
+        body = plan.body_transformer(request.get_data())
+
+        resp = http_requests.request(
+            method=request.method,
+            url=plan.target_url,
+            headers=fwd_headers,
+            data=body,
+            stream=True,
+            timeout=120,
+            proxies={"http": None, "https": None},  # type: ignore[dict-item]
+        )
+
+        if resp.status_code >= 400:
+            return _gateway_error_response(resp, plan.gateway_key)
+
+        # Mirror the direct path: a converted /responses request gets its
+        # chat-completions response re-wrapped into a Responses-API SSE stream.
+        if getattr(plan, "is_responses", False) and resp.status_code == 200:
+            sse_response = _emit_responses_sse(resp, body)
+            if sse_response is not None:
+                return sse_response
+
+        return _finalize_upstream_response(resp, body, session_id, user_id, provider)
+    except Exception as exc:
+        logger.error("LLM proxy gateway error: %s", exc)
+        return (
+            jsonify({"error": {"message": "Internal proxy error", "type": "proxy_error"}}),
+            502,
+        )
+
+
 def handle_llm_proxy_request(
     *,
     scope: str,
@@ -393,6 +662,43 @@ def handle_llm_proxy_request(
         )
 
     requested_model = _extract_requested_model()
+
+    # ── Model-gateway seam (single, removable) ───────────────────────────
+    # When the LiteLLM-compatible gateway is enabled, route this request through
+    # it: single attempt, attribution headers, quota already checked above.
+    # ``is_noop`` means disabled -> direct-provider mode runs unchanged (R6).
+    # Enabled-but-misconfigured -> 503, never a silent fallback to direct mode.
+    _gateway = get_gateway_planner()
+    if not _gateway.is_noop:
+        _gateway_plan = _gateway.plan(
+            provider=provider,
+            requested_model=requested_model,
+            path=path,
+            token_payload=token_payload,
+            session_id=session_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if _gateway_plan is None:
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": (
+                                "Model gateway is enabled but not configured. "
+                                "Set a gateway base URL and API key, or disable gateway mode."
+                            ),
+                            "type": "gateway_misconfigured",
+                        }
+                    }
+                ),
+                503,
+            )
+        return _forward_via_gateway(
+            _gateway_plan, session_id=session_id, user_id=user_id, provider=provider
+        )
+    # ── end model-gateway seam ───────────────────────────────────────────
+
     allowed_key_ids = _resolve_allowed_key_ids(token_payload, requested_model)
     if (
         allowed_key_ids is None
@@ -641,161 +947,11 @@ def handle_llm_proxy_request(
                     continue
 
             if converted_from_responses and resp.status_code == 200:
-                try:
-                    import uuid as _uuid
+                sse_response = _emit_responses_sse(resp, body)
+                if sse_response is not None:
+                    return sse_response
 
-                    cc_resp = resp.json()
-                    response_id = f"resp_{cc_resp.get('id', 'default')}"
-                    model = cc_resp.get("model", "")
-                    output_text = ""
-                    if cc_resp.get("choices"):
-                        output_text = cc_resp["choices"][0].get("message", {}).get("content", "")
-                    usage = cc_resp.get("usage", {})
-                    item_id = f"msg_{_uuid.uuid4().hex[:24]}"
-                    events = [
-                        {
-                            "type": "response.created",
-                            "response": {
-                                "id": response_id,
-                                "object": "response",
-                                "status": "in_progress",
-                                "model": model,
-                                "output": [],
-                                "usage": None,
-                            },
-                        },
-                        {
-                            "type": "response.output_item.added",
-                            "output_index": 0,
-                            "item": {
-                                "type": "message",
-                                "id": item_id,
-                                "status": "in_progress",
-                                "role": "assistant",
-                                "content": [],
-                            },
-                        },
-                        {
-                            "type": "response.content_part.added",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "part": {"type": "output_text", "text": ""},
-                        },
-                        {
-                            "type": "response.output_text.delta",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": output_text,
-                        },
-                        {
-                            "type": "response.output_text.done",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "text": output_text,
-                        },
-                        {
-                            "type": "response.content_part.done",
-                            "output_index": 0,
-                            "content_index": 0,
-                            "part": {"type": "output_text", "text": output_text},
-                        },
-                        {
-                            "type": "response.output_item.done",
-                            "output_index": 0,
-                            "item": {
-                                "type": "message",
-                                "id": item_id,
-                                "status": "completed",
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": output_text}],
-                            },
-                        },
-                        {
-                            "type": "response.completed",
-                            "response": {
-                                "id": response_id,
-                                "object": "response",
-                                "status": "completed",
-                                "model": model,
-                                "output": [
-                                    {
-                                        "type": "message",
-                                        "id": item_id,
-                                        "status": "completed",
-                                        "role": "assistant",
-                                        "content": [{"type": "output_text", "text": output_text}],
-                                    }
-                                ],
-                                "usage": (
-                                    {
-                                        "input_tokens": usage.get("prompt_tokens", 0),
-                                        "output_tokens": usage.get("completion_tokens", 0),
-                                        "total_tokens": usage.get("total_tokens", 0),
-                                    }
-                                    if usage
-                                    else None
-                                ),
-                            },
-                        },
-                    ]
-
-                    def sse_stream(_events=events):
-                        for event in _events:
-                            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
-
-                    return Response(
-                        sse_stream(),
-                        status=200,
-                        content_type="text/event-stream",
-                    )
-                except Exception as exc:
-                    logger.error("Failed to convert CC response to Responses format: %s", exc)
-
-            content_type = resp.headers.get("Content-Type", "")
-
-            def generate(_resp=resp, _content_type=content_type, _body=body):
-                total_content = b""
-                for chunk in _resp.iter_content(chunk_size=4096):
-                    total_content += chunk
-                    yield chunk
-                try:
-                    _record_llm_usage(
-                        total_content,
-                        session_id,
-                        user_id,
-                        provider,
-                        _content_type,
-                        request_body=_body,
-                    )
-                except Exception as exc:
-                    logger.error("Failed to record LLM usage: %s", exc)
-
-            response_headers = {}
-            for key, value in resp.headers.items():
-                if key.lower() in ("content-type", "x-request-id", "openai-organization"):
-                    response_headers[key] = value
-
-            if "text/event-stream" in content_type:
-                return Response(
-                    stream_with_context(generate()),
-                    status=resp.status_code,
-                    headers=response_headers,
-                    content_type=content_type,
-                )
-
-            content = resp.content
-            try:
-                _record_llm_usage(
-                    content, session_id, user_id, provider, content_type, request_body=body
-                )
-            except Exception as exc:
-                logger.error("Failed to record LLM usage: %s", exc)
-            return Response(
-                content,
-                status=resp.status_code,
-                headers=response_headers,
-                content_type=content_type,
-            )
+            return _finalize_upstream_response(resp, body, session_id, user_id, provider)
 
         except Exception as exc:
             logger.error("LLM proxy error: %s", exc)

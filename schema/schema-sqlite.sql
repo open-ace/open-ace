@@ -606,6 +606,19 @@ CREATE TABLE smtp_settings (
  created_by integer
 );
 
+CREATE TABLE model_gateway_config (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mode TEXT DEFAULT 'direct',
+ base_url TEXT,
+ encrypted_api_key TEXT,
+ encryption_version INTEGER DEFAULT 1,
+ model_prefix_mode INTEGER DEFAULT 0,
+ model_prefix TEXT,
+ created_by INTEGER,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE sso_identities (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,

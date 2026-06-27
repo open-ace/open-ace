@@ -185,6 +185,13 @@ const navSections: NavSection[] = [
         path: '/manage/settings/smtp',
         adminOnly: true,
       },
+      {
+        id: 'model-gateway',
+        label: 'modelGatewayConfiguration',
+        icon: 'bi-shuffle',
+        path: '/manage/settings/model-gateway',
+        adminOnly: true,
+      },
     ],
   },
 ];

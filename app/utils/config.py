@@ -87,6 +87,18 @@ def is_run_timeline_enabled() -> bool:
     return bool(get_config_value("run_timeline", "enabled", False))
 
 
+def is_model_gateway_enabled() -> bool:
+    """Check whether the optional LiteLLM-compatible model gateway is enabled.
+
+    Mirrors ``is_run_timeline_enabled``: reads ``model_gateway.enabled`` from
+    config.json (60 s TTL cache). When disabled (the default) the LLM proxy uses
+    direct provider mode unchanged and the gateway module is inert. The whole
+    feature is self-contained and easy to remove later; the env-override layer
+    (``OPENACE_MODEL_GATEWAY_MODE``) lives in the gateway package itself.
+    """
+    return bool(get_config_value("model_gateway", "enabled", False))
+
+
 # ── AI GitHub Account env cache ───────────────────────────────────
 # Avoids a DB query on every subprocess.run() inside GitHubOps.
 # Simple two-variable cache: data + timestamp, guarded by _cache_lock.

@@ -151,3 +151,6 @@ export type {
   EmailStatistics,
   SendTestEmailResult,
 } from './smtpConfig';
+// model-gateway (removable)
+export { modelGatewayApi } from './modelGateway';
+export type { ModelGatewayConfig, ModelGatewayTestResult } from './modelGateway';
