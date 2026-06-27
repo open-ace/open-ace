@@ -13,7 +13,7 @@ import re
 import socket
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -181,12 +181,10 @@ def parse_timestamp(ts_str: str) -> str:
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
             # Convert UTC to local time
-            from datetime import timezone
             dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             if dt.tzinfo is None:
-                from datetime import timezone
                 dt = dt.replace(tzinfo=timezone.utc).astimezone()
         return dt.strftime("%Y-%m-%d")
     except Exception:
