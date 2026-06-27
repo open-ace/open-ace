@@ -110,14 +110,14 @@ generate_default_config() {
     mkdir -p "$CONFIG_DIR"
 
     # Auto-detect SERVER_IP if not configured (Issue #1306)
-    # Reference: scripts/install-central/docker-method/install.sh
+    # Resolve host.docker.internal to get host gateway IP (via extra_hosts)
     if [ -z "$SERVER_IP" ]; then
-        # Method 1: hostname -I (returns all IPs, filter localhost and link-local)
-        SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./)) {print $i; exit}}')
+        # Method 1: getent hosts (resolves host.docker.internal to host gateway IP)
+        SERVER_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}')
 
-        # Method 2: ip route get 1 (fallback, more reliable in some environments)
+        # Method 2: hostname -I (fallback, filter localhost and link-local)
         if [ -z "$SERVER_IP" ]; then
-            SERVER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
+            SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./)) {print $i; exit}}')
         fi
 
         # Final fallback
