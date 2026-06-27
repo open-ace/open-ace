@@ -102,7 +102,7 @@ export const TenantManagement: React.FC = () => {
   // Page refresh control - manual refresh for tenant management
   const pageRefresh = usePageRefresh({
     page: '/manage/tenants',
-    refreshKey: createMatcherConfig([['tenants']], 'prefix'),
+    refreshKey: createMatcherConfig([['admin', 'tenants']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
   });

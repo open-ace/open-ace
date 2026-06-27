@@ -182,6 +182,10 @@ export const ComplianceMgmt: React.FC = () => {
     refreshKey: createMatcherConfig([['compliance']], 'prefix'),
     interval: 0, // No auto refresh - manual only for compliance data
     enabled: false,
+    onRefresh: () => {
+      fetchReportsData();
+      fetchRetentionData();
+    },
   });
 
   // --- Reports State ---

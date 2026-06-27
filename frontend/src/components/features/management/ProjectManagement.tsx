@@ -157,6 +157,8 @@ export const ProjectManagement: React.FC = () => {
     refreshKey: createMatcherConfig([['projects']], 'prefix'),
     interval: 0,
     enabled: false,
+    // Note: fetchData defined below, use arrow function to avoid hoisting issues
+    onRefresh: () => fetchData(),
   });
 
   const fetchData = async () => {
