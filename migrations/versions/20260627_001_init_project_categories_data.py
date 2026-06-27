@@ -65,7 +65,9 @@ def upgrade() -> None:
             """
         )
 
-    logger.info("Initialized project_categories with default categories: Frontend, Backend, Testing")
+    logger.info(
+        "Initialized project_categories with default categories: Frontend, Backend, Testing"
+    )
 
 
 def downgrade() -> None:
