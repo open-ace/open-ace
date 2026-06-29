@@ -139,13 +139,16 @@ generate_default_config() {
 
     # Generate default config (matches install.sh defaults)
     # Note: DATABASE_URL env var takes precedence over config file for database connection
-    # Database credentials use docker-compose.yml defaults (${DB_USER:-ace}, etc.)
+    # Database credentials use docker-compose.yml defaults, shell-expanded at generation time
+    # Issue #1336: Use ${VAR:-default} syntax (no \$ escape) so shell expands variables
+    # This prevents fetch scripts from reading unexpanded "${DB_USER:-ace}" literal strings
+    # which would cause psycopg2 to parse "${DB_USER" as username (colon as delimiter)
     cat > "$CONFIG_FILE" << CONFIG_EOF
 {
   "host_name": "$HOST_NAME",
   "database": {
     "type": "postgresql",
-    "url": "postgresql://\${DB_USER:-ace}:\${DB_PASSWORD:-ace-secret}@postgres:5432/\${DB_NAME:-ace}"
+    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
