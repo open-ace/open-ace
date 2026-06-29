@@ -57,6 +57,7 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     previousRightPanelCollapsed,
     autonomousEnabled,
     setAutonomousEnabled,
+    setConfigLoaded,
   } = useAppStore();
 
   // Load workspace config on mount to determine feature flags
@@ -65,12 +66,14 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
       try {
         const config = await workspaceApi.getConfig();
         setAutonomousEnabled(config.autonomous_enabled);
+        setConfigLoaded(true);
       } catch {
-        // Config fetch failed, keep defaults (autonomousEnabled = false)
+        // Config fetch failed, keep defaults but mark as loaded
+        setConfigLoaded(true);
       }
     };
     loadConfig();
-  }, [setAutonomousEnabled]);
+  }, [setAutonomousEnabled, setConfigLoaded]);
 
   // Filter nav items based on feature flags
   const visibleNavItems = autonomousEnabled
