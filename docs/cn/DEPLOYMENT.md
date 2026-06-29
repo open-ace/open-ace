@@ -208,6 +208,28 @@ docker compose restart open-ace
 
 ### 卸载
 
+#### Docker 方式卸载
+
+如果使用纯 Docker 部署（无 deploy.sh 脚本），可手动卸载：
+
+```bash
+# 停止并删除容器
+docker compose down
+
+# 删除镜像
+docker rmi openace/open-ace:latest postgres:15-alpine
+
+# 删除数据卷（彻底清理）
+docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
+
+# 删除本地配置（可选）
+rm -rf ~/.open-ace ./logs
+```
+
+#### 脚本方式卸载
+
+如果使用 deploy.sh 脚本部署：
+
 ```bash
 cd /home/open-ace/open-ace
 
