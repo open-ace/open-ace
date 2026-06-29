@@ -246,7 +246,10 @@ CREATE TABLE autonomous_workflows (
  main_session_id text DEFAULT '' NOT NULL,
  review_session_id text DEFAULT '' NOT NULL,
  test_session_id text DEFAULT '' NOT NULL,
- content_language text DEFAULT 'en' NOT NULL
+ content_language text DEFAULT 'en' NOT NULL,
+ locked_at TIMESTAMP,
+ locked_by text DEFAULT '',
+ transient_retry_count integer DEFAULT 0
 );
 
 CREATE TABLE compliance_reports (
