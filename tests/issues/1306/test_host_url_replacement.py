@@ -2,6 +2,7 @@
 
 Tests that iframe URL uses user's actual access IP (from Flask request)
 instead of container-detected IP (from config.json).
+Also tests that config URL's port is preserved when replacing hostname.
 """
 
 import pytest
@@ -21,33 +22,47 @@ def test_replace_host_from_request():
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Test case 1: Replace container IP with user's actual IP
+    # Test case 1: Replace container IP with user's actual IP (no port in config)
     config_url = "http://172.17.0.1"
     request_host_url = "http://192.168.1.169:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://192.168.1.169"
     print(f"✓ Case 1: {config_url} + {request_host_url} -> {result}")
 
-    # Test case 2: Replace host.docker.internal with domain
+    # Test case 2: Replace host.docker.internal with domain (no port in config)
     config_url = "http://host.docker.internal"
     request_host_url = "http://example.com:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://example.com"
     print(f"✓ Case 2: {config_url} + {request_host_url} -> {result}")
 
-    # Test case 3: HTTPS request
+    # Test case 3: HTTPS request (no port in config)
     config_url = "http://172.17.0.1"
     request_host_url = "https://192.168.1.169:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "https://192.168.1.169"
     print(f"✓ Case 3: {config_url} + {request_host_url} -> {result}")
 
-    # Test case 4: IPv6
+    # Test case 4: IPv6 (no port in config)
     config_url = "http://[::1]"
     request_host_url = "http://[2001:db8::1]:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://[2001:db8::1]"
     print(f"✓ Case 4: {config_url} + {request_host_url} -> {result}")
+
+    # Test case 5: Preserve port from config URL (single-user mode)
+    config_url = "http://172.17.0.1:3100"
+    request_host_url = "http://192.168.1.169:5000"
+    result = manager._replace_host_from_request(config_url, request_host_url)
+    assert result == "http://192.168.1.169:3100"
+    print(f"✓ Case 5 (preserve port): {config_url} + {request_host_url} -> {result}")
+
+    # Test case 6: Preserve port with IPv6
+    config_url = "http://[::1]:3100"
+    request_host_url = "http://[2001:db8::1]:5000"
+    result = manager._replace_host_from_request(config_url, request_host_url)
+    assert result == "http://[2001:db8::1]:3100"
+    print(f"✓ Case 6 (IPv6 with port): {config_url} + {request_host_url} -> {result}")
 
 
 def test_get_user_webui_url_with_host_url():
@@ -56,13 +71,13 @@ def test_get_user_webui_url_with_host_url():
 
     config = WorkspaceConfig(
         enabled=True,
-        url="http://172.17.0.1",  # Container-detected IP (wrong)
+        url="http://172.17.0.1",  # Container-detected IP (wrong), no port
         multi_user_mode=False,
     )
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Without host_url: uses config.url (wrong IP)
+    # Without host_url: uses config.url directly
     url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
     assert url1 == "http://172.17.0.1"
     print(f"✓ Without host_url: {url1}")
@@ -78,6 +93,36 @@ def test_get_user_webui_url_with_host_url():
     assert token1.startswith("1:0:")
     assert token2.startswith("1:0:")
     print("✓ Tokens generated correctly")
+
+
+def test_get_user_webui_url_preserves_port_single_user():
+    """Test that single-user mode preserves port from config URL."""
+    print("\n=== Test: Single-user mode port preservation ===")
+
+    # Config URL with port (typical for single-user mode)
+    config = WorkspaceConfig(
+        enabled=True,
+        url="http://172.17.0.1:3100",  # WebUI port
+        multi_user_mode=False,
+    )
+    manager = WebUIManager(config)
+    manager.stop_cleanup_thread()
+
+    # Without host_url: uses config.url directly (port preserved)
+    url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
+    assert url1 == "http://172.17.0.1:3100"
+    print(f"✓ Without host_url (port preserved): {url1}")
+
+    # With host_url: replaces hostname but preserves port
+    url2, token2 = manager.get_user_webui_url(
+        user_id=1, system_account="testuser", host_url="http://192.168.1.169:5000"
+    )
+    assert url2 == "http://192.168.1.169:3100"
+    print(f"✓ With host_url (hostname replaced, port preserved): {url2}")
+
+    assert token1.startswith("1:0:")
+    assert token2.startswith("1:0:")
+    print("✓ Port preservation test passed")
 
 
 def test_get_user_webui_url_preserves_port_in_multi_user():
@@ -102,4 +147,5 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
 if __name__ == "__main__":
     test_replace_host_from_request()
     test_get_user_webui_url_with_host_url()
+    test_get_user_webui_url_preserves_port_single_user()
     print("\n✓ All tests passed")
