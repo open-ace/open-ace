@@ -49,6 +49,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
 
+  // Helper function to read CSS variable values - Issue #1334
+  const getCSSVariable = (varName: string): string => {
+    const value = window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue(varName)
+      .trim();
+    return value || '';
+  };
+
   // Use ref for theme to avoid stale closure in async initTerminal (Issue #637)
   const themeRef = useRef(theme);
   themeRef.current = theme;
@@ -213,20 +222,18 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
       // Use current theme for initial setup via ref (Issue #637)
       const currentTheme = themeRef.current;
-      const initialTheme =
-        currentTheme === 'dark'
-          ? {
-              background: '#1e1e2e',
-              foreground: '#cdd6f4',
-              cursor: '#f5e0dc',
-              selectionBackground: '#585b7066',
-            }
-          : {
-              background: '#ffffff',
-              foreground: '#1e1e2e',
-              cursor: '#1e1e2e',
-              selectionBackground: '#add8e666',
-            };
+      // Use CSS variables for terminal theme - Issue #1334
+      const initialTheme = {
+        background:
+          getCSSVariable('--terminal-bg') || (currentTheme === 'dark' ? '#1e1e2e' : '#ffffff'),
+        foreground:
+          getCSSVariable('--terminal-fg') || (currentTheme === 'dark' ? '#cdd6f4' : '#1e1e2e'),
+        cursor:
+          getCSSVariable('--terminal-cursor') || (currentTheme === 'dark' ? '#f5e0dc' : '#1e1e2e'),
+        selectionBackground:
+          getCSSVariable('--terminal-selection') ||
+          (currentTheme === 'dark' ? '#585b7066' : '#add8e666'),
+      };
 
       terminal = new Terminal({
         cursorBlink: true,
@@ -280,24 +287,18 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
   }, []);
 
-  // Dynamic theme update without restarting terminal (Issue #637)
+  // Dynamic theme update without restarting terminal (Issue #637, #1334)
   useEffect(() => {
     if (!xtermRef.current) return;
 
-    const terminalTheme =
-      theme === 'dark'
-        ? {
-            background: '#1e1e2e',
-            foreground: '#cdd6f4',
-            cursor: '#f5e0dc',
-            selectionBackground: '#585b7066',
-          }
-        : {
-            background: '#ffffff',
-            foreground: '#1e1e2e',
-            cursor: '#1e1e2e',
-            selectionBackground: '#add8e666',
-          };
+    // Use CSS variables for terminal theme - Issue #1334
+    const terminalTheme = {
+      background: getCSSVariable('--terminal-bg') || (theme === 'dark' ? '#1e1e2e' : '#ffffff'),
+      foreground: getCSSVariable('--terminal-fg') || (theme === 'dark' ? '#cdd6f4' : '#1e1e2e'),
+      cursor: getCSSVariable('--terminal-cursor') || (theme === 'dark' ? '#f5e0dc' : '#1e1e2e'),
+      selectionBackground:
+        getCSSVariable('--terminal-selection') || (theme === 'dark' ? '#585b7066' : '#add8e666'),
+    };
 
     xtermRef.current.options.theme = terminalTheme;
   }, [theme]);
@@ -359,11 +360,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   // Always render terminal div to allow xterm.js initialization
   // The terminal will show "waiting for connection" state if wsUrl is empty
 
-  // Dynamic styles based on theme (Issue #637)
-  const terminalBgColor = theme === 'dark' ? '#1e1e2e' : '#ffffff';
-  const statusBarBgColor = theme === 'dark' ? '#181825' : '#f8fafc';
-  const statusBarBorderColor = theme === 'dark' ? '#313244' : '#e2e8f0';
-  const statusBarTextColor = theme === 'dark' ? '#a6adc8' : '#475569';
+  // Dynamic styles based on theme using CSS variables (Issue #637, #1334)
+  const terminalBgColor =
+    getCSSVariable('--terminal-bg') || (theme === 'dark' ? '#1e1e2e' : '#ffffff');
+  const statusBarBgColor =
+    getCSSVariable('--terminal-status-bar-bg') || (theme === 'dark' ? '#181825' : '#f8fafc');
+  const statusBarBorderColor =
+    getCSSVariable('--terminal-status-bar-border') || (theme === 'dark' ? '#313244' : '#e2e8f0');
+  const statusBarTextColor =
+    getCSSVariable('--terminal-status-bar-text') || (theme === 'dark' ? '#a6adc8' : '#475569');
 
   return (
     <div className="d-flex flex-column h-100">
