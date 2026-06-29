@@ -968,8 +968,6 @@ export const QuotaAlerts: React.FC = () => {
         <div className="d-flex gap-2">
           <PageRefreshControl
             refresh={pageRefresh}
-            showAutoRefreshToggle={false}
-            showIntervalSelector={false}
             compact={true}
             showLastRefreshTime={true}
           />

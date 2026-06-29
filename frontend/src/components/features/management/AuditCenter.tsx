@@ -1122,8 +1122,6 @@ export const AuditCenter: React.FC = () => {
           <PageRefreshControl
             refresh={pageRefresh}
             compact={true}
-            showAutoRefreshToggle={false}
-            showIntervalSelector={false}
             showLastRefreshTime={true}
           />
           {activeTab === 'analysis' && (

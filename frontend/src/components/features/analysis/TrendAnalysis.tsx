@@ -267,8 +267,6 @@ export const TrendAnalysis: React.FC = () => {
         <PageRefreshControl
           refresh={pageRefresh}
           compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
           showLastRefreshTime={true}
         />
       </div>
