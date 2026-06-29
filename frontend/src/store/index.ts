@@ -70,6 +70,7 @@ interface AppState {
 
   // Feature flags
   autonomousEnabled: boolean;
+  configLoaded: boolean;
 
   // Actions
   setUser: (user: User | null) => void;
@@ -112,6 +113,7 @@ interface AppState {
 
   // Feature flag actions
   setAutonomousEnabled: (enabled: boolean) => void;
+  setConfigLoaded: (loaded: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -147,6 +149,7 @@ export const useAppStore = create<AppState>()(
 
       // Feature flags
       autonomousEnabled: false,
+      configLoaded: false,
 
       // Actions
       setUser: (user) => set({ user }),
@@ -261,6 +264,7 @@ export const useAppStore = create<AppState>()(
 
       // Feature flag actions
       setAutonomousEnabled: (enabled) => set({ autonomousEnabled: enabled }),
+      setConfigLoaded: (loaded) => set({ configLoaded: loaded }),
     }),
     {
       name: 'open-ace-store',
