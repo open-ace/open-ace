@@ -468,7 +468,10 @@ export const UserManagement: React.FC = () => {
 
           <div className="row g-3">
             <div className="col-md-6">
-              <label className="form-label">{t('tableUsername', language)}</label>
+              <label className="form-label">
+                {t('tableUsername', language)}
+                <span className="text-danger ms-1">*</span>
+              </label>
               <TextInput
                 value={formData.username}
                 onChange={(value: string) => setFormData({ ...formData, username: value })}
@@ -476,7 +479,10 @@ export const UserManagement: React.FC = () => {
               />
             </div>
             <div className="col-md-6">
-              <label className="form-label">{t('tableEmail', language)}</label>
+              <label className="form-label">
+                {t('tableEmail', language)}
+                <span className="text-danger ms-1">*</span>
+              </label>
               <TextInput
                 type="email"
                 value={formData.email}
@@ -526,7 +532,10 @@ export const UserManagement: React.FC = () => {
             {!editingUser && (
               <>
                 <div className="col-md-6">
-                  <label className="form-label">{t('password', language)}</label>
+                  <label className="form-label">
+                    {t('password', language)}
+                    <span className="text-danger ms-1">*</span>
+                  </label>
                   <TextInput
                     type="password"
                     value={formData.password}
@@ -536,7 +545,10 @@ export const UserManagement: React.FC = () => {
                   <PasswordPolicyHint />
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('confirmPassword', language)}</label>
+                  <label className="form-label">
+                    {t('confirmPassword', language)}
+                    <span className="text-danger ms-1">*</span>
+                  </label>
                   <TextInput
                     type="password"
                     value={formData.confirm_password ?? ''}
