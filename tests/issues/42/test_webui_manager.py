@@ -181,8 +181,8 @@ def test_manager_get_user_webui_url_single_user():
 
     url, token = manager.get_user_webui_url(user_id=1, system_account="testuser")
 
-    # URL should have port removed for correct iframe address
-    assert url == "http://localhost"
+    # URL should preserve port from config (WebUI port is fixed in single-user mode)
+    assert url == "http://localhost:8080"
     # Token is generated for iframe auth in cross-origin API calls
     assert token.startswith("1:0:")  # Format: user_id:port:random:signature
     print(f"✓ Single-user mode: url={url}, token={token[:20]}...")

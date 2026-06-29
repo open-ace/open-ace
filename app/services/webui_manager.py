@@ -262,21 +262,21 @@ class WebUIManager:
         Used in Docker deployments where container cannot detect host's real IP.
 
         Examples:
-            config_url="http://172.17.0.1", request_host_url="http://192.168.1.169:5000"
-            -> "http://192.168.1.169"
+            config_url="http://172.17.0.1:3100", request_host_url="http://192.168.1.169:5000"
+            -> "http://192.168.1.169:3100" (hostname replaced, port preserved from config)
 
-            config_url="http://host.docker.internal", request_host_url="http://example.com"
-            -> "http://example.com"
+            config_url="http://host.docker.internal:3100", request_host_url="http://example.com"
+            -> "http://example.com:3100"
 
-            config_url="http://[::1]", request_host_url="http://[2001:db8::1]:5000"
-            -> "http://[2001:db8::1]" (IPv6 preserved with brackets)
+            config_url="http://[::1]:3100", request_host_url="http://[2001:db8::1]:5000"
+            -> "http://[2001:db8::1]:3100" (IPv6 preserved with brackets)
 
         Args:
             config_url: URL from config.json (may have wrong IP in Docker).
             request_host_url: Host URL from Flask request (user's actual access URL).
 
         Returns:
-            URL with hostname replaced from request, without port.
+            URL with hostname replaced from request, preserving config's port.
         """
         from urllib.parse import urlparse
 
@@ -286,15 +286,21 @@ class WebUIManager:
         # Use request's scheme and hostname, preserving config's scheme if request lacks it
         scheme = request_parsed.scheme or config_parsed.scheme or "http"
         hostname = request_parsed.hostname or config_parsed.hostname
+        # Preserve port from config_url (important for single-user mode where WebUI port is fixed)
+        port = config_parsed.port
 
         if hostname:
             # Check if hostname is IPv6 (contains colons and no dots)
             # IPv6 addresses need to be wrapped in brackets in URLs
             if ":" in hostname and "." not in hostname:
+                if port:
+                    return f"{scheme}://[{hostname}]:{port}"
                 return f"{scheme}://[{hostname}]"
+            if port:
+                return f"{scheme}://{hostname}:{port}"
             return f"{scheme}://{hostname}"
         # Fallback: return original config_url if parsing fails
-        return self._remove_port_from_url(config_url)
+        return config_url
 
     def start_cleanup_thread(self):
         """Start the background cleanup greenlet."""
@@ -495,10 +501,12 @@ class WebUIManager:
             Tuple of (url, token).
         """
         # Determine base URL: use request host if provided, otherwise use config
+        # In single-user mode, preserve the port from config.url (WebUI port is fixed)
         if host_url:
             base_url = self._replace_host_from_request(self.config.url, host_url)
         else:
-            base_url = self._remove_port_from_url(self.config.url)
+            # Single-user mode: use configured URL directly (preserve port)
+            base_url = self.config.url
 
         if not self.config.multi_user_mode:
             # Single-user mode: return configured URL with a generated token
