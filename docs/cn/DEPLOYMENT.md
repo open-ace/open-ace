@@ -256,6 +256,77 @@ cd /home/open-ace/open-ace
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | 邮件 SMTP 密码 |
 
+### 端口配置
+
+Open ACE 默认监听 5000 端口。如需修改端口，可根据部署方式选择以下方法。
+
+#### macOS 端口冲突
+
+macOS Monterey (12) 及以后版本默认启用 **AirPlay Receiver**，监听 5000 端口，会与 Open ACE 冲突。
+
+**解决方案**：
+1. 关闭 AirPlay Receiver：系统设置 → 通用 → AirDrop 与接力 → 关闭「AirPlay 接收器」
+2. 或修改 Open ACE 端口（见下方方法）
+
+#### 二进制方式
+
+修改配置文件 `~/.open-ace/config.json`：
+
+```json
+{
+  "server": {
+    "web_port": 5001,
+    "web_host": "0.0.0.0"
+  }
+}
+```
+
+修改后重启服务即可生效。
+
+#### Docker 方式
+
+**临时修改**（命令行）：
+
+```bash
+PORT=5001 docker compose up -d
+```
+
+**永久修改**（.env 文件）：
+
+```bash
+# 在项目根目录创建/编辑 .env 文件
+echo "PORT=5001" >> .env
+
+# 重启容器
+docker compose down
+docker compose up -d
+```
+
+**验证端口映射**：
+
+```bash
+docker ps
+# 应显示 0.0.0.0:5001->5000/tcp
+```
+
+#### 防火墙设置（如需外网访问）
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 5001/tcp
+
+# CentOS/RHEL
+sudo firewall-cmd --add-port=5001/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### 总结
+
+| 方式 | 配置位置 | 修改方法 |
+|------|----------|----------|
+| 二进制 | `~/.open-ace/config.json` | 修改 `server.web_port` |
+| Docker | 环境变量 `PORT` | `.env` 文件或命令行传入 |
+
 ## 部署场景
 
 ### 场景一：单机部署（推荐个人使用）
@@ -427,6 +498,11 @@ python3 scripts/manage.py local start
 
 ### 端口被占用
 
+如果启动时提示端口被占用，可以选择：
+
+1. **修改 Open ACE 端口** - 参见 [端口配置](#端口配置)
+2. **终止占用进程**：
+
 ```bash
 # 查找占用 5000 端口的进程
 lsof -i :5000
@@ -434,6 +510,8 @@ lsof -i :5000
 # 终止进程
 kill -9 <PID>
 ```
+
+**macOS 用户注意**：macOS Monterey (12) 及以后版本默认启用 AirPlay Receiver，监听 5000 端口。建议关闭 AirPlay Receiver 或修改 Open ACE 端口。
 
 ### 数据库被锁定
 
