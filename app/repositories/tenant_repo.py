@@ -133,10 +133,14 @@ class TenantRepository:
                 # Insert tenant_settings
                 settings_dict = tenant.settings.to_dict()
                 # Use adapt_boolean_value for PostgreSQL/SQLite compatibility
-                content_filter_val = adapt_boolean_value(settings_dict.get("content_filter_enabled", True))
+                content_filter_val = adapt_boolean_value(
+                    settings_dict.get("content_filter_enabled", True)
+                )
                 audit_log_val = adapt_boolean_value(settings_dict.get("audit_log_enabled", True))
                 sso_val = adapt_boolean_value(settings_dict.get("sso_enabled", False))
-                auto_provision_val = adapt_boolean_value(settings_dict.get("auto_provision_users", False))
+                auto_provision_val = adapt_boolean_value(
+                    settings_dict.get("auto_provision_users", False)
+                )
 
                 cursor.execute(
                     adapt_sql(
