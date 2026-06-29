@@ -832,7 +832,8 @@ if __name__ == "__main__":
                 config_data = json.load(f)
             db_config = config_data.get("database", {})
             db_url = db_config.get("url")
-            if db_url:
+            # Only set if not already configured (Docker provides DATABASE_URL)
+            if db_url and not os.environ.get("DATABASE_URL"):
                 os.environ["DATABASE_URL"] = db_url
                 print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 

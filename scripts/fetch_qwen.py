@@ -1313,11 +1313,12 @@ if __name__ == "__main__":
         config_path = Path(args.config)
         if config_path.exists():
             # Load config and set DATABASE_URL environment variable
+            # Only set if not already configured (Docker provides DATABASE_URL)
             with open(config_path) as f:
                 config_data = json.load(f)
             db_config = config_data.get("database", {})
             db_url = db_config.get("url")
-            if db_url:
+            if db_url and not os.environ.get("DATABASE_URL"):
                 os.environ["DATABASE_URL"] = db_url
                 print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 
