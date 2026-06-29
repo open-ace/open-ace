@@ -570,7 +570,7 @@ class WebUIManager:
 
         try:
             process, model_pool = self._launch_webui_process(
-                user_id, system_account, port, base_url
+                user_id, system_account, port
             )
             pid = process.pid if process else None
 
@@ -695,7 +695,7 @@ class WebUIManager:
             }
 
     def _launch_webui_process(
-        self, user_id: int, system_account: str, port: int, base_url: str
+        self, user_id: int, system_account: str, port: int
     ) -> tuple[Optional[subprocess.Popen], dict[str, Any]]:
         """
         Launch a webui process as the specified user.
@@ -704,8 +704,6 @@ class WebUIManager:
             user_id: User ID for log directory naming.
             system_account: System account to run the process as.
             port: Port for the webui to listen on.
-            base_url: Base URL from request (e.g., http://192.168.1.87), used for
-                      WebUI process to connect to main service's LLM proxy API.
 
         Returns:
             subprocess.Popen object or None if launch failed.
@@ -726,13 +724,13 @@ class WebUIManager:
             logger.error("qwen-code-webui executable not found")
             return None, {}
 
-        # Build openace_api_url from base_url (from request host_url)
-        # WebUI process needs to connect to main service's LLM proxy API
-        # Use base_url (user's actual access IP) instead of config.url (container-detected IP)
-        openace_api_url = self._remove_port_from_url(base_url)
-        server_config = self._load_server_config()
-        server_port = server_config.get("web_port", 5000)
-        openace_api_url = f"{openace_api_url}:{server_port}"
+        # Build openace_api_url for WebUI process to connect to main service
+        # WebUI process and main service run in the same container
+        # Use localhost for container-internal communication (works on all platforms:
+        # Linux Docker, macOS Docker, and Windows Docker Desktop)
+        # Note: Windows Docker Desktop containers cannot access services in the same
+        # container via external IP (unlike Linux Docker which shares network namespace)
+        openace_api_url = "http://localhost:5000"
 
         # Build child environment first (needed for sudo env passing)
         child_env = os.environ.copy()
