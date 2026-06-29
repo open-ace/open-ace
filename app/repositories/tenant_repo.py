@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
-from app.repositories.database import Database
+from app.repositories.database import Database, adapt_boolean_value
 from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
@@ -132,11 +132,15 @@ class TenantRepository:
 
                 # Insert tenant_settings
                 settings_dict = tenant.settings.to_dict()
-                # Both PostgreSQL and SQLite use integer for boolean fields in tenant_settings
-                content_filter_val = 1 if settings_dict.get("content_filter_enabled", True) else 0
-                audit_log_val = 1 if settings_dict.get("audit_log_enabled", True) else 0
-                sso_val = 1 if settings_dict.get("sso_enabled", False) else 0
-                auto_provision_val = 1 if settings_dict.get("auto_provision_users", False) else 0
+                # Use adapt_boolean_value for PostgreSQL/SQLite compatibility
+                content_filter_val = adapt_boolean_value(
+                    settings_dict.get("content_filter_enabled", True)
+                )
+                audit_log_val = adapt_boolean_value(settings_dict.get("audit_log_enabled", True))
+                sso_val = adapt_boolean_value(settings_dict.get("sso_enabled", False))
+                auto_provision_val = adapt_boolean_value(
+                    settings_dict.get("auto_provision_users", False)
+                )
 
                 cursor.execute(
                     adapt_sql(
@@ -755,7 +759,7 @@ class TenantRepository:
                 fields.append(f"{key} = {p}")
                 value = quota_dict[key]
                 if cast_type is int and isinstance(value, bool):
-                    value = 1 if value else 0
+                    value = adapt_boolean_value(value)
                 values.append(value)
 
         if not fields:
