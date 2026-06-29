@@ -966,11 +966,7 @@ export const QuotaAlerts: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('quotaAndAlerts', language)}</h2>
         <div className="d-flex gap-2">
-          <PageRefreshControl
-            refresh={pageRefresh}
-            compact={true}
-            showLastRefreshTime={true}
-          />
+          <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
           {activeTab === 'quota' && unreadCount > 0 && (
             <Button variant="outline-info" size="sm" onClick={() => setActiveTab('alerts')}>
               <i className="bi bi-bell me-1" />

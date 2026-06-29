@@ -1119,11 +1119,7 @@ export const AuditCenter: React.FC = () => {
         <h2>{t('auditCenter', language)}</h2>
         <div className="d-flex gap-2">
           {/* Page Refresh Control */}
-          <PageRefreshControl
-            refresh={pageRefresh}
-            compact={true}
-            showLastRefreshTime={true}
-          />
+          <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
           {activeTab === 'analysis' && (
             <Button variant="outline-success" size="sm" onClick={handleExportReport}>
               <i className="bi bi-download me-1" />

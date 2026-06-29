@@ -264,11 +264,7 @@ export const TrendAnalysis: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tokenTrend', language)}</h2>
         {/* Page Refresh Control - compact mode */}
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
 
       {/* Filters */}

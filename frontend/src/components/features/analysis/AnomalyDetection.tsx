@@ -198,11 +198,7 @@ export const AnomalyDetection: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('anomalyDetection', language)}</h2>
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
 
       {/* Filters */}
