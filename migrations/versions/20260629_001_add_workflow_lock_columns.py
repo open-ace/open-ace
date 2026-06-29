@@ -4,7 +4,7 @@ Revision ID: 20260629_001_add_workflow_lock_columns
 Revises: 20260627_001_init_project_categories
 Create Date: 2026-06-29
 
-Issue: #1347
+Issue: #1351
 These columns were defined in the SQLite CREATE TABLE/ALTER TABLE statements
 but were missing from PostgreSQL Alembic migrations, causing runtime errors.
 
@@ -57,3 +57,4 @@ def downgrade() -> None:
         batch_op.drop_column("transient_retry_count")
         batch_op.drop_column("locked_by")
         batch_op.drop_column("locked_at")
+
