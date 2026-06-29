@@ -36,6 +36,8 @@ describe('App Store', () => {
       sidebarCollapsed: false,
       workspaceTabs: [],
       workspaceActiveTabId: '',
+      autonomousEnabled: false,
+      configLoaded: false,
       reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => {
         const state = useAppStore.getState();
         const tabs = [...state.workspaceTabs];
@@ -57,6 +59,8 @@ describe('App Store', () => {
       expect(state.theme).toBe('light');
       expect(state.language).toBe('en');
       expect(state.sidebarCollapsed).toBe(false);
+      expect(state.autonomousEnabled).toBe(false);
+      expect(state.configLoaded).toBe(false);
     });
   });
 
@@ -293,6 +297,40 @@ describe('App Store', () => {
       expect(restoredTabs[0].id).toBe('tab-1');
       expect(restoredTabs[1].id).toBe('tab-2');
       expect(restoredTabs[2].id).toBe('tab-3');
+    });
+  });
+
+  describe('feature flag actions', () => {
+    it('should set autonomousEnabled', () => {
+      expect(useAppStore.getState().autonomousEnabled).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setAutonomousEnabled(true);
+      });
+
+      expect(useAppStore.getState().autonomousEnabled).toBe(true);
+
+      act(() => {
+        useAppStore.getState().setAutonomousEnabled(false);
+      });
+
+      expect(useAppStore.getState().autonomousEnabled).toBe(false);
+    });
+
+    it('should set configLoaded', () => {
+      expect(useAppStore.getState().configLoaded).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setConfigLoaded(true);
+      });
+
+      expect(useAppStore.getState().configLoaded).toBe(true);
+
+      act(() => {
+        useAppStore.getState().setConfigLoaded(false);
+      });
+
+      expect(useAppStore.getState().configLoaded).toBe(false);
     });
   });
 });
