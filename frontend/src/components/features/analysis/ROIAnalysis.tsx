@@ -180,6 +180,9 @@ export const ROIAnalysis: React.FC = () => {
     refreshKey: createMatcherConfig([['analysis', 'roi']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
+    // Note: fetchData defined below, use arrow function to avoid hoisting issues
+    // forceRefresh=true to bypass cache and fetch fresh data
+    onRefresh: () => fetchData(true),
   });
 
   // Initialize dates

@@ -73,7 +73,13 @@ export const QuotaAlerts: React.FC = () => {
   // Page refresh control - manages manual refresh for quota and alerts data
   const pageRefresh = usePageRefresh({
     page: '/manage/quota',
-    refreshKey: createMatcherConfig([['quota'], ['alerts']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['admin', 'quota'],
+        ['admin', 'quota-stats'],
+      ],
+      'prefix'
+    ),
     interval: 0, // Manual refresh only for configuration data
     enabled: false,
   });

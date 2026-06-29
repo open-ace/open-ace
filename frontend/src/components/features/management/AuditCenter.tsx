@@ -110,7 +110,13 @@ export const AuditCenter: React.FC = () => {
   // --- Page Refresh Control ---
   const pageRefresh = usePageRefresh({
     page: '/manage/audit',
-    refreshKey: createMatcherConfig([['audit']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['admin', 'audit-logs'],
+        ['admin', 'audit-thresholds'],
+      ],
+      'prefix'
+    ),
     interval: 0, // No auto refresh - manual only for audit logs
     enabled: false,
   });
