@@ -57,4 +57,3 @@ def downgrade() -> None:
         batch_op.drop_column("transient_retry_count")
         batch_op.drop_column("locked_by")
         batch_op.drop_column("locked_at")
-

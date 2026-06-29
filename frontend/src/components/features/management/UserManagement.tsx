@@ -224,6 +224,7 @@ export const UserManagement: React.FC = () => {
           role: formData.role,
           system_account: formData.system_account,
           is_active: formData.is_active,
+          tenant_id: formData.tenant_id,
         };
         await updateUser.mutateAsync({ userId: editingUser.id, data: updateData });
       } else {
