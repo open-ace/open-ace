@@ -209,7 +209,9 @@ class TestConfigureLocalOpenAIProxy:
         ):
             mock_popen.return_value = MagicMock(pid=12345)
             mock_run_as_root.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            _, model_pool = manager._launch_webui_process(1, "testuser", 9000)
+            _, model_pool = manager._launch_webui_process(
+                1, "testuser", 9000, "http://192.168.1.87"
+            )
 
             # Verify local proxy setup was called
             mock_proxy_setup.assert_called_once()
