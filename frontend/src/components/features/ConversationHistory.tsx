@@ -598,13 +598,7 @@ export const ConversationHistory: React.FC = () => {
       {/* Page Header */}
       <div className="page-header mb-4 d-flex justify-content-between align-items-center">
         <h2>{t('conversationHistory', language)}</h2>
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
       {tableContent}
       {/* Conversation Detail Modal */}

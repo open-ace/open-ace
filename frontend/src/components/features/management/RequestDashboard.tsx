@@ -194,6 +194,7 @@ export const RequestDashboard: React.FC = () => {
         <h2>{t('requestStatistics', language)}</h2>
         <PageRefreshControl
           refresh={pageRefresh}
+          compact={true}
           showLastRefreshTime={true}
           showNextRefreshTime={false}
         />
