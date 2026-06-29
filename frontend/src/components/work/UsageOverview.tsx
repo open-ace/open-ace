@@ -114,14 +114,8 @@ export const UsageOverview: React.FC = () => {
       <div className="usage-overview">
         {/* Skeleton Loading State */}
         <div className="d-flex justify-content-between align-items-center mb-4">
-          <div
-            className="skeleton skeleton-text"
-            style={{ width: '200px', height: '32px' }}
-          />
-          <div
-            className="skeleton skeleton-text"
-            style={{ width: '100px', height: '36px' }}
-          />
+          <div className="skeleton skeleton-text" style={{ width: '200px', height: '32px' }} />
+          <div className="skeleton skeleton-text" style={{ width: '100px', height: '36px' }} />
         </div>
 
         {/* Skeleton Cards */}

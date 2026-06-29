@@ -77,3 +77,25 @@
     font-size: 20px;
   }
 }
+
+/* Dark Theme Support */
+[data-theme='dark'] .logout-success-page {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+[data-theme='dark'] .logout-success-container {
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-xl);
+}
+
+[data-theme='dark'] .logout-success-container h1 {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .logout-message {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .logout-redirect {
+  color: var(--text-tertiary);
+}
