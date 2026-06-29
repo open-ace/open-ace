@@ -256,6 +256,77 @@ Configuration is stored in `~/.open-ace/config.json`:
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | Email SMTP password |
 
+### Port Configuration
+
+Open ACE listens on port 5000 by default. To change the port, use the appropriate method based on your deployment type.
+
+#### macOS Port Conflict
+
+macOS Monterey (12) and later versions enable **AirPlay Receiver** by default, which listens on port 5000 and conflicts with Open ACE.
+
+**Solutions**:
+1. Disable AirPlay Receiver: System Settings → General → AirDrop & Handoff → Turn off "AirPlay Receiver"
+2. Or change Open ACE port (see methods below)
+
+#### Binary Installation
+
+Modify the configuration file `~/.open-ace/config.json`:
+
+```json
+{
+  "server": {
+    "web_port": 5001,
+    "web_host": "0.0.0.0"
+  }
+}
+```
+
+Restart the service after modification.
+
+#### Docker Installation
+
+**Temporary change** (command line):
+
+```bash
+PORT=5001 docker compose up -d
+```
+
+**Permanent change** (.env file):
+
+```bash
+# Create/edit .env file in project root
+echo "PORT=5001" >> .env
+
+# Restart container
+docker compose down
+docker compose up -d
+```
+
+**Verify port mapping**:
+
+```bash
+docker ps
+# Should show 0.0.0.0:5001->5000/tcp
+```
+
+#### Firewall Settings (for external access)
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 5001/tcp
+
+# CentOS/RHEL
+sudo firewall-cmd --add-port=5001/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### Summary
+
+| Method | Configuration Location | How to Change |
+|--------|------------------------|---------------|
+| Binary | `~/.open-ace/config.json` | Modify `server.web_port` |
+| Docker | Environment variable `PORT` | `.env` file or command line |
+
 ## Deployment Scenarios
 
 ### 1. Single Machine (Recommended for Personal Use)
@@ -427,6 +498,11 @@ python3 scripts/manage.py local start
 
 ### Port Already in Use
 
+If startup fails due to port conflict, you can:
+
+1. **Change Open ACE port** - See [Port Configuration](#port-configuration)
+2. **Kill the conflicting process**:
+
 ```bash
 # Find process using port 5000
 lsof -i :5000
@@ -434,6 +510,8 @@ lsof -i :5000
 # Kill process
 kill -9 <PID>
 ```
+
+**macOS users**: macOS Monterey (12) and later versions enable AirPlay Receiver by default, which listens on port 5000. Consider disabling AirPlay Receiver or changing Open ACE port.
 
 ### Database Locked
 
