@@ -111,21 +111,23 @@ generate_default_config() {
 
     # Auto-detect SERVER_IP if not configured (Issue #1306)
     # Resolve host.docker.internal to get host gateway IP (via extra_hosts)
+    # Issue #1334: Filter IPv6 addresses, only use IPv4 (addresses containing dots)
     if [ -z "$SERVER_IP" ]; then
         # Method 1: getent hosts (resolves host.docker.internal to host gateway IP)
-        SERVER_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}')
+        # Filter: only accept IPv4 addresses (must contain dots)
+        SERVER_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /\./) {print $i; exit}}')
 
-        # Method 2: hostname -I (fallback, filter localhost and link-local)
+        # Method 2: hostname -I (fallback, filter localhost, link-local, and IPv6)
         if [ -z "$SERVER_IP" ]; then
-            SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./)) {print $i; exit}}')
+            SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./) && $i ~ /\./) {print $i; exit}}')
         fi
 
         # Final fallback
         if [ -z "$SERVER_IP" ]; then
-            echo "WARNING: Could not auto-detect SERVER_IP, falling back to host.docker.internal"
+            echo "WARNING: Could not auto-detect IPv4 SERVER_IP, falling back to host.docker.internal"
             SERVER_IP="host.docker.internal"
         else
-            echo "Auto-detected SERVER_IP: $SERVER_IP"
+            echo "Auto-detected SERVER_IP (IPv4): $SERVER_IP"
         fi
     fi
     PORT="${PORT:-5000}"
