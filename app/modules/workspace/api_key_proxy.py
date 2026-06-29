@@ -340,7 +340,7 @@ class APIKeyProxyService:
         provider: str,
         scope: str = "remote",
         exclude_key_ids: Optional[set[int]] = None,
-    ) -> Optional[tuple[str, Optional[str], int]]:
+    ) -> Optional[tuple[str, Optional[str], int, Optional[str]]]:
         """
         Resolve and decrypt an API key for a tenant/provider with scope filtering
         and multi-key scheduling.
@@ -352,7 +352,7 @@ class APIKeyProxyService:
             exclude_key_ids: Key IDs to exclude (for failover retries).
 
         Returns:
-            Tuple of (api_key, base_url, key_id) or None if not found.
+            Tuple of (api_key, base_url, key_id, cli_settings) or None if not found.
         """
         from app.modules.workspace.api_key_router import APIKeyRouter
 
@@ -364,7 +364,7 @@ class APIKeyProxyService:
             if is_postgresql():
                 cursor.execute(
                     """
-                    SELECT id, encrypted_key, base_url, priority, weight
+                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings
                     FROM api_key_store
                     WHERE tenant_id = %s AND provider = %s AND is_active = TRUE
                       AND (scope = %s OR scope = 'shared')
@@ -374,7 +374,7 @@ class APIKeyProxyService:
             else:
                 cursor.execute(
                     """
-                    SELECT id, encrypted_key, base_url, priority, weight
+                    SELECT id, encrypted_key, base_url, priority, weight, cli_settings
                     FROM api_key_store
                     WHERE tenant_id = ? AND provider = ? AND is_active = TRUE
                       AND (scope = ? OR scope = 'shared')
@@ -393,6 +393,7 @@ class APIKeyProxyService:
                 row_dict = row if isinstance(row, dict) else dict(row)
                 encrypted_key = row_dict["encrypted_key"]
                 base_url = row_dict["base_url"]
+                cli_settings = row_dict.get("cli_settings")
                 try:
                     decrypted = self._decrypt_key(encrypted_key)
                 except Exception as e:
@@ -405,6 +406,7 @@ class APIKeyProxyService:
                         "base_url": base_url,
                         "priority": row_dict.get("priority") or 0,
                         "weight": row_dict.get("weight") or 100,
+                        "cli_settings": cli_settings,
                     }
                 )
 
@@ -416,7 +418,12 @@ class APIKeyProxyService:
             if selected is None:
                 return None
 
-            return (selected["api_key"], selected["base_url"], selected["id"])
+            return (
+                selected["api_key"],
+                selected["base_url"],
+                selected["id"],
+                selected.get("cli_settings"),
+            )
         except Exception as e:
             logger.error("Failed to resolve API key for scope: %s", e)
             return None
@@ -1110,8 +1117,12 @@ class APIKeyProxyService:
         provider: str,
         key_ids: list[int],
         exclude_key_ids: Optional[set[int]] = None,
-    ) -> Optional[tuple[str, Optional[str], int]]:
-        """Resolve a real API key from an allowed key-id subset using HA routing."""
+    ) -> Optional[tuple[str, Optional[str], int, Optional[str]]]:
+        """Resolve a real API key from an allowed key-id subset using HA routing.
+
+        Returns:
+            Tuple of (api_key, base_url, key_id, cli_settings) or None if not found.
+        """
         normalized_ids = sorted({int(key_id) for key_id in key_ids if key_id is not None})
         if not normalized_ids:
             return None
@@ -1122,7 +1133,7 @@ class APIKeyProxyService:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                SELECT id, encrypted_key, base_url, priority, weight
+                SELECT id, encrypted_key, base_url, priority, weight, cli_settings
                 FROM api_key_store
                 WHERE tenant_id = {_param()} AND provider = {_param()} AND is_active = TRUE
                   AND id IN ({placeholders})
@@ -1147,6 +1158,7 @@ class APIKeyProxyService:
                     "weight": int(row.get("weight") or 100),
                     "api_key": api_key,
                     "base_url": row.get("base_url"),
+                    "cli_settings": row.get("cli_settings"),
                 }
             )
 
@@ -1157,6 +1169,7 @@ class APIKeyProxyService:
             cast("str", selected["api_key"]),
             cast("Optional[str]", selected.get("base_url")),
             int(selected["id"]),
+            cast("Optional[str]", selected.get("cli_settings")),
         )
 
     def delete_api_key_by_id(self, key_id: int, tenant_id: int) -> bool:
