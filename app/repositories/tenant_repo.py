@@ -54,10 +54,11 @@ class TenantRepository:
             from app.repositories.database import adapt_sql, is_postgresql
 
             with self.db.connection() as conn:
-                cursor = conn.cursor()
-
                 # Insert tenant - use RETURNING for PostgreSQL
                 if is_postgresql():
+                    from psycopg2.extras import RealDictCursor
+
+                    cursor = conn.cursor(cursor_factory=RealDictCursor)
                     cursor.execute(
                         """
                         INSERT INTO tenants
@@ -83,6 +84,7 @@ class TenantRepository:
                     result = cursor.fetchone()
                     tenant_id = result["id"] if result else None
                 else:
+                    cursor = conn.cursor()
                     cursor.execute(
                         """
                         INSERT INTO tenants
