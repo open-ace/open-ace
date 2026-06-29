@@ -208,6 +208,28 @@ docker compose restart open-ace
 
 ### Uninstallation
 
+#### Docker Uninstallation
+
+For pure Docker deployments (without deploy.sh script):
+
+```bash
+# Stop and remove containers
+docker compose down
+
+# Remove images
+docker rmi openace/open-ace:latest postgres:15-alpine
+
+# Remove data volumes (complete cleanup)
+docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
+
+# Remove local configuration (optional)
+rm -rf ~/.open-ace ./logs
+```
+
+#### Script Uninstallation
+
+For deployments using deploy.sh script:
+
 ```bash
 cd /home/open-ace/open-ace
 
