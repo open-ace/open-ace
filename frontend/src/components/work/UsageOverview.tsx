@@ -115,12 +115,12 @@ export const UsageOverview: React.FC = () => {
         {/* Skeleton Loading State */}
         <div className="d-flex justify-content-between align-items-center mb-4">
           <div
-            className="skeleton-title"
-            style={{ width: '200px', height: '32px', background: '#e0e0e0', borderRadius: '4px' }}
+            className="skeleton skeleton-text"
+            style={{ width: '200px', height: '32px' }}
           />
           <div
-            className="skeleton-button"
-            style={{ width: '100px', height: '36px', background: '#e0e0e0', borderRadius: '4px' }}
+            className="skeleton skeleton-text"
+            style={{ width: '100px', height: '36px' }}
           />
         </div>
 
@@ -132,33 +132,19 @@ export const UsageOverview: React.FC = () => {
           <div className="col-md-6">
             <Card>
               <div
-                style={{
-                  width: '120px',
-                  height: '20px',
-                  background: '#e0e0e0',
-                  borderRadius: '4px',
-                  marginBottom: '12px',
-                }}
+                className="skeleton skeleton-text"
+                style={{ width: '120px', height: '20px', marginBottom: '12px' }}
               />
-              <div
-                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
-              />
+              <div className="skeleton skeleton-text" style={{ width: '100%', height: '8px' }} />
             </Card>
           </div>
           <div className="col-md-6">
             <Card>
               <div
-                style={{
-                  width: '120px',
-                  height: '20px',
-                  background: '#e0e0e0',
-                  borderRadius: '4px',
-                  marginBottom: '12px',
-                }}
+                className="skeleton skeleton-text"
+                style={{ width: '120px', height: '20px', marginBottom: '12px' }}
               />
-              <div
-                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
-              />
+              <div className="skeleton skeleton-text" style={{ width: '100%', height: '8px' }} />
             </Card>
           </div>
         </div>
@@ -170,33 +156,19 @@ export const UsageOverview: React.FC = () => {
           <div className="col-md-6">
             <Card>
               <div
-                style={{
-                  width: '120px',
-                  height: '20px',
-                  background: '#e0e0e0',
-                  borderRadius: '4px',
-                  marginBottom: '12px',
-                }}
+                className="skeleton skeleton-text"
+                style={{ width: '120px', height: '20px', marginBottom: '12px' }}
               />
-              <div
-                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
-              />
+              <div className="skeleton skeleton-text" style={{ width: '100%', height: '8px' }} />
             </Card>
           </div>
           <div className="col-md-6">
             <Card>
               <div
-                style={{
-                  width: '120px',
-                  height: '20px',
-                  background: '#e0e0e0',
-                  borderRadius: '4px',
-                  marginBottom: '12px',
-                }}
+                className="skeleton skeleton-text"
+                style={{ width: '120px', height: '20px', marginBottom: '12px' }}
               />
-              <div
-                style={{ width: '100%', height: '8px', background: '#f0f0f0', borderRadius: '4px' }}
-              />
+              <div className="skeleton skeleton-text" style={{ width: '100%', height: '8px' }} />
             </Card>
           </div>
         </div>
@@ -204,17 +176,10 @@ export const UsageOverview: React.FC = () => {
         {/* Skeleton Charts */}
         <Card className="mb-4">
           <div
-            style={{
-              width: '150px',
-              height: '24px',
-              background: '#e0e0e0',
-              borderRadius: '4px',
-              marginBottom: '16px',
-            }}
+            className="skeleton skeleton-text"
+            style={{ width: '150px', height: '24px', marginBottom: '16px' }}
           />
-          <div
-            style={{ width: '100%', height: '250px', background: '#f5f5f5', borderRadius: '4px' }}
-          />
+          <div className="skeleton skeleton-card" style={{ width: '100%', height: '250px' }} />
         </Card>
       </div>
     );
@@ -479,10 +444,10 @@ export const UsageOverview: React.FC = () => {
               />
             ) : (
               <div
+                className="skeleton skeleton-card"
                 style={{
                   width: '100%',
                   height: '250px',
-                  background: '#f5f5f5',
                   borderRadius: '4px',
                   display: 'flex',
                   alignItems: 'center',
@@ -521,10 +486,10 @@ export const UsageOverview: React.FC = () => {
               />
             ) : (
               <div
+                className="skeleton skeleton-card"
                 style={{
                   width: '100%',
                   height: '250px',
-                  background: '#f5f5f5',
                   borderRadius: '4px',
                   display: 'flex',
                   alignItems: 'center',
