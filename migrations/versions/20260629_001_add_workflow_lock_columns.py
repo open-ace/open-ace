@@ -52,6 +52,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("autonomous_workflows", "transient_retry_count")
-    op.drop_column("autonomous_workflows", "locked_by")
-    op.drop_column("autonomous_workflows", "locked_at")
+    # Use batch_alter_table for SQLite compatibility (DROP COLUMN requires batch mode)
+    with op.batch_alter_table("autonomous_workflows") as batch_op:
+        batch_op.drop_column("transient_retry_count")
+        batch_op.drop_column("locked_by")
+        batch_op.drop_column("locked_at")
