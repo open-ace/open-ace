@@ -6,11 +6,11 @@ Tests that validate_proxy_token() checks instance alive status for WebUI session
 instead of fixed expiration time.
 """
 
-import os
 import json
+import os
+from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
-from base64 import b64encode
 
 import pytest
 
@@ -48,8 +48,8 @@ def _encode_payload(payload: dict) -> str:
 
 def _make_signed_token(service, payload: dict) -> str:
     """Create a signed token from payload."""
-    import hmac
     import hashlib
+    import hmac
 
     payload_b64 = _encode_payload(payload)
     signature = hmac.new(
@@ -184,7 +184,7 @@ class TestWebUITokenInstanceCheck:
 
         # Validate - expiration check should pass
         # But agent session needs database check, which will fail in unit test
-        result = service.validate_proxy_token(token)
+        _ = service.validate_proxy_token(token)
         # The result may be None due to database check failure
         # but the important thing is: it went through expiration check, not instance alive check
         # We can verify this by checking that the code doesn't call get_webui_manager
