@@ -33,6 +33,30 @@ import { usePageRefresh } from '@/hooks';
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
 
+// Functional directories that should not be considered as project names
+// These are common subdirectories that indicate project structure, not project identity
+const FUNCTIONAL_DIRS = [
+  'test',
+  'tests',
+  'testing',
+  'spec',
+  'specs',
+  'src',
+  'frontend',
+  'backend',
+  'web',
+  'ui',
+  'api',
+  'server',
+  'lib',
+  'libs',
+  'utils',
+  'scripts',
+  'docs',
+  'config',
+  'data',
+];
+
 // Aggregated stats for a category
 interface CategoryAggregatedStats {
   category_id: number;
@@ -46,6 +70,20 @@ interface CategoryAggregatedStats {
   first_access: string | null;
   last_access: string | null;
   workspaces: ProjectStats[];
+}
+
+// Extract project name from path, skipping functional directories
+// Issue #1371: Auto-categorize by project name instead of generic "uncategorized"
+function extractProjectName(path: string): string {
+  const parts = path.split(/[/\\]/).filter((p) => p);
+  // Search from end, skip functional directories
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i].toLowerCase();
+    if (!FUNCTIONAL_DIRS.includes(part)) {
+      return parts[i]; // Return original case
+    }
+  }
+  return parts[parts.length - 1] || 'unknown'; // Fallback
 }
 
 // Match project path against patterns (case-insensitive, contains match)
@@ -104,35 +142,43 @@ function categorizeProjects(
     result.push(aggregated);
   }
 
-  // Add uncategorized group
+  // Auto-categorize remaining projects by extracted project name (Issue #1371)
   const uncategorizedWorkspaces = stats.filter((s) => !matchedProjectIds.has(s.project_id));
   if (uncategorizedWorkspaces.length > 0) {
-    const uniqueUserIds = new Set(
-      uncategorizedWorkspaces.flatMap((w) => w.user_stats.map((u) => u.user_id))
-    );
+    // Group by extracted project name
+    const projectGroups: Map<string, ProjectStats[]> = new Map();
+    for (const workspace of uncategorizedWorkspaces) {
+      const projectName = extractProjectName(workspace.project_path);
+      if (!projectGroups.has(projectName)) {
+        projectGroups.set(projectName, []);
+      }
+      projectGroups.get(projectName)!.push(workspace);
+    }
 
-    result.push({
-      category_id: -1,
-      category_name: 'uncategorized', // Will be translated in render
-      key_patterns: [],
-      total_workspaces: uncategorizedWorkspaces.length,
-      total_users: uniqueUserIds.size,
-      total_tokens: uncategorizedWorkspaces.reduce((sum, w) => sum + Number(w.total_tokens), 0),
-      total_requests: uncategorizedWorkspaces.reduce((sum, w) => sum + w.total_requests, 0),
-      total_duration_seconds: uncategorizedWorkspaces.reduce(
-        (sum, w) => sum + w.total_duration_seconds,
-        0
-      ),
-      first_access: uncategorizedWorkspaces.reduce(
-        (min, w) => (w.first_access && (!min || w.first_access < min) ? w.first_access : min),
-        null as string | null
-      ),
-      last_access: uncategorizedWorkspaces.reduce(
-        (max, w) => (w.last_access && (!max || w.last_access > max) ? w.last_access : max),
-        null as string | null
-      ),
-      workspaces: uncategorizedWorkspaces,
-    });
+    // Create aggregated stats for each project group
+    for (const [projectName, workspaces] of projectGroups) {
+      const uniqueUserIds = new Set(workspaces.flatMap((w) => w.user_stats.map((u) => u.user_id)));
+
+      result.push({
+        category_id: -1, // Use -1 for auto-generated categories
+        category_name: projectName,
+        key_patterns: [],
+        total_workspaces: workspaces.length,
+        total_users: uniqueUserIds.size,
+        total_tokens: workspaces.reduce((sum, w) => sum + Number(w.total_tokens), 0),
+        total_requests: workspaces.reduce((sum, w) => sum + w.total_requests, 0),
+        total_duration_seconds: workspaces.reduce((sum, w) => sum + w.total_duration_seconds, 0),
+        first_access: workspaces.reduce(
+          (min, w) => (w.first_access && (!min || w.first_access < min) ? w.first_access : min),
+          null as string | null
+        ),
+        last_access: workspaces.reduce(
+          (max, w) => (w.last_access && (!max || w.last_access > max) ? w.last_access : max),
+          null as string | null
+        ),
+        workspaces,
+      });
+    }
   }
 
   return result;
