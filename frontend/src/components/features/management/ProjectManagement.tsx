@@ -190,7 +190,7 @@ export const ProjectManagement: React.FC = () => {
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedWorkspace, setSelectedWorkspace] = useState<ProjectStats | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -291,13 +291,13 @@ export const ProjectManagement: React.FC = () => {
     });
   }, [categorizedStats, sortKey, sortDirection]);
 
-  const toggleExpand = (categoryId: number) => {
+  const toggleExpand = (categoryName: string) => {
     setExpandedCategories((prev) => {
       const next = new Set(prev);
-      if (next.has(categoryId)) {
-        next.delete(categoryId);
+      if (next.has(categoryName)) {
+        next.delete(categoryName);
       } else {
-        next.add(categoryId);
+        next.add(categoryName);
       }
       return next;
     });
@@ -442,14 +442,14 @@ export const ProjectManagement: React.FC = () => {
               </thead>
               <tbody>
                 {sortedCategorizedStats.map((category) => {
-                  const isExpanded = expandedCategories.has(category.category_id);
+                  const isExpanded = expandedCategories.has(category.category_name);
                   const isUncategorized = category.category_id === -1;
 
                   return (
-                    <React.Fragment key={category.category_id}>
+                    <React.Fragment key={category.category_name}>
                       {/* Category Row */}
                       <tr
-                        onClick={() => toggleExpand(category.category_id)}
+                        onClick={() => toggleExpand(category.category_name)}
                         style={{ cursor: 'pointer' }}
                         className={isUncategorized ? 'table-secondary' : ''}
                       >
