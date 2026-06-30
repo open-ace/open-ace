@@ -461,14 +461,10 @@ export const ProjectManagement: React.FC = () => {
                         <td>
                           <div className="d-flex align-items-center">
                             <i
-                              className={`bi ${isUncategorized ? 'bi-folder-x text-muted' : 'bi-folder-fill text-warning'} me-2`}
+                              className={`bi ${isUncategorized ? 'bi-folder2-open text-info' : 'bi-folder-fill text-warning'} me-2`}
                             />
                             <div>
-                              <strong>
-                                {isUncategorized
-                                  ? t('uncategorized', language)
-                                  : category.category_name}
-                              </strong>
+                              <strong>{category.category_name}</strong>
                               {!isUncategorized && category.key_patterns.length > 0 && (
                                 <small className="d-block text-muted">
                                   {category.key_patterns.slice(0, 3).join(', ')}
