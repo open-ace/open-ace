@@ -249,7 +249,8 @@ CREATE TABLE autonomous_workflows (
  content_language text DEFAULT 'en' NOT NULL,
  locked_at TIMESTAMP,
  locked_by text DEFAULT '',
- transient_retry_count integer DEFAULT 0
+ transient_retry_count integer DEFAULT 0,
+ retry_count integer DEFAULT 0
 );
 
 CREATE TABLE compliance_reports (

@@ -360,7 +360,8 @@ CREATE TABLE autonomous_workflows (
     content_language text DEFAULT 'en'::text NOT NULL,
     locked_at timestamp without time zone,
     locked_by text DEFAULT ''::text,
-    transient_retry_count integer DEFAULT 0
+    transient_retry_count integer DEFAULT 0,
+    retry_count integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

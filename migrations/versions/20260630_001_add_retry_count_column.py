@@ -40,9 +40,7 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
         return result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text(
-                "SELECT name FROM pragma_table_info(:table_name) WHERE name = :column_name"
-            ),
+            sa.text("SELECT name FROM pragma_table_info(:table_name) WHERE name = :column_name"),
             {"table_name": table_name, "column_name": column_name},
         )
         return result.fetchone() is not None
