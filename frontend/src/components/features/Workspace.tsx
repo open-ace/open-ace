@@ -597,19 +597,20 @@ export const Workspace: React.FC = () => {
         return url;
       }
 
-      // Single-user mode: use configured URL
-      // Remove any existing port from URL (keep only scheme://hostname)
+      // Single-user mode: use configured URL (preserve port)
+      // Note: Port should NOT be removed - WebUI runs on a specific port (e.g., 3100)
+      // The backend handles hostname replacement via _replace_host_from_request if needed
       let url = config.url;
-      try {
-        const parsedUrl = new URL(url);
-        url = `${parsedUrl.protocol}//${parsedUrl.hostname}`;
-      } catch {
-        // Fallback: if URL parsing fails, use original
-        console.warn('Failed to parse workspace URL:', url);
-      }
       // Add lang parameter for language sync
       const langSeparator = url.includes('?') ? '&' : '?';
       url = `${url}${langSeparator}lang=${encodeURIComponent(language)}&theme=${theme}`;
+      // Add token and openace_url for authentication (same as multi-user mode)
+      if (userWebUI?.success && userWebUI.token) {
+        url = appendParam(url, 'token', userWebUI.token);
+        if (userWebUI.openace_url) {
+          url = appendParam(url, 'openace_url', userWebUI.openace_url);
+        }
+      }
       if (restoreSessionId) {
         url = appendParam(url, 'sessionId', restoreSessionId);
       }
