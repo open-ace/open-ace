@@ -253,7 +253,7 @@ export const ProjectManagement: React.FC = () => {
 
   // Summary statistics (aggregated from categories)
   const summary = useMemo(() => {
-    const totalCategories = categorizedStats.filter((c) => c.category_id !== -1).length;
+    const totalCategories = categorizedStats.length;
     const totalWorkspaces = categorizedStats.reduce((sum, c) => sum + c.total_workspaces, 0);
     const totalUsers = categorizedStats.reduce((sum, c) => sum + c.total_users, 0);
     const totalTokens = categorizedStats.reduce((sum, c) => sum + c.total_tokens, 0);
