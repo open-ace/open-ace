@@ -135,7 +135,7 @@ def api_login():
                     logger.info(
                         f"Pre-starting webui for user {user_id} ({system_account}) on login"
                     )
-                    manager.prestart_user_instance_async(user_id, system_account)
+                    manager.prestart_user_instance_async(user_id, system_account, request.host_url)
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")
 

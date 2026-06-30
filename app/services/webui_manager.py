@@ -1058,7 +1058,9 @@ class WebUIManager:
             if user_id in self._instances:
                 self._instances[user_id].update_activity()
 
-    def prestart_user_instance_async(self, user_id: int, system_account: str):
+    def prestart_user_instance_async(
+        self, user_id: int, system_account: str, host_url: Optional[str] = None
+    ):
         """
         Pre-start a webui instance for a user in background thread.
 
@@ -1068,6 +1070,9 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:5000").
+                      Used to replace container-detected IP with user's actual access IP.
+                      Required for Docker deployments where container cannot detect host's real IP.
         """
         if not self.config.multi_user_mode:
             return  # No pre-start needed in single-user mode
@@ -1084,7 +1089,7 @@ class WebUIManager:
         def start_in_background():
             try:
                 logger.info(f"Pre-starting webui instance for user {user_id} ({system_account})")
-                url, token = self.get_user_webui_url(user_id, system_account)
+                url, token = self.get_user_webui_url(user_id, system_account, host_url)
                 logger.info(f"Pre-started webui for user {user_id}: {url}")
             except Exception as e:
                 logger.error(f"Failed to pre-start webui for user {user_id}: {e}")
