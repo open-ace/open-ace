@@ -1,8 +1,13 @@
-"""Test host_url replacement for Issue #1306.
+"""Test host_url replacement for Issue #1306 and Issue #1357.
 
 Tests that iframe URL uses user's actual access IP (from Flask request)
 instead of container-detected IP (from config.json).
-Also tests that config URL's port is preserved when replacing hostname.
+
+Issue #1357 Design Principle:
+- Single-user mode (docker compose): WebUI and open-ace on same machine
+  URL from request.host_url with fixed port 3100, NOT from config.json
+- Multi-user mode (install.sh): WebUI and open-ace may be on different machines
+  URL from config.json (user-configured) or request.host_url with instance.port
 """
 
 import pytest
@@ -50,19 +55,20 @@ def test_replace_host_from_request():
     assert result == "http://[2001:db8::1]"
     print(f"✓ Case 4: {config_url} + {request_host_url} -> {result}")
 
-    # Test case 5: Preserve port from config URL (single-user mode)
+    # Test case 5: _replace_host_from_request no longer returns port (Issue #1357)
+    # Port is added separately in get_user_webui_url for single-user mode
     config_url = "http://172.17.0.1:3100"
     request_host_url = "http://192.168.1.169:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
-    assert result == "http://192.168.1.169:3100"
-    print(f"✓ Case 5 (preserve port): {config_url} + {request_host_url} -> {result}")
+    assert result == "http://192.168.1.169"
+    print(f"✓ Case 5 (no port in result): {config_url} + {request_host_url} -> {result}")
 
-    # Test case 6: Preserve port with IPv6
+    # Test case 6: IPv6 - no port in result (Issue #1357)
     config_url = "http://[::1]:3100"
     request_host_url = "http://[2001:db8::1]:5000"
     result = manager._replace_host_from_request(config_url, request_host_url)
-    assert result == "http://[2001:db8::1]:3100"
-    print(f"✓ Case 6 (IPv6 with port): {config_url} + {request_host_url} -> {result}")
+    assert result == "http://[2001:db8::1]"
+    print(f"✓ Case 6 (IPv6, no port in result): {config_url} + {request_host_url} -> {result}")
 
 
 def test_get_user_webui_url_with_host_url():
@@ -77,17 +83,17 @@ def test_get_user_webui_url_with_host_url():
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Without host_url: uses config.url directly
+    # Without host_url: uses config.url directly (fallback)
     url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
     assert url1 == "http://172.17.0.1"
-    print(f"✓ Without host_url: {url1}")
+    print(f"✓ Without host_url (fallback): {url1}")
 
-    # With host_url: uses request IP (correct IP)
+    # With host_url: uses request IP with fixed port 3100 (Issue #1357)
     url2, token2 = manager.get_user_webui_url(
         user_id=1, system_account="testuser", host_url="http://192.168.1.169:5000"
     )
-    assert url2 == "http://192.168.1.169"
-    print(f"✓ With host_url: {url2}")
+    assert url2 == "http://192.168.1.169:3100"
+    print(f"✓ With host_url (fixed port 3100): {url2}")
 
     # Verify tokens are generated
     assert token1.startswith("1:0:")
@@ -96,10 +102,14 @@ def test_get_user_webui_url_with_host_url():
 
 
 def test_get_user_webui_url_preserves_port_single_user():
-    """Test that single-user mode preserves port from config URL."""
-    print("\n=== Test: Single-user mode port preservation ===")
+    """Test that single-user mode uses fixed port 3100 (Issue #1357).
 
-    # Config URL with port (typical for single-user mode)
+    In single-user mode (docker compose), WebUI runs on fixed port 3100.
+    URL should come from request.host_url with port 3100, NOT from config.json.
+    """
+    print("\n=== Test: Single-user mode fixed port 3100 ===")
+
+    # Config URL with port (but will be ignored in single-user mode with host_url)
     config = WorkspaceConfig(
         enabled=True,
         url="http://172.17.0.1:3100",  # WebUI port
@@ -108,17 +118,17 @@ def test_get_user_webui_url_preserves_port_single_user():
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Without host_url: uses config.url directly (port preserved)
+    # Without host_url: uses config.url as fallback
     url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
     assert url1 == "http://172.17.0.1:3100"
-    print(f"✓ Without host_url (port preserved): {url1}")
+    print(f"✓ Without host_url (fallback to config.url): {url1}")
 
-    # With host_url: replaces hostname but preserves port
+    # With host_url: uses request IP with fixed port 3100 (Issue #1357)
     url2, token2 = manager.get_user_webui_url(
         user_id=1, system_account="testuser", host_url="http://192.168.1.169:5000"
     )
     assert url2 == "http://192.168.1.169:3100"
-    print(f"✓ With host_url (hostname replaced, port preserved): {url2}")
+    print(f"✓ With host_url (request IP + fixed port 3100): {url2}")
 
     assert token1.startswith("1:0:")
     assert token2.startswith("1:0:")

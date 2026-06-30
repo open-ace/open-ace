@@ -261,45 +261,54 @@ class WebUIManager:
 
         Used in Docker deployments where container cannot detect host's real IP.
 
+        **Design Principle (Issue #1357):**
+        In docker compose deployment, WebUI and open-ace are on the same machine.
+        URL should come from request.host_url (user's actual access IP),
+        NOT from config.json (which may have wrong IPv6 or container-detected IP).
+
+        Port is handled separately:
+        - Single-user mode: fixed port 3100 (WebUI port)
+        - Multi-user mode: dynamic port from instance.port
+
         Examples:
             config_url="http://172.17.0.1:3100", request_host_url="http://192.168.1.169:5000"
-            -> "http://192.168.1.169:3100" (hostname replaced, port preserved from config)
+            -> "http://192.168.1.169" (hostname replaced, no port)
 
             config_url="http://host.docker.internal:3100", request_host_url="http://example.com"
-            -> "http://example.com:3100"
+            -> "http://example.com"
 
             config_url="http://[::1]:3100", request_host_url="http://[2001:db8::1]:5000"
-            -> "http://[2001:db8::1]:3100" (IPv6 preserved with brackets)
+            -> "http://[2001:db8::1]" (IPv6 preserved with brackets)
 
         Args:
             config_url: URL from config.json (may have wrong IP in Docker).
             request_host_url: Host URL from Flask request (user's actual access URL).
 
         Returns:
-            URL with hostname replaced from request, preserving config's port.
+            URL with hostname replaced from request, without port.
         """
         from urllib.parse import urlparse
 
-        config_parsed = urlparse(config_url)
         request_parsed = urlparse(request_host_url)
 
-        # Use request's scheme and hostname, preserving config's scheme if request lacks it
-        scheme = request_parsed.scheme or config_parsed.scheme or "http"
-        hostname = request_parsed.hostname or config_parsed.hostname
-        # Preserve port from config_url (important for single-user mode where WebUI port is fixed)
-        port = config_parsed.port
+        # Use request's scheme and hostname
+        scheme = request_parsed.scheme or "http"
+        hostname = request_parsed.hostname
 
         if hostname:
             # Check if hostname is IPv6 (contains colons and no dots)
             # IPv6 addresses need to be wrapped in brackets in URLs
             if ":" in hostname and "." not in hostname:
-                if port:
-                    return f"{scheme}://[{hostname}]:{port}"
                 return f"{scheme}://[{hostname}]"
-            if port:
-                return f"{scheme}://{hostname}:{port}"
             return f"{scheme}://{hostname}"
-        # Fallback: return original config_url if parsing fails
+        # Fallback: parse config_url if request_host_url parsing fails
+        config_parsed = urlparse(config_url)
+        hostname = config_parsed.hostname
+        scheme = config_parsed.scheme or "http"
+        if hostname:
+            if ":" in hostname and "." not in hostname:
+                return f"{scheme}://[{hostname}]"
+            return f"{scheme}://{hostname}"
         return config_url
 
     def start_cleanup_thread(self):
@@ -501,18 +510,27 @@ class WebUIManager:
             Tuple of (url, token).
         """
         # Determine base URL: use request host if provided, otherwise use config
-        # In single-user mode, preserve the port from config.url (WebUI port is fixed)
+        # Design Principle (Issue #1357):
+        # - Single-user mode (docker compose): WebUI and open-ace on same machine
+        #   URL from request.host_url with fixed port 3100, NOT from config.json
+        # - Multi-user mode (install.sh): WebUI and open-ace may be on different machines
+        #   URL from config.json (user-configured) or request.host_url with instance.port
         if host_url:
             base_url = self._replace_host_from_request(self.config.url, host_url)
         else:
-            # Single-user mode: use configured URL directly (preserve port)
             base_url = self.config.url
 
         if not self.config.multi_user_mode:
-            # Single-user mode: return configured URL with a generated token
-            # The token is needed for iframe auth when making cross-origin API calls
+            # Single-user mode (docker compose): use fixed WebUI port 3100
+            # base_url from _replace_host_from_request has no port
             token = self.generate_token(user_id, 0)
-            return base_url, token
+            if host_url:
+                # Docker compose: URL from request.host_url with fixed port 3100
+                url = f"{base_url}:3100"
+            else:
+                # Fallback: use config.url (for edge cases where host_url not provided)
+                url = base_url
+            return url, token
 
         with self._lock:
             # Check if user already has an instance
