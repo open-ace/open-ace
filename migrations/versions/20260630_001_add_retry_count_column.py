@@ -1,20 +1,23 @@
 """Add retry_count column to autonomous_workflows table
 
-Revision ID: 20260630_001
-Revises: 20260629_001
+Revision ID: 20260630_001_add_retry_count_column
+Revises: 20260629_001_add_workflow_lock_columns
 Create Date: 2026-06-30
 
-Issue: retry API returns Internal server error because PostgreSQL lacks
+Issue: #1376 - retry API returns Internal server error because PostgreSQL lacks
 retry_count column which exists in SQLite CREATE TABLE but not in migration.
 
 Column:
 - retry_count: INTEGER - counter for manual user-triggered retries
 """
 
+import logging
 from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
+
+log = logging.getLogger(__name__)
 
 revision: str = "20260630_001_add_retry_count_column"
 down_revision: Union[str, None] = "20260629_001_add_workflow_lock_columns"
@@ -50,10 +53,13 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     if not _column_exists(conn, "autonomous_workflows", "retry_count"):
+        log.info("Adding retry_count column to autonomous_workflows table")
         op.add_column(
             "autonomous_workflows",
             sa.Column("retry_count", sa.Integer(), nullable=True, server_default="0"),
         )
+    else:
+        log.info("retry_count column already exists, skipping")
 
 
 def downgrade() -> None:
@@ -61,9 +67,12 @@ def downgrade() -> None:
     conn = op.get_bind()
 
     if _column_exists(conn, "autonomous_workflows", "retry_count"):
+        log.info("Removing retry_count column from autonomous_workflows table")
         if conn.dialect.name == "postgresql":
             op.drop_column("autonomous_workflows", "retry_count")
         else:
             # SQLite requires batch_alter_table
             with op.batch_alter_table("autonomous_workflows") as batch_op:
                 batch_op.drop_column("retry_count")
+    else:
+        log.info("retry_count column does not exist, skipping")
