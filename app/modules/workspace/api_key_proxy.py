@@ -1277,15 +1277,34 @@ class APIKeyProxyService:
 
             payload = json.loads(b64decode(payload_b64))
 
-            # Check expiration
-            exp = datetime.fromisoformat(payload["exp"])
-            if datetime.now(timezone.utc).replace(tzinfo=None) > exp:
-                logger.warning("Proxy token expired")
-                return None
-
-            # Check session is still active (skip for terminal sessions)
             session_id = payload.get("session_id")
             session_type = payload.get("session_type", "agent")
+            user_id = payload.get("user_id")
+
+            # For WebUI sessions, check instance alive status instead of fixed expiration
+            if session_id and session_id.startswith("webui:") and user_id:
+                from app.services.webui_manager import get_webui_manager
+
+                manager = get_webui_manager()
+                instance = manager.get_user_instance(user_id)
+                if instance and instance.is_alive():
+                    # Instance alive, skip expiration check
+                    pass
+                else:
+                    logger.warning(
+                        "WebUI instance not alive for session: %s, user_id: %s",
+                        session_id,
+                        user_id,
+                    )
+                    return None
+            else:
+                # For other session types (agent), check fixed expiration time
+                exp = datetime.fromisoformat(payload["exp"])
+                if datetime.now(timezone.utc).replace(tzinfo=None) > exp:
+                    logger.warning("Proxy token expired")
+                    return None
+
+            # Check session is still active (skip for terminal sessions)
             if session_id and session_type == "agent":
                 try:
                     from app.repositories.database import adapt_sql, get_db_connection
