@@ -562,33 +562,34 @@ export const Workspace: React.FC = () => {
           url = `${url}&openace_url=${encodeURIComponent(openaceUrl)}`;
         }
         // Add lang parameter for language sync
-        url = `${url}&lang=${encodeURIComponent(language)}&theme=${theme}`;
+        url = appendParam(url, 'lang', language);
+        url = appendParam(url, 'theme', theme);
         // Add sessionId, encodedProjectName, and toolName if restoring a session
         if (restoreSessionId) {
-          url = `${url}&sessionId=${encodeURIComponent(restoreSessionId)}`;
+          url = appendParam(url, 'sessionId', restoreSessionId);
         }
         if (encodedProjectName) {
-          url = `${url}&encodedProjectName=${encodeURIComponent(encodedProjectName)}`;
+          url = appendParam(url, 'encodedProjectName', encodedProjectName);
         }
         if (toolName) {
-          url = `${url}&toolName=${encodeURIComponent(toolName)}`;
+          url = appendParam(url, 'toolName', toolName);
         }
         // Add settings parameters (Issue #70)
         if (settings?.model) {
-          url = `${url}&model=${encodeURIComponent(settings.model)}`;
+          url = appendParam(url, 'model', settings.model);
         }
         if (settings?.useWebUI !== undefined) {
-          url = `${url}&useWebUI=${settings.useWebUI}`;
+          url = appendParam(url, 'useWebUI', String(settings.useWebUI));
         }
         if (settings?.permissionMode) {
-          url = `${url}&permissionMode=${encodeURIComponent(settings.permissionMode)}`;
+          url = appendParam(url, 'permissionMode', settings.permissionMode);
         }
         // File changes panel visibility (Issue #144)
         const showPanel = useAppStore.getState().showFileChangesPanel;
-        url = `${url}&showFileChangesPanel=${showPanel}`;
+        url = appendParam(url, 'showFileChangesPanel', String(showPanel));
         // Resume hint for CLI session (Issue #669)
         if (resumeHint) {
-          url = `${url}&resumeHint=true`;
+          url = appendParam(url, 'resumeHint', 'true');
         }
         // Remote workspace parameters
         url = appendRemoteParams(url);
@@ -625,7 +626,7 @@ export const Workspace: React.FC = () => {
         url = appendParam(url, 'model', settings.model);
       }
       if (settings?.useWebUI !== undefined) {
-        url = `${url}&useWebUI=${settings.useWebUI}`;
+        url = appendParam(url, 'useWebUI', String(settings.useWebUI));
       }
       if (settings?.permissionMode) {
         url = appendParam(url, 'permissionMode', settings.permissionMode);
