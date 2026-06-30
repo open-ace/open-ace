@@ -262,7 +262,9 @@ class TestWebUIvsAgentBehaviorDifference:
         token = _make_signed_token(service, payload)
 
         result = service.validate_proxy_token(token)
-        assert result is not None, "WebUI session should accept even very old token if instance alive"
+        assert (
+            result is not None
+        ), "WebUI session should accept even very old token if instance alive"
 
     def test_agent_rejects_expiration_even_very_old(self):
         """
