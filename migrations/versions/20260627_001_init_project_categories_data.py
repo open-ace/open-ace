@@ -20,8 +20,6 @@ Migration kept for alembic version chain continuity.
 import logging
 from typing import Sequence, Union
 
-from alembic import op
-
 logger = logging.getLogger(__name__)
 
 revision: str = "20260627_001_init_project_categories"
