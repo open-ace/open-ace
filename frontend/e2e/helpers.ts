@@ -31,14 +31,19 @@ export async function login(page: Page, username = 'admin', password = 'admin123
   }
 
   // Handle ForceChangePasswordModal if it appears (for users with must_change_password=true)
-  const skipButton = page.locator('button:has-text("Skip"), button:has-text("跳过")');
-  // Use waitFor with short timeout to avoid race condition (isVisible is non-waiting)
-  const modalVisible = await skipButton.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false);
+  // The modal is loaded lazily via Suspense, so it may take time to appear in CI environments
+  const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
+  const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
+
+  // Wait for modal to appear (up to 5s for CI environments), then handle it
+  const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
   if (modalVisible) {
+    // Wait for Skip button to be visible and clickable
+    await skipButton.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
     // Click Skip button to dismiss the modal
-    await skipButton.click();
-    // Wait for modal to disappear
-    await page.locator('[role="dialog"]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await skipButton.click({ force: true });
+    // Wait for modal to disappear completely
+    await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 
   // Wait for page to be ready
@@ -50,6 +55,18 @@ export async function login(page: Page, username = 'admin', password = 'admin123
  */
 export async function waitForApp(page: Page) {
   await page.waitForLoadState('networkidle');
+
+  // Fallback: handle ForceChangePasswordModal if login helper missed it
+  const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
+  const isModalVisible = await modalDialog.isVisible().catch(() => false);
+  if (isModalVisible) {
+    const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
+    if (await skipButton.isVisible().catch(() => false)) {
+      await skipButton.click({ force: true });
+      await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    }
+  }
+
   // Wait for main content to be visible
   await page.locator('main').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
 }
