@@ -131,7 +131,11 @@ def create_default_admin(
         print(f"Admin user '{username}' already exists")
         return True
 
-    # Create admin user with must_change_password = True (force password change on first login)
+    # E2E test environment: skip forced password change to avoid modal blocking tests
+    is_e2e_test = os.environ.get("OPENACE_E2E_TEST", "").lower() in ("true", "1", "yes")
+    must_change_pwd = not is_e2e_test
+
+    # Create admin user with must_change_password based on environment
     result = db.create_user_with_is_active(
         username=username,
         password_hash=password_hash,
@@ -140,7 +144,7 @@ def create_default_admin(
         daily_token_quota=10,  # 10M tokens (stored in M units)
         daily_request_quota=10000,
         is_active=True,
-        must_change_password=True,  # Force password change on first login
+        must_change_password=must_change_pwd,
         system_account=system_account,
         tenant_id=tenant_id,
     )
