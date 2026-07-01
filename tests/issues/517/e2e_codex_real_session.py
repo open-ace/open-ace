@@ -193,7 +193,7 @@ def test_codex_exec_conversation():
     if not existing_files:
         # No existing sessions - we need to create one
         # Use the proxy URL and token from the open-ace server
-        proxy_base = f"http://{REMOTE_HOST.replace('.3', '.1')}:5001/api/remote/llm-proxy/v1"
+        proxy_base = f"http://{REMOTE_HOST.replace('.3', '.1')}:19888/api/remote/llm-proxy/v1"
 
         # Get a fresh proxy token - use session_token as auth
         # Actually, let's try running codex exec directly with proper env

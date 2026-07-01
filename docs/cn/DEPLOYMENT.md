@@ -328,17 +328,17 @@ docker compose up -d
 
 ```bash
 docker ps
-# 应显示 0.0.0.0:5001->19888/tcp
+# 应显示 0.0.0.0:19888->19888/tcp
 ```
 
 #### 防火墙设置（如需外网访问）
 
 ```bash
 # Ubuntu/Debian
-sudo ufw allow 5001/tcp
+sudo ufw allow 19888/tcp
 
 # CentOS/RHEL
-sudo firewall-cmd --add-port=5001/tcp --permanent
+sudo firewall-cmd --add-port=19888/tcp --permanent
 sudo firewall-cmd --reload
 ```
 

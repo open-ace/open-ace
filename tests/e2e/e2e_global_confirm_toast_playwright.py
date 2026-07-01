@@ -20,7 +20,7 @@ Run:
   HEADLESS=true  python tests/e2e/e2e_global_confirm_toast_playwright.py   # auto
   HEADLESS=false python tests/e2e/e2e_global_confirm_toast_playwright.py   # demo
 
-  # Point at a Vite dev server (this PR's frontend tree) proxying the API to :5001:
+  # Point at a Vite dev server (this PR's frontend tree) proxying the API to :19888:
   BASE_URL=http://localhost:5173 HEADLESS=true python tests/e2e/e2e_global_confirm_toast_playwright.py
 """
 

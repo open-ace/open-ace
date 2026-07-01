@@ -16,7 +16,7 @@ import time
 
 from playwright.async_api import async_playwright
 
-BASE_URL = os.environ.get("OPENACE_URL", "http://127.0.0.1:5001")
+BASE_URL = os.environ.get("OPENACE_URL", "http://127.0.0.1:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "screenshots", "issues", "341")

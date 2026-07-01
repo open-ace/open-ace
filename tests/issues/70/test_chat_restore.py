@@ -65,7 +65,7 @@ def restart_service():
     # 等待服务就绪
     for _i in range(30):
         time.sleep(1)
-        result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
+        result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
         if result.stdout.strip():
             break
 
@@ -294,7 +294,7 @@ def test_chat_restore():
             # 等待服务就绪
             for i in range(30):
                 time.sleep(1)
-                result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
+                result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
                 if result.stdout.strip():
                     break
 
