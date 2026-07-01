@@ -13,7 +13,7 @@ docker compose up -d --build
 
 这将：
 - 本地构建 open-ace 镜像
-- 启动 open-ace 容器（端口 19888，Issue #1372: AI + ace 谐音端口）
+- 启动 open-ace 容器（端口 19888）
 - 启动 PostgreSQL 数据库（内部端口 5432）
 
 ### 2. 访问应用

@@ -60,7 +60,7 @@ def _get_web_port() -> int:
         except (ValueError, TypeError):
             pass
 
-    # Priority 3: Default (Issue #1372: AI + ace 谐音端口)
+    # Priority 3: Default port
     return 19888
 
 
