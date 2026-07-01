@@ -128,7 +128,7 @@ cd open-ace
 # 构建并启动
 docker compose up -d --build
 
-# 访问 http://localhost:19888 (AI + ace 谐音端口)
+# 访问 http://localhost:19888
 ```
 
 > 💡 生产环境部署请参考 [部署指南](scripts/install-central/docker-method/README.md)
@@ -154,7 +154,7 @@ python3 scripts/init_db.py
 # 5. 启动服务
 python3 server.py
 
-# 访问 http://localhost:19888 (AI + ace 谐音端口)
+# 访问 http://localhost:19888
 ```
 
 ### 默认账号

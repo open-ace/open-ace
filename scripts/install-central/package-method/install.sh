@@ -2674,7 +2674,7 @@ configure_local() {
     echo ""
     prompt_yesno "Install as systemd service?" "y" install_service
     if [ "$install_service" = "yes" ]; then
-        # Get default port from config or use 19888 (Issue #1372: AI + ace 谐音端口)
+        # Get default port from config or use 19888
         local default_port=$(get_web_port_from_config)
         prompt_input "Web server port" "$default_port" SERVICE_PORT
         prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST

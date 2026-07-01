@@ -5,7 +5,7 @@
 #   git clone https://github.com/open-ace/open-ace.git
 #   cd open-ace
 #   docker compose up -d --build
-#   # Access http://localhost:19888 (Issue #1372: AI + ace 谐音端口)
+#   # Access http://localhost:19888
 #
 # Pull pre-built image from Docker Hub:
 #   docker compose up -d
