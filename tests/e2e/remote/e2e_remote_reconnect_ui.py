@@ -301,7 +301,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
 
     # Restart server
     log("Restart", "Restarting open-ace server...")
-    pid = subprocess.run(["lsof :19888"], capture_output=True, text=True).stdout.strip()
+    pid = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True).stdout.strip()
     if pid:
         subprocess.run(["kill", "-9"] + pid.split(), capture_output=True)
     time.sleep(2)

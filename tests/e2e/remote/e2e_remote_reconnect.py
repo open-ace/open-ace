@@ -202,7 +202,7 @@ def test_2_stale_session_after_restart():
 
     # Restart open-ace server
     log("重启", "Restarting open-ace server...")
-    pid = subprocess.run(["lsof :19888"], capture_output=True, text=True).stdout.strip()
+    pid = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True).stdout.strip()
     if pid:
         subprocess.run(["kill", "-9", pid], capture_output=True)
     time.sleep(2)
