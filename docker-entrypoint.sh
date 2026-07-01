@@ -128,7 +128,7 @@ generate_default_config() {
             echo "Auto-detected SERVER_IP: $SERVER_IP"
         fi
     fi
-    PORT="${PORT:-5000}"
+    PORT="${PORT:-19888}"
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -582,7 +582,7 @@ echo "  Open ACE - Starting Gunicorn"
 echo "=========================================="
 
 exec gunicorn \
-    --bind 0.0.0.0:5000 \
+    --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \
     --access-logfile - \

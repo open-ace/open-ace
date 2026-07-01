@@ -65,7 +65,7 @@ frontend/
 # Install dependencies
 npm install
 
-# Start dev server (port 3000, proxies API to localhost:5000)
+# Start dev server (port 3000, proxies API to localhost:19888)
 npm run dev
 
 # Build for production (outputs to ../static/js/dist/)
@@ -78,7 +78,7 @@ npm run test
 npm run lint
 ```
 
-The dev server runs on port 3000 with `/api` and `/auth` requests proxied to the Flask backend on port 5000.
+The dev server runs on port 3000 with `/api` and `/auth` requests proxied to the Flask backend on port 19888.
 
 ## Routing
 
@@ -173,7 +173,7 @@ Help documents also exist per language in `src/components/work/docs/`.
 | Base path | `/static/js/dist/` |
 | Output | `../static/js/dist` |
 | Dev server port | 3000 |
-| API proxy | `/api`, `/auth` → `http://localhost:5000` |
+| API proxy | `/api`, `/auth` → `http://localhost:19888` |
 | Target | ES2020 |
 | Minifier | esbuild (drops console.log in prod) |
 

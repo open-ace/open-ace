@@ -235,7 +235,7 @@ class WebUIManager:
         Examples:
             http://localhost:3100 -> http://localhost
             http://192.168.1.169:3100 -> http://192.168.1.169
-            http://[::1]:5000 -> http://[::1] (IPv6)
+            http://[::1]:19888 -> http://[::1] (IPv6)
             http://localhost -> http://localhost (no change)
 
         Args:
@@ -271,13 +271,13 @@ class WebUIManager:
         - Multi-user mode: dynamic port from instance.port
 
         Examples:
-            config_url="http://172.17.0.1:3100", request_host_url="http://192.168.1.169:5000"
+            config_url="http://172.17.0.1:3100", request_host_url="http://192.168.1.169:19888"
             -> "http://192.168.1.169" (hostname replaced, no port)
 
             config_url="http://host.docker.internal:3100", request_host_url="http://example.com"
             -> "http://example.com"
 
-            config_url="http://[::1]:3100", request_host_url="http://[2001:db8::1]:5000"
+            config_url="http://[::1]:3100", request_host_url="http://[2001:db8::1]:19888"
             -> "http://[2001:db8::1]" (IPv6 preserved with brackets)
 
         Args:
@@ -502,7 +502,7 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
-            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.169:5000").
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.169:19888").
                       Used to replace container-detected IP with user's actual access IP.
                       Required for Docker deployments where container cannot detect host's real IP.
 
@@ -757,7 +757,7 @@ class WebUIManager:
         # Use base_url (user's actual access IP) instead of config.url (container-detected IP)
         openace_api_url = self._remove_port_from_url(base_url)
         server_config = self._load_server_config()
-        server_port = server_config.get("web_port", 5000)
+        server_port = server_config.get("web_port", 19888)
         openace_api_url = f"{openace_api_url}:{server_port}"
 
         # Build child environment first (needed for sudo env passing)
@@ -1088,7 +1088,7 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
-            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:5000").
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:19888").
                       Used to replace container-detected IP with user's actual access IP.
                       Required for Docker deployments where container cannot detect host's real IP.
         """

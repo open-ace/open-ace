@@ -245,7 +245,7 @@ Edit `~/.open-ace/config.json`:
 # Start web server
 python3 server.py
 
-# Visit http://localhost:5000
+# Visit http://localhost:19888
 # Default login: admin / admin123
 ```
 
@@ -369,7 +369,7 @@ Password: admin123
 ### Default Ports
 | Service | Port | URL |
 |---------|------|-----|
-| Web Server | 5000 | http://localhost:5000 |
+| Web Server | 19888 | http://localhost:19888 |
 | Workspace (if enabled) | 3000 | http://localhost:3000 |
 
 ### Configuration Location

@@ -5,7 +5,7 @@
 #   git clone https://github.com/open-ace/open-ace.git
 #   cd open-ace
 #   docker compose up -d --build
-#   # Access http://localhost:5000
+#   # Access http://localhost:19888 (Issue #1372: AI + ace 谐音端口)
 #
 # Pull pre-built image from Docker Hub:
 #   docker compose up -d
@@ -36,7 +36,7 @@ services:
     container_name: open-ace
     restart: unless-stopped
     ports:
-      - "${PORT:-5000}:5000"
+      - "${PORT:-19888}:19888"
       # Multi-user workspace: expose port range for qwen-code-webui instances
       - "${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}:${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}"
     environment:
@@ -73,7 +73,7 @@ services:
       # Recommend using dedicated SSH keys with restricted commands in authorized_keys
       # - ~/.ssh:/root/.ssh:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:19888/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -18,7 +18,7 @@ Browser (HTTPS)
     v
 nginx (443) --- /webui/{port}/* ---> http://127.0.0.1:{port} (qwen-code-webui)
     |
-    +--- /* -----------------------> http://127.0.0.1:5000   (Open ACE Flask)
+    +--- /* -----------------------> http://127.0.0.1:19888   (Open ACE main service)
 ```
 
 Users access their own webui instance through `https://your-domain/webui/3100/`.
@@ -113,7 +113,7 @@ server {
     # Main Open ACE application.
     location / {
         client_max_body_size 50m;      # Agent session sync payloads can exceed the 1MB default.
-        proxy_pass         http://127.0.0.1:5000;
+        proxy_pass         http://127.0.0.1:19888;
         proxy_http_version 1.1;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
@@ -223,7 +223,7 @@ This sets `window.__WEBUI_BASENAME__` before module scripts load, allowing the w
 **Cause**: JavaScript includes two categories of API calls, and both start with `/api/`:
 
 - webui APIs, such as `/api/chat` and `/api/version`, must be proxied to the webui port.
-- Open ACE APIs, such as `/api/remote/sessions/...` and `/api/workspace/...`, must be proxied to the main backend on port 5000.
+- Open ACE APIs, such as `/api/remote/sessions/...` and `/api/workspace/...`, must be proxied to the main backend on port 19888.
 
 Using `sub_filter '`/api/'` rewrites every API path indiscriminately, which sends Open ACE API calls to the webui port and causes 404 responses.
 
@@ -376,7 +376,7 @@ server {
 
     # Main application.
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:19888;
         # ...
     }
 }

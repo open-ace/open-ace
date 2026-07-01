@@ -110,7 +110,7 @@ DB_PASSWORD=openace123
 
 # 服务配置
 INSTALL_SERVICE=yes
-SERVICE_PORT=5000
+SERVICE_PORT=19888
 SERVICE_HOST=0.0.0.0
 EOF
 
@@ -126,7 +126,7 @@ cat > install.conf << 'EOF'
 DEPLOY_USER=$USER
 DEPLOY_PATH=$HOME
 DB_TYPE=sqlite
-SERVICE_PORT=5000
+SERVICE_PORT=19888
 EOF
 
 ./scripts/install-central/package-method/install.sh --config install.conf
@@ -158,7 +158,7 @@ DEPLOY_HOST=192.168.1.100
 DEPLOY_USER=admin
 DEPLOY_PATH=$HOME
 INSTALL_SERVICE=yes
-SERVICE_PORT=5000
+SERVICE_PORT=19888
 SERVICE_HOST=0.0.0.0
 EOF
 
@@ -303,7 +303,7 @@ DB_PASSWORD=openace123    # PostgreSQL 密码
 
 # Systemd 服务配置
 INSTALL_SERVICE=yes       # 是否安装 systemd 服务
-SERVICE_PORT=5000         # Web 服务端口
+SERVICE_PORT=19888         # Web 服务端口
 SERVICE_HOST=0.0.0.0      # Web 服务主机
 
 # 多用户 Workspace 模式（可选）

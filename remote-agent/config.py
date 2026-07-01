@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Default configuration values
 DEFAULTS = {
-    "server_url": "http://localhost:5000",
+    "server_url": "http://localhost:19888",
     "heartbeat_interval": 60,
     "reconnect_base_delay": 1,
     "reconnect_max_delay": 60,

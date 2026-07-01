@@ -47,7 +47,7 @@ def _make_agent() -> RemoteAgent:
     """Create a RemoteAgent with a mock config, bypassing real __init__."""
     config = MagicMock()
     config.machine_id = "test-machine-id-1234"
-    config.server_url = "http://localhost:5000"
+    config.server_url = "http://localhost:19888"
     config.hostname = "testhost"
     config.reconnect_base_delay = 1
     config.reconnect_max_delay = 60

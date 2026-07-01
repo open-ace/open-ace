@@ -18,7 +18,7 @@ Open-ACE 在多用户模式下，每个用户拥有独立的 qwen-code-webui 进
     ▼
 nginx (443) ─── /webui/{port}/* ──→ http://127.0.0.1:{port} (qwen-code-webui)
     │
-    └── /* ──────────────────────→ http://127.0.0.1:5000   (Open-ACE Flask)
+    └── /* ──────────────────────→ http://127.0.0.1:19888   (Open-ACE 主服务)
 ```
 
 用户通过 `https://your-domain/webui/3100/` 访问自己的 webui 实例。
@@ -113,7 +113,7 @@ server {
     # ── Open-ACE 主应用 ──
     location / {
         client_max_body_size 50m;      # Agent 会话同步数据可能超过默认的 1MB 限制
-        proxy_pass         http://127.0.0.1:5000;
+        proxy_pass         http://127.0.0.1:19888;
         proxy_http_version 1.1;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
@@ -216,7 +216,7 @@ sub_filter '<script type="module"'
 
 **原因**：JS 中同时包含两类 API 调用，路径都以 `/api/` 开头：
 - webui API：`/api/chat`、`/api/version` 等 → 需要代理到 webui 端口
-- Open-ACE API：`/api/remote/sessions/...`、`/api/workspace/...` → 需要代理到主后端（5000 端口）
+- Open-ACE API：`/api/remote/sessions/...`、`/api/workspace/...` → 需要代理到主后端（19888 端口）
 
 使用 `sub_filter '`/api/'` 会**无差别重写**所有 API 路径，导致 Open-ACE API 调用被错误代理到 webui 端口而返回 404。
 
@@ -358,7 +358,7 @@ server {
 
     # 主应用
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:19888;
         # ...
     }
 }

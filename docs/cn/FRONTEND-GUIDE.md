@@ -65,7 +65,7 @@ frontend/
 # 安装依赖
 npm install
 
-# 启动开发服务器（端口 3000，API 代理到 localhost:5000）
+# 启动开发服务器（端口 3000，API 代理到 localhost:19888）
 npm run dev
 
 # 生产构建（输出到 ../static/js/dist/）
@@ -78,7 +78,7 @@ npm run test
 npm run lint
 ```
 
-开发服务器运行在 3000 端口，`/api` 和 `/auth` 请求代理到 5000 端口的 Flask 后端。
+开发服务器运行在 3000 端口，`/api` 和 `/auth` 请求代理到 19888 端口的 Flask 后端。
 
 ## 路由
 
@@ -173,7 +173,7 @@ t('common.save', language)
 | Base 路径 | `/static/js/dist/` |
 | 输出目录 | `../static/js/dist` |
 | 开发服务器端口 | 3000 |
-| API 代理 | `/api`、`/auth` → `http://localhost:5000` |
+| API 代理 | `/api`、`/auth` → `http://localhost:19888` |
 | 编译目标 | ES2020 |
 | 压缩器 | esbuild（生产环境移除 console.log） |
 
