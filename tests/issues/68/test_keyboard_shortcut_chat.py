@@ -37,7 +37,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def ensure_service_running():
     """确保服务运行"""
-    result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
+    result = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True)
     if not result.stdout.strip():
         print("启动服务...")
         subprocess.Popen(
@@ -48,7 +48,7 @@ def ensure_service_running():
         )
         for _i in range(30):
             time.sleep(1)
-            result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
+            result = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True)
             if result.stdout.strip():
                 break
         time.sleep(3)
