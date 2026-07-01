@@ -32,7 +32,8 @@ export async function login(page: Page, username = 'admin', password = 'admin123
 
   // Handle ForceChangePasswordModal if it appears (for users with must_change_password=true)
   const skipButton = page.locator('button:has-text("Skip"), button:has-text("跳过")');
-  const modalVisible = await skipButton.isVisible().catch(() => false);
+  // Use waitFor with short timeout to avoid race condition (isVisible is non-waiting)
+  const modalVisible = await skipButton.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false);
   if (modalVisible) {
     // Click Skip button to dismiss the modal
     await skipButton.click();
