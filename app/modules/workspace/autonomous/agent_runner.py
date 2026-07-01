@@ -558,7 +558,7 @@ class AutonomousAgentRunner:
         self.session_manager = session_manager
         self.remote_session_manager = remote_session_manager
         self.server_url = server_url or os.environ.get(
-            "OPENACE_SERVER_URL", "http://localhost:5000"
+            "OPENACE_SERVER_URL", "http://localhost:19888"
         )
         self._activity_callback = activity_callback
         self._on_pid_registered = on_pid_registered

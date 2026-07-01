@@ -60,8 +60,8 @@ def _get_web_port() -> int:
         except (ValueError, TypeError):
             pass
 
-    # Priority 3: Default
-    return 5000
+    # Priority 3: Default (Issue #1372: AI + ace 谐音端口)
+    return 19888
 
 
 def _get_web_host() -> str:

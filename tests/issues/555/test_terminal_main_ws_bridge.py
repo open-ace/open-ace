@@ -54,13 +54,13 @@ def test_backend_url_prefers_external_url_then_request_host(tmp_path, monkeypatc
     from app.repositories import database
 
     monkeypatch.setattr(database, "CONFIG_DIR", tmp_path)
-    assert manager.get_backend_url("http://192.168.1.21:5000/") == "http://192.168.1.21:5000"
+    assert manager.get_backend_url("http://192.168.1.21:19888/") == "http://192.168.1.21:19888"
 
     (tmp_path / "config.json").write_text(
-        '{"external_url": "http://public.example:5000", '
-        '"server": {"server_url": "http://localhost:5000"}}'
+        '{"external_url": "http://public.example:19888", '
+        '"server": {"server_url": "http://localhost:19888"}}'
     )
-    assert manager.get_backend_url("http://192.168.1.21:5000/") == "http://public.example:5000"
+    assert manager.get_backend_url("http://192.168.1.21:19888/") == "http://public.example:19888"
 
 
 def test_backend_url_preserves_legacy_fallback_when_no_context(tmp_path, monkeypatch):

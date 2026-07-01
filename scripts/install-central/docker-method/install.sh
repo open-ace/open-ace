@@ -26,8 +26,8 @@ RUN_USER="${RUN_USER:-open-ace}"
 RUN_USER_UID="${RUN_USER_UID:-}"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/$RUN_USER/open-ace}"
 IMAGE_NAME="${IMAGE_NAME:-open-ace:latest}"
-WEB_PORT="${WEB_PORT:-5000}"
-INTERNAL_WEB_PORT="${INTERNAL_WEB_PORT:-5000}"
+WEB_PORT="${WEB_PORT:-19888}"
+INTERNAL_WEB_PORT="${INTERNAL_WEB_PORT:-19888}"
 DB_USER="${DB_USER:-$RUN_USER}"
 DB_PASSWORD="${DB_PASSWORD:-$(openssl rand -hex 16)}"
 DB_NAME="${DB_NAME:-ace}"
@@ -820,7 +820,7 @@ show_help() {
     echo "  --non-interactive    Run without prompts (use defaults)"
     echo "  --deploy-dir DIR     Deployment directory (default: /opt/open-ace)"
     echo "  --image IMAGE        Docker image name (default: open-ace:latest)"
-    echo "  --port PORT          Web server port (default: 5000)"
+    echo "  --port PORT          Web server port (default: 19888)"
     echo "  --help, -h           Show this help message"
     echo ""
     echo "Environment Variables:"
@@ -2270,7 +2270,7 @@ read_existing_config() {
     # Read from config.json
     if [ -f "$config_file" ]; then
         HOST_NAME=$(jq -r '.host_name' "$config_file" 2>/dev/null || echo "")
-        WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "5000")
+        WEB_PORT=$(jq -r '.server.web_port' "$config_file" 2>/dev/null || echo "19888")
         WORKSPACE_ENABLED=$(jq -r '.workspace.enabled' "$config_file" 2>/dev/null || echo "true")
         WORKSPACE_URL=$(jq -r '.workspace.url' "$config_file" 2>/dev/null || echo "http://localhost:3000")
         WORKSPACE_MULTI_USER_MODE=$(jq -r '.workspace.multi_user_mode' "$config_file" 2>/dev/null || echo "false")

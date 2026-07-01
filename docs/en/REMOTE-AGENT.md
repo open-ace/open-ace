@@ -52,7 +52,7 @@ Config file: `~/.open-ace-agent/config.json`
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| server_url | `http://localhost:5000` | Open ACE server |
+| server_url | `http://localhost:19888` | Open ACE server |
 | heartbeat_interval | 60s | Heartbeat frequency |
 | reconnect_base_delay | 1s | Initial reconnect delay |
 | reconnect_max_delay | 60s | Max reconnect delay (exponential backoff) |

@@ -1963,7 +1963,7 @@ ${current_user_rules}
 
 get_web_port_from_config() {
     local config_file="$HOME/.open-ace/config.json"
-    local default_port="5000"
+    local default_port="19888"
 
     if [ -f "$config_file" ]; then
         # Try to extract port from config.json
@@ -1995,7 +1995,7 @@ run_pip_as_user() {
 install_systemd_service() {
     local target_path="$1"
     local user="$2"
-    local port="${3:-5000}"
+    local port="${3:-19888}"
     local host="${4:-0.0.0.0}"
 
     local service_template="$SOURCE_DIR/scripts/open-ace.service"
@@ -2114,7 +2114,7 @@ install_systemd_service_remote() {
     local remote="$1"
     local target_path="$2"
     local user="$3"
-    local port="${4:-5000}"
+    local port="${4:-19888}"
     local host="${5:-0.0.0.0}"
 
     local service_template="$SOURCE_DIR/scripts/open-ace.service"
@@ -2674,7 +2674,7 @@ configure_local() {
     echo ""
     prompt_yesno "Install as systemd service?" "y" install_service
     if [ "$install_service" = "yes" ]; then
-        # Get default port from config or use 5000
+        # Get default port from config or use 19888 (Issue #1372: AI + ace 谐音端口)
         local default_port=$(get_web_port_from_config)
         prompt_input "Web server port" "$default_port" SERVICE_PORT
         prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
@@ -2741,7 +2741,7 @@ configure_deploy() {
     echo ""
     prompt_yesno "Install as systemd service on remote?" "y" install_service
     if [ "$install_service" = "yes" ]; then
-        prompt_input "Web server port" "5000" SERVICE_PORT
+        prompt_input "Web server port" "19888" SERVICE_PORT
         prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
     fi
 
@@ -2796,7 +2796,7 @@ configure_deploy_remaining() {
     echo ""
     prompt_yesno "Install as systemd service on remote?" "y" install_service
     if [ "$install_service" = "yes" ]; then
-        prompt_input "Web server port" "5000" SERVICE_PORT
+        prompt_input "Web server port" "19888" SERVICE_PORT
         prompt_input "Web server host" "$SERVICE_HOST" SERVICE_HOST
     fi
 
@@ -4161,7 +4161,7 @@ show_help() {
     echo ""
     echo "  # Systemd service configuration (optional)"
     echo "  INSTALL_SERVICE=yes              # Install as systemd service"
-    echo "  SERVICE_PORT=5000                # Web server port"
+    echo "  SERVICE_PORT=19888               # Web server port"
     echo "  SERVICE_HOST=0.0.0.0             # Web server host"
     echo ""
     echo "  # Database configuration (optional - auto-detected if not specified)"

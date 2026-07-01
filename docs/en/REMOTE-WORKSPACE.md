@@ -101,7 +101,7 @@ export OPENACE_ENCRYPTION_KEY="<your-random-32byte-key>"
 sudo systemctl restart open-ace  # or your usual startup command
 
 # 5. Verify the API is reachable
-curl -s http://localhost:5000/api/remote/agent/install.sh | head -5
+curl -s http://localhost:19888/api/remote/agent/install.sh | head -5
 # Should print the install script
 ```
 
@@ -109,12 +109,12 @@ curl -s http://localhost:5000/api/remote/agent/install.sh | head -5
 
 ```bash
 # 1. Admin login
-curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:19888/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # 2. Store an LLM API key (required for remote sessions)
-curl -b cookies.txt -X POST http://<server>:5000/api/remote/api-keys \
+curl -b cookies.txt -X POST http://<server>:19888/api/remote/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "openai",
@@ -124,7 +124,7 @@ curl -b cookies.txt -X POST http://<server>:5000/api/remote/api-keys \
   }'
 
 # 3. Generate a registration token
-curl -b cookies.txt -X POST http://<server>:5000/api/remote/machines/register \
+curl -b cookies.txt -X POST http://<server>:19888/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 # → {"registration_token": "abc123..."}
@@ -134,8 +134,8 @@ curl -b cookies.txt -X POST http://<server>:5000/api/remote/machines/register \
 
 ```bash
 # On the remote machine, run the one-line installer (replace <token> with the registration token from the previous step)
-curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5000 --token <token>
+curl -fsSL http://<server>:19888/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:19888 --token <token>
 
 # If curl returns 404, the server is missing the install-script route — use manual installation (below)
 ```
@@ -144,11 +144,11 @@ curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
 
 ```bash
 # Get the machine_id (from the install output or the admin UI)
-curl -b cookies.txt http://<server>:5000/api/remote/machines
+curl -b cookies.txt http://<server>:19888/api/remote/machines
 
 # Assign a user (get user_id from the user management page)
 curl -b cookies.txt -X POST \
-  http://<server>:5000/api/remote/machines/<machine_id>/assign \
+  http://<server>:19888/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -174,12 +174,12 @@ In the Open ACE admin UI (Manage Mode → Remote Workspace → Remote Machines �
 
 ```bash
 # Admin login to get session_token
-curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:19888/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # Generate a registration token
-curl -b cookies.txt -X POST http://<server>:5000/api/remote/machines/register \
+curl -b cookies.txt -X POST http://<server>:19888/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 ```
@@ -192,8 +192,8 @@ Response:
 **Step 2: Install the Agent on the remote machine**
 
 ```bash
-curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5000 --token <registration-token>
+curl -fsSL http://<server>:19888/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:19888 --token <registration-token>
 ```
 
 > **Note**: If this command returns 404, the server has not yet deployed the install-script route. Confirm the server code is up to date and restarted. See [Manual Installation](#manual-installation) for a workaround.
@@ -211,7 +211,7 @@ Admin does this in the UI (Remote Machine detail modal → Assign Users), or via
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://<server>:5000/api/remote/machines/<machine_id>/assign \
+  http://<server>:19888/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -249,7 +249,7 @@ In the admin UI (Manage Mode → Remote Workspace → API Keys → Add API Key),
 
 ```bash
 # Store an OpenAI API key
-curl -b cookies.txt -X POST http://<server>:5000/api/remote/api-keys \
+curl -b cookies.txt -X POST http://<server>:19888/api/remote/api-keys \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "openai",
@@ -293,14 +293,14 @@ The system has **two independent API-key mechanisms** serving different scenario
 **Linux / macOS:**
 
 ```bash
-curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
-  bash -s -- --server http://<server>:5000 --token <token>
+curl -fsSL http://<server>:19888/api/remote/agent/install.sh | \
+  bash -s -- --server http://<server>:19888 --token <token>
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-Invoke-WebRequest -Uri "http://<server>:5000/api/remote/agent/install.ps1" | Invoke-Expression
+Invoke-WebRequest -Uri "http://<server>:19888/api/remote/agent/install.ps1" | Invoke-Expression
 ```
 
 ### Install Parameters
@@ -316,7 +316,7 @@ Invoke-WebRequest -Uri "http://<server>:5000/api/remote/agent/install.ps1" | Inv
 Example — install Claude Code:
 
 ```bash
-curl -fsSL http://<server>:5000/api/remote/agent/install.sh | \
+curl -fsSL http://<server>:19888/api/remote/agent/install.sh | \
   bash -s -- --server https://ace.example.com \
               --token abc123... \
               --install-cli claude-code \
@@ -441,12 +441,12 @@ Click "Generate Registration Token" in the admin UI, or via API:
 
 ```bash
 # 1. Admin login
-curl -c cookies.txt -X POST http://localhost:5000/api/auth/login \
+curl -c cookies.txt -X POST http://localhost:19888/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}'
 
 # 2. Generate registration token
-curl -b cookies.txt -X POST http://localhost:5000/api/remote/machines/register \
+curl -b cookies.txt -X POST http://localhost:19888/api/remote/machines/register \
   -H "Content-Type: application/json" \
   -d '{"tenant_id": 1}'
 # → {"registration_token": "abc123..."}
@@ -455,7 +455,7 @@ curl -b cookies.txt -X POST http://localhost:5000/api/remote/machines/register \
 ### Listing All Machines
 
 ```bash
-curl -b cookies.txt http://localhost:5000/api/remote/machines
+curl -b cookies.txt http://localhost:19888/api/remote/machines
 ```
 
 Sample response:
@@ -483,7 +483,7 @@ Sample response:
 ```bash
 # Grant a user access to a machine
 curl -b cookies.txt -X POST \
-  http://localhost:5000/api/remote/machines/<machine_id>/assign \
+  http://localhost:19888/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "user"}'
 ```
@@ -520,14 +520,14 @@ Machine admins cannot:
 
 ```bash
 curl -b cookies.txt -X DELETE \
-  http://localhost:5000/api/remote/machines/<machine_id>/assign/<user_id>
+  http://localhost:19888/api/remote/machines/<machine_id>/assign/<user_id>
 ```
 
 ### Unregistering a Machine
 
 ```bash
 curl -b cookies.txt -X DELETE \
-  http://localhost:5000/api/remote/machines/<machine_id>
+  http://localhost:19888/api/remote/machines/<machine_id>
 ```
 
 ---
@@ -585,33 +585,33 @@ Machine admins manage users and sessions on their machine through the API; they 
 
 ```bash
 # Machine admin login to get token
-curl -c cookies.txt -X POST http://<server>:5000/api/auth/login \
+curl -c cookies.txt -X POST http://<server>:19888/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"<username>","password":"<password>"}'
 
 # List machines assigned to me (includes current_user_permission field)
-curl -b cookies.txt http://<server>:5000/api/remote/machines
+curl -b cookies.txt http://<server>:19888/api/remote/machines
 
 # List users assigned to a machine
-curl -b cookies.txt http://<server>:5000/api/remote/machines/<machine_id>/users
+curl -b cookies.txt http://<server>:19888/api/remote/machines/<machine_id>/users
 
 # Assign a user to the machine (permission is forced to user; admin cannot be granted)
 curl -b cookies.txt -X POST \
-  http://<server>:5000/api/remote/machines/<machine_id>/assign \
+  http://<server>:19888/api/remote/machines/<machine_id>/assign \
   -H "Content-Type: application/json" \
   -d '{"user_id": <user_id>, "permission": "admin"}'
 # → permission actually stored as "user"
 
 # Revoke a regular user (cannot revoke an admin; returns 403)
 curl -b cookies.txt -X DELETE \
-  http://<server>:5000/api/remote/machines/<machine_id>/assign/<user_id>
+  http://<server>:19888/api/remote/machines/<machine_id>/assign/<user_id>
 
 # View another user's session on this machine
-curl -b cookies.txt http://<server>:5000/api/remote/sessions/<session_id>
+curl -b cookies.txt http://<server>:19888/api/remote/sessions/<session_id>
 
 # Stop another user's session on this machine
 curl -b cookies.txt -X POST \
-  http://<server>:5000/api/remote/sessions/<session_id>/stop
+  http://<server>:19888/api/remote/sessions/<session_id>/stop
 ```
 
 ---
@@ -646,13 +646,13 @@ curl -b cookies.txt -X POST \
 
 ```bash
 # After login, a user can view the online machines assigned to them
-curl -b cookies.txt http://localhost:5000/api/remote/machines/available
+curl -b cookies.txt http://localhost:19888/api/remote/machines/available
 ```
 
 ### Creating a Remote Session
 
 ```bash
-curl -b cookies.txt -X POST http://localhost:5000/api/remote/sessions \
+curl -b cookies.txt -X POST http://localhost:19888/api/remote/sessions \
   -H "Content-Type: application/json" \
   -d '{
     "machine_id": "<machine_id>",
@@ -677,7 +677,7 @@ Parameters:
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://localhost:5000/api/remote/sessions/<session_id>/chat \
+  http://localhost:19888/api/remote/sessions/<session_id>/chat \
   -H "Content-Type: application/json" \
   -d '{"content": "Please review main.py for me"}'
 ```
@@ -686,7 +686,7 @@ curl -b cookies.txt -X POST \
 
 ```bash
 curl -b cookies.txt \
-  http://localhost:5000/api/remote/sessions/<session_id>
+  http://localhost:19888/api/remote/sessions/<session_id>
 ```
 
 Response includes session state and all output:
@@ -713,7 +713,7 @@ Response includes session state and all output:
 
 ```bash
 curl -b cookies.txt -X POST \
-  http://localhost:5000/api/remote/sessions/<session_id>/stop
+  http://localhost:19888/api/remote/sessions/<session_id>/stop
 ```
 
 ### Pausing / Resuming a Session
@@ -721,11 +721,11 @@ curl -b cookies.txt -X POST \
 ```bash
 # Pause
 curl -b cookies.txt -X POST \
-  http://localhost:5000/api/remote/sessions/<session_id>/pause
+  http://localhost:19888/api/remote/sessions/<session_id>/pause
 
 # Resume
 curl -b cookies.txt -X POST \
-  http://localhost:5000/api/remote/sessions/<session_id>/resume
+  http://localhost:19888/api/remote/sessions/<session_id>/resume
 ```
 
 ---
@@ -931,7 +931,7 @@ Configuration precedence: env vars > config file > built-in defaults.
 
 | Variable | Config key | Default |
 |----------|-----------|---------|
-| `OPENACE_SERVER_URL` | `server_url` | `http://localhost:5000` |
+| `OPENACE_SERVER_URL` | `server_url` | `http://localhost:19888` |
 | `OPENACE_AGENT_TOKEN` | `agent_token` | None |
 | `OPENACE_MACHINE_ID` | `machine_id` | Auto-generated UUID |
 | `OPENACE_HEARTBEAT_INTERVAL` | `heartbeat_interval` | `60` (seconds) |
@@ -962,7 +962,7 @@ Config file path: `~/.open-ace-agent/config.json`
 
 ### Install Script Returns 404
 
-**Symptom**: `curl -fsSL http://<server>:5000/api/remote/agent/install.sh` returns 404.
+**Symptom**: `curl -fsSL http://<server>:19888/api/remote/agent/install.sh` returns 404.
 
 **Cause**: The server is missing the install-script routes (`/api/remote/agent/install.sh` and `/api/remote/agent/files/<path>`).
 
@@ -987,7 +987,7 @@ sudo journalctl -u open-ace-agent -f
 
 1. **Network connectivity**: ensure the remote machine can reach the server port
    ```bash
-   curl -v http://<server>:5000/api/auth/login
+   curl -v http://<server>:19888/api/auth/login
    ```
 
 2. **Registration token expired**: tokens are one-time; once used, they are invalid. If registration failed, ask the admin to generate a new one.

@@ -34,7 +34,7 @@ alembic upgrade head
 # Start web server
 python3 server.py
 
-# Visit http://localhost:5000
+# Visit http://localhost:19888
 ```
 
 ## Docker Deployment
@@ -70,7 +70,7 @@ The deployment script will prompt for:
 |---------|-------------|---------|
 | Run User | User to run the application | `open-ace` |
 | Deploy Directory | Installation directory | `/home/open-ace/open-ace` |
-| Web Port | Web server port | `5000` |
+| Web Port | Web server port | `19888` |
 | Host Name | Server hostname | Auto-detected |
 | Database User | PostgreSQL username | `open-ace` |
 | Database Name | PostgreSQL database name | `ace` |
@@ -280,11 +280,11 @@ Configuration is stored in `~/.open-ace/config.json`:
 
 ### Port Configuration
 
-Open ACE listens on port 5000 by default. To change the port, use the appropriate method based on your deployment type.
+Open ACE listens on port 19888 by default (Issue #1372: AI + ace mnemonic port). To change the port, use the appropriate method based on your deployment type.
 
-#### macOS Port Conflict
+#### macOS Port Conflict (Legacy Note)
 
-macOS Monterey (12) and later versions enable **AirPlay Receiver** by default, which listens on port 5000 and conflicts with Open ACE.
+Historically, macOS Monterey (12) and later versions enabled **AirPlay Receiver** by default, which listened on port 5000 and conflicted with Open ACE. Since we now use port 19888, this conflict is no longer an issue.
 
 **Solutions**:
 1. Disable AirPlay Receiver: System Settings → General → AirDrop & Handoff → Turn off "AirPlay Receiver"
@@ -328,7 +328,7 @@ docker compose up -d
 
 ```bash
 docker ps
-# Should show 0.0.0.0:5001->5000/tcp
+# Should show 0.0.0.0:5001->19888/tcp
 ```
 
 #### Firewall Settings (for external access)
@@ -526,14 +526,12 @@ If startup fails due to port conflict, you can:
 2. **Kill the conflicting process**:
 
 ```bash
-# Find process using port 5000
-lsof -i :5000
+# Find process using port 19888
+lsof -i :19888
 
 # Kill process
 kill -9 <PID>
 ```
-
-**macOS users**: macOS Monterey (12) and later versions enable AirPlay Receiver by default, which listens on port 5000. Consider disabling AirPlay Receiver or changing Open ACE port.
 
 ### Database Locked
 
@@ -555,7 +553,7 @@ chmod -R 755 ~/.open-ace/
 
 1. **Authentication**: Enable user authentication in production
 2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
-3. **Firewall**: Restrict access to port 5000
+3. **Firewall**: Restrict access to port 19888
 4. **Secrets**: Use environment variables for sensitive data
 
 ## Multi-User Workspace Deployment
@@ -695,7 +693,7 @@ WantedBy=multi-user.target
 
 ```bash
 # View running instances
-curl http://localhost:5000/api/workspace/instances
+curl http://localhost:19888/api/workspace/instances
 
 # Check logs
 tail -f /home/open-ace/open-ace/logs/open-ace.log | grep WebUIManager

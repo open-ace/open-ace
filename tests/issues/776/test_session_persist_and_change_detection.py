@@ -28,7 +28,7 @@ class TestPersistSessionMessagesWithEventLog:
         runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
         runner.session_manager = MagicMock()
         runner.remote_session_manager = None
-        runner.server_url = "http://localhost:5000"
+        runner.server_url = "http://localhost:19888"
         runner._activity_callback = None
         runner._local_sessions = {}
         return runner

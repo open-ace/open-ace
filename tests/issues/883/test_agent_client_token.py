@@ -33,7 +33,7 @@ class TestSaveAgentToken:
     def test_save_agent_token_persists_to_file(self, tmp_path):
         """save_agent_token should write agent_token to config.json."""
         config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"server_url": "http://localhost:5000"}))
+        config_file.write_text(json.dumps({"server_url": "http://localhost:19888"}))
 
         config = AgentConfig(config_path=str(config_file))
         config.save_agent_token("abc123def456")
@@ -52,7 +52,7 @@ class TestSaveAgentToken:
         config_file.write_text(
             json.dumps(
                 {
-                    "server_url": "http://localhost:5000",
+                    "server_url": "http://localhost:19888",
                     "agent_token": "old_token",
                 }
             )

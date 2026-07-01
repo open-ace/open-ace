@@ -180,7 +180,7 @@ docker compose up -d --build
 Then open:
 
 ```text
-http://localhost:5000
+http://localhost:19888
 ```
 
 Links:

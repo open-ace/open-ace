@@ -34,7 +34,7 @@ alembic upgrade head
 # 启动 Web 服务器
 python3 server.py
 
-# 访问 http://localhost:5000
+# 访问 http://localhost:19888
 ```
 
 ## Docker 部署
@@ -70,7 +70,7 @@ sudo ./deploy.sh
 |------|------|--------|
 | 运行用户 | 运行应用的用户 | `open-ace` |
 | 部署目录 | 安装目录 | `/home/open-ace/open-ace` |
-| Web 端口 | Web 服务器端口 | `5000` |
+| Web 端口 | Web 服务器端口 | `19888` |
 | 主机名 | 服务器主机名 | 自动检测 |
 | 数据库用户 | PostgreSQL 用户名 | `open-ace` |
 | 数据库名称 | PostgreSQL 数据库名 | `ace` |
@@ -280,11 +280,11 @@ cd /home/open-ace/open-ace
 
 ### 端口配置
 
-Open ACE 默认监听 5000 端口。如需修改端口，可根据部署方式选择以下方法。
+Open ACE 默认监听 19888 端口。如需修改端口，可根据部署方式选择以下方法。
 
 #### macOS 端口冲突
 
-macOS Monterey (12) 及以后版本默认启用 **AirPlay Receiver**，监听 5000 端口，会与 Open ACE 冲突。
+macOS Monterey (12) 及以后版本默认启用 **AirPlay Receiver**，监听 19888 端口，会与 Open ACE 冲突。
 
 **解决方案**：
 1. 关闭 AirPlay Receiver：系统设置 → 通用 → AirDrop 与接力 → 关闭「AirPlay 接收器」
@@ -328,7 +328,7 @@ docker compose up -d
 
 ```bash
 docker ps
-# 应显示 0.0.0.0:5001->5000/tcp
+# 应显示 0.0.0.0:5001->19888/tcp
 ```
 
 #### 防火墙设置（如需外网访问）
@@ -526,14 +526,14 @@ python3 scripts/manage.py local start
 2. **终止占用进程**：
 
 ```bash
-# 查找占用 5000 端口的进程
-lsof -i :5000
+# 查找占用 19888 端口的进程
+lsof -i :19888
 
 # 终止进程
 kill -9 <PID>
 ```
 
-**macOS 用户注意**：macOS Monterey (12) 及以后版本默认启用 AirPlay Receiver，监听 5000 端口。建议关闭 AirPlay Receiver 或修改 Open ACE 端口。
+**macOS 用户注意**：macOS Monterey (12) 及以后版本默认启用 AirPlay Receiver，监听 19888 端口。建议关闭 AirPlay Receiver 或修改 Open ACE 端口。
 
 ### 数据库被锁定
 
@@ -555,7 +555,7 @@ chmod -R 755 ~/.open-ace/
 
 1. **认证**：在生产环境中启用用户认证
 2. **HTTPS**：使用反向代理（nginx/Apache）配合 SSL
-3. **防火墙**：限制对 5000 端口的访问
+3. **防火墙**：限制对 19888 端口的访问
 4. **密钥管理**：使用环境变量存储敏感数据
 
 ## 多用户工作区部署
@@ -695,7 +695,7 @@ WantedBy=multi-user.target
 
 ```bash
 # 查看运行中的实例
-curl http://localhost:5000/api/workspace/instances
+curl http://localhost:19888/api/workspace/instances
 
 # 查看日志
 tail -f /home/open-ace/open-ace/logs/open-ace.log | grep WebUIManager

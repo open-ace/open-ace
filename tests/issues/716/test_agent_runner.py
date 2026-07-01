@@ -27,7 +27,7 @@ class TestAgentRunnerInit:
         runner = AutonomousAgentRunner(
             session_manager=sm,
             remote_session_manager=rsm,
-            server_url="http://test:5000",
+            server_url="http://test:19888",
         )
         assert runner.session_manager is sm
         assert runner.remote_session_manager is rsm

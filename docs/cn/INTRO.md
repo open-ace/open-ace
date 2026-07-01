@@ -245,7 +245,7 @@ python3 cli.py config init
 # 启动 Web 服务器
 python3 server.py
 
-# 访问 http://localhost:5000
+# 访问 http://localhost:19888
 # 默认登录：admin / admin123
 ```
 
@@ -369,7 +369,7 @@ docker compose restart
 ### 默认端口
 | 服务 | 端口 | URL |
 |------|------|-----|
-| Web 服务器 | 5000 | http://localhost:5000 |
+| Web 服务器 | 19888 | http://localhost:19888 |
 | 工作空间（如启用） | 3000 | http://localhost:3000 |
 
 ### 配置位置

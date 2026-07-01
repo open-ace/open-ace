@@ -39,7 +39,7 @@ Before starting, make sure:
 
 ### 2. Login to Platform
 
-1. Open browser, access Open ACE address (e.g., `http://localhost:5000` or your deployment address)
+1. Open browser, access Open ACE address (e.g., `http://localhost:19888` or your deployment address)
 2. Enter **username** and **password**, click login
 
 > 💡 **Default admin account**: `admin` / `admin123` (Please change default password in production!)

@@ -29,28 +29,28 @@ def test_replace_host_from_request():
 
     # Test case 1: Replace container IP with user's actual IP (no port in config)
     config_url = "http://172.17.0.1"
-    request_host_url = "http://192.168.1.169:5000"
+    request_host_url = "http://192.168.1.169:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://192.168.1.169"
     print(f"✓ Case 1: {config_url} + {request_host_url} -> {result}")
 
     # Test case 2: Replace host.docker.internal with domain (no port in config)
     config_url = "http://host.docker.internal"
-    request_host_url = "http://example.com:5000"
+    request_host_url = "http://example.com:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://example.com"
     print(f"✓ Case 2: {config_url} + {request_host_url} -> {result}")
 
     # Test case 3: HTTPS request (no port in config)
     config_url = "http://172.17.0.1"
-    request_host_url = "https://192.168.1.169:5000"
+    request_host_url = "https://192.168.1.169:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "https://192.168.1.169"
     print(f"✓ Case 3: {config_url} + {request_host_url} -> {result}")
 
     # Test case 4: IPv6 (no port in config)
     config_url = "http://[::1]"
-    request_host_url = "http://[2001:db8::1]:5000"
+    request_host_url = "http://[2001:db8::1]:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://[2001:db8::1]"
     print(f"✓ Case 4: {config_url} + {request_host_url} -> {result}")
@@ -58,14 +58,14 @@ def test_replace_host_from_request():
     # Test case 5: _replace_host_from_request no longer returns port (Issue #1357)
     # Port is added separately in get_user_webui_url for single-user mode
     config_url = "http://172.17.0.1:3100"
-    request_host_url = "http://192.168.1.169:5000"
+    request_host_url = "http://192.168.1.169:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://192.168.1.169"
     print(f"✓ Case 5 (no port in result): {config_url} + {request_host_url} -> {result}")
 
     # Test case 6: IPv6 - no port in result (Issue #1357)
     config_url = "http://[::1]:3100"
-    request_host_url = "http://[2001:db8::1]:5000"
+    request_host_url = "http://[2001:db8::1]:19888"
     result = manager._replace_host_from_request(config_url, request_host_url)
     assert result == "http://[2001:db8::1]"
     print(f"✓ Case 6 (IPv6, no port in result): {config_url} + {request_host_url} -> {result}")
@@ -90,7 +90,7 @@ def test_get_user_webui_url_with_host_url():
 
     # With host_url: uses request IP with fixed port 3100 (Issue #1357)
     url2, token2 = manager.get_user_webui_url(
-        user_id=1, system_account="testuser", host_url="http://192.168.1.169:5000"
+        user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
     )
     assert url2 == "http://192.168.1.169:3100"
     print(f"✓ With host_url (fixed port 3100): {url2}")
@@ -125,7 +125,7 @@ def test_get_user_webui_url_preserves_port_single_user():
 
     # With host_url: uses request IP with fixed port 3100 (Issue #1357)
     url2, token2 = manager.get_user_webui_url(
-        user_id=1, system_account="testuser", host_url="http://192.168.1.169:5000"
+        user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
     )
     assert url2 == "http://192.168.1.169:3100"
     print(f"✓ With host_url (request IP + fixed port 3100): {url2}")
