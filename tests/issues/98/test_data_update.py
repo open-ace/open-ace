@@ -17,7 +17,7 @@ from datetime import datetime
 import psycopg2
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 
 
 def get_db_connection():

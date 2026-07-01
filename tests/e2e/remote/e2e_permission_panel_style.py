@@ -28,7 +28,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 # ── Config ──
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 PROXIES = {"http": None, "https": None}
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://127.0.0.1:3101")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

@@ -9,7 +9,7 @@ Dependencies:
 
 Configuration:
     Environment variables (optional):
-        BASE_URL: Target URL (default: http://localhost:5001)
+        BASE_URL: Target URL (default: http://localhost:19888)
         USERNAME: Login username (default: admin)
         PASSWORD: Login password (default: admin123)
         HEADLESS: Run in headless mode (default: true)
@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from playwright.sync_api import sync_playwright
 
 # Configuration - use environment variables or defaults
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

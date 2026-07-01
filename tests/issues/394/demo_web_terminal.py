@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 TEST_USER = "admin"
 TEST_PASS = "admin123"

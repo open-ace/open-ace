@@ -15,7 +15,7 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
 def login(page):

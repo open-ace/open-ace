@@ -36,7 +36,7 @@ import json  # noqa: E402
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-global-confirm-toast")
 

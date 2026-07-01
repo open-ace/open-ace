@@ -19,8 +19,8 @@ stack but responds correctly to curl and to the browser. API calls in this test
 therefore use curl (see project E2E gotchas); the browser drives the UI.
 
 Environment:
-  WEB_BASE  Playwright UI origin  (default http://localhost:5001)
-  API_BASE  curl API origin       (default http://localhost:5001)
+  WEB_BASE  Playwright UI origin  (default http://localhost:19888)
+  API_BASE  curl API origin       (default http://localhost:19888)
   HEADLESS  true|false            (default true)
 
 Run (normal):
@@ -29,7 +29,7 @@ Run (normal):
 
 Run against a local Vite dev server (exercises current source rather than the
 built dist):
-  WEB_BASE=http://localhost:3000 API_BASE=http://localhost:5001 HEADLESS=true \\
+  WEB_BASE=http://localhost:3000 API_BASE=http://localhost:19888 HEADLESS=true \\
     python tests/issues/824/e2e_conversation_history_pagination.py
 """
 
@@ -45,8 +45,8 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.sync_api import sync_playwright
 
-WEB_BASE = os.environ.get("WEB_BASE", os.environ.get("BASE_URL", "http://localhost:5001"))
-API_BASE = os.environ.get("API_BASE", "http://localhost:5001")
+WEB_BASE = os.environ.get("WEB_BASE", os.environ.get("BASE_URL", "http://localhost:19888"))
+API_BASE = os.environ.get("API_BASE", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")

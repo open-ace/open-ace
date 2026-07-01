@@ -14,7 +14,7 @@ from datetime import datetime
 
 import aiohttp
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 
 
 async def test_conversation_history_api():

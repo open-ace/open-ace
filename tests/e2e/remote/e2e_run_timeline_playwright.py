@@ -12,7 +12,7 @@ gevent pywsgi 服务会 502（见项目记忆 urllib→gevent 502）。fetch 复
 cookie，登录后自动携带。
 
 前置条件（与其它 remote E2E 一致）：
-  - 运行中的服务 BASE_URL（默认 http://localhost:5001），且 config 中
+  - 运行中的服务 BASE_URL（默认 http://localhost:19888），且 config 中
     ``run_timeline.enabled=true``（特性默认关闭，需显式开启）
   - 存在管理员账号（默认 admin / admin123）
   - 已安装 playwright chromium
@@ -28,7 +28,7 @@ import uuid
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 ADMIN_USER = os.environ.get("TEST_REAL_USER", "admin")
 ADMIN_PASS = os.environ.get("TEST_REAL_PASS", "admin123")

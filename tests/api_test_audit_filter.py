@@ -5,7 +5,7 @@ import sys
 
 import requests
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 
 
 def main():

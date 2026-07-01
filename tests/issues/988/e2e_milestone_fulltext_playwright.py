@@ -43,7 +43,7 @@ _session = requests.Session()
 _session.trust_env = False
 
 # ── Config ──────────────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-milestone-fulltext-988")
 TEST_USER = os.environ.get("TEST_REAL_USER", "admin")

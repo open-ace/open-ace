@@ -11,7 +11,7 @@ tokenAccumulationWarning / roiNegativeHint / avgTokensPerRequest）。
 tests/e2e/manage/test_manage_full_audit.py。
 
 按项目 E2E 规范：默认 headless 先跑通；HEADLESS=false 可演示。
-依赖：BASE_URL (默认 http://localhost:5001)、TEST_USERNAME/TEST_PASSWORD (默认 admin/admin123)。
+依赖：BASE_URL (默认 http://localhost:19888)、TEST_USERNAME/TEST_PASSWORD (默认 admin/admin123)。
 """
 
 import os
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() != "false"

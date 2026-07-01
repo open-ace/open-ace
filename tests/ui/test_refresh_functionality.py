@@ -13,7 +13,7 @@ import time
 import requests
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = (1400, 900)

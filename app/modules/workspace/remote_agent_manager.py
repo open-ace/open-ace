@@ -1184,7 +1184,8 @@ class RemoteAgentManager:
 
         # Preserve the legacy no-context fallback. Runtime request paths pass
         # request.host_url so forwarded deployments use the browser-visible URL.
-        return "http://localhost:5001"
+        # Issue #1372: 统一端口为 19888
+        return "http://localhost:19888"
 
     def _get_backend_url(self) -> str:
         """Backward-compatible alias for internal callers without request context."""

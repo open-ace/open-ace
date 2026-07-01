@@ -63,7 +63,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 # ── Config ──
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 RECORD_VIDEO = os.environ.get("RECORD_VIDEO", "false").lower() == "true"
 VIDEO_DIR = os.path.join(PROJECT_ROOT, "videos", "e2e-remote-ui")

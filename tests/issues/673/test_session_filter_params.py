@@ -219,7 +219,7 @@ def test_api_endpoint_integration():
     """
     import requests
 
-    BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+    BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
     # 测试 status 过滤
     resp = requests.get(f"{BASE_URL}/api/workspace/sessions", params={"status": "active"})
