@@ -15,7 +15,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 # Add remote-agent directory to path
 remote_agent_dir = Path(__file__).parent.parent.parent.parent / "remote-agent"

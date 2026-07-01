@@ -12,7 +12,7 @@ Actually tests the full lifecycle on a remote test machine:
 7. Verify quota tracks codex usage
 
 This test REQUIRES:
-  - open-ace server running at localhost:5001
+  - open-ace server running at localhost:19888
   - Remote test machine online with agent running
   - codex installed on remote test machine
   - LLM proxy working (proxy token configured)
@@ -193,7 +193,7 @@ def test_codex_exec_conversation():
     if not existing_files:
         # No existing sessions - we need to create one
         # Use the proxy URL and token from the open-ace server
-        proxy_base = f"http://{REMOTE_HOST.replace('.3', '.1')}:5001/api/remote/llm-proxy/v1"
+        proxy_base = f"http://{REMOTE_HOST.replace('.3', '.1')}:19888/api/remote/llm-proxy/v1"
 
         # Get a fresh proxy token - use session_token as auth
         # Actually, let's try running codex exec directly with proper env

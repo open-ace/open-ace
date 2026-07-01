@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
@@ -36,7 +36,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def ensure_service_running():
     """确保服务运行"""
-    result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
+    result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
     if not result.stdout.strip():
         print("启动服务...")
         subprocess.Popen(
@@ -47,7 +47,7 @@ def ensure_service_running():
         )
         for _i in range(30):
             time.sleep(1)
-            result = subprocess.run(["lsof", "-i", ":5001"], capture_output=True, text=True)
+            result = subprocess.run(["lsof :19888"], capture_output=True, text=True)
             if result.stdout.strip():
                 break
         time.sleep(3)

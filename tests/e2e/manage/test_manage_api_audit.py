@@ -10,7 +10,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 s = requests.Session()
 
 issues = []

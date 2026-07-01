@@ -27,7 +27,7 @@ from tests.regression.test_helpers import (
 MODULE_NAME = "login"
 
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
 def test_login_page_loads():

@@ -68,7 +68,7 @@ class TestNormalizeModelProviders:
                 ]
             }
         }
-        proxy_url = "http://test-server:5001/api/remote/llm-proxy/v1"
+        proxy_url = "http://test-server:19888/api/remote/llm-proxy/v1"
         normalize_model_providers(settings, proxy_base_url=proxy_url)
         assert settings["modelProviders"]["openai"][0]["baseUrl"] == proxy_url
 
@@ -77,7 +77,7 @@ class TestNormalizeModelProviders:
         settings = {
             "modelProviders": {"openai": [{"envKey": "CUSTOM_KEY", "id": "glm-5", "name": "glm-5"}]}
         }
-        proxy_url = "http://test-server:5001/api/remote/llm-proxy/v1"
+        proxy_url = "http://test-server:19888/api/remote/llm-proxy/v1"
         normalize_model_providers(settings, proxy_base_url=proxy_url)
         assert settings["modelProviders"]["openai"][0]["baseUrl"] == proxy_url
 

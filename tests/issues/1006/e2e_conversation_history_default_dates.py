@@ -20,7 +20,7 @@ Run:
   BASE_URL=http://localhost:5173 HEADLESS=true  python tests/issues/1006/e2e_conversation_history_default_dates.py
   BASE_URL=http://localhost:5173 HEADLESS=false python tests/issues/1006/e2e_conversation_history_default_dates.py
   # Or against a deployed instance:
-  BASE_URL=http://localhost:5001 HEADLESS=true python tests/issues/1006/e2e_conversation_history_default_dates.py
+  BASE_URL=http://localhost:19888 HEADLESS=true python tests/issues/1006/e2e_conversation_history_default_dates.py
 """
 
 import os
@@ -37,7 +37,7 @@ import tempfile
 import requests  # noqa: F401  (kept for parity with sibling E2E scripts)
 from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001").rstrip("/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")

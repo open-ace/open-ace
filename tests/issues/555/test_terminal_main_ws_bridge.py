@@ -69,7 +69,7 @@ def test_backend_url_preserves_legacy_fallback_when_no_context(tmp_path, monkeyp
     from app.repositories import database
 
     monkeypatch.setattr(database, "CONFIG_DIR", tmp_path)
-    assert manager.get_backend_url() == "http://localhost:5001"
+    assert manager.get_backend_url() == "http://localhost:19888"
 
 
 def test_close_terminal_bridges_closes_active_connections():

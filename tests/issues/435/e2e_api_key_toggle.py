@@ -30,7 +30,7 @@ import requests
 from playwright.sync_api import expect, sync_playwright
 
 # ── 配置 ──────────────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-api-key-toggle")
 

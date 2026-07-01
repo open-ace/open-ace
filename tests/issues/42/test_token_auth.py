@@ -20,7 +20,7 @@ import urllib.parse
 import requests
 
 # Configuration
-OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TOKEN_SECRET = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
