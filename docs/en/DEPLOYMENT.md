@@ -34,7 +34,7 @@ alembic upgrade head
 # Start web server
 python3 server.py
 
-# Visit http://localhost:5000
+# Visit http://localhost:19888
 ```
 
 ## Docker Deployment
@@ -70,7 +70,7 @@ The deployment script will prompt for:
 |---------|-------------|---------|
 | Run User | User to run the application | `open-ace` |
 | Deploy Directory | Installation directory | `/home/open-ace/open-ace` |
-| Web Port | Web server port | `5000` |
+| Web Port | Web server port | `19888` |
 | Host Name | Server hostname | Auto-detected |
 | Database User | PostgreSQL username | `open-ace` |
 | Database Name | PostgreSQL database name | `ace` |
@@ -208,6 +208,28 @@ docker compose restart open-ace
 
 ### Uninstallation
 
+#### Docker Uninstallation
+
+For pure Docker deployments (without deploy.sh script):
+
+```bash
+# Stop and remove containers
+docker compose down
+
+# Remove images
+docker rmi openace/open-ace:latest postgres:15-alpine
+
+# Remove data volumes (complete cleanup)
+docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
+
+# Remove local configuration (optional)
+rm -rf ~/.open-ace ./logs
+```
+
+#### Script Uninstallation
+
+For deployments using deploy.sh script:
+
 ```bash
 cd /home/open-ace/open-ace
 
@@ -255,6 +277,77 @@ Configuration is stored in `~/.open-ace/config.json`:
 |----------|-------------|
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | Email SMTP password |
+
+### Port Configuration
+
+Open ACE listens on port 19888 by default (Issue #1372: AI + ace mnemonic port). To change the port, use the appropriate method based on your deployment type.
+
+#### macOS Port Conflict (Legacy Note)
+
+Historically, macOS Monterey (12) and later versions enabled **AirPlay Receiver** by default, which listened on port 5000 and conflicted with Open ACE. Since we now use port 19888, this conflict is no longer an issue.
+
+**Solutions**:
+1. Disable AirPlay Receiver: System Settings → General → AirDrop & Handoff → Turn off "AirPlay Receiver"
+2. Or change Open ACE port (see methods below)
+
+#### Binary Installation
+
+Modify the configuration file `~/.open-ace/config.json`:
+
+```json
+{
+  "server": {
+    "web_port": 5001,
+    "web_host": "0.0.0.0"
+  }
+}
+```
+
+Restart the service after modification.
+
+#### Docker Installation
+
+**Temporary change** (command line):
+
+```bash
+PORT=5001 docker compose up -d
+```
+
+**Permanent change** (.env file):
+
+```bash
+# Create/edit .env file in project root
+echo "PORT=5001" >> .env
+
+# Restart container
+docker compose down
+docker compose up -d
+```
+
+**Verify port mapping**:
+
+```bash
+docker ps
+# Should show 0.0.0.0:19888->19888/tcp
+```
+
+#### Firewall Settings (for external access)
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 19888/tcp
+
+# CentOS/RHEL
+sudo firewall-cmd --add-port=19888/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### Summary
+
+| Method | Configuration Location | How to Change |
+|--------|------------------------|---------------|
+| Binary | `~/.open-ace/config.json` | Modify `server.web_port` |
+| Docker | Environment variable `PORT` | `.env` file or command line |
 
 ## Deployment Scenarios
 
@@ -427,9 +520,14 @@ python3 scripts/manage.py local start
 
 ### Port Already in Use
 
+If startup fails due to port conflict, you can:
+
+1. **Change Open ACE port** - See [Port Configuration](#port-configuration)
+2. **Kill the conflicting process**:
+
 ```bash
-# Find process using port 5000
-lsof -i :5000
+# Find process using port 19888
+lsof -i :19888
 
 # Kill process
 kill -9 <PID>
@@ -455,7 +553,7 @@ chmod -R 755 ~/.open-ace/
 
 1. **Authentication**: Enable user authentication in production
 2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
-3. **Firewall**: Restrict access to port 5000
+3. **Firewall**: Restrict access to port 19888
 4. **Secrets**: Use environment variables for sensitive data
 
 ## Multi-User Workspace Deployment
@@ -595,7 +693,7 @@ WantedBy=multi-user.target
 
 ```bash
 # View running instances
-curl http://localhost:5000/api/workspace/instances
+curl http://localhost:19888/api/workspace/instances
 
 # Check logs
 tail -f /home/open-ace/open-ace/logs/open-ace.log | grep WebUIManager

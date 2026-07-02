@@ -11,25 +11,25 @@
 .auto-workflow-item {
   cursor: pointer;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
-  background: #ffffff;
+  background: var(--bg-primary);
 }
 
 .auto-workflow-item:hover {
   z-index: 1;
   transform: translateY(-1px);
-  background: #f3f7fd;
+  background: var(--bg-tertiary);
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 
 .auto-workflow-item-selected {
-  background: #d2e6ff;
+  background: rgba(14, 165, 233, 0.15);
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 10px 20px rgba(37, 99, 235, 0.1);
 }
 
 .auto-workflow-item-selected:hover {
-  background: #c6ddff;
+  background: rgba(14, 165, 233, 0.25);
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 10px 20px rgba(37, 99, 235, 0.1);
@@ -44,20 +44,20 @@
 }
 
 .auto-workflow-item-compact {
-  background: #ffffff;
+  background: var(--bg-primary);
 }
 
 .auto-workflow-item-compact.auto-workflow-item-selected {
-  background: #d2e6ff;
+  background: rgba(14, 165, 233, 0.15);
 }
 
 .auto-workflow-item-compact:hover {
-  background: #f3f7fd;
+  background: var(--bg-tertiary);
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
 }
 
 .auto-workflow-item-compact.auto-workflow-item-selected:hover {
-  background: #c6ddff;
+  background: rgba(14, 165, 233, 0.25);
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 10px 20px rgba(37, 99, 235, 0.1);
@@ -94,25 +94,25 @@
 
 .auto-workflow-batch {
   border-bottom: 1px solid rgba(96, 165, 250, 0.22) !important;
-  background: #ffffff;
+  background: var(--bg-primary);
 }
 
 .auto-workflow-batch:hover {
   z-index: 2;
   transform: translateY(-1px);
-  background: #f3f7fd;
+  background: var(--bg-tertiary);
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 
 .auto-workflow-batch-selected {
-  background: #d2e6ff;
+  background: rgba(14, 165, 233, 0.15);
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 14px 30px rgba(59, 130, 246, 0.14);
 }
 
 .auto-workflow-batch-selected:hover {
-  background: #c6ddff;
+  background: rgba(14, 165, 233, 0.25);
   box-shadow:
     inset 3px 0 0 rgba(37, 99, 235, 0.95),
     0 14px 30px rgba(59, 130, 246, 0.14);
@@ -200,7 +200,7 @@
 
 .auto-workflow-batch-children {
   padding: 0.35rem 0;
-  background: #ffffff;
+  background: var(--bg-primary);
 }
 
 @media (max-width: 576px) {

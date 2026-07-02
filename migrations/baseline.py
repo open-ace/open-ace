@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
 BASELINE_REVISION = "baseline_2026_06_23"
-HEAD_REVISION = "001_fix_auto_provision"
+HEAD_REVISION = "20260630_001_add_retry_count_column"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE_SCHEMA_DIR = _PROJECT_ROOT / "schema" / "baselines"

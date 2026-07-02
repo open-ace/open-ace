@@ -84,7 +84,13 @@ export const SecurityCenter: React.FC = () => {
   // --- Page Refresh Control ---
   const pageRefresh = usePageRefresh({
     page: '/manage/security',
-    refreshKey: createMatcherConfig([['security']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['admin', 'security-settings'],
+        ['admin', 'audit-thresholds'],
+      ],
+      'prefix'
+    ),
     interval: 0, // Manual refresh only
     enabled: false,
   });

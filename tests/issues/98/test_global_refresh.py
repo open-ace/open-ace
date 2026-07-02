@@ -12,7 +12,7 @@ import asyncio
 
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 
 
 async def test_global_refresh():

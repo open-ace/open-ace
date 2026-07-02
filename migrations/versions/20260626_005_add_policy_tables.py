@@ -1,7 +1,7 @@
 """add central policy & approval tables
 
 Revision ID: 20260626_005_add_policy_tables
-Revises: 20260626_004_fix_tenant_quotas_overflow
+Revises: 20260630_001_add_retry_count_column
 Create Date: 2026-06-26
 
 Adds the central policy & approval MVP tables (see plan §2.2):
@@ -26,7 +26,7 @@ from typing import Sequence
 from alembic import op
 
 revision: str = "20260626_005_add_policy_tables"
-down_revision: str | None = "20260626_004_fix_tenant_quotas_overflow"
+down_revision: str | None = "20260630_001_add_retry_count_column"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

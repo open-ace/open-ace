@@ -31,7 +31,7 @@ sys.path.insert(0, PROJECT_ROOT)
 import requests
 
 # ── Config ──
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-reconnect")
 TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
@@ -202,7 +202,7 @@ def test_2_stale_session_after_restart():
 
     # Restart open-ace server
     log("重启", "Restarting open-ace server...")
-    pid = subprocess.run(["lsof", "-ti:5001"], capture_output=True, text=True).stdout.strip()
+    pid = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True).stdout.strip()
     if pid:
         subprocess.run(["kill", "-9", pid], capture_output=True)
     time.sleep(2)

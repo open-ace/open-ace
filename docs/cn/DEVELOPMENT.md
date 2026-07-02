@@ -100,11 +100,11 @@ npm install
 ### 开发服务器
 
 ```bash
-# 在 3000 端口启动开发服务器（API 代理到 localhost:5000）
+# 在 3000 端口启动开发服务器（API 代理到 localhost:19888）
 npm run dev
 ```
 
-前端需要后端在 5000 端口运行才能正常工作。
+前端需要后端在 19888 端口运行才能正常工作。
 
 ### 构建
 
@@ -275,7 +275,7 @@ async def test_login():
         page = await browser.new_page()
 
         # 导航到登录页
-        await page.goto('http://localhost:5000/login')
+        await page.goto('http://localhost:19888/login')
 
         # 填写表单
         await page.fill('#username', 'admin')
@@ -283,7 +283,7 @@ async def test_login():
         await page.click('button[type="submit"]')
 
         # 等待重定向
-        await page.wait_for_url('http://localhost:5000/')
+        await page.wait_for_url('http://localhost:19888/')
 
         await browser.close()
 ```

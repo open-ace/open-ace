@@ -35,7 +35,7 @@ def test_install_script_reports_missing_python(tmp_path):
             "/bin/bash",
             str(script),
             "--server",
-            "http://127.0.0.1:5000",
+            "http://127.0.0.1:19888",
             "--token",
             "test-token",
         ],

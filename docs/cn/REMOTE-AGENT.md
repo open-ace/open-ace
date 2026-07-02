@@ -52,7 +52,7 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 
 | 设置 | 默认值 | 说明 |
 |------|--------|------|
-| server_url | `http://localhost:5000` | Open ACE 服务器 |
+| server_url | `http://localhost:19888` | Open ACE 服务器 |
 | heartbeat_interval | 60s | 心跳频率 |
 | reconnect_base_delay | 1s | 初始重连延迟 |
 | reconnect_max_delay | 60s | 最大重连延迟（指数退避） |

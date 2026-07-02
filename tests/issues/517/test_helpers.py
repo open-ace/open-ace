@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
 import requests
 
 # ── Configuration ──────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 REMOTE_TEST_HOST = os.environ.get("REMOTE_TEST_HOST", "192.168.64.3")

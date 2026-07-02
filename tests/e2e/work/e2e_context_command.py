@@ -30,7 +30,7 @@ APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 from playwright.sync_api import sync_playwright
 
 # ── 配置 ──────────────────────────────────────────────
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-context")

@@ -20,7 +20,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 import requests
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 
 # Track test results
 RESULTS = []

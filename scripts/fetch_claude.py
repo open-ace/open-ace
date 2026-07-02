@@ -14,7 +14,7 @@ import re
 import socket
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -65,7 +65,7 @@ def get_agent_session_id_from_path(project_path: str) -> Optional[str]:
 
 
 def parse_timestamp(ts_str: str) -> str:
-    """Extract date from ISO timestamp."""
+    """Extract date from ISO timestamp, converting UTC to local time."""
     if not ts_str:
         return "unknown"
     try:
@@ -77,6 +77,8 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+            # UTC time - convert to local time for date extraction
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d")
@@ -1299,11 +1301,12 @@ if __name__ == "__main__":
         config_path = Path(args.config)
         if config_path.exists():
             # Load config and set DATABASE_URL environment variable
+            # Only set if not already configured (Docker provides DATABASE_URL)
             with open(config_path) as f:
                 config_data = json.load(f)
             db_config = config_data.get("database", {})
             db_url = db_config.get("url")
-            if db_url:
+            if db_url and not os.environ.get("DATABASE_URL"):
                 os.environ["DATABASE_URL"] = db_url
                 print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 

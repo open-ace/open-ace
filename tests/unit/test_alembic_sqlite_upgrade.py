@@ -94,7 +94,9 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     conn.close()
 
     assert version is not None
-    # Migration chain: ... -> 004_fix_tenant_quotas_overflow -> 005_add_policy_tables
+    # Migration chain: 001_run_timeline -> 002_content_language -> 003_status_index
+    # -> 001_add_project_categories -> 004_fix_tenant_quotas_overflow -> 001_init_project_categories
+    # -> 001_add_workflow_lock_columns -> 001_add_retry_count_column -> 005_add_policy_tables
     assert version[0] == "20260626_005_add_policy_tables"
     if has_session_messages:
         assert "source" in columns

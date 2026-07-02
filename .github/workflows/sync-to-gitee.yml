@@ -29,23 +29,34 @@ jobs:
           git fetch gitee --prune
 
       - name: Push main branch to Gitee
-        run: |
-          # Push main branch with force-with-lease (safer than force)
-          git push gitee origin/main:main --force-with-lease || \
-          git push gitee origin/main:main --force
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            git push gitee origin/main:main --force-with-lease || \
+            git push gitee origin/main:main --force
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
       - name: Push other branches to Gitee
-        run: |
-          # Push all other branches
-          git push gitee --all --force || true
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: git push gitee --all --force
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
       - name: Push tags to Gitee
-        run: |
-          git push gitee --tags --force
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: git push gitee --tags --force
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 

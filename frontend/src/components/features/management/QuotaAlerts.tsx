@@ -73,7 +73,13 @@ export const QuotaAlerts: React.FC = () => {
   // Page refresh control - manages manual refresh for quota and alerts data
   const pageRefresh = usePageRefresh({
     page: '/manage/quota',
-    refreshKey: createMatcherConfig([['quota'], ['alerts']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['admin', 'quota'],
+        ['admin', 'quota-stats'],
+      ],
+      'prefix'
+    ),
     interval: 0, // Manual refresh only for configuration data
     enabled: false,
   });
@@ -960,13 +966,7 @@ export const QuotaAlerts: React.FC = () => {
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('quotaAndAlerts', language)}</h2>
         <div className="d-flex gap-2">
-          <PageRefreshControl
-            refresh={pageRefresh}
-            showAutoRefreshToggle={false}
-            showIntervalSelector={false}
-            compact={true}
-            showLastRefreshTime={true}
-          />
+          <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
           {activeTab === 'quota' && unreadCount > 0 && (
             <Button variant="outline-info" size="sm" onClick={() => setActiveTab('alerts')}>
               <i className="bi bi-bell me-1" />

@@ -8,7 +8,7 @@ This document collects common issues and solutions users may encounter when usin
 
 **1. Installation & Deployment**
 - Docker startup fails: Database connection timeout
-- Port conflict: Port 5000 is in use
+- Port conflict: Port 19888 is in use
 - SECRET_KEY not set: Production startup fails
 - Config file not found
 
@@ -60,16 +60,16 @@ This document collects common issues and solutions users may encounter when usin
 
 ---
 
-### Port conflict: Port 5000 is in use
+### Port conflict: Port 19888 is in use
 
-**Symptom:** Startup error: `Error: Address already in use (0.0.0.0:5000)`
+**Symptom:** Startup error: `Error: Address already in use (0.0.0.0:19888)`
 
 **Possible causes:**
-1. Another service is using port 5000
+1. Another service is using port 19888
 2. Previous Open ACE process did not fully stop
 
 **Solutions:**
-1. Check port usage: `lsof -i :5000` or `netstat -tlnp | grep 5000`
+1. Check port usage: `lsof -i :19888` or `netstat -tlnp | grep 19888`
 2. Stop the process using the port: `kill -9 <PID>` or `docker compose down`
 3. Start with different port: `PORT=8080 docker compose up -d`
 

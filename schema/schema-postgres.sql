@@ -357,7 +357,11 @@ CREATE TABLE autonomous_workflows (
     main_session_id text DEFAULT ''::text NOT NULL,
     review_session_id text DEFAULT ''::text NOT NULL,
     test_session_id text DEFAULT ''::text NOT NULL,
-    content_language text DEFAULT 'en'::text NOT NULL
+    content_language text DEFAULT 'en'::text NOT NULL,
+    locked_at timestamp without time zone,
+    locked_by text DEFAULT ''::text,
+    transient_retry_count integer DEFAULT 0,
+    retry_count integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

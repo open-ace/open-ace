@@ -1774,16 +1774,19 @@ def get_user_webui_url():
         system_account = user.get("system_account") or user.get("username")
 
         # Get or create user's webui instance
-        url, token = manager.get_user_webui_url(int(user_id), str(system_account))
+        # Pass host_url to ensure iframe uses user's actual access IP (Issue #1306)
+        from flask import request as flask_request
+
+        host_url = flask_request.host_url.rstrip("/")
+        url, token = manager.get_user_webui_url(int(user_id), str(system_account), host_url)
 
         # Update activity timestamp
         manager.update_user_activity(user_id)
 
         # Build Open-ACE API URL for iframe integration
         # This is needed so qwen-code-webui can call Open-ACE APIs
-        from flask import request as flask_request
-
-        openace_url = flask_request.host_url.rstrip("/")
+        # Note: flask_request already imported above for host_url
+        openace_url = host_url
 
         # For HTTPS requests in multi-user mode, convert URL to relative path
         # to avoid mixed content blocking (HTTP iframe in HTTPS page)

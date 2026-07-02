@@ -136,6 +136,58 @@ describe('PageRefreshControl', () => {
 
       expect(screen.getByTestId('refresh-error-indicator')).toBeInTheDocument();
     });
+
+    it('should render static clock icon when no dropdown content in compact mode', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      // Should render static clock icon instead of dropdown toggle
+      expect(screen.getByTestId('refresh-clock-icon')).toBeInTheDocument();
+      expect(screen.queryByTestId('dropdown-toggle')).not.toBeInTheDocument();
+    });
+
+    it('should show tooltip on static clock icon with last refresh time', () => {
+      const mockRefresh = createMockRefresh();
+      mockRefresh.lastRefreshTime = Date.now() - 120000;
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+          showLastRefreshTime={true}
+        />
+      );
+
+      const clockIcon = screen.getByTestId('refresh-clock-icon');
+      expect(clockIcon).toHaveAttribute('title');
+      expect(clockIcon.getAttribute('title')).toContain('Last Refresh');
+    });
+
+    it('should still render manual refresh button when no dropdown content', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      // Manual refresh button should always be present
+      expect(screen.getByTestId('manual-refresh-button')).toBeInTheDocument();
+    });
   });
 
   describe('manual refresh only mode', () => {

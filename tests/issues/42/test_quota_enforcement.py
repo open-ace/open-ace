@@ -21,7 +21,7 @@ import time
 import requests
 
 # Configuration
-OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 

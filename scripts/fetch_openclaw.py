@@ -16,7 +16,7 @@ import socket
 import sys
 import uuid
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -94,7 +94,6 @@ def parse_timestamp(ts_str: str) -> str:
         return "unknown"
     try:
         if ts_str.endswith("Z"):
-            # UTC time - convert to local time (assuming UTC+8 for China)
             if "." in ts_str:
                 base, rest = ts_str.rsplit(".", 1)
                 ms = rest.rstrip("Z")
@@ -102,14 +101,11 @@ def parse_timestamp(ts_str: str) -> str:
                 dt = datetime.strptime(f"{base}.{ms}Z", "%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 dt = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
-            # Convert UTC to local time (UTC+8 for China)
-            from datetime import timedelta
-
-            local_dt = dt + timedelta(hours=8)
-            return local_dt.strftime("%Y-%m-%d")
+            # UTC time - convert to local time for date extraction
+            dt = dt.replace(tzinfo=timezone.utc).astimezone()
         else:
             dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            return dt.strftime("%Y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
     except Exception:
         return "unknown"
 
@@ -1843,11 +1839,12 @@ def main():
         config_path = Path(args.config)
         if config_path.exists():
             # Load config and set DATABASE_URL environment variable
+            # Only set if not already configured (Docker provides DATABASE_URL)
             with open(config_path) as f:
                 config_data = json.load(f)
             db_config = config_data.get("database", {})
             db_url = db_config.get("url")
-            if db_url:
+            if db_url and not os.environ.get("DATABASE_URL"):
                 os.environ["DATABASE_URL"] = db_url
                 print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 

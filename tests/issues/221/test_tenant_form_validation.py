@@ -25,7 +25,7 @@ import sys
 from playwright.async_api import async_playwright
 
 # Configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 SESSION_TOKEN = os.environ.get("SESSION_TOKEN", "")
 SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "./screenshots/issues/221")
 

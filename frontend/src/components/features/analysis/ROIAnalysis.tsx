@@ -180,6 +180,9 @@ export const ROIAnalysis: React.FC = () => {
     refreshKey: createMatcherConfig([['analysis', 'roi']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
+    // Note: fetchData defined below, use arrow function to avoid hoisting issues
+    // forceRefresh=true to bypass cache and fetch fresh data
+    onRefresh: () => fetchData(true),
   });
 
   // Initialize dates
@@ -466,13 +469,7 @@ export const ROIAnalysis: React.FC = () => {
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>{t('roiAnalysis', language)}</h2>
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
 
       {/* Filters */}

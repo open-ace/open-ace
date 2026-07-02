@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
   test.beforeEach(async ({ page }) => {
     // Login first
-    await page.goto('http://localhost:5001/login');
+    await page.goto('http://localhost:19888/login');
     await page.fill('input[name="username"]', 'admin');
     await page.fill('input[name="password"]', 'admin123');
     await page.click('button[type="submit"]');
@@ -24,7 +24,7 @@ test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
 
   test('should show quota exceeded warning when quota is over limit', async ({ page }) => {
     // Navigate to workspace
-    await page.goto('http://localhost:5001/work/workspace');
+    await page.goto('http://localhost:19888/work/workspace');
 
     // Wait for workspace to load
     await page.waitForSelector('.workspace', { timeout: 15000 });
@@ -39,7 +39,7 @@ test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
 
   test('should display fullscreen toggle button', async ({ page }) => {
     // Navigate to workspace
-    await page.goto('http://localhost:5001/work/workspace');
+    await page.goto('http://localhost:19888/work/workspace');
 
     // Wait for workspace header to load
     await page.waitForSelector('.page-header', { timeout: 15000 });
@@ -54,7 +54,7 @@ test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
 
   test('should enter fullscreen mode when button clicked', async ({ page }) => {
     // Navigate to workspace
-    await page.goto('http://localhost:5001/work/workspace');
+    await page.goto('http://localhost:19888/work/workspace');
 
     // Wait for page header
     await page.waitForSelector('.page-header', { timeout: 15000 });
@@ -77,7 +77,7 @@ test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
   test('should show toast notification when quota exceeded', async ({ page }) => {
     // This test verifies the toast notification component is available
     // Navigate to workspace
-    await page.goto('http://localhost:5001/work/workspace');
+    await page.goto('http://localhost:19888/work/workspace');
 
     // Wait for workspace to load
     await page.waitForSelector('.workspace', { timeout: 15000 });

@@ -34,80 +34,88 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Create the run-timeline tables and indexes."""
-    op.create_table(
-        "agent_runs",
-        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("run_id", sa.Text, nullable=False, unique=True),
-        sa.Column("session_id", sa.Text, nullable=False),
-        sa.Column("user_id", sa.Integer),
-        sa.Column("tenant_id", sa.Integer),
-        sa.Column("machine_id", sa.Text),
-        sa.Column("tool_name", sa.Text),
-        sa.Column("provider", sa.Text),
-        sa.Column("cli_tool", sa.Text),
-        sa.Column("model", sa.Text),
-        sa.Column("status", sa.Text, server_default="active"),
-        sa.Column("started_at", sa.TIMESTAMP),
-        sa.Column("ended_at", sa.TIMESTAMP),
-        sa.Column("total_tokens", sa.Integer, server_default="0"),
-        sa.Column("total_input_tokens", sa.Integer, server_default="0"),
-        sa.Column("total_output_tokens", sa.Integer, server_default="0"),
-        sa.Column("total_requests", sa.Integer, server_default="0"),
-        sa.Column("metadata", sa.Text),
-        sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-    )
-    op.create_index("idx_agent_runs_session_id", "agent_runs", ["session_id"], unique=True)
-    op.create_index("idx_agent_runs_user_id", "agent_runs", ["user_id"])
-    op.create_index("idx_agent_runs_status", "agent_runs", ["status"])
+    # Check if tables already exist (PostgreSQL may have them from runtime DDL)
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    existing_tables = set(inspector.get_table_names())
 
-    op.create_table(
-        "agent_run_events",
-        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("run_id", sa.Text),
-        sa.Column("session_id", sa.Text),
-        sa.Column("event_type", sa.Text, nullable=False, server_default=""),
-        sa.Column("event_subtype", sa.Text),
-        sa.Column("role", sa.Text),
-        sa.Column("content", sa.Text),
-        sa.Column("tool_name", sa.Text),
-        sa.Column("provider", sa.Text),
-        sa.Column("model", sa.Text),
-        sa.Column("key_id", sa.Text),
-        sa.Column("user_id", sa.Integer),
-        sa.Column("tenant_id", sa.Integer),
-        sa.Column("machine_id", sa.Text),
-        sa.Column("metadata", sa.Text),
-        sa.Column("event_ts", sa.TIMESTAMP),
-        sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-    )
-    op.create_index("idx_run_events_session_id", "agent_run_events", ["session_id", "id"])
-    op.create_index("idx_run_events_run_id", "agent_run_events", ["run_id"])
-    op.create_index("idx_run_events_event_type", "agent_run_events", ["event_type"])
-    op.create_index("idx_run_events_created_at", "agent_run_events", ["created_at"])
+    if "agent_runs" not in existing_tables:
+        op.create_table(
+            "agent_runs",
+            sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+            sa.Column("run_id", sa.Text, nullable=False, unique=True),
+            sa.Column("session_id", sa.Text, nullable=False),
+            sa.Column("user_id", sa.Integer),
+            sa.Column("tenant_id", sa.Integer),
+            sa.Column("machine_id", sa.Text),
+            sa.Column("tool_name", sa.Text),
+            sa.Column("provider", sa.Text),
+            sa.Column("cli_tool", sa.Text),
+            sa.Column("model", sa.Text),
+            sa.Column("status", sa.Text, server_default="active"),
+            sa.Column("started_at", sa.TIMESTAMP),
+            sa.Column("ended_at", sa.TIMESTAMP),
+            sa.Column("total_tokens", sa.Integer, server_default="0"),
+            sa.Column("total_input_tokens", sa.Integer, server_default="0"),
+            sa.Column("total_output_tokens", sa.Integer, server_default="0"),
+            sa.Column("total_requests", sa.Integer, server_default="0"),
+            sa.Column("metadata", sa.Text),
+            sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+        )
+        op.create_index("idx_agent_runs_session_id", "agent_runs", ["session_id"], unique=True)
+        op.create_index("idx_agent_runs_user_id", "agent_runs", ["user_id"])
+        op.create_index("idx_agent_runs_status", "agent_runs", ["status"])
 
-    op.create_table(
-        "agent_approvals",
-        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("request_id", sa.Text, nullable=False, unique=True),
-        sa.Column("run_id", sa.Text),
-        sa.Column("session_id", sa.Text),
-        sa.Column("tool_name", sa.Text),
-        sa.Column("request_subtype", sa.Text),
-        sa.Column("request_details", sa.Text),
-        sa.Column("status", sa.Text, server_default="pending"),
-        sa.Column("decision", sa.Text),
-        sa.Column("decided_by", sa.Integer),
-        sa.Column("decided_by_name", sa.Text),
-        sa.Column("decision_metadata", sa.Text),
-        sa.Column("requested_at", sa.TIMESTAMP),
-        sa.Column("decided_at", sa.TIMESTAMP),
-        sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-    )
-    op.create_index("idx_agent_approvals_session_id", "agent_approvals", ["session_id"])
-    op.create_index("idx_agent_approvals_run_id", "agent_approvals", ["run_id"])
-    op.create_index("idx_agent_approvals_status", "agent_approvals", ["status"])
+    if "agent_run_events" not in existing_tables:
+        op.create_table(
+            "agent_run_events",
+            sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+            sa.Column("run_id", sa.Text),
+            sa.Column("session_id", sa.Text),
+            sa.Column("event_type", sa.Text, nullable=False, server_default=""),
+            sa.Column("event_subtype", sa.Text),
+            sa.Column("role", sa.Text),
+            sa.Column("content", sa.Text),
+            sa.Column("tool_name", sa.Text),
+            sa.Column("provider", sa.Text),
+            sa.Column("model", sa.Text),
+            sa.Column("key_id", sa.Text),
+            sa.Column("user_id", sa.Integer),
+            sa.Column("tenant_id", sa.Integer),
+            sa.Column("machine_id", sa.Text),
+            sa.Column("metadata", sa.Text),
+            sa.Column("event_ts", sa.TIMESTAMP),
+            sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+        )
+        op.create_index("idx_run_events_session_id", "agent_run_events", ["session_id", "id"])
+        op.create_index("idx_run_events_run_id", "agent_run_events", ["run_id"])
+        op.create_index("idx_run_events_event_type", "agent_run_events", ["event_type"])
+        op.create_index("idx_run_events_created_at", "agent_run_events", ["created_at"])
+
+    if "agent_approvals" not in existing_tables:
+        op.create_table(
+            "agent_approvals",
+            sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+            sa.Column("request_id", sa.Text, nullable=False, unique=True),
+            sa.Column("run_id", sa.Text),
+            sa.Column("session_id", sa.Text),
+            sa.Column("tool_name", sa.Text),
+            sa.Column("request_subtype", sa.Text),
+            sa.Column("request_details", sa.Text),
+            sa.Column("status", sa.Text, server_default="pending"),
+            sa.Column("decision", sa.Text),
+            sa.Column("decided_by", sa.Integer),
+            sa.Column("decided_by_name", sa.Text),
+            sa.Column("decision_metadata", sa.Text),
+            sa.Column("requested_at", sa.TIMESTAMP),
+            sa.Column("decided_at", sa.TIMESTAMP),
+            sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+        )
+        op.create_index("idx_agent_approvals_session_id", "agent_approvals", ["session_id"])
+        op.create_index("idx_agent_approvals_run_id", "agent_approvals", ["run_id"])
+        op.create_index("idx_agent_approvals_status", "agent_approvals", ["status"])
 
 
 def downgrade() -> None:

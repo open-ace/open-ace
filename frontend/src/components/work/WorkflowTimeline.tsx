@@ -1346,7 +1346,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     return (
       <article
         key={milestone.milestone_id}
-        ref={!compact ? registerMilestoneCard(milestone.milestone_id) : undefined}
+        ref={registerMilestoneCard(milestone.milestone_id)}
         className={`timeline-milestone-card ${
           compact ? 'timeline-milestone-card--compact' : ''
         } ${isExpanded ? 'timeline-milestone-card--expanded' : ''} timeline-milestone-card--${statusDisplay.tone}`}

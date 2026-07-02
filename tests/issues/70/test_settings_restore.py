@@ -20,7 +20,7 @@ from playwright.sync_api import sync_playwright
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://localhost:19888"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}

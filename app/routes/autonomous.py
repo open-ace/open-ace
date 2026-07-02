@@ -1260,10 +1260,15 @@ def get_milestone_session(workflow_id, milestone_id):
     actual_session_id = _resolve_actual_session_id(session_id, sm)
 
     if actual_session_id and actual_session_id != session_id:
+        # The resolved actual session is the real Claude transcript, shared
+        # across multiple milestones (e.g. plan_created + plan_refined resume
+        # the same CLI session). Its messages are not tagged per-milestone
+        # (milestone_id is typically NULL), so filtering by message_milestone_id
+        # would drop them all and leave the viewer showing only "Status".
+        # Return the full transcript for the actual session.
         session_data = sm.get_session(
             actual_session_id,
             include_messages=True,
-            message_milestone_id=milestone_id,
         )
         if session_data:
             return jsonify({"success": True, "session": session_data})

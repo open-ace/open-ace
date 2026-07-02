@@ -6,7 +6,7 @@
  */
 
 import React, { useState } from 'react';
-import { Modal, Button, TextInput } from '@/components/common';
+import { Modal, Button, TextInput, PasswordPolicyHint } from '@/components/common';
 import { useAuth, useLanguage, useMustChangePassword, useSecuritySettings } from '@/hooks';
 import { t } from '@/i18n';
 
@@ -20,29 +20,10 @@ export const ForceChangePasswordModal: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState(false);
 
-  // Password policy hint component
-  const PasswordPolicyHint = () => {
-    const policy = securitySettings;
-    if (!policy) return null;
-
-    const requirements: string[] = [];
-    requirements.push(`${t('passwordMinLength', language)}: ${policy.password_min_length ?? 8}`);
-    if (policy.password_require_uppercase) requirements.push(t('requireUppercase', language));
-    if (policy.password_require_lowercase) requirements.push(t('requireLowercase', language));
-    if (policy.password_require_number) requirements.push(t('requireNumber', language));
-    if (policy.password_require_special) requirements.push(t('requireSpecial', language));
-
-    return (
-      <div className="password-policy-hint text-muted small mt-1">
-        <div>{t('passwordRequirements', language)}:</div>
-        <ul className="mb-0 ps-3" style={{ fontSize: '0.85em' }}>
-          {requirements.map((req, idx) => (
-            <li key={idx}>{req}</li>
-          ))}
-        </ul>
-      </div>
-    );
+  const handleSkip = () => {
+    setSkipped(true);
   };
 
   const handleSubmit = async () => {
@@ -58,8 +39,11 @@ export const ForceChangePasswordModal: React.FC = () => {
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError(t('passwordTooShort', language) ?? 'Password must be at least 8 characters');
+    const minLength = securitySettings?.password_min_length ?? 8;
+    if (newPassword.length < minLength) {
+      setError(
+        t('passwordTooShort', language) ?? `Password must be at least ${minLength} characters`
+      );
       return;
     }
 
@@ -81,21 +65,26 @@ export const ForceChangePasswordModal: React.FC = () => {
     }
   };
 
-  // Don't render if not required
-  if (!mustChangePassword) {
+  // Don't render if not required or user skipped (will be reminded next login)
+  if (!mustChangePassword || skipped) {
     return null;
   }
 
   return (
     <Modal
       isOpen={true}
-      onClose={() => {}}
+      onClose={handleSkip}
       title={t('changePasswordRequired', language) ?? 'Change Password Required'}
       size="md"
       footer={
-        <Button variant="primary" onClick={handleSubmit} loading={isChangingPassword}>
-          {t('changePassword', language) ?? 'Change Password'}
-        </Button>
+        <>
+          <Button variant="outline-secondary" onClick={handleSkip}>
+            {t('skip', language) ?? 'Skip'}
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} loading={isChangingPassword}>
+            {t('changePassword', language) ?? 'Change Password'}
+          </Button>
+        </>
       }
     >
       <div className="alert alert-warning mb-3">

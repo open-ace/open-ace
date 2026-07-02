@@ -109,9 +109,26 @@ generate_default_config() {
     # Create config directory
     mkdir -p "$CONFIG_DIR"
 
-    # Use SERVER_IP environment variable (default: host.docker.internal)
-    SERVER_IP="${SERVER_IP:-host.docker.internal}"
-    PORT="${PORT:-5000}"
+    # Auto-detect SERVER_IP if not configured (Issue #1306)
+    # Resolve host.docker.internal to get host gateway IP (via extra_hosts)
+    if [ -z "$SERVER_IP" ]; then
+        # Method 1: getent hosts (resolves host.docker.internal to host gateway IP)
+        SERVER_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1; exit}')
+
+        # Method 2: hostname -I (fallback, filter localhost and link-local)
+        if [ -z "$SERVER_IP" ]; then
+            SERVER_IP=$(hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i!="127.0.0.1" && !match($i,/^169\.254\./)) {print $i; exit}}')
+        fi
+
+        # Final fallback
+        if [ -z "$SERVER_IP" ]; then
+            echo "WARNING: Could not auto-detect SERVER_IP, falling back to host.docker.internal"
+            SERVER_IP="host.docker.internal"
+        else
+            echo "Auto-detected SERVER_IP: $SERVER_IP"
+        fi
+    fi
+    PORT="${PORT:-19888}"
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -122,13 +139,16 @@ generate_default_config() {
 
     # Generate default config (matches install.sh defaults)
     # Note: DATABASE_URL env var takes precedence over config file for database connection
-    # Database credentials use docker-compose.yml defaults (${DB_USER:-ace}, etc.)
+    # Database credentials use docker-compose.yml defaults, shell-expanded at generation time
+    # Issue #1336: Use ${VAR:-default} syntax (no \$ escape) so shell expands variables
+    # This prevents fetch scripts from reading unexpanded "${DB_USER:-ace}" literal strings
+    # which would cause psycopg2 to parse "${DB_USER" as username (colon as delimiter)
     cat > "$CONFIG_FILE" << CONFIG_EOF
 {
   "host_name": "$HOST_NAME",
   "database": {
     "type": "postgresql",
-    "url": "postgresql://\${DB_USER:-ace}:\${DB_PASSWORD:-ace-secret}@postgres:5432/\${DB_NAME:-ace}"
+    "url": "postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}"
   },
   "server": {
     "upload_auth_key": "$UPLOAD_AUTH_KEY",
@@ -562,7 +582,7 @@ echo "  Open ACE - Starting Gunicorn"
 echo "=========================================="
 
 exec gunicorn \
-    --bind 0.0.0.0:5000 \
+    --bind 0.0.0.0:19888 \
     --worker-class app.gunicorn_worker.TerminalGeventWorker \
     --workers 1 \
     --access-logfile - \

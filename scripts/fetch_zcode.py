@@ -113,11 +113,13 @@ def find_zcode_db_path() -> Optional[Path]:
 
 
 def _ms_to_date(ms: Optional[int]) -> str:
-    """Convert epoch milliseconds to a YYYY-MM-DD date string (UTC)."""
+    """Convert epoch milliseconds to a YYYY-MM-DD date string (local time)."""
     if not ms:
         return "unknown"
     try:
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        # Convert UTC timestamp to local time for date extraction
+        dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc).astimezone()
+        return dt.strftime("%Y-%m-%d")
     except (ValueError, OSError, OverflowError):
         return "unknown"
 
@@ -830,7 +832,8 @@ if __name__ == "__main__":
                 config_data = json.load(f)
             db_config = config_data.get("database", {})
             db_url = db_config.get("url")
-            if db_url:
+            # Only set if not already configured (Docker provides DATABASE_URL)
+            if db_url and not os.environ.get("DATABASE_URL"):
                 os.environ["DATABASE_URL"] = db_url
                 print(f"Using database from config: {db_config.get('type', 'postgresql')}")
 

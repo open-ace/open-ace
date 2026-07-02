@@ -235,7 +235,7 @@ class WebUIManager:
         Examples:
             http://localhost:3100 -> http://localhost
             http://192.168.1.169:3100 -> http://192.168.1.169
-            http://[::1]:5000 -> http://[::1] (IPv6)
+            http://[::1]:19888 -> http://[::1] (IPv6)
             http://localhost -> http://localhost (no change)
 
         Args:
@@ -252,6 +252,64 @@ class WebUIManager:
             return f"{parsed.scheme}://{parsed.hostname}"
         # Fallback: if URL lacks scheme, return original
         return url
+
+    def _replace_host_from_request(self, config_url: str, request_host_url: str) -> str:
+        """Replace hostname in config_url with hostname from request.
+
+        This ensures iframe URL uses the actual IP/hostname that user accessed,
+        not the container-detected IP which may be inaccessible from external browsers.
+
+        Used in Docker deployments where container cannot detect host's real IP.
+
+        **Design Principle (Issue #1357):**
+        In docker compose deployment, WebUI and open-ace are on the same machine.
+        URL should come from request.host_url (user's actual access IP),
+        NOT from config.json (which may have wrong IPv6 or container-detected IP).
+
+        Port is handled separately:
+        - Single-user mode: fixed port 3100 (WebUI port)
+        - Multi-user mode: dynamic port from instance.port
+
+        Examples:
+            config_url="http://172.17.0.1:3100", request_host_url="http://192.168.1.169:19888"
+            -> "http://192.168.1.169" (hostname replaced, no port)
+
+            config_url="http://host.docker.internal:3100", request_host_url="http://example.com"
+            -> "http://example.com"
+
+            config_url="http://[::1]:3100", request_host_url="http://[2001:db8::1]:19888"
+            -> "http://[2001:db8::1]" (IPv6 preserved with brackets)
+
+        Args:
+            config_url: URL from config.json (may have wrong IP in Docker).
+            request_host_url: Host URL from Flask request (user's actual access URL).
+
+        Returns:
+            URL with hostname replaced from request, without port.
+        """
+        from urllib.parse import urlparse
+
+        request_parsed = urlparse(request_host_url)
+
+        # Use request's scheme and hostname
+        scheme = request_parsed.scheme or "http"
+        hostname = request_parsed.hostname
+
+        if hostname:
+            # Check if hostname is IPv6 (contains colons and no dots)
+            # IPv6 addresses need to be wrapped in brackets in URLs
+            if ":" in hostname and "." not in hostname:
+                return f"{scheme}://[{hostname}]"
+            return f"{scheme}://{hostname}"
+        # Fallback: parse config_url if request_host_url parsing fails
+        config_parsed = urlparse(config_url)
+        hostname = config_parsed.hostname
+        scheme = config_parsed.scheme or "http"
+        if hostname:
+            if ":" in hostname and "." not in hostname:
+                return f"{scheme}://[{hostname}]"
+            return f"{scheme}://{hostname}"
+        return config_url
 
     def start_cleanup_thread(self):
         """Start the background cleanup greenlet."""
@@ -432,7 +490,9 @@ class WebUIManager:
         except (ValueError, TypeError) as e:
             return False, None, f"Token parse error: {e}"
 
-    def get_user_webui_url(self, user_id: int, system_account: str) -> tuple[str, str]:
+    def get_user_webui_url(
+        self, user_id: int, system_account: str, host_url: Optional[str] = None
+    ) -> tuple[str, str]:
         """
         Get or create the webui URL for a user.
 
@@ -442,16 +502,35 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.169:19888").
+                      Used to replace container-detected IP with user's actual access IP.
+                      Required for Docker deployments where container cannot detect host's real IP.
 
         Returns:
             Tuple of (url, token).
         """
+        # Determine base URL: use request host if provided, otherwise use config
+        # Design Principle (Issue #1357):
+        # - Single-user mode (docker compose): WebUI and open-ace on same machine
+        #   URL from request.host_url with fixed port 3100, NOT from config.json
+        # - Multi-user mode (install.sh): WebUI and open-ace may be on different machines
+        #   URL from config.json (user-configured) or request.host_url with instance.port
+        if host_url:
+            base_url = self._replace_host_from_request(self.config.url, host_url)
+        else:
+            base_url = self.config.url
+
         if not self.config.multi_user_mode:
-            # Single-user mode: return configured URL with a generated token
-            # The token is needed for iframe auth when making cross-origin API calls
-            # Remove port from URL to ensure correct iframe address
+            # Single-user mode (docker compose): use fixed WebUI port 3100
+            # base_url from _replace_host_from_request has no port
             token = self.generate_token(user_id, 0)
-            return self._remove_port_from_url(self.config.url), token
+            if host_url:
+                # Docker compose: URL from request.host_url with fixed port 3100
+                url = f"{base_url}:3100"
+            else:
+                # Fallback: use config.url (for edge cases where host_url not provided)
+                url = base_url
+            return url, token
 
         with self._lock:
             # Check if user already has an instance
@@ -459,6 +538,10 @@ class WebUIManager:
                 instance = self._instances[user_id]
                 if instance.is_alive():
                     instance.update_activity()
+                    # Use dynamic base_url if provided, otherwise use stored instance.url
+                    if host_url:
+                        url = f"{base_url}:{instance.port}"
+                        return url, instance.token
                     return instance.url, instance.token
                 else:
                     # Process declared dead after consecutive health check failures
@@ -475,16 +558,20 @@ class WebUIManager:
                 raise ValueError(f"Maximum instances ({self.config.max_instances}) reached")
 
             # Start new instance
-            instance = self._start_instance_internal(user_id, system_account)
+            instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
 
-    def _start_instance_internal(self, user_id: int, system_account: str) -> WebUIInstance:
+    def _start_instance_internal(
+        self, user_id: int, system_account: str, base_url: Optional[str] = None
+    ) -> WebUIInstance:
         """
         Start a webui instance for a user (internal, must be called with lock).
 
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            base_url: Optional base URL (already processed with host_url if provided).
+                      If None, uses config.url without port.
 
         Returns:
             WebUIInstance object.
@@ -498,8 +585,9 @@ class WebUIManager:
         # Generate token
         token = self.generate_token(user_id, port)
 
-        # Build URL (remove any existing port from config.url)
-        base_url = self._remove_port_from_url(self.config.url)
+        # Build URL using provided base_url or fallback to config.url
+        if base_url is None:
+            base_url = self._remove_port_from_url(self.config.url)
         url = f"{base_url}:{port}"
 
         # Start process
@@ -507,7 +595,9 @@ class WebUIManager:
         process = None
 
         try:
-            process, model_pool = self._launch_webui_process(user_id, system_account, port)
+            process, model_pool = self._launch_webui_process(
+                user_id, system_account, port, base_url
+            )
             pid = process.pid if process else None
 
             if process is None:
@@ -631,7 +721,7 @@ class WebUIManager:
             }
 
     def _launch_webui_process(
-        self, user_id: int, system_account: str, port: int
+        self, user_id: int, system_account: str, port: int, base_url: str
     ) -> tuple[Optional[subprocess.Popen], dict[str, Any]]:
         """
         Launch a webui process as the specified user.
@@ -640,6 +730,8 @@ class WebUIManager:
             user_id: User ID for log directory naming.
             system_account: System account to run the process as.
             port: Port for the webui to listen on.
+            base_url: Base URL from request (e.g., http://192.168.1.87), used for
+                      WebUI process to connect to main service's LLM proxy API.
 
         Returns:
             subprocess.Popen object or None if launch failed.
@@ -660,10 +752,12 @@ class WebUIManager:
             logger.error("qwen-code-webui executable not found")
             return None, {}
 
-        # Build openace_api_url from config (remove any existing port first)
-        openace_api_url = self._remove_port_from_url(self.config.url)
+        # Build openace_api_url from base_url (from request host_url)
+        # WebUI process needs to connect to main service's LLM proxy API
+        # Use base_url (user's actual access IP) instead of config.url (container-detected IP)
+        openace_api_url = self._remove_port_from_url(base_url)
         server_config = self._load_server_config()
-        server_port = server_config.get("web_port", 5000)
+        server_port = server_config.get("web_port", 19888)
         openace_api_url = f"{openace_api_url}:{server_port}"
 
         # Build child environment first (needed for sudo env passing)
@@ -982,7 +1076,9 @@ class WebUIManager:
             if user_id in self._instances:
                 self._instances[user_id].update_activity()
 
-    def prestart_user_instance_async(self, user_id: int, system_account: str):
+    def prestart_user_instance_async(
+        self, user_id: int, system_account: str, host_url: Optional[str] = None
+    ):
         """
         Pre-start a webui instance for a user in background thread.
 
@@ -992,6 +1088,9 @@ class WebUIManager:
         Args:
             user_id: User ID.
             system_account: User's system account name.
+            host_url: Optional host URL from Flask request (e.g., "http://192.168.1.87:19888").
+                      Used to replace container-detected IP with user's actual access IP.
+                      Required for Docker deployments where container cannot detect host's real IP.
         """
         if not self.config.multi_user_mode:
             return  # No pre-start needed in single-user mode
@@ -1008,7 +1107,7 @@ class WebUIManager:
         def start_in_background():
             try:
                 logger.info(f"Pre-starting webui instance for user {user_id} ({system_account})")
-                url, token = self.get_user_webui_url(user_id, system_account)
+                url, token = self.get_user_webui_url(user_id, system_account, host_url)
                 logger.info(f"Pre-started webui for user {user_id}: {url}")
             except Exception as e:
                 logger.error(f"Failed to pre-start webui for user {user_id}: {e}")
