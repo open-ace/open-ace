@@ -2359,7 +2359,8 @@ export const translations: Record<Language, Translations> = {
     smtpConfigDeletedDesc: 'SMTP 配置已删除',
     verified: '已验证',
     modelGatewayConfiguration: '模型网关配置',
-    modelGatewayDesc: '通过 LiteLLM 兼容的模型网关路由 LLM 代理流量，同时保留 Open ACE 配额与归属。',
+    modelGatewayDesc:
+      '通过 LiteLLM 兼容的模型网关路由 LLM 代理流量，同时保留 Open ACE 配额与归属。',
     gatewayBaseUrl: '网关 Base URL',
     gatewayApiKey: '网关 API Key',
     modelPrefixMode: '模型前缀模式',
@@ -2368,7 +2369,8 @@ export const translations: Record<Language, Translations> = {
     gatewayNotConfigured: '网关未配置',
     gatewayConfigSaved: '网关配置已保存',
     gatewayConfigDeleted: '网关配置已删除',
-    gatewayEnableHint: '当 config.json 中 model_gateway.enabled=true（或 OPENACE_MODEL_GATEWAY_MODE=gateway）时启用网关路由。',
+    gatewayEnableHint:
+      '当 config.json 中 model_gateway.enabled=true（或 OPENACE_MODEL_GATEWAY_MODE=gateway）时启用网关路由。',
     notVerified: '未验证',
     emailStatistics: '邮件统计',
     totalEmails: '邮件总数',

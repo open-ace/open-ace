@@ -29,6 +29,13 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Create the model_gateway_config table (single admin row)."""
+    # boolean DEFAULT must be 'false' on PostgreSQL but '0' on SQLite (integer
+    # affinity) so the rebuilt snapshots match the committed schema files.
+    from alembic import context
+
+    is_pg = context.get_context().dialect.name == "postgresql"
+    prefix_default = sa.text("false" if is_pg else "0")
+
     op.create_table(
         "model_gateway_config",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
@@ -36,7 +43,7 @@ def upgrade() -> None:
         sa.Column("base_url", sa.Text),
         sa.Column("encrypted_api_key", sa.Text),
         sa.Column("encryption_version", sa.Integer, server_default="1"),
-        sa.Column("model_prefix_mode", sa.Boolean, server_default=sa.text("0")),
+        sa.Column("model_prefix_mode", sa.Boolean, server_default=prefix_default),
         sa.Column("model_prefix", sa.Text),
         sa.Column("created_by", sa.Integer),
         sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
