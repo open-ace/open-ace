@@ -1,5 +1,6 @@
 {
   "host_name": "<HOST_NAME>",
+  "secret_key": "<SECRET_KEY>",
   "database": {
     "type": "postgresql",
     "url": "postgresql://user:password@localhost:5432/openace"

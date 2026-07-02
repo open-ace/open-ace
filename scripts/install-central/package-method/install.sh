@@ -1326,6 +1326,44 @@ EOF
     return 0
 }
 
+# Update config.json with secret_key for Flask session and API key encryption
+update_config_secret_key() {
+    local config_file="$1"
+    local secret_key="$2"
+
+    if [ ! -f "$config_file" ]; then
+        print_warning "Config file not found: $config_file"
+        return 1
+    fi
+
+    if [ -z "$secret_key" ]; then
+        print_warning "No secret_key provided"
+        return 1
+    fi
+
+    print_info "Updating secret_key in $config_file..."
+
+    # Use Python to update JSON
+    if command -v python3 &>/dev/null; then
+        python3 -c "
+import json
+with open('$config_file', 'r') as f:
+    config = json.load(f)
+config['secret_key'] = '$secret_key'
+with open('$config_file', 'w') as f:
+    json.dump(config, f, indent=2)
+" 2>/dev/null && print_success "secret_key configuration updated" || {
+            print_warning "Failed to update secret_key in config"
+            return 1
+        }
+    else
+        print_warning "Python3 not available, cannot update secret_key config"
+        return 1
+    fi
+
+    return 0
+}
+
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
@@ -3202,6 +3240,10 @@ do_fresh_install() {
                 fi
             fi
             update_config_workspace "$config_dir/config.json" "$webui_path"
+
+            # Generate and set secret_key for Flask session and API key encryption
+            local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+            update_config_secret_key "$config_dir/config.json" "$secret_key"
         fi
     fi
 
@@ -3607,6 +3649,14 @@ with open('$config_dir/config.json', 'w') as f:
             fi
         fi
         update_config_workspace "$config_dir/config.json" "$webui_path"
+
+        # Check and set secret_key if missing (upgrade from older version)
+        local current_secret=$(python3 -c "import json; c=json.load(open('$config_dir/config.json')); print(c.get('secret_key', ''))" 2>/dev/null)
+        if [ -z "$current_secret" ] || [ "$current_secret" = "<SECRET_KEY>" ]; then
+            print_warning "Adding missing secret_key to config.json..."
+            local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
+            update_config_secret_key "$config_dir/config.json" "$secret_key"
+        fi
     fi
 
     # Check build dependencies before installing Python packages (gevent, bcrypt need gcc)
