@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.1.0] - 2026-07-02
+
 ### Added
 - AI autonomous development workflow with retry, fork/cancel milestones, and PR-issue linkage (#716, #740, #886)
 - Real-time agent activity streaming for autonomous workflows (Issue #771)
@@ -106,5 +108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.0.0...HEAD
+[v1.1.0]: https://github.com/open-ace/open-ace/releases/tag/v1.1.0
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.1.0...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
