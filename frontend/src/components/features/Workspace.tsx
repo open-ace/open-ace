@@ -1857,7 +1857,7 @@ export const Workspace: React.FC = () => {
         <div
           className={cn(
             'workspace-tabs d-flex align-items-center border-bottom',
-            workspaceFullscreen ? 'bg-white fullscreen-tabs' : 'bg-light'
+            workspaceFullscreen ? 'bg-white dark:bg-slate-800 fullscreen-tabs' : 'bg-light dark:bg-slate-900'
           )}
           style={{ minHeight: '40px' }}
         >
@@ -1878,7 +1878,7 @@ export const Workspace: React.FC = () => {
                   className={cn(
                     'workspace-tab d-flex align-items-center px-2 py-2 cursor-pointer',
                     'border-end position-relative',
-                    activeTabId === tab.id && 'active bg-white',
+                    activeTabId === tab.id && 'active bg-white dark:bg-slate-800',
                     draggedTabId === tab.id && 'dragging',
                     dragOverTabId === tab.id && 'drag-over'
                   )}
@@ -2250,6 +2250,9 @@ export const Workspace: React.FC = () => {
         }
         .workspace-tab:hover {
           background-color: rgba(0, 0, 0, 0.05);
+        }
+        [data-theme='dark'] .workspace-tab:hover {
+          background-color: rgba(255, 255, 255, 0.05);
         }
         .workspace-tab.active {
           border-bottom: 2px solid var(--primary, #0d6efd);
