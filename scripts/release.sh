@@ -115,7 +115,7 @@ else
     # Replace [Unreleased] header with new version header
     sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$TAG] - $RELEASE_DATE/" "$CHANGELOG"
     echo "  ✓ Added version header to CHANGELOG"
-    
+
     # Update bottom links
     # Add new version link before [Unreleased] link
     sed -i "s|^\[Unreleased\]: .*|\[$TAG\]: https://github.com/open-ace/open-ace/releases/tag/$TAG\n\[Unreleased\]: https://github.com/open-ace/open-ace/compare/$TAG...HEAD|" "$CHANGELOG"
@@ -142,7 +142,7 @@ else
     git add "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/CHANGELOG.md"
     git commit -m "Release $TAG"
     echo "  ✓ Committed release changes"
-    
+
     git tag -a "$TAG" -m "Release $TAG"
     echo "  ✓ Created tag $TAG"
 fi
