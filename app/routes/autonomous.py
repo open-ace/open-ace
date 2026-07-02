@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pwd
 import queue
 import re
 import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -31,6 +33,7 @@ from app.repositories.autonomous_repo import (
     DEFAULT_CONTENT_LANGUAGE,
     AutonomousWorkflowRepository,
 )
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,31 @@ MAX_RETRY_COUNT = 5
 
 # Lazy repo — avoids creating DB connection at import time
 auto_repo: AutonomousWorkflowRepository | None = None
+user_repo = UserRepository()
+
+
+def _get_effective_system_account(system_account: str | None) -> str | None:
+    """Check if current user is already the target user.
+
+    When NoNewPrivileges=true is set in systemd, sudo is blocked.
+    If the process is already running as the target user, we can skip sudo.
+
+    Returns None if current user matches target user, otherwise returns system_account.
+    """
+    if not system_account:
+        return None
+
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    if current_user == system_account:
+        return None
+
+    return system_account
+
+
+def _run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
+    """Run a command as a specific user using sudo."""
+    sudo_cmd = ["sudo", "-u", system_account] + command
+    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
 
 
 def _get_repo() -> AutonomousWorkflowRepository:
@@ -509,6 +537,53 @@ def create_workflow():
                     jsonify({"error": "Machine admin permission required for remote workflows"}),
                     403,
                 )
+
+    # Validate local workspace permission
+    # Admin users bypass permission validation (they have full system access)
+    if workspace_type == "local" and g.user_role != "admin":
+        user = user_repo.get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        system_account = user.get("system_account")
+        if not system_account:
+            return jsonify({"error": "User does not have a system account configured"}), 400
+
+        project_path = data.get("project_path", "")
+        if project_path:
+            effective_system_account = _get_effective_system_account(system_account)
+            if effective_system_account:
+                # Check if user can access the project path
+                result = _run_as_user(effective_system_account, ["test", "-e", project_path])
+                if result.returncode != 0:
+                    return jsonify({"error": f"Cannot access project path: {project_path}"}), 403
+                # Check if user has read permission
+                result = _run_as_user(effective_system_account, ["test", "-r", project_path])
+                if result.returncode != 0:
+                    return (
+                        jsonify({"error": f"No read permission for project path: {project_path}"}),
+                        403,
+                    )
+                # Check if user has write permission (required for autonomous development)
+                result = _run_as_user(effective_system_account, ["test", "-w", project_path])
+                if result.returncode != 0:
+                    return (
+                        jsonify({"error": f"No write permission for project path: {project_path}"}),
+                        403,
+                    )
+            else:
+                # Already running as target user, check directly
+                if not os.path.exists(project_path):
+                    return jsonify({"error": f"Cannot access project path: {project_path}"}), 403
+                if not os.access(project_path, os.R_OK):
+                    return (
+                        jsonify({"error": f"No read permission for project path: {project_path}"}),
+                        403,
+                    )
+                if not os.access(project_path, os.W_OK):
+                    return (
+                        jsonify({"error": f"No write permission for project path: {project_path}"}),
+                        403,
+                    )
 
     # Validate required fields
     if not requirements_text and not requirements_issue_input and not requirements_issue_url:

@@ -67,12 +67,15 @@ class GitHubOpsError(Exception):
 class GitHubOps:
     """GitHub operations using the gh CLI."""
 
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, system_account: Optional[str] = None):
         """
         Args:
             repo_path: Local path to the git repository (for cwd in gh commands).
+            system_account: Optional system account name for multi-user permission isolation.
+                When set, git/gh commands will be run via `sudo -u <system_account>`.
         """
         self.repo_path = repo_path
+        self.system_account = system_account
 
     def _get_env(self) -> Optional[dict[str, str]]:
         """Get environment overrides for AI GitHub account.
@@ -108,7 +111,12 @@ class GitHubOps:
 
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a gh CLI command with transient-network-error retry."""
-        cmd = ["gh"] + args
+        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
+        # (Issue #1395: Allow GitHubOps to access user-private directories)
+        if self.system_account:
+            cmd = ["sudo", "-u", self.system_account, "gh"] + args
+        else:
+            cmd = ["gh"] + args
         last_error: Optional[GitHubOpsError] = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
@@ -152,7 +160,12 @@ class GitHubOps:
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
-        cmd = ["git"] + args
+        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
+        # (Issue #1395: Allow GitHubOps to access user-private directories)
+        if self.system_account:
+            cmd = ["sudo", "-u", self.system_account, "git"] + args
+        else:
+            cmd = ["git"] + args
         last_error: Optional[GitHubOpsError] = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
