@@ -286,6 +286,9 @@ def register_blueprints(app):
     from app.routes.run_timeline import run_timeline_bp
 
     app.register_blueprint(run_timeline_bp, url_prefix="/api/remote")
+    from app.routes.policy import policy_bp
+
+    app.register_blueprint(policy_bp, url_prefix="/api")
     app.register_blueprint(api_keys_bp, url_prefix="/api")
     app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
