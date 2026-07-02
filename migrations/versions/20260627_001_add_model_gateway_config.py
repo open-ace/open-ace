@@ -1,7 +1,7 @@
 """add model gateway config
 
 Revision ID: 20260627_001_add_model_gateway_config
-Revises: 20260626_004_fix_tenant_quotas_overflow
+Revises: 20260626_005_add_policy_tables
 Create Date: 2026-06-27
 
 Adds the single admin row that configures the optional LiteLLM-compatible model
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 # revision identifiers, used by Alembic.
 revision: str = "20260627_001_add_model_gateway_config"
-down_revision: str | None = "20260626_004_fix_tenant_quotas_overflow"
+down_revision: str | None = "20260626_005_add_policy_tables"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
