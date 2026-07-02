@@ -67,6 +67,9 @@ class GitHubOpsError(Exception):
 class GitHubOps:
     """GitHub operations using the gh CLI."""
 
+    # Class-level cache to avoid repeated safe.directory config calls
+    _safe_directory_configured: bool = False
+
     def __init__(self, repo_path: str, system_account: Optional[str] = None):
         """
         Args:
@@ -167,13 +170,22 @@ class GitHubOps:
 
         Uses --global so it affects all users (important when running via sudo).
         """
+        # Skip if already configured (class-level cache)
+        if GitHubOps._safe_directory_configured:
+            return
+
         # Configure safe.directory globally (affects all users)
         # Use wildcard for Docker environments with multiple mount paths
         safe_cmd = ["git", "config", "--global", "--add", "safe.directory", "*"]
         # Build kwargs but don't modify the original dict
         base_kwargs = self._build_subprocess_kwargs()
         safe_kwargs = {k: v for k, v in base_kwargs.items() if k != "cwd"}
-        subprocess.run(safe_cmd, **safe_kwargs, check=False)
+        try:
+            subprocess.run(safe_cmd, **safe_kwargs, check=False, timeout=5)
+            GitHubOps._safe_directory_configured = True
+            logger.debug("Configured git safe.directory for Docker volume mounts")
+        except Exception as e:
+            logger.warning("Failed to configure safe.directory: %s", e)
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
