@@ -1717,9 +1717,9 @@ class AutonomousOrchestrator:
                     )
                 self._create_milestone(
                     phase="preparation",
-                    milestone_type="issue_created",
+                    milestone_type="issue_linked",
                     status="completed",
-                    title=f"Read issue #{issue_number}",
+                    title=f"Linked to issue #{issue_number}",
                     github_issue_number=issue_number,
                     result_summary=issue_data.get("title", ""),
                 )
