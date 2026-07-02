@@ -32,6 +32,8 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-model-gateway")
 GATEWAY_URL = f"{BASE_URL}/manage/settings/model-gateway"
 BASEURL_PLACEHOLDER = "https://litellm.example.com/v1"
+E2E_USER = os.environ.get("OPENACE_E2E_USER", "admin")
+E2E_PASS = os.environ.get("OPENACE_E2E_PASS", "admin123")
 
 passed = 0
 failed = 0
@@ -71,8 +73,8 @@ def login(page):
     print("\n[TEST] Login as admin...")
     page.goto(f"{BASE_URL}/login")
     pause(1)
-    page.fill("#username", "admin")
-    page.fill("#password", "admin123")
+    page.fill("#username", E2E_USER)
+    page.fill("#password", E2E_PASS)
     page.click("button[type='submit']")
     pause(2)
     page.wait_for_url("**/manage/**", timeout=10000)
