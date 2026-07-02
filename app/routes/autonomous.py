@@ -559,19 +559,31 @@ def create_workflow():
                 # Check if user has read permission
                 result = _run_as_user(effective_system_account, ["test", "-r", project_path])
                 if result.returncode != 0:
-                    return jsonify({"error": f"No read permission for project path: {project_path}"}), 403
+                    return (
+                        jsonify({"error": f"No read permission for project path: {project_path}"}),
+                        403,
+                    )
                 # Check if user has write permission (required for autonomous development)
                 result = _run_as_user(effective_system_account, ["test", "-w", project_path])
                 if result.returncode != 0:
-                    return jsonify({"error": f"No write permission for project path: {project_path}"}), 403
+                    return (
+                        jsonify({"error": f"No write permission for project path: {project_path}"}),
+                        403,
+                    )
             else:
                 # Already running as target user, check directly
                 if not os.path.exists(project_path):
                     return jsonify({"error": f"Cannot access project path: {project_path}"}), 403
                 if not os.access(project_path, os.R_OK):
-                    return jsonify({"error": f"No read permission for project path: {project_path}"}), 403
+                    return (
+                        jsonify({"error": f"No read permission for project path: {project_path}"}),
+                        403,
+                    )
                 if not os.access(project_path, os.W_OK):
-                    return jsonify({"error": f"No write permission for project path: {project_path}"}), 403
+                    return (
+                        jsonify({"error": f"No write permission for project path: {project_path}"}),
+                        403,
+                    )
 
     # Validate required fields
     if not requirements_text and not requirements_issue_input and not requirements_issue_url:
