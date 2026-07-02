@@ -35,6 +35,7 @@ from app.modules.workspace.autonomous.progress_report_i18n import (
 )
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -498,7 +499,15 @@ class AutonomousOrchestrator:
         wf = self.workflow
         if not self._gh and wf:
             project_path = wf.get("worktree_path") or wf.get("project_path", "")
-            self._gh = GitHubOps(project_path)
+            # Get system_account for multi-user permission isolation (Issue #1395)
+            system_account = None
+            user_id = wf.get("user_id")
+            if user_id:
+                user_repo = UserRepository()
+                user = user_repo.get_user_by_id(user_id)
+                if user:
+                    system_account = user.get("system_account")
+            self._gh = GitHubOps(project_path, system_account=system_account)
         return self._gh
 
     def _ensure_worktree(self, wf: dict) -> str:
@@ -544,7 +553,15 @@ class AutonomousOrchestrator:
 
         # Worktree missing — recreate from the main repo.
         branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
-        main_gh = GitHubOps(project_path)
+        # Get system_account for multi-user permission isolation (Issue #1395)
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                system_account = user.get("system_account")
+        main_gh = GitHubOps(project_path, system_account=system_account)
         try:
             main_gh._run_git(["fetch", "origin", "main"])
             # Does the branch still exist locally or on origin?
@@ -1133,6 +1150,16 @@ class AutonomousOrchestrator:
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
 
+        # Get system_account for multi-user permission isolation (Issue #1395)
+        # When set, CLI tools will be run via `sudo -u <system_account>`
+        if "system_account" not in kwargs and workflow_data:
+            user_id = workflow_data.get("user_id")
+            if user_id:
+                user_repo = UserRepository()
+                user = user_repo.get_user_by_id(user_id)
+                if user:
+                    kwargs["system_account"] = user.get("system_account")
+
         with self._session_lock:
             self._current_session_id = tracking_session_id
 
@@ -1567,7 +1594,15 @@ class AutonomousOrchestrator:
         # New project: create GitHub repo
         if wf.get("is_new_project"):
             try:
-                gh = GitHubOps(project_path or ".")
+                # Get system_account for multi-user permission isolation (Issue #1395)
+                system_account = None
+                user_id = wf.get("user_id")
+                if user_id:
+                    user_repo = UserRepository()
+                    user = user_repo.get_user_by_id(user_id)
+                    if user:
+                        system_account = user.get("system_account")
+                gh = GitHubOps(project_path or ".", system_account=system_account)
                 repo_data = gh.create_repo(
                     name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
                     private=wf.get("is_private", True),
@@ -1583,7 +1618,7 @@ class AutonomousOrchestrator:
                 )
                 self._update_workflow({"project_repo_url": repo_url})
                 project_path = project_path or "."
-                self._gh = GitHubOps(project_path)
+                self._gh = GitHubOps(project_path, system_account=system_account)
             except GitHubOpsError as e:
                 self._create_milestone(
                     phase="preparation",
@@ -3498,15 +3533,23 @@ class AutonomousOrchestrator:
         branch_name = wf.get("branch_name", "")
         worktree_path = wf.get("worktree_path", "")
         project_path = wf.get("project_path", "")
+        # Get system_account for multi-user permission isolation (Issue #1395)
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                system_account = user.get("system_account")
         try:
             if worktree_path:
                 # Must use main repo's gh to remove worktree
                 # (can't remove a worktree from within itself)
-                main_gh = GitHubOps(project_path)
+                main_gh = GitHubOps(project_path, system_account=system_account)
                 main_gh.remove_worktree(worktree_path)
                 self._update_workflow({"worktree_path": ""})
                 # Reinitialize gh to point at main repo for branch deletion
-                self._gh = GitHubOps(project_path)
+                self._gh = GitHubOps(project_path, system_account=system_account)
                 gh = self._gh
             if branch_name:
                 gh.delete_branch(branch_name)
@@ -3541,11 +3584,19 @@ class AutonomousOrchestrator:
         wf = self.workflow
         project_path = wf.get("project_path", "")
         worktree_path = wf.get("worktree_path", "")
+        # Get system_account for multi-user permission isolation (Issue #1395)
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                system_account = user.get("system_account")
 
         # Git forbids checking out the same branch in two worktrees, so the
         # workflow's own worktree (if still present) must be removed first to
         # free the branch for the temp worktree below.
-        main_gh = GitHubOps(project_path)
+        main_gh = GitHubOps(project_path, system_account=system_account)
         if worktree_path:
             try:
                 main_gh.remove_worktree(worktree_path)
@@ -3556,7 +3607,7 @@ class AutonomousOrchestrator:
             # its cwd. Rebind it (and the cached self._gh) to the main repo so
             # the later merge_pr / _do_merge cleanup don't run subprocess with
             # a gone cwd (#1107 review).
-            gh = GitHubOps(project_path)
+            gh = GitHubOps(project_path, system_account=system_account)
             self._gh = gh
 
         # Create an isolated worktree for the existing PR branch. Use the main
@@ -3566,7 +3617,7 @@ class AutonomousOrchestrator:
         logger.info("Created temporary merge worktree at %s", temp_wt_path)
 
         # All subsequent git ops run inside the temp worktree.
-        wt_gh = GitHubOps(temp_wt_path)
+        wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
         try:
             # Fetch latest main and merge into the branch.
             wt_gh._run_git(["fetch", "origin", "main"])

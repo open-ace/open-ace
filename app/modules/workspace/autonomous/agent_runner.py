@@ -990,6 +990,7 @@ class AutonomousAgentRunner:
         resume: bool = False,
         resume_session_id: str = None,
         milestone_id: str = "",
+        system_account: str | None = None,
     ) -> AgentTaskResult:
         """
         Execute an agent task and wait for completion.
@@ -1006,6 +1007,11 @@ class AutonomousAgentRunner:
             session_type: Session type record.
             timeout: Maximum wait time in seconds.
             session_id: Optional pre-generated session_id (for cancellation tracking).
+
+        Args:
+            system_account: Optional system account name for multi-user permission isolation.
+                When set, CLI tools will be run via `sudo -u <system_account>` to access
+                user-private directories.
 
         Returns:
             AgentTaskResult with response text, messages, tokens, etc.
@@ -1074,6 +1080,7 @@ class AutonomousAgentRunner:
                     resume=resume,
                     resume_session_id=resume_session_id,
                     milestone_id=milestone_id,
+                    system_account=system_account,
                 )
 
             result.prompt = prompt
@@ -1155,6 +1162,7 @@ class AutonomousAgentRunner:
         resume: bool = False,
         resume_session_id: str = None,
         milestone_id: str = "",
+        system_account: str | None = None,
     ) -> AgentTaskResult:
         """Run an agent task locally using a CLI subprocess."""
         import sys
@@ -1198,6 +1206,7 @@ class AutonomousAgentRunner:
                 resume=resume,
                 resume_session_id=resume_session_id,
                 milestone_id=milestone_id,
+                system_account=system_account,
             )
         if not adapter.supports_stdin_input():
             return self._run_single_shot(
@@ -1209,6 +1218,7 @@ class AutonomousAgentRunner:
                 timeout=timeout,
                 workflow_id=workflow_id,
                 milestone_id=milestone_id,
+                system_account=system_account,
             )
 
         # Build env vars (use direct env vars, no proxy for local autonomous)
@@ -1249,6 +1259,11 @@ class AutonomousAgentRunner:
                     error=f"CLI tool '{exe_name}' not found",
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
+
+        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
+        # (Issue #1395: Allow agent_runner to access user-private directories)
+        if system_account:
+            cmd = ["sudo", "-u", system_account] + cmd
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 
@@ -1467,6 +1482,7 @@ class AutonomousAgentRunner:
         resume: bool = False,
         resume_session_id: str = None,
         milestone_id: str = "",
+        system_account: str | None = None,
     ) -> AgentTaskResult:
         """Run a ZCode agent task via the persistent app-server protocol.
 
@@ -1506,6 +1522,11 @@ class AutonomousAgentRunner:
             permission_mode=zcode_mode,
             resume=resume,
         )
+        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
+        # (Issue #1395: Allow agent_runner to access user-private directories)
+        if system_account:
+            cmd = ["sudo", "-u", system_account] + cmd
+
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
         try:
@@ -1816,6 +1837,7 @@ class AutonomousAgentRunner:
         timeout: int,
         workflow_id: str,
         milestone_id: str = "",
+        system_account: str | None = None,
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
@@ -1847,6 +1869,11 @@ class AutonomousAgentRunner:
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = dict(os.environ)
+
+        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
+        # (Issue #1395: Allow agent_runner to access user-private directories)
+        if system_account:
+            cmd = ["sudo", "-u", system_account] + cmd
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
 

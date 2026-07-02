@@ -1784,11 +1784,15 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
     # utility_rule 在用户规则中引用 OPENACE_UTILS Cmnd_Alias
     local utility_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_UTILS"
 
+    # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
+    local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
+
     # Build current user's complete rule block
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 $run_user ALL=(ALL) NOPASSWD: $webui_path *
 $webui_local_rule
 $utility_rule
+$cli_rule
 $fetch_rules"
 
     # Build header and defaults section
@@ -1810,10 +1814,18 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     # 【修复 Issue #1262】Cmnd_Alias 独立定义，避免重复
     # 所有命令必须添加 * 后缀以允许任意参数（如 'test -r', 'chown user:group path'）
     # useradd 和 id 命令用于 Package 版 multi-user mode 创建系统用户（代码层面验证 uid >= 1000）
+    # 【修复 Issue #1395】添加 autonomous 开发所需的 CLI 工具和 git/gh 命令
+    # CLI 工具路径可能是 /usr/bin/qwen-code 或 /usr/local/bin/qwen-code（取决于 npm 安装方式）
+    # 使用通配符覆盖所有可能的 CLI 工具路径
     local cmnd_alias_section="# Utility commands for multi-user workspace operations
 # Commands must have '*' suffix to allow arguments (Issue #1262)
 # useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *"
+# git/gh: for autonomous development workflows (Issue #1395)
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+
+# Autonomous development CLI tools (Issue #1395)
+# Allow running qwen-code/codex/etc. as target user for permission isolation
+Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
