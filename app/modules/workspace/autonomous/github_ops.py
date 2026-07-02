@@ -158,8 +158,27 @@ class GitHubOps:
                 raise GitHubOpsError("gh CLI not found. Please install and authenticate gh.")
         raise last_error or GitHubOpsError(f"gh {' '.join(args)} failed after retries")
 
+    def _ensure_safe_directory(self) -> None:
+        """Ensure git safe.directory is configured for Docker volume mounts.
+
+        In Docker environments, git may reject operations on directories owned
+        by different users (volume mounts). This configures safe.directory to
+        allow the repo path, preventing 'dubious ownership' errors.
+
+        Uses --global so it affects all users (important when running via sudo).
+        """
+        # Configure safe.directory globally (affects all users)
+        # Use wildcard for Docker environments with multiple mount paths
+        safe_cmd = ["git", "config", "--global", "--add", "safe.directory", "*"]
+        # Build kwargs but don't modify the original dict
+        base_kwargs = self._build_subprocess_kwargs()
+        safe_kwargs = {k: v for k, v in base_kwargs.items() if k != "cwd"}
+        subprocess.run(safe_cmd, **safe_kwargs, check=False)
+
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
+        # Ensure safe.directory is configured for Docker volume mounts
+        self._ensure_safe_directory()
         # If system_account is set, wrap command with sudo -u for multi-user permission isolation
         # (Issue #1395: Allow GitHubOps to access user-private directories)
         if self.system_account:
