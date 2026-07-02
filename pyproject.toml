@@ -1,6 +1,6 @@
 [project]
 name = "open-ace"
-version = "1.0.0"
+version = "1.1.0"
 description = "Self-hosted enterprise AI workspace and governance platform"
 readme = "README.md"
 license = "Apache-2.0"
