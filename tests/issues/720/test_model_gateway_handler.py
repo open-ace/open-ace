@@ -52,7 +52,7 @@ def _quota_ok():
 def _mock_proxy():
     mock = MagicMock()
     mock.validate_proxy_token.return_value = _mock_proxy_token()
-    mock.resolve_api_key_for_scope.return_value = ("sk-key", "https://api.openai.com/v1", 1)
+    mock.resolve_api_key_for_scope.return_value = ("sk-key", "https://api.openai.com/v1", 1, None)
     return mock
 
 
