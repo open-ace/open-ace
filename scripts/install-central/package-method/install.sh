@@ -2572,7 +2572,8 @@ detect_and_load_local_upgrade() {
         EXISTING_CONFIG_PATH="$config_file"
 
         # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
-        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'true'))" 2>/dev/null)
+        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
+        local multi_user=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('multi_user_mode', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [ -n "$multi_user" ]; then
             WORKSPACE_MULTI_USER_MODE="$multi_user"
             print_info "Read WORKSPACE_MULTI_USER_MODE=$WORKSPACE_MULTI_USER_MODE from existing config"
