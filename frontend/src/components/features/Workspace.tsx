@@ -1857,7 +1857,9 @@ export const Workspace: React.FC = () => {
         <div
           className={cn(
             'workspace-tabs d-flex align-items-center border-bottom',
-            workspaceFullscreen ? 'bg-white dark:bg-slate-800 fullscreen-tabs' : 'bg-light dark:bg-slate-900'
+            workspaceFullscreen
+              ? 'bg-white dark:bg-slate-800 fullscreen-tabs'
+              : 'bg-light dark:bg-slate-900'
           )}
           style={{ minHeight: '40px' }}
         >
