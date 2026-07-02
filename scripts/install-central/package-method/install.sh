@@ -1251,7 +1251,7 @@ update_config_workspace() {
     if command -v python3 &>/dev/null; then
         # Use environment variables to pass values safely (avoids special character issues in heredoc)
         export _CONFIG_FILE="$config_file"
-        export _WS_ENABLED="$WORKSPACE_MULTI_USER_MODE"
+        export _WS_ENABLED="$WORKSPACE_ENABLED"
         export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
         export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
         export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
@@ -1367,6 +1367,11 @@ with open('$config_file', 'w') as f:
 # Systemd service settings
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
+
+# Workspace settings
+# WORKSPACE_ENABLED: workspace 功能是否启用（独立于 multi_user_mode）
+# multi_user_mode 只控制是否为每个用户启动独立进程，不影响 workspace 功能启用
+WORKSPACE_ENABLED="true"
 
 # Multi-user workspace mode settings
 WORKSPACE_MULTI_USER_MODE="true"
@@ -3045,6 +3050,21 @@ install_local() {
     # Configure sudoers for multi-user workspace mode
     # sudoers run_user should match the systemd service's actual running user
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        # Check root privileges - required for sudoers configuration
+        if [ "$(id -u)" -ne 0 ]; then
+            print_error "Root privileges required for multi-user workspace mode"
+            print_error "Multi-user mode requires sudoers configuration to allow the service account to:"
+            print_error "  - Create system users (useradd)"
+            print_error "  - Change file ownership (chown)"
+            print_error "  - Run qwen-code-webui as other users"
+            print_info ""
+            print_info "Please run the installation script with sudo or as root:"
+            print_info "  sudo bash install.sh"
+            print_info ""
+            print_info "Or disable multi-user mode to install without root privileges."
+            exit 1
+        fi
+
         # Stop existing qwen-code-webui systemd service first
         stop_webui_systemd_service
 
