@@ -398,7 +398,13 @@ def pg_db():
     test_db_name = f"ace_test_{uuid.uuid4().hex[:8]}"
 
     # Create test database
-    conn = psycopg2.connect(base_url)
+    try:
+        conn = psycopg2.connect(base_url, connect_timeout=2)
+    except psycopg2.OperationalError as exc:
+        # Skip cleanly when no live PostgreSQL server is reachable instead of
+        # erroring every test. These integration tests require a running Postgres;
+        # environments without one (local sandbox, CI without a DB service) skip.
+        pytest.skip(f"PostgreSQL server not reachable at {base_url}: {exc}")
     conn.autocommit = True
     try:
         conn.cursor().execute(f'CREATE DATABASE "{test_db_name}"')

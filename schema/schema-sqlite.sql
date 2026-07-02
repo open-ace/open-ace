@@ -417,6 +417,19 @@ CREATE TABLE machine_assignments (
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE model_gateway_config (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mode text DEFAULT 'direct',
+ base_url text,
+ encrypted_api_key text,
+ encryption_version integer DEFAULT 1,
+ model_prefix_mode INTEGER DEFAULT 0,
+ model_prefix text,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE notification_preferences (
  user_id INTEGER PRIMARY KEY AUTOINCREMENT,
  email_enabled INTEGER DEFAULT 1,

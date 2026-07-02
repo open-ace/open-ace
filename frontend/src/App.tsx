@@ -139,6 +139,12 @@ const SmtpConfig = lazy(() =>
     default: m.SmtpConfig,
   }))
 );
+// model-gateway (removable)
+const ModelGatewayConfig = lazy(() =>
+  import('@/components/features/management/ModelGatewayConfig').then((m) => ({
+    default: m.ModelGatewayConfig,
+  }))
+);
 const ForceChangePasswordModal = lazy(() =>
   import('@/components/features/ForceChangePasswordModal').then((m) => ({
     default: m.ForceChangePasswordModal,
@@ -348,6 +354,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="/settings/api-keys" element={<APIKeyManagement />} />
           <Route path="/settings/ai-agent" element={<AiAgentSettings />} />
           <Route path="/settings/smtp" element={<SmtpConfig />} />
+          <Route path="/settings/model-gateway" element={<ModelGatewayConfig />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />

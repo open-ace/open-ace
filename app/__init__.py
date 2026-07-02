@@ -293,6 +293,10 @@ def register_blueprints(app):
     app.register_blueprint(autonomous_bp, url_prefix="/api/autonomous")
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
     app.register_blueprint(smtp_config_bp, url_prefix="/api")
+    # model-gateway (removable): admin config routes for the optional LiteLLM gateway
+    from app.routes.model_gateway import model_gateway_bp
+
+    app.register_blueprint(model_gateway_bp, url_prefix="/api")
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")

@@ -76,6 +76,12 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
         ).fetchone()
         is not None
     )
+    has_model_gateway_config = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_gateway_config'"
+        ).fetchone()
+        is not None
+    )
     has_policy_tables = (
         conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='policy_rules'"
@@ -95,15 +101,16 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
 
     assert version is not None
     # Migration chain: 001_run_timeline -> 002_content_language -> 003_status_index
-    # -> 001_add_project_categories -> 004_fix_tenant_quotas_overflow -> 001_init_project_categories
-    # -> 001_add_workflow_lock_columns -> 001_add_retry_count_column -> 005_add_policy_tables
-    assert version[0] == "20260626_005_add_policy_tables"
+    # -> 001_add_project_categories -> 004_fix_tenant_quotas_overflow
+    # -> 005_add_policy_tables -> 001_add_model_gateway_config (re-parented onto policy_tables head)
+    assert version[0] == "20260627_001_add_model_gateway_config"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
     assert has_compliance_reports is True
     assert has_run_timeline is True
     assert has_project_categories is True
+    assert has_model_gateway_config is True
     assert has_policy_tables is True
     assert "auto_mapping_enabled" in user_columns
     # content_language column added by 20260626_002 (#1287)

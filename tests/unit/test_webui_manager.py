@@ -206,9 +206,14 @@ class TestConfigureLocalOpenAIProxy:
             ) as mock_proxy_setup,
             patch("subprocess.Popen") as mock_popen,
             patch("app.services.webui_manager.run_as_root_if_needed") as mock_run_as_root,
+            # The launch path looks up the current OS user to decide sudo vs. direct
+            # execution. Mock it so the test stays hermetic and does not depend on the
+            # running uid existing in the host passwd database.
+            patch("app.services.webui_manager.pwd") as mock_pwd,
             patch("os.open", return_value=123),
             patch("os.close"),
         ):
+            mock_pwd.getpwuid.return_value.pw_name = "testuser"
             mock_popen.return_value = MagicMock(pid=12345)
             mock_run_as_root.return_value = MagicMock(returncode=0, stdout="", stderr="")
             _, model_pool = manager._launch_webui_process(

@@ -609,6 +609,28 @@ CREATE SEQUENCE machine_assignments_id_seq
     CACHE 1;
 
 ALTER SEQUENCE machine_assignments_id_seq OWNED BY machine_assignments.id;
+CREATE TABLE model_gateway_config (
+    id integer NOT NULL,
+    mode text DEFAULT 'direct'::text,
+    base_url text,
+    encrypted_api_key text,
+    encryption_version integer DEFAULT 1,
+    model_prefix_mode boolean DEFAULT false,
+    model_prefix text,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE model_gateway_config_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE model_gateway_config_id_seq OWNED BY model_gateway_config.id;
 CREATE TABLE notification_preferences (
     user_id integer NOT NULL,
     email_enabled boolean DEFAULT true,
@@ -1512,6 +1534,8 @@ ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_b
 
 ALTER TABLE ONLY machine_assignments ALTER COLUMN id SET DEFAULT nextval('machine_assignments_id_seq'::regclass);
 
+ALTER TABLE ONLY model_gateway_config ALTER COLUMN id SET DEFAULT nextval('model_gateway_config_id_seq'::regclass);
+
 ALTER TABLE ONLY policy_decisions ALTER COLUMN id SET DEFAULT nextval('policy_decisions_id_seq'::regclass);
 
 ALTER TABLE ONLY policy_rules ALTER COLUMN id SET DEFAULT nextval('policy_rules_id_seq'::regclass);
@@ -1680,6 +1704,9 @@ ALTER TABLE ONLY machine_assignments
 
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY model_gateway_config
+    ADD CONSTRAINT model_gateway_config_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY notification_preferences
     ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id);
