@@ -35,7 +35,9 @@ class ModelGatewayConfigRepository:
             return conn
         import sqlite3
 
-        conn = sqlite3.connect("app.db")
+        url = get_database_url()
+        db_path = url[len("sqlite:///") :] if url.startswith("sqlite:///") else "app.db"
+        conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return conn
 

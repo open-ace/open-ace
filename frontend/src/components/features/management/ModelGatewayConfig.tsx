@@ -21,7 +21,7 @@ import {
 } from '@/components/common';
 import {
   modelGatewayApi,
-  type ModelGatewayConfig,
+  type ModelGatewayConfig as ModelGatewayConfigType,
   type ModelGatewayTestResult,
 } from '@/api/modelGateway';
 
@@ -30,7 +30,7 @@ export const ModelGatewayConfig: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const [config, setConfig] = useState<ModelGatewayConfig | null>(null);
+  const [config, setConfig] = useState<ModelGatewayConfigType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
