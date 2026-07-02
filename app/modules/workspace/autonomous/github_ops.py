@@ -67,8 +67,8 @@ class GitHubOpsError(Exception):
 class GitHubOps:
     """GitHub operations using the gh CLI."""
 
-    # Class-level cache to avoid repeated safe.directory config calls
-    _safe_directory_configured: bool = False
+    # Class-level cache: track which system_accounts have safe.directory configured
+    _safe_directory_configured: set[str] = set()
 
     def __init__(self, repo_path: str, system_account: Optional[str] = None):
         """
@@ -165,27 +165,37 @@ class GitHubOps:
         """Ensure git safe.directory is configured for Docker volume mounts.
 
         In Docker environments, git may reject operations on directories owned
-        by different users (volume mounts). This configures safe.directory to
-        allow the repo path, preventing 'dubious ownership' errors.
+        by different users (volume mounts). This configures safe.directory for
+        the effective user (current user or sudo target user), preventing
+        'dubious ownership' errors.
 
-        Uses --global so it affects all users (important when running via sudo).
+        Note: --global config writes to the executing user's ~/.gitconfig.
+        When using sudo wrapper, we must run the config command as the target
+        user so it writes to their ~/.gitconfig.
         """
-        # Skip if already configured (class-level cache)
-        if GitHubOps._safe_directory_configured:
+        # Cache key: system_account or "default" for no sudo wrapper
+        cache_key = self.system_account or "default"
+        if cache_key in GitHubOps._safe_directory_configured:
             return
 
-        # Configure safe.directory globally (affects all users)
+        # Build the git config command
         # Use wildcard for Docker environments with multiple mount paths
         safe_cmd = ["git", "config", "--global", "--add", "safe.directory", "*"]
-        # Build kwargs but don't modify the original dict
+
+        # Wrap with sudo if system_account is set (same logic as _run_git)
+        # This ensures the config is written to the target user's ~/.gitconfig
+        if self.system_account:
+            safe_cmd = ["sudo", "-u", self.system_account] + safe_cmd
+
+        # Execute without cwd (global config doesn't need repo context)
         base_kwargs = self._build_subprocess_kwargs()
         safe_kwargs = {k: v for k, v in base_kwargs.items() if k != "cwd"}
         try:
             subprocess.run(safe_cmd, **safe_kwargs, check=False, timeout=5)
-            GitHubOps._safe_directory_configured = True
-            logger.debug("Configured git safe.directory for Docker volume mounts")
+            GitHubOps._safe_directory_configured.add(cache_key)
+            logger.debug("Configured git safe.directory for user: %s", cache_key)
         except Exception as e:
-            logger.warning("Failed to configure safe.directory: %s", e)
+            logger.warning("Failed to configure safe.directory for %s: %s", cache_key, e)
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command with transient-network-error retry."""
