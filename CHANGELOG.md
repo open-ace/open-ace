@@ -7,9 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> Curated summary of 795 commits since `v1.0.0`. Regenerate the full grouped list
-> with `python3 scripts/generate_changelog.py --since v1.0.0`, or browse every
-> commit via `git log v1.0.0..HEAD --oneline`.
+## [v1.1.0] - 2026-07-02
 
 ### Added
 - AI autonomous development workflow with retry, fork/cancel milestones, and PR-issue linkage (#716, #740, #886)
@@ -38,6 +36,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed unused management components and dead diagnostic scripts (Issue #877, #1242)
 
 ### Fixed
+- 项目管理页面总项目数统计应包含智能分类 (Issue #1384)
+- 移除默认项目分类初始化，使用智能分类替代 (Issue #1382)
+- fork 视图中「查看最近里程碑」按钮点击无响应 (Issue #1375) (#1380)
+- 添加 autonomous_workflows.retry_count 列 (Issue #1376)
+- 为 Sync to Gitee workflow 添加重试机制 (Issue #1378) (#1379)
+- WebUI session token validation based on instance alive status (Issue #1169) (#1374)
+- 项目分类按工作区路径智能提取项目名 (Issue #1371) (#1373)
+- 单用户模式下使用固定端口3100，不依赖config.json解析端口 (Issue #1357) (#1370)
+- 单用户模式下 iframe URL 添加 token 参数 (#1369)
+- fetch脚本不覆盖已存在的DATABASE_URL环境变量 (Issue #1362) (#1363)
+- WebUI进程使用请求中的IP连接主服务 (Issue #1357) (#1358)
+- 编辑用户时同步 tenant_id 到后端 API (Issue #1359)
+- PostgreSQL 创建租户时 boolean 类型兼容性修复 (#1353)
+- 使用 CSS 变量替换骨架屏和终端硬编码颜色 (Issue #1334) (#1352)
+- 修复页面刷新时竞态条件导致的错误提示 (Issue #1347) (#1349)
+- 统一管理页面刷新按钮样式 (Issue #1337) (#1348)
+- 修正 refreshKey 配置使刷新按钮生效 (Issue #1335) (#1336)
+- 修复 PostgreSQL 下创建租户时的 cursor 类型错误 (Issue #1341) (#1345)
+- 为必填字段添加红色星号标识 (Issue #1340) (#1342)
+- Insights 报告使用 API Key 的 cli_settings 配置模型 (Issue #1171) (#1216)
+- 隐藏空下拉菜单避免点击无内容 (#1332)
+- 修复项目管理页面中文显示英文问题 (#1326)
+- auto-detect SERVER_IP to fix iframe loading failure (Issue #1306) (#1307)
 - Recognize post-baseline revisions so head DBs upgrade cleanly; widen legacy `alembic_version.version_num` to VARCHAR(64) (#1281, #1282)
 - Work-page quota reads `agent_sessions` only; gray-style CLI sessions (#1272)
 - Auto-provision users PostgreSQL type fix (Issue #1261) (#1266)
@@ -87,5 +108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.0.0...HEAD
+[v1.1.0]: https://github.com/open-ace/open-ace/releases/tag/v1.1.0
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.1.0...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
