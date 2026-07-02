@@ -154,7 +154,8 @@ def sample_message_data():
 # =============================================================================
 
 # Test configuration for UI tests
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+# Issue #1372: 统一端口为 19888
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 TEST_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

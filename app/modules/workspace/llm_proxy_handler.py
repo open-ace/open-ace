@@ -786,7 +786,7 @@ def handle_llm_proxy_request(
                 500,
             )
 
-        api_key, base_url, key_id = key_result
+        api_key, base_url, key_id, _ = key_result
         target_result = _determine_target_url(provider, base_url, path)
         if isinstance(target_result, tuple):
             return target_result

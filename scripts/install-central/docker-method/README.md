@@ -13,12 +13,12 @@ docker compose up -d --build
 
 这将：
 - 本地构建 open-ace 镜像
-- 启动 open-ace 容器（端口 5000）
+- 启动 open-ace 容器（端口 19888）
 - 启动 PostgreSQL 数据库（内部端口 5432）
 
 ### 2. 访问应用
 
-- 地址: http://localhost:5000
+- 地址: http://localhost:19888
 - 默认账号: admin / admin123
 
 > ⚠️ 生产环境请务必修改默认密码！
@@ -144,7 +144,7 @@ WORKSPACE_MULTI_USER_MODE=true docker compose up -d
 
 ```bash
 # 通过 API 创建用户（system_account 会自动创建系统用户）
-curl -X POST http://localhost:5000/api/admin/users \
+curl -X POST http://localhost:19888/api/admin/users \
   -H "Content-Type: application/json" \
   -b "session_token=YOUR_TOKEN" \
   -d '{
@@ -223,10 +223,10 @@ Apple Silicon (M1/M2/M3/M4) 和 Intel Mac 部署请参考 [README-MAC-DEPLOY.md]
 
 ```bash
 # 查找占用进程
-lsof -i :5000
+lsof -i :19888
 
 # 或修改端口
-PORT=5002 docker compose up -d
+PORT=19889 docker compose up -d
 ```
 
 ### Q: 数据库连接失败？

@@ -135,7 +135,7 @@ def api_login():
                     logger.info(
                         f"Pre-starting webui for user {user_id} ({system_account}) on login"
                     )
-                    manager.prestart_user_instance_async(user_id, system_account)
+                    manager.prestart_user_instance_async(user_id, system_account, request.host_url)
         except Exception as e:
             logger.warning(f"Failed to pre-start webui on login: {e}")
 
@@ -276,6 +276,8 @@ def api_auth_check():
         "Authorization", ""
     ).replace("Bearer ", "")
 
+    logger.debug(f"Auth check request from {request.remote_addr}, token present: {bool(token)}")
+
     if not token:
         return jsonify({"authenticated": False})
 
@@ -291,6 +293,7 @@ def api_auth_check():
 
     avatar_url = user_data.get("avatar_url") if user_data else None
     avatar_url = _validate_avatar_url(user_id, avatar_url)
+    must_change_password = bool(user_data.get("must_change_password")) if user_data else False
 
     response_data = {
         "authenticated": True,
@@ -301,6 +304,7 @@ def api_auth_check():
             "role": session.get("role"),
             "tenant_id": session.get("tenant_id"),
             "avatar_url": avatar_url,
+            "must_change_password": must_change_password,
         },
     }
 

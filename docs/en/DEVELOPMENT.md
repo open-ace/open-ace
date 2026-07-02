@@ -100,11 +100,11 @@ npm install
 ### Development Server
 
 ```bash
-# Start dev server on port 3000 (proxies API to localhost:5000)
+# Start dev server on port 3000 (proxies API to localhost:19888)
 npm run dev
 ```
 
-The backend must be running on port 5000 for the frontend to work.
+The backend must be running on port 19888 for the frontend to work.
 
 ### Build
 
@@ -275,7 +275,7 @@ async def test_login():
         page = await browser.new_page()
 
         # Navigate to login
-        await page.goto('http://localhost:5000/login')
+        await page.goto('http://localhost:19888/login')
 
         # Fill form
         await page.fill('#username', 'admin')
@@ -283,7 +283,7 @@ async def test_login():
         await page.click('button[type="submit"]')
 
         # Wait for redirect
-        await page.wait_for_url('http://localhost:5000/')
+        await page.wait_for_url('http://localhost:19888/')
 
         await browser.close()
 ```

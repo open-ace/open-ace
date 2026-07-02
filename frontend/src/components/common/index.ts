@@ -37,6 +37,7 @@ export { Divider } from './Divider';
 export { SessionDetailContent } from './SessionDetailContent';
 export { RunTimeline } from './RunTimeline';
 export { UserSettingsModal } from './UserSettingsModal';
+export { PasswordPolicyHint } from './PasswordPolicyHint';
 
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';

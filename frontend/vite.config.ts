@@ -140,11 +140,11 @@ export default defineConfig(({ command }) => ({
     // 代理配置 - 代理 API 请求到后端
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:19888',
         changeOrigin: true,
       },
       '/auth': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:19888',
         changeOrigin: true,
       },
     },

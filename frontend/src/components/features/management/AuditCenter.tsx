@@ -110,7 +110,13 @@ export const AuditCenter: React.FC = () => {
   // --- Page Refresh Control ---
   const pageRefresh = usePageRefresh({
     page: '/manage/audit',
-    refreshKey: createMatcherConfig([['audit']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['admin', 'audit-logs'],
+        ['admin', 'audit-thresholds'],
+      ],
+      'prefix'
+    ),
     interval: 0, // No auto refresh - manual only for audit logs
     enabled: false,
   });
@@ -1113,13 +1119,7 @@ export const AuditCenter: React.FC = () => {
         <h2>{t('auditCenter', language)}</h2>
         <div className="d-flex gap-2">
           {/* Page Refresh Control */}
-          <PageRefreshControl
-            refresh={pageRefresh}
-            compact={true}
-            showAutoRefreshToggle={false}
-            showIntervalSelector={false}
-            showLastRefreshTime={true}
-          />
+          <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
           {activeTab === 'analysis' && (
             <Button variant="outline-success" size="sm" onClick={handleExportReport}>
               <i className="bi bi-download me-1" />

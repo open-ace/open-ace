@@ -30,7 +30,7 @@ except ImportError:
     sys.exit(1)
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 ADMIN_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TEST_USER_USERNAME = os.environ.get("TEST_USERNAME", "admin")

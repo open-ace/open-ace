@@ -329,6 +329,7 @@ class TestHandleLlmProxyRequest:
             "sk-key",
             "https://api.openai.com/v1",
             42,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -372,6 +373,7 @@ class TestHandleLlmProxyRequest:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -434,6 +436,7 @@ class TestHandleLlmProxyRequest:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -462,6 +465,7 @@ class TestHandleLlmProxyRequest:
             "sk-key",
             "https://api.openai.com/v1",
             1,
+            None,
         )
         mock_get_proxy.return_value = mock_proxy
         mock_quota_cls.return_value = _make_quota_ok()
@@ -500,6 +504,7 @@ class TestResponsesApiConversion:
             "sk-key",
             base_url,
             1,
+            None,
         )
         return mock_proxy
 

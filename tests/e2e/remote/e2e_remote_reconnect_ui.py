@@ -27,7 +27,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 # ── Config ──
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://127.0.0.1:3101")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-reconnect-ui")
@@ -301,7 +301,7 @@ def _run_all(page, token, webui_url, webui_token, console_errors):
 
     # Restart server
     log("Restart", "Restarting open-ace server...")
-    pid = subprocess.run(["lsof", "-ti:5001"], capture_output=True, text=True).stdout.strip()
+    pid = subprocess.run(["lsof", "-ti:19888"], capture_output=True, text=True).stdout.strip()
     if pid:
         subprocess.run(["kill", "-9"] + pid.split(), capture_output=True)
     time.sleep(2)

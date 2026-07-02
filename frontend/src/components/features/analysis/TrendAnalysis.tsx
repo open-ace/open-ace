@@ -77,7 +77,7 @@ export const TrendAnalysis: React.FC = () => {
   // Page refresh control - manual refresh for trend analysis
   const pageRefresh = usePageRefresh({
     page: '/manage/analysis/trend',
-    refreshKey: createMatcherConfig([['analysis', 'trend']], 'prefix'),
+    refreshKey: createMatcherConfig([['analysis', 'batch']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
   });
@@ -264,13 +264,7 @@ export const TrendAnalysis: React.FC = () => {
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('tokenTrend', language)}</h2>
         {/* Page Refresh Control - compact mode */}
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
 
       {/* Filters */}

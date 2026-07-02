@@ -10,7 +10,7 @@ import time
 
 from playwright.async_api import async_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
 

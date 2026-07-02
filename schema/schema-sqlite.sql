@@ -246,7 +246,11 @@ CREATE TABLE autonomous_workflows (
  main_session_id text DEFAULT '' NOT NULL,
  review_session_id text DEFAULT '' NOT NULL,
  test_session_id text DEFAULT '' NOT NULL,
- content_language text DEFAULT 'en' NOT NULL
+ content_language text DEFAULT 'en' NOT NULL,
+ locked_at TIMESTAMP,
+ locked_by text DEFAULT '',
+ transient_retry_count integer DEFAULT 0,
+ retry_count integer DEFAULT 0
 );
 
 CREATE TABLE compliance_reports (
@@ -422,6 +426,65 @@ CREATE TABLE notification_preferences (
  min_severity text DEFAULT 'warning',
  notification_email text,
  email_verified INTEGER DEFAULT 0
+);
+
+CREATE TABLE policy_decisions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ decision_id text NOT NULL,
+ request_id text,
+ run_id text,
+ session_id text,
+ tenant_id integer,
+ workspace_scope text,
+ machine_id text,
+ model text,
+ provider text,
+ tool_name text,
+ action text,
+ resource_target text,
+ args_digest text,
+ normalization_profile_id text,
+ normalization_profile_version integer,
+ fingerprint_hash text,
+ policy_rule_id integer,
+ policy_rule_version integer,
+ decision text NOT NULL,
+ reason text,
+ reviewer_identity text,
+ issued_at TIMESTAMP,
+ expires_at TIMESTAMP,
+ consumed_at TIMESTAMP,
+ remote_response_id text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE policy_rules (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_key text NOT NULL,
+ name text NOT NULL,
+ version integer DEFAULT 1 NOT NULL,
+ is_current INTEGER DEFAULT 1,
+ enabled INTEGER DEFAULT 1,
+ tenant_id integer,
+ project_path text,
+ machine_id text,
+ user_id integer,
+ team_id text,
+ policy_type text NOT NULL,
+ pattern_type text DEFAULT 'glob',
+ pattern text,
+ value_list text,
+ tool_name text,
+ action text,
+ effect text NOT NULL,
+ priority integer DEFAULT 100,
+ is_default INTEGER DEFAULT 0,
+ approval_ttl_seconds integer,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ superseded_at TIMESTAMP,
+ description text
 );
 
 CREATE TABLE project_categories (
@@ -1118,6 +1181,16 @@ CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, 
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
 
+CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
+
+CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
+
+CREATE INDEX idx_policy_decisions_session_id ON policy_decisions (session_id);
+
+CREATE INDEX idx_policy_rules_current_enabled ON policy_rules (is_current, enabled);
+
+CREATE INDEX idx_policy_rules_key_current ON policy_rules (rule_key, is_current);
+
 CREATE INDEX idx_project_categories_sort_order ON project_categories (sort_order);
 
 CREATE INDEX idx_projects_created_by ON projects (created_by);
@@ -1259,6 +1332,10 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, creat
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
+
+CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
+
+CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
 CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
 

@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.modules.policy import get_evaluator
+from app.modules.policy.evaluator import TARGET_MODEL_SELECTION, TARGET_TOOL_ACTION, PolicyContext
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.run_timeline import get_run_recorder
@@ -23,6 +25,9 @@ from app.repositories.user_repo import UserRepository
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# Reviewer identity recorded for auto (non-human) policy decisions.
+_POLICY_SYSTEM_ACTOR = "policy"
 
 
 class RemoteSessionManager:
@@ -57,6 +62,10 @@ class RemoteSessionManager:
         # Persisted run/event timeline recorder. No-op when the feature is
         # disabled (run_timeline.enabled=false); see app/modules/workspace/run_timeline.
         self._run_recorder = get_run_recorder()
+        # Central policy evaluator. NullPolicyEvaluator (is_noop=True) when the
+        # feature is disabled (policy.enabled=false), so every call site is
+        # unconditional and removing the feature = deleting these references.
+        self._policy_evaluator = get_evaluator()
 
     def _timeline(self, method: str, *args: Any, **kwargs: Any) -> None:
         """Single integration seam to the run-timeline recorder.
@@ -84,6 +93,148 @@ class RemoteSessionManager:
             fn(*args, **kwargs)
         except Exception as e:  # pragma: no cover - defensive, hot path must never raise
             logger.debug("run_timeline: recorder %s failed: %s", method, e)
+
+    # ── Central policy & approval (policy.enabled) ────────────────────
+    # All policy logic is guarded by ``self._policy_evaluator.is_noop`` so the
+    # whole feature is a no-op when disabled. Removing it = deleting this block
+    # plus the ``self._policy_evaluator`` init and the two import lines above.
+
+    def _session_policy_scope(self, session_id: str) -> dict[str, Any]:
+        """Collect the scoping attributes for a session's policy evaluation."""
+        scope: dict[str, Any] = {
+            "tenant_id": None,
+            "project_path": None,
+            "machine_id": None,
+            "user_id": None,
+        }
+        machine_id = self._get_machine_id(session_id)
+        scope["machine_id"] = machine_id
+        session = self._session_manager.get_session(session_id)
+        if session:
+            scope["user_id"] = session.user_id
+            scope["project_path"] = session.project_path
+        if machine_id:
+            machine = self._agent_manager.get_machine(machine_id)
+            if machine:
+                scope["tenant_id"] = machine.get("tenant_id")
+        return scope
+
+    def _evaluate_model_policy(
+        self,
+        *,
+        tenant_id: Optional[int],
+        project_path: Optional[str],
+        machine_id: Optional[str],
+        user_id: Optional[int],
+        model: Optional[str],
+        provider: Optional[str],
+        session_id: Optional[str] = None,
+    ):
+        """Evaluate model/provider policy. Never raises (evaluator is fail-closed)."""
+        ctx = PolicyContext(
+            target_kind=TARGET_MODEL_SELECTION,
+            tenant_id=tenant_id,
+            project_path=project_path,
+            machine_id=machine_id,
+            user_id=user_id,
+            model=model,
+            provider=provider,
+            session_id=session_id,
+            run_id=session_id,
+        )
+        return self._policy_evaluator.evaluate(ctx)
+
+    def _emit_policy_decision_event(
+        self,
+        session_id: str,
+        result,
+        *,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Emit a ``policy_decision`` run-timeline event (visibility/audit only)."""
+        metadata: dict[str, Any] = {
+            "decision": result.decision,
+            "reason": result.reason,
+            "fell_back": result.fell_back,
+        }
+        if result.matched_rule:
+            metadata["rule_key"] = result.matched_rule.rule_key
+            metadata["rule_version"] = result.matched_rule.version
+        if result.fingerprint_hash:
+            metadata["fingerprint_hash"] = result.fingerprint_hash
+        if model:
+            metadata["model"] = model
+        if provider:
+            metadata["provider"] = provider
+        if request_id:
+            metadata["request_id"] = request_id
+        self._timeline("record_event", session_id, "policy_decision", metadata=metadata)
+
+    def _persist_tool_decision(
+        self, session_id: str, control_request: dict, result, scope: dict
+    ) -> str:
+        """SYNCHRONOUSLY persist a tool-action decision row (the gate object).
+
+        Per the persistence invariant (plan §2.7): the decision INSERT is
+        synchronous so the consume chokepoint in ``respond_to_permission`` can
+        read it immediately — it must NOT go through the async timeline writer.
+        Only the visibility *event* is async (``_emit_policy_decision_event``).
+        """
+        from datetime import timedelta
+
+        from app.modules.policy.repo import PolicyRepository
+        from app.utils.config import get_policy_approval_ttl_seconds
+
+        rule = result.matched_rule
+        ttl = (
+            rule.approval_ttl_seconds
+            if rule and rule.approval_ttl_seconds
+            else get_policy_approval_ttl_seconds()
+        )
+        now = datetime.utcnow()
+        fp = result.fingerprint
+        repo = PolicyRepository()
+        request_id = fp.request_id if fp else None
+        decision_id = repo.insert_decision(
+            request_id=request_id,
+            run_id=session_id,
+            session_id=session_id,
+            tenant_id=scope.get("tenant_id"),
+            workspace_scope=scope.get("project_path"),
+            machine_id=scope.get("machine_id"),
+            tool_name=fp.tool if fp else None,
+            action=fp.action if fp else None,
+            resource_target=result.resource_target,
+            args_digest=result.args_digest,
+            normalization_profile_id=fp.normalization_profile_id if fp else None,
+            normalization_profile_version=fp.normalization_profile_version if fp else None,
+            fingerprint_hash=result.fingerprint_hash,
+            policy_rule_id=rule.id if rule else None,
+            policy_rule_version=rule.version if rule else None,
+            decision=result.decision,
+            reason=result.reason,
+            expires_at=now + timedelta(seconds=ttl),
+        )
+        self._emit_policy_decision_event(session_id, result, request_id=request_id)
+        return decision_id
+
+    def _buffer_permission_for_human(self, session_id: str, control_request: dict) -> None:
+        """Buffer a permission request for SSE delivery to the frontend (manual path)."""
+        output_entry = {
+            "session_id": session_id,
+            "data": json.dumps(control_request),
+            "stream": "permission",
+            "is_complete": False,
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+        }
+        self._agent_manager.buffer_output(session_id, output_entry)
+        logger.info(
+            "Buffered permission request for session %s: %s",
+            session_id[:8],
+            control_request.get("request", {}).get("subtype"),
+        )
 
     def create_remote_session(
         self,
@@ -133,6 +284,28 @@ class RemoteSessionManager:
         tool_name = normalize_tool_name(cli_tool)
 
         effective_tenant_id = tenant_id or machine.get("tenant_id", 1)
+
+        # Central policy gate: a denied model/provider cannot be selected for a
+        # remote session (acceptance criterion). No-op when policy is disabled.
+        if not self._policy_evaluator.is_noop:
+            model_decision = self._evaluate_model_policy(
+                tenant_id=effective_tenant_id,
+                project_path=project_path,
+                machine_id=machine_id,
+                user_id=user_id,
+                model=model,
+                provider=provider,
+            )
+            if model_decision.is_deny:
+                logger.warning(
+                    "Policy denied model %s (provider %s) for tenant %s: %s",
+                    model,
+                    provider,
+                    effective_tenant_id,
+                    model_decision.reason,
+                )
+                return None
+
         ha_pool: Optional[dict[str, Any]] = None
         if tool_name == "qwen":
             if not ha_pool_token:
@@ -451,6 +624,15 @@ class RemoteSessionManager:
     ) -> bool:
         """Send a permission response (approve/deny) to the remote agent.
 
+        This is the SINGLE consume chokepoint for policy decisions (plan §2.5,
+        review A3): both the human-approval route and the auto allow/deny path
+        in ``process_permission_request`` funnel through here. When policy is
+        enabled and a decision row exists for ``request_id``, the decision is
+        atomically consumed here (single-use + expiry + fingerprint binding). If
+        the consume fails (already consumed / expired / drifted), the response
+        fails CLOSED to ``deny`` so an approval can neither be replayed nor
+        outlive its binding.
+
         Centralises the response path so the durable approval record and the
         ``permission_answered`` event are recorded alongside the command dispatch
         (the route previously dispatched directly and captured no operator
@@ -459,7 +641,16 @@ class RemoteSessionManager:
         """
         machine_id = self._get_machine_id(session_id)
 
-        # Record the durable approval response first (no-op when disabled).
+        # Single consume point: enforce the policy decision's binding BEFORE
+        # recording the response, so the audited behavior reflects what is
+        # actually enforced (consume may fail-closed to deny on replay / expiry
+        # / error). No-op when policy is disabled or no decision row exists.
+        behavior = self._enforce_policy_consume(
+            session_id, request_id, behavior, decided_by, decided_by_name
+        )
+
+        # Record the durable approval response with the actually-enforced
+        # behavior (no-op when the recorder is disabled).
         self._timeline(
             "record_approval_response",
             session_id,
@@ -488,11 +679,99 @@ class RemoteSessionManager:
         self._agent_manager.send_command(machine_id, command)
         return True
 
+    def _enforce_policy_consume(
+        self,
+        session_id: str,
+        request_id: Optional[str],
+        behavior: str,
+        decided_by: Optional[int],
+        decided_by_name: Optional[str],
+    ) -> str:
+        """Atomically consume the policy decision for ``request_id``.
+
+        Returns the (possibly overridden) behavior to dispatch. Fail-closed to
+        ``deny`` on consume failure (already-consumed / expired) OR on any
+        exception (e.g. transient DB error) — matching the evaluator's
+        fail-closed posture (review S2). Returns ``behavior`` unchanged only
+        when policy is disabled or no decision row exists (a human approving a
+        pre-policy request is not blocked).
+
+        Note (review S3): server-side consume enforces single-use
+        (``consumed_at``) + expiry only. The stored ``fingerprint_hash`` is the
+        decision's binding-of-record (audit) but is NOT re-verified here —
+        ``respond_to_permission`` has no access to the live request args to
+        recompute it. Live fingerprint re-verification is the deferred Phase-2
+        CLI-side pre-side-effect recheck (honest-client boundary, plan §2.6).
+        """
+        if self._policy_evaluator.is_noop or not request_id:
+            return behavior
+        try:
+            from app.modules.policy.repo import PolicyRepository
+
+            repo = PolicyRepository()
+            decision = repo.get_decision_by_request(request_id)
+            if decision is None:
+                # No decision row for this request (e.g. created before policy
+                # was enabled): don't block a human approval.
+                return behavior
+            reviewer = decided_by_name or (f"user:{decided_by}" if decided_by else "human")
+            ok = repo.consume_decision(
+                decision.decision_id,
+                resolved_decision=behavior,
+                reviewer_identity=reviewer,
+            )
+            if not ok:
+                logger.warning(
+                    "Policy consume failed (expired/consumed) for request %s in "
+                    "session %s; failing closed to deny",
+                    request_id,
+                    session_id[:8],
+                )
+                return "deny"
+            return behavior
+        except Exception as e:  # pragma: no cover - defensive: fail-closed
+            logger.warning(
+                "Policy consume raised for request %s: %s; failing closed to deny",
+                request_id,
+                e,
+            )
+            return "deny"
+
     def update_model(self, session_id: str, model: str) -> bool:
         """Switch the model of an active remote session."""
         machine_id = self._get_machine_id(session_id)
         if not machine_id:
             return False
+
+        # Central policy gate: a denied model/provider cannot be switched to.
+        # No-op when policy is disabled.
+        if not self._policy_evaluator.is_noop:
+            scope = self._session_policy_scope(session_id)
+            session = self._session_manager.get_session(session_id)
+            cli_tool = (
+                session.context.get("cli_tool") if session and session.context else None
+            ) or ""
+            provider = self._cli_tool_to_provider(cli_tool) if cli_tool else None
+            model_decision = self._evaluate_model_policy(
+                tenant_id=scope.get("tenant_id"),
+                project_path=scope.get("project_path"),
+                machine_id=machine_id,
+                user_id=scope.get("user_id"),
+                model=model,
+                provider=provider,
+                session_id=session_id,
+            )
+            if model_decision.is_deny:
+                logger.warning(
+                    "Policy denied model switch to %s for session %s: %s",
+                    model,
+                    session_id[:8],
+                    model_decision.reason,
+                )
+                self._emit_policy_decision_event(
+                    session_id, model_decision, model=model, provider=provider
+                )
+                return False
 
         # Update model in DB
         session = self._session_manager.get_session(session_id)
@@ -943,27 +1222,72 @@ class RemoteSessionManager:
         """
         Process a permission request from the remote agent.
 
-        Buffers the permission request as a special output entry so it
-        is delivered to the frontend via the SSE stream.  The entry uses
-        a distinct ``permission_request`` type that the frontend can detect.
+        The CLI permission request is treated as an INPUT EVENT (plan §0): the
+        control plane owns the decision. Behaviour:
+
+        - policy disabled (NullEvaluator): current path — buffer for human review.
+        - ``allow`` / ``deny``: auto-resolve. The decision row is persisted
+          synchronously and the response is dispatched through the single
+          consume chokepoint (``respond_to_permission``); the request never
+          reaches the frontend.
+        - ``require_human``: persist the decision, then buffer for human review.
+
+        The durable input-event record (``agent_approvals``) is always written.
         """
-        output_entry = {
-            "session_id": session_id,
-            "data": json.dumps(control_request),
-            "stream": "permission",
-            "is_complete": False,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        }
-
-        self._agent_manager.buffer_output(session_id, output_entry)
-        logger.info(
-            "Buffered permission request for session %s: %s",
-            session_id[:8],
-            control_request.get("request", {}).get("subtype"),
-        )
-
-        # Persist the durable approval (pending) + permission_requested event.
+        # 1. Always record the input event (durable approval request + event).
         self._timeline("record_approval_request", session_id, control_request)
+
+        # 2. Policy disabled → legacy manual-approval path.
+        if self._policy_evaluator.is_noop:
+            self._buffer_permission_for_human(session_id, control_request)
+            return
+
+        # 3. Evaluate tool/file/command policy (fail-closed on error).
+        scope = self._session_policy_scope(session_id)
+        ctx = PolicyContext(
+            target_kind=TARGET_TOOL_ACTION,
+            control_request=control_request,
+            tenant_id=scope.get("tenant_id"),
+            project_path=scope.get("project_path"),
+            machine_id=scope.get("machine_id"),
+            user_id=scope.get("user_id"),
+            session_id=session_id,
+            run_id=session_id,
+        )
+        result = self._policy_evaluator.evaluate(ctx)
+
+        if result.requires_human:
+            # Persist the require_human decision (consumed on human approval).
+            self._persist_tool_decision(session_id, control_request, result, scope)
+            self._buffer_permission_for_human(session_id, control_request)
+            return
+
+        # Auto allow/deny: persist the decision row, then resolve via the single
+        # consume chokepoint so binding verification + single-use are enforced.
+        self._persist_tool_decision(session_id, control_request, result, scope)
+
+        from app.modules.policy.fingerprint import extract_request_fields
+
+        fields = extract_request_fields(control_request)
+        request_id = fields.get("request_id")
+        tool_name = fields.get("tool") or ""
+        behavior = "allow" if result.is_allow else "deny"
+        logger.info(
+            "Policy auto-%s for session %s tool=%s (rule=%s)",
+            behavior,
+            session_id[:8],
+            tool_name,
+            result.matched_rule.rule_key if result.matched_rule else "fallback",
+        )
+        self.respond_to_permission(
+            session_id,
+            request_id,
+            behavior,
+            tool_name,
+            message=result.reason,
+            decided_by=None,
+            decided_by_name=_POLICY_SYSTEM_ACTOR,
+        )
 
     def process_request_state(
         self,

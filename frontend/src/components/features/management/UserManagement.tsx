@@ -15,6 +15,7 @@ import {
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
+import { copyToClipboard } from '@/utils';
 import {
   Button,
   Modal,
@@ -24,8 +25,9 @@ import {
   Error,
   EmptyState,
   Badge,
+  PageRefreshControl,
 } from '@/components/common';
-import { useConfirm } from '@/components/common';
+import { useConfirm, useToast } from '@/components/common';
 import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
 import { createMatcherConfig } from '@/utils';
@@ -49,7 +51,7 @@ export const UserManagement: React.FC = () => {
   // Page refresh control - manual refresh for user management
   const pageRefresh = usePageRefresh({
     page: '/manage/users',
-    refreshKey: createMatcherConfig([['users']], 'prefix'),
+    refreshKey: createMatcherConfig([['admin', 'users']], 'prefix'),
     interval: 0, // No auto refresh - manual only
     enabled: false,
   });
@@ -222,6 +224,7 @@ export const UserManagement: React.FC = () => {
           role: formData.role,
           system_account: formData.system_account,
           is_active: formData.is_active,
+          tenant_id: formData.tenant_id,
         };
         await updateUser.mutateAsync({ userId: editingUser.id, data: updateData });
       } else {
@@ -242,6 +245,7 @@ export const UserManagement: React.FC = () => {
   };
 
   const confirm = useConfirm();
+  const toast = useToast();
   const handleDelete = async (userId: number) => {
     if (await confirm({ message: t('confirmDeleteUser', language), variant: 'danger' })) {
       try {
@@ -315,25 +319,14 @@ export const UserManagement: React.FC = () => {
 
         {/* 右侧：操作按钮 */}
         <div className="d-flex align-items-center gap-2 ms-auto">
-          {/* 刷新按钮：简约图标轻按钮 */}
-          <button
-            type="button"
-            className="btn btn-sm p-1 border-0"
-            onClick={() => refetch()}
-            disabled={pageRefresh.isRefreshing}
-            title={t('refresh', language)}
-            style={{
-              color: '#6c757d',
-              backgroundColor: 'transparent',
-              borderRadius: '4px',
-              lineHeight: '1',
-            }}
-          >
-            <i
-              className={`bi bi-arrow-clockwise ${pageRefresh.isRefreshing ? 'spinner-border spinner-border-sm' : ''}`}
-              style={{ fontSize: '1rem' }}
-            />
-          </button>
+          {/* 刷新按钮 */}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
 
           {/* 添加用户按钮：柔和圆角主色按钮 */}
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>
@@ -466,7 +459,10 @@ export const UserManagement: React.FC = () => {
 
           <div className="row g-3">
             <div className="col-md-6">
-              <label className="form-label">{t('tableUsername', language)}</label>
+              <label className="form-label">
+                {t('tableUsername', language)}
+                <span className="text-danger ms-1">*</span>
+              </label>
               <TextInput
                 value={formData.username}
                 onChange={(value: string) => setFormData({ ...formData, username: value })}
@@ -474,7 +470,10 @@ export const UserManagement: React.FC = () => {
               />
             </div>
             <div className="col-md-6">
-              <label className="form-label">{t('tableEmail', language)}</label>
+              <label className="form-label">
+                {t('tableEmail', language)}
+                <span className="text-danger ms-1">*</span>
+              </label>
               <TextInput
                 type="email"
                 value={formData.email}
@@ -524,7 +523,10 @@ export const UserManagement: React.FC = () => {
             {!editingUser && (
               <>
                 <div className="col-md-6">
-                  <label className="form-label">{t('password', language)}</label>
+                  <label className="form-label">
+                    {t('password', language)}
+                    <span className="text-danger ms-1">*</span>
+                  </label>
                   <TextInput
                     type="password"
                     value={formData.password}
@@ -534,7 +536,10 @@ export const UserManagement: React.FC = () => {
                   <PasswordPolicyHint />
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">{t('confirmPassword', language)}</label>
+                  <label className="form-label">
+                    {t('confirmPassword', language)}
+                    <span className="text-danger ms-1">*</span>
+                  </label>
                   <TextInput
                     type="password"
                     value={formData.confirm_password ?? ''}
@@ -581,8 +586,11 @@ export const UserManagement: React.FC = () => {
             />
             <Button
               variant="outline-secondary"
-              onClick={() => {
-                navigator.clipboard.writeText(tempPassword);
+              onClick={async () => {
+                const success = await copyToClipboard(tempPassword);
+                if (!success) {
+                  toast.error(t('copyFailed', language) || 'Copy failed');
+                }
               }}
               title={t('copyToClipboard', language) ?? 'Copy to clipboard'}
             >

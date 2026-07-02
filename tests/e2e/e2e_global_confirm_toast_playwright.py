@@ -20,7 +20,7 @@ Run:
   HEADLESS=true  python tests/e2e/e2e_global_confirm_toast_playwright.py   # auto
   HEADLESS=false python tests/e2e/e2e_global_confirm_toast_playwright.py   # demo
 
-  # Point at a Vite dev server (this PR's frontend tree) proxying the API to :5001:
+  # Point at a Vite dev server (this PR's frontend tree) proxying the API to :19888:
   BASE_URL=http://localhost:5173 HEADLESS=true python tests/e2e/e2e_global_confirm_toast_playwright.py
 """
 
@@ -36,7 +36,7 @@ import json  # noqa: E402
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-global-confirm-toast")
 

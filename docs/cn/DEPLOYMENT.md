@@ -34,7 +34,7 @@ alembic upgrade head
 # 启动 Web 服务器
 python3 server.py
 
-# 访问 http://localhost:5000
+# 访问 http://localhost:19888
 ```
 
 ## Docker 部署
@@ -70,7 +70,7 @@ sudo ./deploy.sh
 |------|------|--------|
 | 运行用户 | 运行应用的用户 | `open-ace` |
 | 部署目录 | 安装目录 | `/home/open-ace/open-ace` |
-| Web 端口 | Web 服务器端口 | `5000` |
+| Web 端口 | Web 服务器端口 | `19888` |
 | 主机名 | 服务器主机名 | 自动检测 |
 | 数据库用户 | PostgreSQL 用户名 | `open-ace` |
 | 数据库名称 | PostgreSQL 数据库名 | `ace` |
@@ -208,6 +208,28 @@ docker compose restart open-ace
 
 ### 卸载
 
+#### Docker 方式卸载
+
+如果使用纯 Docker 部署（无 deploy.sh 脚本），可手动卸载：
+
+```bash
+# 停止并删除容器
+docker compose down
+
+# 删除镜像
+docker rmi openace/open-ace:latest postgres:15-alpine
+
+# 删除数据卷（彻底清理）
+docker volume rm open-ace_postgres-data open-ace_config-data open-ace_workspace-data
+
+# 删除本地配置（可选）
+rm -rf ~/.open-ace ./logs
+```
+
+#### 脚本方式卸载
+
+如果使用 deploy.sh 脚本部署：
+
 ```bash
 cd /home/open-ace/open-ace
 
@@ -255,6 +277,77 @@ cd /home/open-ace/open-ace
 |------|------|
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | 邮件 SMTP 密码 |
+
+### 端口配置
+
+Open ACE 默认监听 19888 端口。如需修改端口，可根据部署方式选择以下方法。
+
+#### macOS 端口冲突
+
+macOS Monterey (12) 及以后版本默认启用 **AirPlay Receiver**，监听 19888 端口，会与 Open ACE 冲突。
+
+**解决方案**：
+1. 关闭 AirPlay Receiver：系统设置 → 通用 → AirDrop 与接力 → 关闭「AirPlay 接收器」
+2. 或修改 Open ACE 端口（见下方方法）
+
+#### 二进制方式
+
+修改配置文件 `~/.open-ace/config.json`：
+
+```json
+{
+  "server": {
+    "web_port": 5001,
+    "web_host": "0.0.0.0"
+  }
+}
+```
+
+修改后重启服务即可生效。
+
+#### Docker 方式
+
+**临时修改**（命令行）：
+
+```bash
+PORT=5001 docker compose up -d
+```
+
+**永久修改**（.env 文件）：
+
+```bash
+# 在项目根目录创建/编辑 .env 文件
+echo "PORT=5001" >> .env
+
+# 重启容器
+docker compose down
+docker compose up -d
+```
+
+**验证端口映射**：
+
+```bash
+docker ps
+# 应显示 0.0.0.0:19888->19888/tcp
+```
+
+#### 防火墙设置（如需外网访问）
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 19888/tcp
+
+# CentOS/RHEL
+sudo firewall-cmd --add-port=19888/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### 总结
+
+| 方式 | 配置位置 | 修改方法 |
+|------|----------|----------|
+| 二进制 | `~/.open-ace/config.json` | 修改 `server.web_port` |
+| Docker | 环境变量 `PORT` | `.env` 文件或命令行传入 |
 
 ## 部署场景
 
@@ -427,13 +520,20 @@ python3 scripts/manage.py local start
 
 ### 端口被占用
 
+如果启动时提示端口被占用，可以选择：
+
+1. **修改 Open ACE 端口** - 参见 [端口配置](#端口配置)
+2. **终止占用进程**：
+
 ```bash
-# 查找占用 5000 端口的进程
-lsof -i :5000
+# 查找占用 19888 端口的进程
+lsof -i :19888
 
 # 终止进程
 kill -9 <PID>
 ```
+
+**macOS 用户注意**：macOS Monterey (12) 及以后版本默认启用 AirPlay Receiver，监听 19888 端口。建议关闭 AirPlay Receiver 或修改 Open ACE 端口。
 
 ### 数据库被锁定
 
@@ -455,7 +555,7 @@ chmod -R 755 ~/.open-ace/
 
 1. **认证**：在生产环境中启用用户认证
 2. **HTTPS**：使用反向代理（nginx/Apache）配合 SSL
-3. **防火墙**：限制对 5000 端口的访问
+3. **防火墙**：限制对 19888 端口的访问
 4. **密钥管理**：使用环境变量存储敏感数据
 
 ## 多用户工作区部署
@@ -595,7 +695,7 @@ WantedBy=multi-user.target
 
 ```bash
 # 查看运行中的实例
-curl http://localhost:5000/api/workspace/instances
+curl http://localhost:19888/api/workspace/instances
 
 # 查看日志
 tail -f /home/open-ace/open-ace/logs/open-ace.log | grep WebUIManager

@@ -35,7 +35,8 @@ def ui_screenshot_dir(tmp_path):
 @pytest.fixture(scope="session")
 def ui_base_url():
     """Base URL for the application under test."""
-    return os.environ.get("BASE_URL", "http://localhost:5001")
+    # Issue #1372: 统一端口为 19888
+    return os.environ.get("BASE_URL", "http://localhost:19888")
 
 
 @pytest.fixture(scope="session")

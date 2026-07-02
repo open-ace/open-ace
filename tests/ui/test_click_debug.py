@@ -8,7 +8,7 @@ import os
 
 from playwright.async_api import async_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:5001")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 WEBUI_PORT = os.environ.get("WEBUI_PORT", "3101")
 WEBUI_TOKEN = os.environ.get("WEBUI_TOKEN", "")
 SCREENSHOT_DIR = os.path.join(

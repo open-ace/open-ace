@@ -99,6 +99,30 @@ def is_model_gateway_enabled() -> bool:
     return bool(get_config_value("model_gateway", "enabled", False))
 
 
+def is_policy_enabled() -> bool:
+    """Check whether the central policy & approval feature is enabled.
+
+    Reads ``policy.enabled`` from config.json (60 s TTL cache), mirroring
+    ``is_run_timeline_enabled``. When disabled, ``get_evaluator`` returns a
+    ``NullPolicyEvaluator`` (model → allow, tool → require_human) so the system
+    behaves exactly as before — real-time manual approval, no auto allow/deny.
+    Strictly mirrors the other toggles (no env bypass) so the feature is easy
+    to remove later.
+    """
+    return bool(get_config_value("policy", "enabled", False))
+
+
+def get_policy_approval_ttl_seconds() -> int:
+    """Default approval lifetime (seconds) for a policy decision.
+
+    Read from ``policy.approval_ttl_seconds`` (default 3600 = 1 hour). A rule
+    may override this per-rule via ``policy_rules.approval_ttl_seconds``.
+    Approvals never live indefinitely (review M3): an expired decision cannot
+    be consumed and a fresh request is triggered.
+    """
+    return int(get_config_value("policy", "approval_ttl_seconds", 3600) or 3600)
+
+
 # ── AI GitHub Account env cache ───────────────────────────────────
 # Avoids a DB query on every subprocess.run() inside GitHubOps.
 # Simple two-variable cache: data + timestamp, guarded by _cache_lock.

@@ -114,13 +114,17 @@ def _refresh_session(token: str, user_repo=None):
     remaining, avoiding a DB write on every request.
     """
     try:
+        from app.repositories.database import get_param_placeholder
         from app.repositories.user_repo import UserRepository
         from app.services.auth_service import _get_session_timeout_hours
 
         repo = user_repo or UserRepository()
 
+        # Placeholder style: use get_param_placeholder() ({p}) per the file
+        # convention; never raw ? / %s. The Database layer adapts internally.
+        p = get_param_placeholder()
         # Lightweight query — only need expires_at, no JOIN
-        row = repo.db.fetch_one("SELECT expires_at FROM sessions WHERE token = ?", (token,))
+        row = repo.db.fetch_one(f"SELECT expires_at FROM sessions WHERE token = {p}", (token,))
         if not row or not row.get("expires_at"):
             return
 
@@ -505,7 +509,6 @@ def list_sessions():
     try:
         from app.repositories.database import (
             Database,
-            adapt_sql,
             escape_like,
             get_param_placeholder,
             is_postgresql,
@@ -535,7 +538,10 @@ def list_sessions():
         if session_type and session_type not in VALID_SESSION_TYPE_VALUES:
             session_type = None  # Invalid value, ignore filter
 
-        # Get placeholder variable for consistent SQL style
+        # Placeholder style convention for this file: build parameterized SQL by
+        # interpolating {p} from get_param_placeholder(). Do NOT wrap these queries
+        # in adapt_sql() (the Database layer adapts internally) and do NOT use raw
+        # ? / %s literals. Declare p once per function.
         p = get_param_placeholder()
 
         # Query agent_sessions table (user-created sessions)
@@ -609,8 +615,7 @@ def list_sessions():
                   )
             """
             count_params = base_params + [search_pattern, search_pattern, search_pattern]
-            count_query = adapt_sql(count_sql)
-            result = db.fetch_one(count_query, tuple(count_params))
+            result = db.fetch_one(count_sql, tuple(count_params))
             total = result["count"] if result else 0
 
             sessions_sql = f"""
@@ -637,14 +642,12 @@ def list_sessions():
                 limit,
                 offset,
             ]
-            sessions_query = adapt_sql(sessions_sql)
-            sessions = db.fetch_all(sessions_query, tuple(sessions_params))
+            sessions = db.fetch_all(sessions_sql, tuple(sessions_params))
 
         else:
             where_clause = base_where_clause
             count_sql = f"SELECT COUNT(*) as count FROM agent_sessions WHERE {where_clause}"
-            count_query = adapt_sql(count_sql)
-            result = db.fetch_one(count_query, tuple(base_params))
+            result = db.fetch_one(count_sql, tuple(base_params))
             total = result["count"] if result else 0
 
             offset = (page - 1) * limit
@@ -654,8 +657,7 @@ def list_sessions():
                 ORDER BY updated_at DESC
                 LIMIT {p} OFFSET {p}
             """
-            sessions_query = adapt_sql(sessions_sql)
-            sessions = db.fetch_all(sessions_query, tuple(base_params + [limit, offset]))
+            sessions = db.fetch_all(sessions_sql, tuple(base_params + [limit, offset]))
 
         total_pages = (total + limit - 1) // limit if total > 0 else 1
 
@@ -663,7 +665,6 @@ def list_sessions():
         first_message_map = {}
         if session_ids:
             try:
-                p = get_param_placeholder()
                 sid_placeholders = ", ".join([p] * len(session_ids))
                 # Get first user message for each session (for tooltip preview)
                 if is_postgresql():

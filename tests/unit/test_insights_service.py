@@ -91,12 +91,14 @@ class TestInsightsServiceConfig:
                 "db-key",
                 "https://db.api.com/v1",
                 1,
+                None,
             )
             mock_get.return_value = mock_proxy
 
-            api_key, base_url = svc._get_api_credentials(config)
+            api_key, base_url, model = svc._get_api_credentials(config)
             assert api_key == "db-key"
             assert base_url == "https://db.api.com/v1"
+            assert model is None
             mock_proxy.resolve_api_key_for_scope.assert_called_once_with(1, "openai", scope="local")
 
     def test_get_api_credentials_db_key_default_base_url(self):
@@ -109,12 +111,13 @@ class TestInsightsServiceConfig:
             patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
         ):
             mock_proxy = MagicMock()
-            mock_proxy.resolve_api_key_for_scope.return_value = ("db-key", None, 1)
+            mock_proxy.resolve_api_key_for_scope.return_value = ("db-key", None, 1, None)
             mock_get.return_value = mock_proxy
 
-            api_key, base_url = svc._get_api_credentials(config)
+            api_key, base_url, model = svc._get_api_credentials(config)
             assert api_key == "db-key"
             assert base_url == "https://coding.dashscope.aliyuncs.com/v1"
+            assert model is None
 
     def test_get_api_credentials_fallback_to_env(self):
         """Falls back to env vars when database has no key."""
@@ -136,9 +139,10 @@ class TestInsightsServiceConfig:
             mock_proxy.resolve_api_key_for_scope.return_value = None
             mock_get.return_value = mock_proxy
 
-            api_key, base_url = svc._get_api_credentials(config)
+            api_key, base_url, model = svc._get_api_credentials(config)
             assert api_key == "env-key"
             assert base_url == "https://env.api.com/v1"
+            assert model is None
 
     def test_get_api_credentials_env_default_base_url(self):
         """Env fallback with only OPENAI_API_KEY uses default base URL."""
@@ -153,9 +157,10 @@ class TestInsightsServiceConfig:
             mock_proxy.resolve_api_key_for_scope.return_value = None
             mock_get.return_value = mock_proxy
 
-            api_key, base_url = svc._get_api_credentials(config)
+            api_key, base_url, model = svc._get_api_credentials(config)
             assert api_key == "env-key"
             assert base_url == "https://coding.dashscope.aliyuncs.com/v1"
+            assert model is None
 
     def test_get_api_credentials_no_key_anywhere(self):
         """Neither database nor env has a key → empty string."""
@@ -170,8 +175,9 @@ class TestInsightsServiceConfig:
             mock_proxy.resolve_api_key_for_scope.return_value = None
             mock_get.return_value = mock_proxy
 
-            api_key, _ = svc._get_api_credentials(config)
+            api_key, _, model = svc._get_api_credentials(config)
             assert api_key == ""
+            assert model is None
 
     def test_get_api_credentials_db_exception_falls_to_env(self):
         """DB exception is caught gracefully, falls back to env."""
@@ -185,8 +191,9 @@ class TestInsightsServiceConfig:
                 side_effect=Exception("DB down"),
             ),
         ):
-            api_key, _ = svc._get_api_credentials(config)
+            api_key, _, model = svc._get_api_credentials(config)
             assert api_key == "env-key"
+            assert model is None
 
     def test_get_api_credentials_db_over_env(self):
         """Database key takes priority over environment variable."""
@@ -202,12 +209,14 @@ class TestInsightsServiceConfig:
                 "db-key",
                 "https://db.api.com/v1",
                 1,
+                None,
             )
             mock_get.return_value = mock_proxy
 
-            api_key, base_url = svc._get_api_credentials(config)
+            api_key, base_url, model = svc._get_api_credentials(config)
             assert api_key == "db-key"
             assert base_url == "https://db.api.com/v1"
+            assert model is None
 
 
 class TestInsightsServicePrompts:
@@ -633,6 +642,7 @@ class TestInsightsServiceGenerateInsights:
                 "test-key",
                 "https://api.example.com/v1",
                 1,
+                None,
             )
             mock_get.return_value = mock_proxy
 
@@ -666,6 +676,7 @@ class TestInsightsServiceGenerateInsights:
                 "test-key",
                 "https://api.example.com/v1",
                 1,
+                None,
             )
             mock_get.return_value = mock_proxy
 

@@ -183,6 +183,9 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   // Error indicator
   const hasError = showErrorIndicator && error && errorCount > 0;
 
+  // Check if dropdown has any content (auto refresh toggle or interval selector)
+  const hasDropdownContent = showAutoRefreshToggle || (showIntervalSelector && autoRefresh);
+
   if (compact) {
     // Compact mode: just icon buttons with dropdown
     return (
@@ -203,61 +206,70 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           />
         )}
 
-        {/* Dropdown for settings */}
-        <div className="dropdown">
-          <button
-            className="btn btn-link btn-sm p-0"
-            type="button"
-            data-bs-toggle="dropdown"
-            aria-expanded="false"
-            title={buildTooltip()}
-            data-testid="dropdown-toggle"
-          >
-            <i className={cn('bi', autoRefresh ? 'bi-clock' : 'bi-clock-history')} />
-          </button>
-          <ul className="dropdown-menu dropdown-menu-end">
-            {showAutoRefreshToggle && (
-              <li>
-                <div className="dropdown-item-text">
-                  <div className="form-check form-switch">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id={`${position}-auto-refresh`}
-                      checked={autoRefresh}
-                      onChange={(e) => setAutoRefresh(e.target.checked)}
-                    />
-                    <label className="form-check-label" htmlFor={`${position}-auto-refresh`}>
-                      {t('autoRefresh', language)}
-                    </label>
+        {/* Dropdown for settings - only render if there's content */}
+        {hasDropdownContent ? (
+          <div className="dropdown">
+            <button
+              className="btn btn-link btn-sm p-0"
+              type="button"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              title={buildTooltip()}
+              data-testid="dropdown-toggle"
+            >
+              <i className={cn('bi', autoRefresh ? 'bi-clock' : 'bi-clock-history')} />
+            </button>
+            <ul className="dropdown-menu dropdown-menu-end">
+              {showAutoRefreshToggle && (
+                <li>
+                  <div className="dropdown-item-text">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`${position}-auto-refresh`}
+                        checked={autoRefresh}
+                        onChange={(e) => setAutoRefresh(e.target.checked)}
+                      />
+                      <label className="form-check-label" htmlFor={`${position}-auto-refresh`}>
+                        {t('autoRefresh', language)}
+                      </label>
+                    </div>
                   </div>
-                </div>
-              </li>
-            )}
-            {showIntervalSelector && autoRefresh && (
-              <>
-                <li>
-                  <hr className="dropdown-divider" />
                 </li>
-                <li>
-                  <span className="dropdown-item-text small text-muted">
-                    {t('refreshInterval', language)}
-                  </span>
-                </li>
-                {intervalOptions.map((option) => (
-                  <li key={option.value}>
-                    <button
-                      className={cn('dropdown-item', interval === option.value && 'active')}
-                      onClick={() => setInterval(option.value)}
-                    >
-                      {t(option.label, language)}
-                    </button>
+              )}
+              {showIntervalSelector && autoRefresh && (
+                <>
+                  <li>
+                    <hr className="dropdown-divider" />
                   </li>
-                ))}
-              </>
-            )}
-          </ul>
-        </div>
+                  <li>
+                    <span className="dropdown-item-text small text-muted">
+                      {t('refreshInterval', language)}
+                    </span>
+                  </li>
+                  {intervalOptions.map((option) => (
+                    <li key={option.value}>
+                      <button
+                        className={cn('dropdown-item', interval === option.value && 'active')}
+                        onClick={() => setInterval(option.value)}
+                      >
+                        {t(option.label, language)}
+                      </button>
+                    </li>
+                  ))}
+                </>
+              )}
+            </ul>
+          </div>
+        ) : (
+          /* Static clock icon when no dropdown content - shows last refresh time tooltip */
+          <i
+            className={cn('bi bi-clock-history', 'text-muted')}
+            title={buildTooltip()}
+            data-testid="refresh-clock-icon"
+          />
+        )}
 
         {/* Manual refresh button */}
         <button

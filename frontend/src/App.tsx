@@ -266,6 +266,7 @@ const AutonomousDisabledRedirect: React.FC = () => {
 const WorkRoutes: React.FC = () => {
   const location = useLocation();
   const autonomousEnabled = useAppStore((state) => state.autonomousEnabled);
+  const configLoaded = useAppStore((state) => state.configLoaded);
   const isWorkspaceRoute =
     location.pathname === '/work' ||
     location.pathname === '/work/' ||
@@ -295,10 +296,15 @@ const WorkRoutes: React.FC = () => {
           <Route path="prompts" element={<Prompts />} />
           <Route path="usage" element={<UsageOverview />} />
           <Route path="insights" element={<InsightsReport />} />
-          {autonomousEnabled ? (
-            <Route path="autonomous" element={<AutonomousDev />} />
+          {/* Wait for config to load before deciding autonomous route */}
+          {configLoaded ? (
+            autonomousEnabled ? (
+              <Route path="autonomous" element={<AutonomousDev />} />
+            ) : (
+              <Route path="autonomous" element={<AutonomousDisabledRedirect />} />
+            )
           ) : (
-            <Route path="autonomous" element={<AutonomousDisabledRedirect />} />
+            <Route path="autonomous" element={<PageLoader />} />
           )}
           {/* Explicit /workspace route for session restore */}
           <Route path="workspace" element={null} />

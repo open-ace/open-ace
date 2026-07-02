@@ -135,6 +135,15 @@
   --z-popover: 600;
   --z-tooltip: 700;
   --z-toast: 800;
+
+  /* Terminal Colors - Issue #1334 */
+  --terminal-bg: #ffffff;
+  --terminal-fg: #1e1e2e;
+  --terminal-cursor: #1e1e2e;
+  --terminal-selection: #add8e666;
+  --terminal-status-bar-bg: #f8fafc;
+  --terminal-status-bar-border: #e2e8f0;
+  --terminal-status-bar-text: #475569;
 }
 
 /* Modal Theme Styles - Override Bootstrap defaults */
@@ -239,6 +248,15 @@
 
   /* Dark theme close button - invert to white */
   --btn-close-filter: invert(1) grayscale(100%) brightness(200%);
+
+  /* Terminal Colors - Issue #1334 */
+  --terminal-bg: #1e1e2e;
+  --terminal-fg: #cdd6f4;
+  --terminal-cursor: #f5e0dc;
+  --terminal-selection: #585b7066;
+  --terminal-status-bar-bg: #181825;
+  --terminal-status-bar-border: #313244;
+  --terminal-status-bar-text: #a6adc8;
 
   /* Bootstrap Modal Dark Theme Variables */
   --bs-modal-bg: var(--bg-primary);

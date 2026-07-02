@@ -114,13 +114,15 @@ class TestConfigureLocalOpenAIProxy:
             mock_get_proxy.return_value = mock_proxy
 
             env = {}
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
 
             assert env["OPENAI_API_KEY"] == "proxy-token"
             assert (
-                env["OPENAI_BASE_URL"] == "http://openace.example:5000/api/workspace/llm-proxy/v1"
+                env["OPENAI_BASE_URL"] == "http://openace.example:19888/api/workspace/llm-proxy/v1"
             )
-            assert env["OPENACE_PROXY_URL"] == "http://openace.example:5000/api/workspace/llm-proxy"
+            assert (
+                env["OPENACE_PROXY_URL"] == "http://openace.example:19888/api/workspace/llm-proxy"
+            )
             assert pool["proxy_token"] == "proxy-token"
             mock_proxy.get_tool_model_pool.assert_called_once_with(
                 tenant_id=1,
@@ -152,7 +154,7 @@ class TestConfigureLocalOpenAIProxy:
             mock_get_proxy.return_value = mock_proxy
 
             env = {}
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
 
             assert env["OPENAI_API_KEY"] == "proxy-token"
             assert pool["models"] == []
@@ -172,7 +174,7 @@ class TestConfigureLocalOpenAIProxy:
         ):
             env = {}
             # Should not raise
-            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:5000")
+            pool = manager._configure_local_openai_proxy(7, env, "http://openace.example:19888")
             assert "OPENAI_API_KEY" not in env
             assert pool["models"] == []
             assert pool["proxy_token"] == ""
@@ -198,7 +200,7 @@ class TestConfigureLocalOpenAIProxy:
                 "_find_webui_executable",
                 return_value=("/usr/local/bin/qwen-code-webui", None),
             ),
-            patch.object(manager, "_load_server_config", return_value={"web_port": 5000}),
+            patch.object(manager, "_load_server_config", return_value={"web_port": 19888}),
             patch.object(
                 manager, "_configure_local_openai_proxy", return_value={"models": []}
             ) as mock_proxy_setup,
@@ -214,7 +216,9 @@ class TestConfigureLocalOpenAIProxy:
             mock_pwd.getpwuid.return_value.pw_name = "testuser"
             mock_popen.return_value = MagicMock(pid=12345)
             mock_run_as_root.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            _, model_pool = manager._launch_webui_process(1, "testuser", 9000)
+            _, model_pool = manager._launch_webui_process(
+                1, "testuser", 9000, "http://192.168.1.87"
+            )
 
             # Verify local proxy setup was called
             mock_proxy_setup.assert_called_once()

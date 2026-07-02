@@ -287,7 +287,7 @@ git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 docker compose up -d --build
 
-Then open http://localhost:5000.
+Then open http://localhost:19888.
 
 The default local account is documented in the README. For production, change the default password and configure SECRET_KEY before exposing the service.
 ```

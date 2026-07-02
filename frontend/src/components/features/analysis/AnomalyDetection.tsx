@@ -60,7 +60,13 @@ export const AnomalyDetection: React.FC = () => {
   // Page refresh control - manual refresh for anomaly detection
   const pageRefresh = usePageRefresh({
     page: '/manage/analysis/anomaly',
-    refreshKey: createMatcherConfig([['analysis', 'anomaly']], 'prefix'),
+    refreshKey: createMatcherConfig(
+      [
+        ['analysis', 'anomaly-detection'],
+        ['analysis', 'anomaly-trend'],
+      ],
+      'prefix'
+    ),
     interval: 0, // No auto refresh - manual only
     enabled: false,
   });
@@ -192,13 +198,7 @@ export const AnomalyDetection: React.FC = () => {
       {/* Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('anomalyDetection', language)}</h2>
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-          showLastRefreshTime={true}
-        />
+        <PageRefreshControl refresh={pageRefresh} compact={true} showLastRefreshTime={true} />
       </div>
 
       {/* Filters */}

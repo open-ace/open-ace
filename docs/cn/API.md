@@ -4,7 +4,7 @@
 
 ## 概述
 
-- **Base URL**: `http://localhost:5000/api`（默认）
+- **Base URL**: `http://localhost:19888/api`（默认）
 - **认证方式**: 通过 Cookie 的 session token 或 Authorization 头中的 Bearer token
 - **Content-Type**: 大多数端点使用 `application/json`
 
