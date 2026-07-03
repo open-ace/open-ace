@@ -114,16 +114,20 @@ class GitHubOps:
 
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a gh CLI command with transient-network-error retry."""
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow GitHubOps to access user-private directories)
+        # Build subprocess kwargs - remove cwd when using system_account to avoid
+        # Python permission check on repo_path (Issue #1421: cwd causes Permission denied)
+        kwargs = self._build_subprocess_kwargs()
+        # If system_account is set, use -C flag instead of cwd for multi-user permission isolation
+        # (Issue #1395 + #1421: Allow GitHubOps to access user-private directories)
         if self.system_account:
-            cmd = ["sudo", "-u", self.system_account, "gh"] + args
+            cmd = ["sudo", "-u", self.system_account, "gh", "-C", self.repo_path] + args
+            kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = ["gh"] + args
         last_error: Optional[GitHubOpsError] = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
-                result = subprocess.run(cmd, **self._build_subprocess_kwargs())
+                result = subprocess.run(cmd, **kwargs)
                 if check and result.returncode != 0:
                     err = GitHubOpsError(
                         f"gh {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
@@ -201,16 +205,20 @@ class GitHubOps:
         """Run a git command with transient-network-error retry."""
         # Ensure safe.directory is configured for Docker volume mounts
         self._ensure_safe_directory()
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow GitHubOps to access user-private directories)
+        # Build subprocess kwargs - remove cwd when using system_account to avoid
+        # Python permission check on repo_path (Issue #1421: cwd causes Permission denied)
+        kwargs = self._build_subprocess_kwargs()
+        # If system_account is set, use -C flag instead of cwd for multi-user permission isolation
+        # (Issue #1395 + #1421: Allow GitHubOps to access user-private directories)
         if self.system_account:
-            cmd = ["sudo", "-u", self.system_account, "git"] + args
+            cmd = ["sudo", "-u", self.system_account, "git", "-C", self.repo_path] + args
+            kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = ["git"] + args
         last_error: Optional[GitHubOpsError] = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
             try:
-                result = subprocess.run(cmd, **self._build_subprocess_kwargs())
+                result = subprocess.run(cmd, **kwargs)
                 if check and result.returncode != 0:
                     err = GitHubOpsError(
                         f"git {' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"
