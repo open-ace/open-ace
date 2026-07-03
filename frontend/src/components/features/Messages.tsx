@@ -1,5 +1,11 @@
 /**
  * Messages Component - Messages list with filters
+ *
+ * UI improvements (Issue #1434):
+ * - Responsive filter layout using Bootstrap grid
+ * - All roles selected by default for complete conversation view
+ * - Default date range: last 7 days for broader history access
+ * - Enhanced message cards with timestamp in header
  */
 
 import React, { useState, useMemo } from 'react';
@@ -35,16 +41,27 @@ import type { Message, MessageFilters } from '@/types';
 
 const ITEMS_PER_PAGE = 20;
 
-// Get today's date in ISO format for default filter
-const getTodayDate = () => formatDate(new Date(), 'iso');
+// Get date N days ago in ISO format
+const getDateDaysAgo = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return formatDate(date, 'iso');
+};
+
+// Default date range: last 7 days (Issue #1434)
+const getDefaultStartDate = () => getDateDaysAgo(7);
+const getDefaultEndDate = () => formatDate(new Date(), 'iso');
+
+// Default roles: all roles for complete conversation view (Issue #1434)
+const DEFAULT_ROLES = ['user', 'assistant', 'system'];
 
 export const Messages: React.FC = () => {
   const language = useLanguage();
-  const [selectedRoles, setSelectedRoles] = useState<string[]>(['user']);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(DEFAULT_ROLES);
   const [filters, setFilters] = useState<MessageFilters>(() => ({
-    startDate: getTodayDate(),
-    endDate: getTodayDate(),
-    role: ['user'],
+    startDate: getDefaultStartDate(),
+    endDate: getDefaultEndDate(),
+    role: DEFAULT_ROLES,
   }));
   const [page, setPage] = useState(1);
 
@@ -146,117 +163,137 @@ export const Messages: React.FC = () => {
         />
       </div>
 
-      {/* Filters - Nested flex for column alignment */}
+      {/* Filters - Responsive layout using Bootstrap grid (Issue #1434) */}
       <Card className="mb-3">
-        {/* Row 1: Date Range + Filters */}
-        <div className="d-flex align-items-center gap-2 mb-2">
-          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
-            <small className="text-muted">{t('startDate', language)}:</small>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              style={{ width: '150px' }}
-              value={filters.startDate ?? ''}
-              aria-label={t('startDate', language)}
-              onChange={(e) => handleFilterChange('startDate', e.target.value)}
-            />
-            <small className="text-muted ms-2">{t('endDate', language)}:</small>
-            <input
-              type="date"
-              className="form-control form-control-sm"
-              style={{ width: '150px' }}
-              value={filters.endDate ?? ''}
-              aria-label={t('endDate', language)}
-              onChange={(e) => handleFilterChange('endDate', e.target.value)}
-            />
+        <div className="row g-2">
+          {/* Date Range - Full width on mobile, auto on desktop */}
+          <div className="col-12 col-md-auto">
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="d-flex align-items-center gap-1">
+                <small className="text-muted">{t('startDate', language)}:</small>
+                <input
+                  type="date"
+                  className="form-control form-control-sm"
+                  style={{ width: '140px' }}
+                  value={filters.startDate ?? ''}
+                  aria-label={t('startDate', language)}
+                  onChange={(e) => handleFilterChange('startDate', e.target.value)}
+                />
+              </div>
+              <div className="d-flex align-items-center gap-1">
+                <small className="text-muted">{t('endDate', language)}:</small>
+                <input
+                  type="date"
+                  className="form-control form-control-sm"
+                  style={{ width: '140px' }}
+                  value={filters.endDate ?? ''}
+                  aria-label={t('endDate', language)}
+                  onChange={(e) => handleFilterChange('endDate', e.target.value)}
+                />
+              </div>
+            </div>
           </div>
-          <div className="d-flex align-items-center gap-2 flex-grow-1">
-            <div className="d-flex align-items-center gap-1">
-              <small className="text-muted">{t('tableHost', language)}:</small>
-              <Select
-                options={hostOptions}
-                value={filters.host ?? ''}
-                onChange={(value) => handleFilterChange('host', value)}
-                size="sm"
-                style={{ width: '150px' } as React.CSSProperties}
-              />
-            </div>
-            <div className="d-flex align-items-center gap-1">
-              <small className="text-muted">{t('tableTool', language)}:</small>
-              <Select
-                options={toolOptions}
-                value={filters.tool ?? ''}
-                onChange={(value) => handleFilterChange('tool', value)}
-                size="sm"
-                style={{ width: '150px' } as React.CSSProperties}
-              />
-            </div>
-            <div className="d-flex align-items-center gap-1 flex-grow-1">
-              <small className="text-muted">{t('tableSender', language)}:</small>
-              <SearchableSelect
-                options={senderOptions}
-                value={filters.sender ?? ''}
-                onChange={(value) => handleFilterChange('sender', value)}
-                placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
-                searchPlaceholder={t('searchSender', language)}
-                size="sm"
-                className="flex-grow-1"
-              />
+
+          {/* Host, Tool, Sender - Stack on mobile */}
+          <div className="col-12 col-md">
+            <div className="d-flex align-items-center gap-2 flex-wrap">
+              <div className="d-flex align-items-center gap-1">
+                <small className="text-muted">{t('tableHost', language)}:</small>
+                <Select
+                  options={hostOptions}
+                  value={filters.host ?? ''}
+                  onChange={(value) => handleFilterChange('host', value)}
+                  size="sm"
+                  style={{ width: '130px' } as React.CSSProperties}
+                />
+              </div>
+              <div className="d-flex align-items-center gap-1">
+                <small className="text-muted">{t('tableTool', language)}:</small>
+                <Select
+                  options={toolOptions}
+                  value={filters.tool ?? ''}
+                  onChange={(value) => handleFilterChange('tool', value)}
+                  size="sm"
+                  style={{ width: '130px' } as React.CSSProperties}
+                />
+              </div>
+              <div
+                className="d-flex align-items-center gap-1 flex-grow-1"
+                style={{ minWidth: '200px' }}
+              >
+                <small className="text-muted">{t('tableSender', language)}:</small>
+                <SearchableSelect
+                  options={senderOptions}
+                  value={filters.sender ?? ''}
+                  onChange={(value) => handleFilterChange('sender', value)}
+                  placeholder={t('dashboardFilterAllSenders', language) || 'All Senders'}
+                  searchPlaceholder={t('searchSender', language)}
+                  size="sm"
+                  className="flex-grow-1"
+                />
+              </div>
             </div>
           </div>
         </div>
-        {/* Row 2: Role + Search */}
-        <div className="d-flex align-items-center gap-2">
-          <div className="d-flex align-items-center gap-1" style={{ minWidth: '440px' }}>
-            <small className="text-muted">{t('role', language)}:</small>
-            <div className="form-check form-check-inline mb-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="roleUser"
-                checked={selectedRoles.includes('user')}
-                onChange={(e) => handleRoleChange('user', e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="roleUser">
-                {t('messageRoleUser', language)}
-              </label>
+
+        {/* Role + Search - Separate row with visual separator */}
+        <div className="border-top mt-2 pt-2">
+          <div className="row g-2">
+            {/* Role checkboxes */}
+            <div className="col-12 col-md-auto">
+              <div className="d-flex align-items-center gap-1 flex-wrap">
+                <small className="text-muted">{t('role', language)}:</small>
+                <div className="form-check form-check-inline mb-0">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="roleUser"
+                    checked={selectedRoles.includes('user')}
+                    onChange={(e) => handleRoleChange('user', e.target.checked)}
+                  />
+                  <label className="form-check-label" htmlFor="roleUser">
+                    {t('messageRoleUser', language)}
+                  </label>
+                </div>
+                <div className="form-check form-check-inline mb-0">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="roleAssistant"
+                    checked={selectedRoles.includes('assistant')}
+                    onChange={(e) => handleRoleChange('assistant', e.target.checked)}
+                  />
+                  <label className="form-check-label" htmlFor="roleAssistant">
+                    {t('messageRoleAssistant', language)}
+                  </label>
+                </div>
+                <div className="form-check form-check-inline mb-0">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="roleSystem"
+                    checked={selectedRoles.includes('system')}
+                    onChange={(e) => handleRoleChange('system', e.target.checked)}
+                  />
+                  <label className="form-check-label" htmlFor="roleSystem">
+                    {t('messageRoleSystem', language)}
+                  </label>
+                </div>
+              </div>
             </div>
-            <div className="form-check form-check-inline mb-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="roleAssistant"
-                checked={selectedRoles.includes('assistant')}
-                onChange={(e) => handleRoleChange('assistant', e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="roleAssistant">
-                {t('messageRoleAssistant', language)}
-              </label>
-            </div>
-            <div className="form-check form-check-inline mb-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="roleSystem"
-                checked={selectedRoles.includes('system')}
-                onChange={(e) => handleRoleChange('system', e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="roleSystem">
-                {t('messageRoleSystem', language)}
-              </label>
-            </div>
-          </div>
-          <div className="d-flex align-items-center gap-2 flex-grow-1">
-            <div className="d-flex align-items-center gap-1 flex-grow-1">
-              <small className="text-muted">{t('search', language)}:</small>
-              <input
-                type="text"
-                className="form-control form-control-sm"
-                placeholder={t('searchMessages', language) ?? 'Search messages...'}
-                style={{ flex: 1, minWidth: 0 }}
-                value={filters.search ?? ''}
-                onChange={(e) => handleFilterChange('search', e.target.value)}
-              />
+            {/* Search */}
+            <div className="col-12 col-md">
+              <div className="d-flex align-items-center gap-1">
+                <small className="text-muted">{t('search', language)}:</small>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  placeholder={t('searchMessages', language) ?? 'Search messages...'}
+                  style={{ flex: 1, minWidth: '150px' }}
+                  value={filters.search ?? ''}
+                  onChange={(e) => handleFilterChange('search', e.target.value)}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -312,11 +349,14 @@ export const Messages: React.FC = () => {
 /**
  * Message Card Component
  *
- * Features:
+ * Features (Issue #1434 improvements):
  * - Click entire card to expand/collapse
+ * - Modern role badge with icon + capitalized text (not uppercase)
+ * - Timestamp in header for better visibility
+ * - Meta info for all roles (not just user)
  * - Smooth shadow transition on hover and expand
  * - Chevron rotation animation
- * - Memoized for performance (rerender-memo optimization)
+ * - Memoized for performance
  */
 interface MessageCardProps {
   message: Message;
@@ -333,10 +373,13 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
   };
 
   const roleIcons: Record<string, string> = {
-    user: 'bi-person',
+    user: 'bi-person-fill',
     assistant: 'bi-robot',
-    system: 'bi-gear',
+    system: 'bi-gear-fill',
   };
+
+  // Capitalize first letter only (more friendly than uppercase)
+  const formatRole = (role: string) => role.charAt(0).toUpperCase() + role.slice(1);
 
   // Toggle expand/collapse
   const handleToggle = () => {
@@ -351,71 +394,108 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
       className={cn('message-item', roleColors[message.role] || '', expanded && 'expanded')}
       onClick={handleToggle}
       style={{ cursor: canExpand ? 'pointer' : 'default' }}
+      role={canExpand ? 'button' : undefined}
+      aria-expanded={canExpand ? expanded : undefined}
+      tabIndex={canExpand ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (canExpand && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          handleToggle();
+        }
+      }}
     >
-      {/* Header with tags */}
+      {/* Header with role badge and timestamp */}
       <div className="message-header">
-        {/* Role Badge */}
-        <div className="message-role">
-          <span className={cn('role-badge', message.role)}>
-            <i className={cn('bi', roleIcons[message.role] || 'bi-chat', 'me-1')} />
-            {message.role.toUpperCase()}
-          </span>
-        </div>
+        {/* Role Badge - Modern design (Issue #1434) */}
+        <span className={cn('role-badge', message.role)}>
+          <i className={cn('bi', roleIcons[message.role] || 'bi-chat', 'me-1')} />
+          {formatRole(message.role)}
+        </span>
 
-        {/* Content area */}
-        <div className="message-content">
-          {/* Meta info for user messages */}
-          {message.role === 'user' && (
-            <div className="message-meta">
-              {/* Host Name */}
-              {(message.host_name ?? message.host) && (
-                <span className="text-muted">
-                  <i className="bi bi-pc-display-horizontal me-1" />
-                  {message.host_name ?? message.host}
-                </span>
-              )}
+        {/* Timestamp in header (Issue #1434) */}
+        <small className="text-muted ms-2">{formatDateTime(message.timestamp)}</small>
 
-              {/* Message Source */}
-              {message.message_source && (
-                <span className={cn('message-source', message.message_source)}>
-                  {message.message_source.toUpperCase()}
-                </span>
-              )}
+        {/* Model info for assistant messages */}
+        {message.role === 'assistant' && message.model && (
+          <small className="text-muted ms-2">
+            <i className="bi bi-cpu me-1" />
+            {message.model}
+          </small>
+        )}
 
-              {/* Sender Name */}
-              {message.sender_name && (
-                <span className="text-primary fw-semibold">
-                  <i className="bi bi-person-circle me-1" />
-                  {message.sender_name}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Truncated content */}
-          <div className="message-content-truncated">
-            {message.content.length > 200
-              ? `${message.content.substring(0, 200)}...`
-              : message.content}
-          </div>
-        </div>
-
-        {/* Tokens display */}
+        {/* Tokens display - moved to header (Issue #1434) */}
         {message.tokens !== undefined && message.tokens > 0 && (
-          <div className="message-tokens">
+          <small className="text-muted ms-2">
             <i className="bi bi-cpu me-1" />
             {formatTokens(message.tokens)} {t('tokens', language)}
-          </div>
+          </small>
         )}
 
         {/* Expand/Collapse chevron */}
         {canExpand && (
-          <div className="message-chevron">
+          <div className="message-chevron ms-auto">
             <i
               className={cn('bi bi-chevron-down', 'transition-transform', expanded && 'rotate-180')}
+              title={
+                expanded
+                  ? (t('collapse', language) ?? 'Collapse')
+                  : (t('expand', language) ?? 'Expand')
+              }
             />
           </div>
         )}
+      </div>
+
+      {/* Meta info row - for all roles (Issue #1434) */}
+      <div className="message-meta-row">
+        {/* User role: Host + Source + Sender */}
+        {message.role === 'user' && (
+          <>
+            {(message.host_name ?? message.host) && (
+              <span className="message-meta-item">
+                <i className="bi bi-pc-display-horizontal me-1" />
+                {message.host_name ?? message.host}
+              </span>
+            )}
+            {message.message_source && (
+              <span className={cn('message-source', message.message_source)}>
+                {message.message_source.toUpperCase()}
+              </span>
+            )}
+            {message.sender_name && (
+              <span className="message-meta-item text-primary fw-semibold">
+                <i className="bi bi-person-circle me-1" />
+                {message.sender_name}
+              </span>
+            )}
+          </>
+        )}
+
+        {/* Assistant role: Model + Tokens (if not shown in header) */}
+        {message.role === 'assistant' && !message.model && (
+          <span className="message-meta-item text-muted">
+            <i className="bi bi-robot me-1" />
+            {t('messageRoleAssistant', language)}
+          </span>
+        )}
+
+        {/* System role: Simple indicator */}
+        {message.role === 'system' && (
+          <span className="message-meta-item text-muted">
+            <i className="bi bi-gear me-1" />
+            {t('messageRoleSystem', language)}
+          </span>
+        )}
+      </div>
+
+      {/* Content area */}
+      <div className="message-content">
+        {/* Truncated content */}
+        <div className="message-content-truncated">
+          {message.content.length > 200
+            ? `${message.content.substring(0, 200)}...`
+            : message.content}
+        </div>
       </div>
 
       {/* Expanded content */}
@@ -428,12 +508,6 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
           </pre>
         </div>
       )}
-
-      {/* Footer */}
-      <div className="message-footer">
-        <small>{formatDateTime(message.timestamp)}</small>
-        {message.model && <small className="text-muted">Model: {message.model}</small>}
-      </div>
     </div>
   );
 });

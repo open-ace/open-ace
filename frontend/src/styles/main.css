@@ -1337,44 +1337,44 @@ table .latency-row:hover td {
   border-left: 4px solid var(--color-warning);
 }
 
-/* Message Header */
+/* Message Header - Updated for timestamp placement (Issue #1434) */
 .message-header {
-  padding: 12px 15px;
+  padding: 10px 15px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border-color);
-  gap: 10px;
+  gap: 8px;
 }
 
-/* Role Badge */
-.message-role {
-  width: 100px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
+/* Role Badge - Modern design (Issue #1434) */
+/* Removed fixed width for better flexibility */
 .role-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 20px; /* More rounded, pill shape */
+  font-size: 0.8rem;
+  font-weight: 500;
+  gap: 4px;
 }
 
 .role-badge.user {
-  background-color: var(--color-primary);
-  color: white;
+  background-color: rgba(var(--color-primary-rgb, 13, 110, 253), 0.15);
+  color: var(--color-primary);
+  border: 1px solid rgba(var(--color-primary-rgb, 13, 110, 253), 0.3);
 }
 
 .role-badge.assistant {
-  background-color: var(--color-success);
-  color: white;
+  background-color: rgba(var(--color-success-rgb, 25, 135, 84), 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(var(--color-success-rgb, 25, 135, 84), 0.3);
 }
 
 .role-badge.system {
-  background-color: var(--color-secondary);
-  color: white;
+  background-color: rgba(var(--color-secondary-rgb, 108, 117, 125), 0.15);
+  color: var(--color-secondary);
+  border: 1px solid rgba(var(--color-secondary-rgb, 108, 117, 125), 0.3);
 }
 
 /* Message Content */
@@ -1382,6 +1382,26 @@ table .latency-row:hover td {
   flex: 1;
   min-width: 0;
   max-width: 100%;
+  padding: 8px 15px;
+}
+
+/* Meta info row - for all roles (Issue #1434) */
+.message-meta-row {
+  padding: 6px 15px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background-color: rgba(var(--bg-secondary-rgb, 248, 249, 250), 0.5);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.message-meta-item {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .message-meta {
