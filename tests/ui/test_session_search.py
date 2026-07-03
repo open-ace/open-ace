@@ -12,6 +12,7 @@ Tests:
 import os
 import sys
 
+import pytest
 from playwright.sync_api import TimeoutError, expect, sync_playwright
 
 # Add project root to path
@@ -27,11 +28,11 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-def test_session_search():
+def test_session_search(ui_screenshot_dir):
     """Test Session Search Enhancement"""
+    global OUTPUT_DIR
+    OUTPUT_DIR = ui_screenshot_dir
 
     print("=" * 60)
     print("Session Search Enhancement - UI Test")

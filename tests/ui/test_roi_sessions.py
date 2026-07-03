@@ -26,9 +26,6 @@ SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
 )
 
-# Ensure screenshot directory exists
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 async def take_screenshot(page, name):
     """Take a screenshot and save it"""
@@ -176,8 +173,10 @@ async def _test_sessions_section(page):
 
 
 @pytest.mark.asyncio
-async def test_roi_analysis_tab():
+async def test_roi_analysis_tab(ui_screenshot_dir):
     """Test ROI Analysis tab in Analysis section."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport=VIEWPORT_SIZE)
@@ -206,8 +205,10 @@ async def test_roi_analysis_tab():
 
 
 @pytest.mark.asyncio
-async def test_sessions_section():
+async def test_sessions_section(ui_screenshot_dir):
     """Test Sessions Management section."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport=VIEWPORT_SIZE)

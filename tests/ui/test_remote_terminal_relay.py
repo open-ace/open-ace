@@ -15,6 +15,7 @@ Tests:
 import os
 import sys
 
+import pytest
 from playwright.sync_api import TimeoutError, sync_playwright
 
 # UI test config
@@ -26,11 +27,11 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 30000
 OUTPUT_DIR = "./screenshots/issues/639"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-def test_remote_terminal_e2e():
+def test_remote_terminal_e2e(ui_screenshot_dir):
     """Test Remote Terminal Relay end-to-end"""
+    global OUTPUT_DIR
+    OUTPUT_DIR = ui_screenshot_dir
 
     print("=" * 60)
     print("Remote Terminal Relay - E2E Test")

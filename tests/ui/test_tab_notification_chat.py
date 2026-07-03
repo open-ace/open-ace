@@ -18,6 +18,7 @@ Test script for issue #71: Tab Notification in Workspace
 import os
 import sys
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +32,6 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 30000
 OUTPUT_DIR = "./screenshots/issues/71"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 TEST_MESSAGE_1 = "Hello, what is 1+1? Please answer briefly."
 TEST_MESSAGE_2 = "What is the capital of France? Answer in one word."
@@ -191,8 +191,10 @@ def check_tab_notification(page, tab_index, expected_waiting=True):
     }
 
 
-def test_tab_notification_chat():
+def test_tab_notification_chat(ui_screenshot_dir):
     """Test tab notification with real chat messages."""
+    global OUTPUT_DIR
+    OUTPUT_DIR = ui_screenshot_dir
 
     print("=" * 60)
     print("Issue #71: Tab Notification - Real Chat Test")

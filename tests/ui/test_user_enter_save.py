@@ -39,9 +39,6 @@ SCREENSHOT_DIR = os.path.join(
 )
 TIMEOUT = 60000  # 60 seconds timeout
 
-# Ensure screenshot directory exists
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 async def take_screenshot(page, name):
     """Take screenshot and save to directory"""
@@ -52,8 +49,10 @@ async def take_screenshot(page, name):
 
 
 @pytest.mark.asyncio
-async def test_user_enter_save():
+async def test_user_enter_save(ui_screenshot_dir):
     """Test Enter key saves user in create user dialog"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     # Generate unique username for testing

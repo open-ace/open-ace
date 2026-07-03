@@ -15,6 +15,8 @@ import os
 import sys
 import time
 
+import pytest
+
 # Add skill scripts to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 skill_dir = os.path.join(PROJECT_ROOT, ".qwen", "skills", "ui-test", "scripts")
@@ -37,8 +39,6 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1400, "height": 900}
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "71")
 
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 def take_screenshot(page, name):
     """Take screenshot and save to screenshot directory"""
@@ -59,8 +59,10 @@ def login(page):
     time.sleep(1)
 
 
-def test_multi_tab_notification():
+def test_multi_tab_notification(ui_screenshot_dir):
     """Test notification with multiple tabs"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     print("\n" + "=" * 60)
