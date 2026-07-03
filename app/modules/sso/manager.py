@@ -19,7 +19,12 @@ from app.modules.sso.provider import (
     SSOProviderConfig,
     get_provider_config,
 )
-from app.repositories.database import Database, is_postgresql
+from app.repositories.database import (
+    Database,
+    adapt_boolean_condition,
+    adapt_boolean_value,
+    is_postgresql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,31 +182,29 @@ class SSOManager:
         )
 
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO sso_providers
-                    (name, provider_type, config, tenant_id)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(name) DO UPDATE SET
-                        provider_type = ?,
-                        config = ?,
-                        tenant_id = ?,
-                        updated_at = ?
-                """,
-                    (
-                        name,
-                        provider_type,
-                        json.dumps(config.__dict__),
-                        tenant_id,
-                        provider_type,
-                        json.dumps(config.__dict__),
-                        tenant_id,
-                        datetime.now(timezone.utc).replace(tzinfo=None),
-                    ),
-                )
-                conn.commit()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            self.db.execute(
+                """
+                INSERT INTO sso_providers
+                (name, provider_type, config, tenant_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    provider_type = ?,
+                    config = ?,
+                    tenant_id = ?,
+                    updated_at = ?
+            """,
+                (
+                    name,
+                    provider_type,
+                    json.dumps(config.__dict__),
+                    tenant_id,
+                    provider_type,
+                    json.dumps(config.__dict__),
+                    tenant_id,
+                    now,
+                ),
+            )
 
             # Clear cached provider
             with self._providers_lock:
@@ -275,7 +278,8 @@ class SSOManager:
 
         # Load from database
         row = self.db.fetch_one(
-            "SELECT * FROM sso_providers WHERE name = ? AND is_active IS TRUE", (name,)
+            f"SELECT * FROM sso_providers WHERE name = ? AND {adapt_boolean_condition('is_active', True)}",
+            (name,),
         )
 
         if not row:
@@ -337,10 +341,10 @@ class SSOManager:
     def disable_provider(self, name: str) -> bool:
         """Disable an SSO provider."""
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE sso_providers SET is_active = FALSE WHERE name = ?", (name,))
-                conn.commit()
+            self.db.execute(
+                "UPDATE sso_providers SET is_active = ? WHERE name = ?",
+                (adapt_boolean_value(False), name),
+            )
 
             with self._providers_lock:
                 if name in self._providers:
@@ -355,10 +359,10 @@ class SSOManager:
     def enable_provider(self, name: str) -> bool:
         """Enable an SSO provider."""
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE sso_providers SET is_active = TRUE WHERE name = ?", (name,))
-                conn.commit()
+            self.db.execute(
+                "UPDATE sso_providers SET is_active = ? WHERE name = ?",
+                (adapt_boolean_value(True), name),
+            )
 
             return True
 
@@ -472,30 +476,29 @@ class SSOManager:
             bool: True if successful.
         """
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO sso_identities
-                    (user_id, provider_name, provider_user_id, provider_data, last_used_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(provider_name, provider_user_id) DO UPDATE SET
-                        user_id = ?,
-                        provider_data = ?,
-                        last_used_at = ?
-                """,
-                    (
-                        user_id,
-                        provider_name,
-                        provider_user_id,
-                        json.dumps(provider_data) if provider_data else None,
-                        datetime.now(timezone.utc).replace(tzinfo=None),
-                        user_id,
-                        json.dumps(provider_data) if provider_data else None,
-                        datetime.now(timezone.utc).replace(tzinfo=None),
-                    ),
-                )
-                conn.commit()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            provider_data_json = json.dumps(provider_data) if provider_data else None
+            self.db.execute(
+                """
+                INSERT INTO sso_identities
+                (user_id, provider_name, provider_user_id, provider_data, last_used_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(provider_name, provider_user_id) DO UPDATE SET
+                    user_id = ?,
+                    provider_data = ?,
+                    last_used_at = ?
+            """,
+                (
+                    user_id,
+                    provider_name,
+                    provider_user_id,
+                    provider_data_json,
+                    now,
+                    user_id,
+                    provider_data_json,
+                    now,
+                ),
+            )
 
             logger.info(
                 f"Linked SSO identity: {provider_name}:{provider_user_id} -> user:{user_id}"
@@ -552,24 +555,21 @@ class SSOManager:
         expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=expires_in)
 
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO sso_sessions
-                    (session_token, user_id, provider_name, access_token, refresh_token, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        session_token,
-                        user_id,
-                        provider_name,
-                        access_token,
-                        refresh_token,
-                        expires_at,
-                    ),
-                )
-                conn.commit()
+            self.db.execute(
+                """
+                INSERT INTO sso_sessions
+                (session_token, user_id, provider_name, access_token, refresh_token, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    session_token,
+                    user_id,
+                    provider_name,
+                    access_token,
+                    refresh_token,
+                    expires_at,
+                ),
+            )
 
             return session_token
 
@@ -603,11 +603,8 @@ class SSOManager:
     def delete_sso_session(self, session_token: str) -> bool:
         """Delete an SSO session."""
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM sso_sessions WHERE session_token = ?", (session_token,))
-                conn.commit()
-                return True
+            self.db.execute("DELETE FROM sso_sessions WHERE session_token = ?", (session_token,))
+            return True
 
         except Exception as e:
             logger.error(f"Failed to delete SSO session: {e}")
@@ -616,15 +613,11 @@ class SSOManager:
     def cleanup_expired_sessions(self) -> int:
         """Delete expired SSO sessions."""
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "DELETE FROM sso_sessions WHERE expires_at < ?",
-                    (datetime.now(timezone.utc).replace(tzinfo=None),),
-                )
-                deleted = cursor.rowcount
-                conn.commit()
-                return cast("int", deleted)
+            cursor = self.db.execute(
+                "DELETE FROM sso_sessions WHERE expires_at < ?",
+                (datetime.now(timezone.utc).replace(tzinfo=None),),
+            )
+            return cast("int", cursor.rowcount)
 
         except Exception as e:
             logger.error(f"Failed to cleanup sessions: {e}")
@@ -645,16 +638,13 @@ class SSOManager:
         instead of a clear error (Issue #237 item 4, review note).
         """
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)
-                    VALUES (?, ?, ?, ?)
-                """,
-                    (state, code_verifier, provider_name, nonce),
-                )
-                conn.commit()
+            self.db.execute(
+                """
+                INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)
+                VALUES (?, ?, ?, ?)
+            """,
+                (state, code_verifier, provider_name, nonce),
+            )
 
         except Exception as e:
             logger.error(f"Failed to store auth state: {e}")
@@ -672,10 +662,7 @@ class SSOManager:
     def _delete_auth_state(self, state: str) -> None:
         """Delete authentication state."""
         try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM sso_auth_states WHERE state = ?", (state,))
-                conn.commit()
+            self.db.execute("DELETE FROM sso_auth_states WHERE state = ?", (state,))
 
         except Exception as e:
             logger.error(f"Failed to delete auth state: {e}")
