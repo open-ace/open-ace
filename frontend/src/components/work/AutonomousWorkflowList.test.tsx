@@ -58,6 +58,7 @@ function workflow(overrides: Partial<AutonomousWorkflow> = {}): AutonomousWorkfl
     dev_round: 1,
     max_plan_rounds: 3,
     max_pr_review_rounds: 5,
+    require_full_review_rounds: false,
     total_tokens: 0,
     total_input_tokens: 0,
     total_output_tokens: 0,

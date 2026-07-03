@@ -23,6 +23,7 @@ class TestAutonomousWorkflow:
         assert wf.dev_round == 1
         assert wf.max_plan_rounds == 3
         assert wf.max_pr_review_rounds == 5
+        assert wf.require_full_review_rounds is False
         assert wf.total_tokens == 0
         assert wf.is_new_project is False
         assert wf.workspace_type == "local"
@@ -76,6 +77,7 @@ class TestAutonomousWorkflow:
             "cli_tool": "codex",
             "model": "gpt-4",
             "dev_round": 2,
+            "require_full_review_rounds": True,
             "created_at": "2026-06-05T12:00:00",
         }
         wf = AutonomousWorkflow.from_dict(data)
@@ -83,6 +85,7 @@ class TestAutonomousWorkflow:
         assert wf.status == "developing"
         assert wf.cli_tool == "codex"
         assert wf.dev_round == 2
+        assert wf.require_full_review_rounds is True
         assert wf.created_at == datetime(2026, 6, 5, 12, 0, 0)
 
     def test_from_dict_empty(self):

@@ -56,6 +56,7 @@ class AutonomousWorkflow:
     dev_round: int = 1
     max_plan_rounds: int = 3
     max_pr_review_rounds: int = 5
+    require_full_review_rounds: bool = False
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -123,6 +124,7 @@ class AutonomousWorkflow:
             "dev_round": self.dev_round,
             "max_plan_rounds": self.max_plan_rounds,
             "max_pr_review_rounds": self.max_pr_review_rounds,
+            "require_full_review_rounds": self.require_full_review_rounds,
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
@@ -172,6 +174,7 @@ class AutonomousWorkflow:
             dev_round=data.get("dev_round", 1),
             max_plan_rounds=data.get("max_plan_rounds", 3),
             max_pr_review_rounds=data.get("max_pr_review_rounds", 5),
+            require_full_review_rounds=bool(data.get("require_full_review_rounds", False)),
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),

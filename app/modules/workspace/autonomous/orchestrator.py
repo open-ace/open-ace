@@ -644,6 +644,14 @@ class AutonomousOrchestrator:
         return bool(last_review and round_num >= max_rounds and "方案通过审查" not in last_review)
 
     @staticmethod
+    def _must_run_full_review_rounds(wf: dict) -> bool:
+        """Whether planning/PR review must consume the configured round cap."""
+        value = wf.get("require_full_review_rounds", False)
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    @staticmethod
     def _should_refine_plan(last_review: str) -> bool:
         """Whether the approved review contains substantive suggestions.
 
@@ -1813,6 +1821,7 @@ class AutonomousOrchestrator:
         wf = self.workflow  # Re-read for latest state
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_plan_rounds", 3)
+        force_full_rounds = self._must_run_full_review_rounds(wf)
         dev_round = wf.get("dev_round", 1)
         issue_number = wf.get("github_issue_number")
         gh = self._get_gh()
@@ -2028,10 +2037,9 @@ class AutonomousOrchestrator:
             )
 
         # Step 3: Check if all rounds are done
-        # max_plan_rounds means the max number of Plan→Review→Refine cycles.
-        # After the initial Plan + Review (round 1), we need at least one
-        # refinement round if the review had substantive feedback.
-        # So the total rounds = initial plan + up to max_plan_rounds refinements.
+        # max_plan_rounds is the cap for plan review rounds. In the default
+        # mode we continue only when the review has substantive feedback; in
+        # force-full mode we continue until the cap even after approval.
         self._update_workflow({"current_round": round_num})
 
         review_has_feedback = bool(
@@ -2039,12 +2047,11 @@ class AutonomousOrchestrator:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        # max_plan_rounds = exact number of review rounds. `round_num < max`
-        # (strict) so the loop runs rounds 1..max and the max-th review is the
-        # last — there is no (max+1)-th round. The last review's feedback is
-        # then acted on by one final plan_refined before plan_finalized (below),
-        # so the Nth review is never silently dropped.
-        needs_refinement = review_has_feedback and round_num < max_rounds
+        # Default mode may stop early when the review passes. When
+        # require_full_review_rounds is enabled, planning keeps going until the
+        # configured cap so the workflow always consumes exactly N review
+        # rounds. The cap is still strict: rounds run 1..max, never max+1.
+        needs_refinement = round_num < max_rounds and (force_full_rounds or review_has_feedback)
 
         if not needs_refinement:
             # Planning complete. Gather the latest plan and the last review.
@@ -2758,6 +2765,7 @@ class AutonomousOrchestrator:
         wf = self.workflow
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_pr_review_rounds", 5)
+        force_full_rounds = self._must_run_full_review_rounds(wf)
         dev_round = wf.get("dev_round", 1)
         branch_name = wf.get("branch_name", "")
         gh = self._get_gh()
@@ -2997,16 +3005,16 @@ class AutonomousOrchestrator:
         # the last review's feedback is never silently dropped. Total reviews are
         # capped at max_pr_review_rounds (matches the "PR 审查最大轮次" label):
         # after the cap-round fix we go straight to summary/report instead of
-        # scheduling another review. So max=N -> review x N (each non-passing
-        # review, incl. the Nth, gets a pr_updated fix), then pr_review_summary;
-        # there is no (N+1)-th review.
+        # scheduling another review. In the default mode, an approved review can
+        # also end PR review early; with require_full_review_rounds enabled, only
+        # the cap ends the loop. There is never an (N+1)-th review.
         at_cap = round_num >= max_rounds
         if not review_passed:
             self._apply_pr_review_fix(
                 wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
             )
 
-        if review_passed or at_cap:
+        if (review_passed and not force_full_rounds) or at_cap:
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback
@@ -3084,8 +3092,10 @@ class AutonomousOrchestrator:
                 }
             )
             self._emit("phase_change", {"phase": "report"})
-        # Under cap and not approved: the fix above already ran; fall through so
-        # the scheduler re-enters _do_pr_review for the next review round.
+        # Under cap, the scheduler re-enters _do_pr_review for the next review
+        # round. In the default mode this path means "not approved and the fix
+        # above already ran"; with force-full enabled it also covers "approved
+        # early, but keep reviewing until the configured cap".
 
     def _apply_pr_review_fix(
         self,
