@@ -633,10 +633,17 @@ class SSOManager:
     def _store_auth_state(
         self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
     ) -> None:
-        """Store authentication state for verification."""
-        # The sso_auth_states table is created at startup from the authoritative
-        # schema files (schema_init.load_schema_from_file), so no inline DDL is
-        # needed here (Issue #237, item 4).
+        """Store authentication state for verification.
+
+        Requires the ``sso_auth_states`` table to already exist. In production it
+        is created at startup from the authoritative schema files via
+        ``schema_init.load_schema_from_file()`` (and by the
+        ``20260703_002_add_sso_auth_states`` migration for pure-Alembic
+        upgrades). Tests that exercise this path must run ``ensure_all_tables()``
+        or ``get_ddl_statements()`` first — otherwise the INSERT below fails and
+        is swallowed by the broad except, surfacing as a downstream SSO failure
+        instead of a clear error (Issue #237 item 4, review note).
+        """
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
