@@ -18,8 +18,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "ui")
 
 
-async def test_admin_default_mode():
+async def test_admin_default_mode(ui_screenshot_dir):
     """Test admin user lands on Manage mode after login."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport={"width": 1280, "height": 900})
@@ -53,8 +55,10 @@ async def test_admin_default_mode():
         }
 
 
-async def test_normal_user_default_mode():
+async def test_normal_user_default_mode(ui_screenshot_dir):
     """Test normal user lands on Work mode after login."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport={"width": 1280, "height": 900})

@@ -43,8 +43,10 @@ def save_screenshot(page, name):
     return path
 
 
-def test_sessions_page():
+def test_sessions_page(ui_screenshot_dir):
     """测试 Sessions 页面"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("\n" + "=" * 60)
     print("Sessions 页面 UI 测试")
     print("=" * 60)

@@ -26,8 +26,10 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_tool_accounts_dropdown():
+def test_tool_accounts_dropdown(ui_screenshot_dir):
     """测试工具账号下拉框功能"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     with sync_playwright() as p:

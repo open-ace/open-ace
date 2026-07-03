@@ -15,10 +15,13 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+SCREENSHOT_DIR = "screenshots"
 
 
-def test_work_page_loads():
+def test_work_page_loads(ui_screenshot_dir):
     """Test that /work page loads without errors"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     console_errors = []
     page_errors = []
 
@@ -54,8 +57,8 @@ def test_work_page_loads():
         page.wait_for_timeout(5000)  # Wait for React to render
 
         # Take screenshot to see what's on the page
-        os.makedirs("screenshots", exist_ok=True)
-        page.screenshot(path="screenshots/test_work_page_debug.png")
+        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_work_page_debug.png"))
         print(f"  Current URL: {page.url}")
 
         # Print errors
@@ -97,7 +100,7 @@ def test_work_page_loads():
         assert status_bar.is_visible(), "Status bar should be visible"
 
         # Take screenshot
-        page.screenshot(path="screenshots/test_work_page_loads.png")
+        page.screenshot(path=os.path.join(SCREENSHOT_DIR, "test_work_page_loads.png"))
 
         print("All checks passed!")
         print("Screenshot saved to: screenshots/test_work_page_loads.png")

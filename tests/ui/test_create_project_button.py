@@ -27,7 +27,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_nonadmin_create_project():
+def test_nonadmin_create_project(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)
     print("Non-admin user - Create Project Button Test")
     print("=" * 70)
