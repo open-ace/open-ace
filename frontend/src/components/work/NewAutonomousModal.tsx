@@ -604,9 +604,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               <label className="form-check-label" htmlFor="requireFullReviewRounds">
                 {t('autoRequireFullReviewRounds', language)}
               </label>
-              <div className="form-text">
-                {t('autoRequireFullReviewRoundsHint', language)}
-              </div>
+              <div className="form-text">{t('autoRequireFullReviewRoundsHint', language)}</div>
             </div>
           </div>
 

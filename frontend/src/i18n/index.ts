@@ -4132,7 +4132,8 @@ export const translations: Record<Language, Translations> = {
     autoMaxPlanRounds: '計画レビュー最大回数',
     autoMaxPRReviewRounds: 'PRレビュー最大回数',
     autoRequireFullReviewRounds: '固定ラウンド数を必ず完走',
-    autoRequireFullReviewRoundsHint: '有効にすると、承認後も計画レビューとPRレビューを途中終了しません。',
+    autoRequireFullReviewRoundsHint:
+      '有効にすると、承認後も計画レビューとPRレビューを途中終了しません。',
     autoMergeAfterPR: 'PR作成後に自動マージ',
     autoMergeHint: 'PRを自動的にマージし、次のワークフローに進む',
     autoCreateTask: 'タスク作成',
@@ -5427,7 +5428,8 @@ export const translations: Record<Language, Translations> = {
     autoMaxPlanRounds: '최대 계획 리뷰 횟수',
     autoMaxPRReviewRounds: '최대 PR 리뷰 횟수',
     autoRequireFullReviewRounds: '고정 라운드 모두 실행',
-    autoRequireFullReviewRoundsHint: '켜면 승인되어도 계획 리뷰와 PR 리뷰를 조기 종료하지 않습니다.',
+    autoRequireFullReviewRoundsHint:
+      '켜면 승인되어도 계획 리뷰와 PR 리뷰를 조기 종료하지 않습니다.',
     autoMergeAfterPR: 'PR 생성 후 자동 머지',
     autoMergeHint: 'PR을 자동으로 머지하고 다음 워크플로우 실행',
     autoCreateTask: '작업 생성',
