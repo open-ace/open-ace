@@ -890,20 +890,18 @@ class WebUIManager:
         logger.debug(f"Launching webui: {cmd}, cwd: {cwd}")
 
         try:
-            # Redirect stdout/stderr to the same directory as OPENACE_LOG_DIR
-            log_path = os.path.join(webui_log_dir, f"webui-{port}.log")
-            log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+            # Don't pre-create log file - let WebUI process handle its own logging
+            # WebUI has OPENACE_LOG_DIR environment variable set and will create logs itself
+            # This avoids permission issues with pre-created files owned by wrong user
 
             process = subprocess.Popen(
                 cmd,
                 start_new_session=True,  # Detach from parent process group
                 cwd=cwd,
                 env=child_env,  # Passed to sudo; preserved via sudoers env_keep
-                stdout=log_fd,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.DEVNULL,  # WebUI handles its own logging via OPENACE_LOG_DIR
+                stderr=subprocess.DEVNULL,
             )
-            # Child has inherited the FD; parent no longer needs it
-            os.close(log_fd)
             return process, model_pool
         except Exception as e:
             logger.error(f"Failed to launch webui process: {e}")
@@ -948,6 +946,7 @@ class WebUIManager:
         # Check common locations for global executable
         candidates = [
             "qwen-code-webui",
+            "/usr/bin/qwen-code-webui",  # Most common location for npm global installs
             "/usr/local/bin/qwen-code-webui",
             "/opt/qwen-code-webui/bin/qwen-code-webui",
         ]
