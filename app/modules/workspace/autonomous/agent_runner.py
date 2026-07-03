@@ -1182,7 +1182,16 @@ class AutonomousAgentRunner:
 
         # Expand project path
         project_path = os.path.expanduser(project_path)
-        Path(project_path).mkdir(parents=True, exist_ok=True)
+        # Create project directory with proper user permission isolation
+        # (Issue #1438: Use sudo wrapper when system_account is set)
+        if system_account:
+            subprocess.run(
+                ["sudo", "-u", system_account, "mkdir", "-p", project_path],
+                check=True,
+                capture_output=True,
+            )
+        else:
+            Path(project_path).mkdir(parents=True, exist_ok=True)
 
         # Protocol dispatch: different CLI tools speak different stdin protocols.
         # The generic _LocalSession path below assumes Claude SDK stream-json,

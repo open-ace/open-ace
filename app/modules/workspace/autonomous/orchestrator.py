@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -1752,23 +1753,61 @@ class AutonomousOrchestrator:
                     gh._run_git(["worktree", "prune"])
 
                     # Check and clean up residual worktree directory (Issue #1442)
-                    if Path(worktree_path).exists():
+                    # Use sudo wrapper for permission isolation - Path.exists() fails
+                    # when openace cannot access user's private directory (700 permissions)
+                    system_account = wf.get("system_account")
+                    dir_exists = False
+                    if system_account:
+                        # Use sudo to check directory existence
+                        result = subprocess.run(
+                            ["sudo", "-u", system_account, "test", "-d", worktree_path],
+                            capture_output=True,
+                        )
+                        dir_exists = result.returncode == 0
+                    else:
+                        dir_exists = Path(worktree_path).exists()
+
+                    if dir_exists:
                         git_file = Path(worktree_path) / ".git"
-                        if git_file.exists() and git_file.is_file():
-                            # Valid worktree - remove via git
+                        git_file_exists = False
+                        if system_account:
+                            # Use sudo to check .git file
+                            result = subprocess.run(
+                                ["sudo", "-u", system_account, "test", "-f",
+                                 os.path.join(worktree_path, ".git")],
+                                capture_output=True,
+                            )
+                            git_file_exists = result.returncode == 0
+                        else:
+                            git_file_exists = git_file.exists() and git_file.is_file()
+
+                        if git_file_exists:
+                            # Valid worktree - remove via git (git handles sudo internally)
                             try:
                                 gh.remove_worktree(worktree_path)
                                 logger.info("Removed residual worktree at %s", worktree_path)
                             except GitHubOpsError:
-                                # Fallback to force delete
-                                shutil.rmtree(worktree_path)
+                                # Fallback to sudo rm
+                                if system_account:
+                                    subprocess.run(
+                                        ["sudo", "-u", system_account, "rm", "-rf", worktree_path],
+                                        check=True,
+                                    )
+                                else:
+                                    shutil.rmtree(worktree_path)
                                 logger.info(
                                     "Force removed worktree directory at %s",
                                     worktree_path,
                                 )
                         else:
-                            # Not a worktree, just a directory
-                            shutil.rmtree(worktree_path)
+                            # Not a worktree, just a directory - use sudo rm
+                            if system_account:
+                                subprocess.run(
+                                    ["sudo", "-u", system_account, "rm", "-rf", worktree_path],
+                                    check=True,
+                                )
+                            else:
+                                shutil.rmtree(worktree_path)
                             logger.info("Removed residual directory at %s", worktree_path)
 
                     wt_data = gh.create_worktree(
