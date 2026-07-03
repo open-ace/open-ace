@@ -20,11 +20,13 @@
 
   /* Secondary - Slate Gray */
   --color-secondary: #64748b;
+  --color-secondary-rgb: 100, 116, 139;
   --color-secondary-hover: #475569;
   --color-secondary-light: #f1f5f9;
 
   /* Accent Colors */
   --color-success: #10b981;
+  --color-success-rgb: 16, 185, 129;
   --color-success-hover: #059669;
   --color-warning: #f59e0b;
   --color-warning-hover: #d97706;
@@ -40,6 +42,7 @@
   /* ===== Background Colors - Layered Depth ===== */
   --bg-primary: #ffffff;
   --bg-secondary: #f8fafc;
+  --bg-secondary-rgb: 248, 250, 252;
   --bg-tertiary: #f1f5f9;
   --bg-elevated: #ffffff;
   --bg-overlay: rgba(15, 23, 42, 0.5);
@@ -223,6 +226,7 @@
 .dark-theme {
   --bg-primary: #0f172a;
   --bg-secondary: #1e293b;
+  --bg-secondary-rgb: 30, 41, 59;
   --bg-tertiary: #334155;
   --bg-elevated: #1e293b;
 
@@ -239,6 +243,12 @@
   --color-primary-rgb: 56, 189, 248;
   --color-primary-hover: #0ea5e9;
   --color-primary-light: rgba(14, 165, 233, 0.1);
+
+  --color-secondary: #64748b;
+  --color-secondary-rgb: 100, 116, 139;
+
+  --color-success: #10b981;
+  --color-success-rgb: 16, 185, 129;
 
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
@@ -1360,21 +1370,21 @@ table .latency-row:hover td {
 }
 
 .role-badge.user {
-  background-color: rgba(var(--color-primary-rgb, 13, 110, 253), 0.15);
+  background-color: rgba(var(--color-primary-rgb), 0.15);
   color: var(--color-primary);
-  border: 1px solid rgba(var(--color-primary-rgb, 13, 110, 253), 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
 }
 
 .role-badge.assistant {
-  background-color: rgba(var(--color-success-rgb, 25, 135, 84), 0.15);
+  background-color: rgba(var(--color-success-rgb), 0.15);
   color: var(--color-success);
-  border: 1px solid rgba(var(--color-success-rgb, 25, 135, 84), 0.3);
+  border: 1px solid rgba(var(--color-success-rgb), 0.3);
 }
 
 .role-badge.system {
-  background-color: rgba(var(--color-secondary-rgb, 108, 117, 125), 0.15);
+  background-color: rgba(var(--color-secondary-rgb), 0.15);
   color: var(--color-secondary);
-  border: 1px solid rgba(var(--color-secondary-rgb, 108, 117, 125), 0.3);
+  border: 1px solid rgba(var(--color-secondary-rgb), 0.3);
 }
 
 /* Message Content */
@@ -1392,7 +1402,7 @@ table .latency-row:hover td {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  background-color: rgba(var(--bg-secondary-rgb, 248, 249, 250), 0.5);
+  background-color: rgba(var(--bg-secondary-rgb), 0.5);
   border-bottom: 1px solid var(--border-color);
 }
 
