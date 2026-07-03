@@ -9,6 +9,8 @@ All methods invoke gh/git via subprocess and return parsed results.
 import json
 import logging
 import os
+import pwd
+import re
 import subprocess
 import time
 from typing import Optional
@@ -79,6 +81,14 @@ class GitHubOps:
         """
         self.repo_path = repo_path
         self.system_account = system_account
+        # Cached owner/repo (e.g. "open-ace/open-ace") resolved from the local
+        # repo's origin remote, used to target gh under a sudo wrapper where gh
+        # can no longer infer the repo from cwd. Lazily populated by
+        # _resolve_owner_repo(); None means "not resolvable / not yet tried".
+        self._owner_repo: Optional[str] = None
+        # Tracks whether _resolve_owner_repo has been attempted, so None can
+        # distinguish "tried and failed" from "not yet tried".
+        self._owner_repo_resolved: bool = False
 
     def _get_env(self) -> Optional[dict[str, str]]:
         """Get environment overrides for AI GitHub account.
@@ -112,17 +122,84 @@ class GitHubOps:
             kwargs["env"] = {**os.environ, **ai_env}
         return kwargs
 
+    def _needs_sudo(self) -> bool:
+        """Whether git/gh commands actually need a sudo -u wrapper.
+
+        A sudo wrapper is only required when the service process user differs
+        from ``system_account`` (Issue #1395/#1421: cross-user access to a
+        user's private workspace). When the service already runs as
+        ``system_account`` (common dev/single-user setup, and systemd
+        User=<account> deployments), sudo is a no-op that additionally breaks
+        under NoNewPrivileges — mirroring the same-user short-circuit already
+        used in webui_manager. Skipping it also sidesteps the gh ``-C`` flag
+        incompatibility (gh has no ``-C``; see _run_gh) for this common case.
+        """
+        if not self.system_account:
+            return False
+        try:
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+        except (KeyError, OverflowError):
+            # Cannot determine the current user; assume cross-user to stay safe.
+            return True
+        return current_user != self.system_account
+
+    def _resolve_owner_repo(self) -> Optional[str]:
+        """Resolve the ``owner/repo`` slug for the local repo's origin remote.
+
+        gh CLI infers the target repo from the working directory's ``.git``,
+        but under a ``sudo -u`` wrapper we drop ``cwd`` (it triggers a Python
+        permission check as the service user, Issue #1421) and gh has no ``-C``
+        flag to compensate. Instead we resolve ``owner/repo`` from the local
+        remote (git ``-C`` *is* valid, so ``_run_git`` still works under sudo)
+        and pass it to gh via ``-R``.
+
+        Cached on the instance after the first call; returns None when the
+        remote is absent or unparseable (e.g. a brand-new project before its
+        GitHub repo is wired up).
+        """
+        if self._owner_repo_resolved:
+            return self._owner_repo
+        self._owner_repo_resolved = True
+        try:
+            url = self.get_repo_url().strip()
+        except GitHubOpsError:
+            # No origin remote configured (e.g. new project pre-create_repo).
+            return None
+        if not url:
+            return None
+        # Accept https://github.com/<owner>/<repo>[.git] and
+        # git@github.com:<owner>/<repo>[.git]. Tolerate an optional trailing
+        # .git and a trailing slash.
+        m = re.match(r"(?:https?://github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?/?$", url)
+        if not m:
+            return None
+        self._owner_repo = m.group(1)
+        return self._owner_repo
+
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
         """Run a gh CLI command with transient-network-error retry."""
-        # Build subprocess kwargs - remove cwd when using system_account to avoid
-        # Python permission check on repo_path (Issue #1421: cwd causes Permission denied)
         kwargs = self._build_subprocess_kwargs()
-        # If system_account is set, use -C flag instead of cwd for multi-user permission isolation
-        # (Issue #1395 + #1421: Allow GitHubOps to access user-private directories)
-        if self.system_account:
-            cmd = ["sudo", "-u", self.system_account, "gh", "-C", self.repo_path] + args
-            kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
+        account = self.system_account
+        if self._needs_sudo():
+            # gh has no `-C <path>` flag (that is git-only), so under a sudo
+            # wrapper — where we must drop cwd to avoid a Python permission
+            # check as the service user (Issue #1421) — target the repo
+            # explicitly via `-R owner/repo` resolved from the local remote.
+            assert account is not None  # _needs_sudo() guarantees non-empty
+            cmd: list[str] = ["sudo", "-u", account]
+            owner_repo = self._resolve_owner_repo()
+            if owner_repo:
+                cmd += ["gh", "-R", owner_repo] + args
+            else:
+                # No resolvable remote (e.g. create_repo before the remote
+                # exists). gh runs without -R; this is best-effort since such
+                # commands (e.g. `gh repo create <name>`) don't need an
+                # existing remote context anyway.
+                cmd += ["gh"] + args
+            kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
+            # Same-user (or no system_account): run gh directly with cwd so it
+            # infers owner/repo from the working directory as before.
             cmd = ["gh"] + args
         last_error: Optional[GitHubOpsError] = None
         for attempt in range(GIT_NETWORK_RETRY_COUNT):
@@ -184,16 +261,22 @@ class GitHubOps:
 
         # Build the git config command
         # Use wildcard for Docker environments with multiple mount paths
-        safe_cmd = ["git", "config", "--global", "--add", "safe.directory", "*"]
+        safe_cmd: list[str] = ["git", "config", "--global", "--add", "safe.directory", "*"]
 
-        # Wrap with sudo if system_account is set (same logic as _run_git)
-        # This ensures the config is written to the target user's ~/.gitconfig
-        if self.system_account:
-            safe_cmd = ["sudo", "-u", self.system_account] + safe_cmd
+        # Wrap with sudo only when actually cross-user (same logic as _run_git).
+        # This ensures the config is written to the target user's ~/.gitconfig.
+        account = self.system_account
+        if self._needs_sudo():
+            assert account is not None  # _needs_sudo() guarantees non-empty
+            safe_cmd = ["sudo", "-u", account] + safe_cmd
 
-        # Execute without cwd (global config doesn't need repo context)
+        # Execute without cwd (global config doesn't need repo context) and
+        # without the default 120s timeout — pass our own shorter one. Both
+        # must be dropped from _build_subprocess_kwargs() to avoid passing
+        # `timeout` twice (a hard TypeError in Python, surfaced as a warning
+        # here and which silently prevented safe.directory from ever being set).
         base_kwargs = self._build_subprocess_kwargs()
-        safe_kwargs = {k: v for k, v in base_kwargs.items() if k != "cwd"}
+        safe_kwargs = {k: v for k, v in base_kwargs.items() if k not in ("cwd", "timeout")}
         try:
             subprocess.run(safe_cmd, **safe_kwargs, check=False, timeout=5)
             GitHubOps._safe_directory_configured.add(cache_key)
@@ -205,13 +288,14 @@ class GitHubOps:
         """Run a git command with transient-network-error retry."""
         # Ensure safe.directory is configured for Docker volume mounts
         self._ensure_safe_directory()
-        # Build subprocess kwargs - remove cwd when using system_account to avoid
-        # Python permission check on repo_path (Issue #1421: cwd causes Permission denied)
         kwargs = self._build_subprocess_kwargs()
-        # If system_account is set, use -C flag instead of cwd for multi-user permission isolation
-        # (Issue #1395 + #1421: Allow GitHubOps to access user-private directories)
-        if self.system_account:
-            cmd = ["sudo", "-u", self.system_account, "git", "-C", self.repo_path] + args
+        account = self.system_account
+        if self._needs_sudo():
+            # git supports `-C <path>` (unlike gh), so we use it to set the
+            # working directory under a sudo wrapper where cwd would trigger a
+            # Python permission check as the service user (Issue #1421).
+            assert account is not None  # _needs_sudo() guarantees non-empty
+            cmd: list[str] = ["sudo", "-u", account, "git", "-C", self.repo_path] + args
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = ["git"] + args
