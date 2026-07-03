@@ -93,31 +93,35 @@ class TestPgConnectionWrapperPreservesDictCursor:
 
 @pytest.fixture(autouse=True)
 def _force_sqlite(monkeypatch):
-    """The end-to-end migrated-module read below runs against SQLite."""
+    """The end-to-end Database read below runs against SQLite."""
     import app.repositories.database as db_mod
-    import app.modules.workspace.prompt_library as pl_mod
 
     monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
-    monkeypatch.setattr(pl_mod, "is_postgresql", lambda: False)
 
 
-class TestMigratedModuleReturnsDictStyleRows:
-    """End-to-end: a migrated module reading via ``db.connection()`` returns rows
-    supporting ``row["col"]`` access — the SQLite mirror of the §2.1 contract."""
+class TestDatabaseConnectionReturnsDictStyleRows:
+    """End-to-end: a connection from ``Database.connection()`` returns rows
+    supporting ``row["col"]`` access — the SQLite mirror of the §2.1 contract.
 
-    def test_prompt_library_row_supports_dict_access(self, tmp_path):
-        from app.modules.workspace.prompt_library import PromptLibrary, PromptTemplate
-        from app.repositories.schema_init import load_schema_from_file
+    Migrated modules obtain their connections via ``Database.connection()``; the
+    SQLite path sets ``row_factory = sqlite3.Row`` (the RealDictCursor
+    equivalent), so every ``row["col"]`` access in a migrated method body works.
+    Pinned here so a refactor of ``Database._get_sqlite_connection`` cannot
+    silently drop the ``row_factory`` and break dict-style access.
+    """
 
-        db_path = str(tmp_path / "dict_row.db")
-        lib = PromptLibrary(db_path=db_path)
-        load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
+    def test_database_connection_row_supports_dict_access(self, tmp_path):
+        from app.repositories.database import Database
 
-        lib.create_template(PromptTemplate(name="DictRow", content="c", is_public=True))
+        db_url = f"sqlite:///{tmp_path / 'dict_row.db'}"
+        db = Database(db_url=db_url)
 
-        with lib.db.connection() as conn:
+        with db.connection() as conn:
+            conn.execute("CREATE TABLE t (name TEXT)")
+            conn.execute("INSERT INTO t (name) VALUES (?)", ("DictRow",))
+            conn.commit()
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM prompt_templates")
+            cursor.execute("SELECT name FROM t")
             row = cursor.fetchone()
 
         assert row["name"] == "DictRow"
