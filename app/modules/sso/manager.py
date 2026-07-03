@@ -634,22 +634,12 @@ class SSOManager:
         self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
     ) -> None:
         """Store authentication state for verification."""
-        # In production, use Redis with TTL
-        # For now, we'll use a simple in-memory cache or database
+        # The sso_auth_states table is created at startup from the authoritative
+        # schema files (schema_init.load_schema_from_file), so no inline DDL is
+        # needed here (Issue #237, item 4).
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sso_auth_states (
-                        state TEXT PRIMARY KEY,
-                        code_verifier TEXT NOT NULL,
-                        provider_name TEXT NOT NULL,
-                        nonce TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """
-                )
                 cursor.execute(
                     """
                     INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)

@@ -1106,6 +1106,13 @@ CREATE SEQUENCE sso_sessions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE sso_sessions_id_seq OWNED BY sso_sessions.id;
+CREATE TABLE sso_auth_states (
+    state text PRIMARY KEY,
+    code_verifier text NOT NULL,
+    provider_name text NOT NULL,
+    nonce text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE sync_events (
     id integer NOT NULL,
     event_id text NOT NULL,

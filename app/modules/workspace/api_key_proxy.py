@@ -12,6 +12,7 @@ import logging
 import os
 import secrets
 import sqlite3
+import threading
 from base64 import b64decode, b64encode
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -1376,11 +1377,14 @@ def get_ddl_statements() -> list[str]:
 
 # Module-level singleton
 _instance: Optional[APIKeyProxyService] = None
+_instance_lock = threading.Lock()
 
 
 def get_api_key_proxy_service() -> APIKeyProxyService:
     """Get the module-level APIKeyProxyService singleton."""
     global _instance
     if _instance is None:
-        _instance = APIKeyProxyService()
+        with _instance_lock:
+            if _instance is None:
+                _instance = APIKeyProxyService()
     return _instance

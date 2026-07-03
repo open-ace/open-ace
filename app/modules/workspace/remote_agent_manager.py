@@ -1244,19 +1244,23 @@ class RemoteAgentManager:
         capabilities: dict[str, Any] | None = None,
     ) -> None:
         """Process a heartbeat from a remote agent."""
-        # Ensure HTTP polling agents are tracked in _connections
-        # (needed after server restart, since _connections is in-memory)
+        # Ensure HTTP polling agents are tracked in _connections and rate-limit
+        # the heartbeat DB write under the same lock: the read-modify-write on
+        # _last_heartbeat_db_write must be atomic with _connections tracking to
+        # avoid two concurrent heartbeats both passing the rate-limit check and
+        # both issuing a DB write (Issue #237, item 2). The DB I/O itself stays
+        # outside the lock so the lock is never held across network/disk work.
         with self._lock:
             if machine_id not in self._connections:
                 self._connections[machine_id] = None
                 logger.info(f"Re-registered HTTP polling agent via heartbeat: {machine_id}")
 
-        # Rate-limit DB writes: skip if last write was within HEARTBEAT_DB_WRITE_INTERVAL
-        now_ts = time.time()
-        last_write = self._last_heartbeat_db_write.get(machine_id, 0)
-        if now_ts - last_write < self.HEARTBEAT_DB_WRITE_INTERVAL:
-            return
-        self._last_heartbeat_db_write[machine_id] = now_ts
+            # Rate-limit DB writes: skip if last write was within HEARTBEAT_DB_WRITE_INTERVAL
+            now_ts = time.time()
+            last_write = self._last_heartbeat_db_write.get(machine_id, 0)
+            if now_ts - last_write < self.HEARTBEAT_DB_WRITE_INTERVAL:
+                return
+            self._last_heartbeat_db_write[machine_id] = now_ts
 
         # Update capabilities separately if provided (within rate limit)
         if capabilities:
@@ -1685,11 +1689,14 @@ def get_ddl_statements() -> list[str]:
 
 # Global singleton
 _agent_manager: RemoteAgentManager | None = None
+_agent_manager_lock = threading.Lock()
 
 
 def get_remote_agent_manager() -> RemoteAgentManager:
     """Get the global RemoteAgentManager instance."""
     global _agent_manager
     if _agent_manager is None:
-        _agent_manager = RemoteAgentManager()
+        with _agent_manager_lock:
+            if _agent_manager is None:
+                _agent_manager = RemoteAgentManager()
     return _agent_manager

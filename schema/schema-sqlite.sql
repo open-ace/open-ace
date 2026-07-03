@@ -715,6 +715,14 @@ CREATE TABLE sso_sessions (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE sso_auth_states (
+ state text PRIMARY KEY,
+ code_verifier text NOT NULL,
+ provider_name text NOT NULL,
+ nonce text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE sync_events (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  event_id text NOT NULL,

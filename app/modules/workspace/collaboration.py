@@ -8,6 +8,7 @@ Supports session sharing, team workspaces, and collaborative annotations.
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -1283,11 +1284,14 @@ def get_ddl_statements() -> list[str]:
 
 # Module-level singleton
 _instance: Optional[CollaborationManager] = None
+_instance_lock = threading.Lock()
 
 
 def get_collaboration_manager() -> CollaborationManager:
     """Get the module-level CollaborationManager singleton."""
     global _instance
     if _instance is None:
-        _instance = CollaborationManager()
+        with _instance_lock:
+            if _instance is None:
+                _instance = CollaborationManager()
     return _instance
