@@ -397,8 +397,7 @@ export const translations: Record<Language, Translations> = {
     noMatchingMessages: 'No matching messages',
     loadOlder: 'Load older',
     refreshToLatest: 'Refresh to latest',
-    searchScopedToLoaded:
-      'Only searching loaded messages. Load older to broaden the range.',
+    searchScopedToLoaded: 'Only searching loaded messages. Load older to broaden the range.',
     expand: 'Expand',
     collapse: 'Collapse',
     quickDateRange: 'Quick Date Range',
@@ -3610,7 +3609,8 @@ export const translations: Record<Language, Translations> = {
     noMatchingMessages: '一致するメッセージがありません',
     loadOlder: '過去を読み込む',
     refreshToLatest: '最新に更新',
-    searchScopedToLoaded: '読み込み済みのメッセージのみ検索中。過去を読み込んで範囲を広げてください。',
+    searchScopedToLoaded:
+      '読み込み済みのメッセージのみ検索中。過去を読み込んで範囲を広げてください。',
     expand: '展開',
     collapse: '折りたたむ',
     quickDateRange: 'クイック日付範囲',

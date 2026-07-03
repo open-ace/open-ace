@@ -631,7 +631,7 @@ CREATE TABLE session_messages (
  content text,
  tokens_used integer DEFAULT 0,
  model text,
- "timestamp" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  metadata text,
  milestone_id text DEFAULT '' NOT NULL,
  source text DEFAULT '' NOT NULL,
@@ -1246,9 +1246,9 @@ CREATE INDEX idx_session_messages_external_message_id ON session_messages (sessi
 
 CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
 
-CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
-
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages (session_id, "timestamp", id);
+
+CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 
