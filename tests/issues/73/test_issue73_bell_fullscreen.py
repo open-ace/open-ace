@@ -36,12 +36,13 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 800}
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "73")
 
-# Ensure screenshot directory exists
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 def take_screenshot(page, name):
     """Take screenshot and save to screenshot directory"""
+    # Lazily create the screenshot dir on first use (avoids module-level
+    # os.makedirs side effects that cause PermissionError on import in
+    # restricted environments like Linux CI — Issue #232/#1446).
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     path = os.path.join(SCREENSHOT_DIR, name)
     page.screenshot(path=path, full_page=False)
     print(f"  Screenshot saved: {path}")
