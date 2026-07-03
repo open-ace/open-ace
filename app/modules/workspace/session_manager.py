@@ -8,6 +8,7 @@ Manages conversation history, state, and context across sessions.
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -1729,11 +1730,14 @@ def get_ddl_statements() -> list[str]:
 
 # Module-level singleton
 _instance: Optional[SessionManager] = None
+_instance_lock = threading.Lock()
 
 
 def get_session_manager() -> SessionManager:
     """Get the module-level SessionManager singleton."""
     global _instance
     if _instance is None:
-        _instance = SessionManager()
+        with _instance_lock:
+            if _instance is None:
+                _instance = SessionManager()
     return _instance

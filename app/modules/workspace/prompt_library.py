@@ -8,6 +8,7 @@ Users can create, organize, and share prompt templates.
 import json
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -835,11 +836,14 @@ def get_ddl_statements() -> list[str]:
 
 # Module-level singleton
 _instance: Optional[PromptLibrary] = None
+_instance_lock = threading.Lock()
 
 
 def get_prompt_library() -> PromptLibrary:
     """Get the module-level PromptLibrary singleton."""
     global _instance
     if _instance is None:
-        _instance = PromptLibrary()
+        with _instance_lock:
+            if _instance is None:
+                _instance = PromptLibrary()
     return _instance

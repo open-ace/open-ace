@@ -633,23 +633,20 @@ class SSOManager:
     def _store_auth_state(
         self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
     ) -> None:
-        """Store authentication state for verification."""
-        # In production, use Redis with TTL
-        # For now, we'll use a simple in-memory cache or database
+        """Store authentication state for verification.
+
+        Requires the ``sso_auth_states`` table to already exist. In production it
+        is created at startup from the authoritative schema files via
+        ``schema_init.load_schema_from_file()`` (and by the
+        ``20260703_002_add_sso_auth_states`` migration for pure-Alembic
+        upgrades). Tests that exercise this path must run ``ensure_all_tables()``
+        or ``get_ddl_statements()`` first — otherwise the INSERT below fails and
+        is swallowed by the broad except, surfacing as a downstream SSO failure
+        instead of a clear error (Issue #237 item 4, review note).
+        """
         try:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS sso_auth_states (
-                        state TEXT PRIMARY KEY,
-                        code_verifier TEXT NOT NULL,
-                        provider_name TEXT NOT NULL,
-                        nonce TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """
-                )
                 cursor.execute(
                     """
                     INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)

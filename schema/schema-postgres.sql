@@ -1047,6 +1047,14 @@ CREATE SEQUENCE smtp_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE smtp_settings_id_seq OWNED BY smtp_settings.id;
+CREATE TABLE sso_auth_states (
+    state text NOT NULL,
+    code_verifier text NOT NULL,
+    provider_name text NOT NULL,
+    nonce text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE sso_identities (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -1774,6 +1782,9 @@ ALTER TABLE ONLY shared_sessions
 
 ALTER TABLE ONLY shared_sessions
     ADD CONSTRAINT shared_sessions_share_id_key UNIQUE (share_id);
+
+ALTER TABLE ONLY sso_auth_states
+    ADD CONSTRAINT sso_auth_states_pkey PRIMARY KEY (state);
 
 ALTER TABLE ONLY sso_identities
     ADD CONSTRAINT sso_identities_pkey PRIMARY KEY (id);

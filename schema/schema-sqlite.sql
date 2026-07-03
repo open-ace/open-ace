@@ -683,6 +683,14 @@ CREATE TABLE smtp_settings (
  created_by integer
 );
 
+CREATE TABLE sso_auth_states (
+ state text PRIMARY KEY NOT NULL,
+ code_verifier text NOT NULL,
+ provider_name text NOT NULL,
+ nonce text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE sso_identities (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
