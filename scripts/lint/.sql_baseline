@@ -1,7 +1,11 @@
-{"rule": "SQL003", "file": "app/modules/governance/quota_manager.py", "line": 550, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 1087, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 1096, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/repositories/usage_repo.py", "line": 1102, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/services/user_stats_aggregator.py", "line": 113, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "app/services/user_stats_aggregator.py", "line": 183, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
-{"rule": "SQL003", "file": "scripts/fetch_claude.py", "line": 831, "message": "LIKE query without escape_like() — special characters in user input will be treated as wildcards"}
+# SQL compatibility checker baseline — accepted/suppressed violations.
+#
+# Regenerated after the LIKE-wildcard ESCAPE-clause fix (issue #15 from the
+# #241 adversarial review). All prior entries were stale: every LIKE site that
+# feeds on user input now carries both escape_like() and an explicit ESCAPE
+# clause, so SQL003/SQL004 produce zero violations repo-wide.
+#
+# To regenerate from the current tree:
+#   python3 scripts/lint/sql_compat_checker.py --baseline > scripts/lint/.sql_baseline
+#
+# (No JSONL suppression entries below — intentionally empty.)

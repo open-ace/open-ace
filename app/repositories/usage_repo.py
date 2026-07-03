@@ -771,7 +771,7 @@ class UsageRepository:
         if user_name:
             # sender_name format is: {username}-{hostname}-{tool}
             # Use LIKE to match username prefix
-            conditions.append("dm.sender_name LIKE ?")
+            conditions.append("dm.sender_name LIKE ? ESCAPE '\\'")
             params.append(f"{escape_like(user_name)}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}"
@@ -914,7 +914,7 @@ class UsageRepository:
         # Fallback: query daily_messages directly (slower but works for all cases)
         # sender_name format is: {username}-{hostname}-{tool}
         # Use LIKE to match username prefix
-        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ?"]
+        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ? ESCAPE '\\'"]
         params = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
 
         if host_name:
@@ -1042,7 +1042,7 @@ class UsageRepository:
         if user_name:
             # sender_name format is: {username}-{hostname}-{tool}
             # Use LIKE to match username prefix
-            conditions.append("sender_name LIKE ?")
+            conditions.append("sender_name LIKE ? ESCAPE '\\'")
             params.append(f"{escape_like(user_name)}%")
 
         query = f"""
@@ -1104,7 +1104,7 @@ class UsageRepository:
                 COUNT(*) as requests
             FROM daily_messages
             -- Uses escape_like() for safe LIKE pattern
-            WHERE sender_name LIKE ?
+            WHERE sender_name LIKE ? ESCAPE '\\'
               AND date >= ? AND date <= ?
               AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
@@ -1219,7 +1219,7 @@ class UsageRepository:
                    COUNT(*) as request_count
             FROM daily_messages
             -- Uses escape_like() for safe LIKE pattern
-            WHERE sender_name LIKE ?
+            WHERE sender_name LIKE ? ESCAPE '\\'
               AND date >= ? AND date <= ? AND role = 'assistant'
               AND (message_source IS NULL OR message_source != 'remote_workspace')
               AND (agent_session_id IS NULL OR agent_session_id = '')

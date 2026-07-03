@@ -9,10 +9,15 @@ Rules (v1 scope):
   - SQL001: Boolean field compared with integer literal in SQL context.
             Should use adapt_boolean_condition() instead.
   - SQL003: LIKE query without escape_like() — wildcard injection risk.
+  - SQL004: LIKE uses escape_like() but is missing an ESCAPE clause.
+            escape_like() only neutralizes wildcards when the SQL declares an
+            ESCAPE clause — the SQL standard has NO default escape character.
+            PostgreSQL happens to default to backslash, but SQLite does not, so
+            an escape_like()'d value without ESCAPE still leaks wildcards on
+            SQLite.
 
 Future scope (not yet implemented):
   - SQL002: Raw ? or %s placeholder (use get_param_placeholder() / adapt_sql())
-  - SQL004: f-string SQL interpolation (use parameterized queries)
 
 Usage:
     # Check all Python files under app/ and scripts/
@@ -332,6 +337,95 @@ def _check_sql003(content: str, filepath: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# SQL004: LIKE uses escape_like() but is missing an ESCAPE clause
+# ---------------------------------------------------------------------------
+#
+# SQL003 ensures a LIKE placeholder has escape_like() nearby, but escape_like()
+# only neutralizes wildcards when the SQL also declares an ESCAPE clause. The SQL
+# standard has NO default escape character; PostgreSQL happens to default to
+# backslash, but SQLite does not — so on SQLite an escape_like()'d value without
+# ESCAPE still leaks % / _ wildcards. SQL004 closes that gap.
+#
+# Detection (single-direction, mirrors SQL003's loose escape_like signal):
+#   1. Line has a LIKE placeholder (reuses _LIKE_PATTERN_RE).
+#   2. escape_like appears within the ±7 line window (the same call-or-inline-
+#      comment signal SQL003 relies on — escape_like() can be called once and
+#      stored in a variable many lines from the LIKE, hence inline
+#      "-- escape_like used" comments carry the intent).
+#   3. No ESCAPE clause on the LIKE line or up to 2 lines below it (covers both
+#      the same-line form `LIKE ? ESCAPE '\\'` and the multi-line form where
+#      ESCAPE sits on the next line, e.g. session_manager.py:908-909).
+#   4. NOT LIKE is excluded — hardcoded exclusion patterns (e.g. webui:%) are
+#      not user input and never need ESCAPE.
+# Group C hardcoded LIKEs (LIKE 'literal' / LIKE (column || ...)) don't match
+# the placeholder regex, so they are structurally invisible to SQL004.
+
+# ESCAPE clause: ESCAPE followed by the opening quote of the escape-char literal
+# (e.g. ESCAPE '\\'). Precise enough not to fire on prose comments.
+_ESCAPE_CLAUSE_RE = re.compile(r"\bESCAPE\b\s+['\"]", re.IGNORECASE)
+
+# ESCAPE may appear on the LIKE line itself or on the next ~2 lines.
+_SQL004_ESCAPE_FORWARD_WINDOW = 2
+
+
+def _check_sql004(content: str, filepath: str) -> list[dict]:
+    """SQL004: LIKE uses escape_like() but has no ESCAPE clause."""
+    violations: list[dict] = []
+
+    lines = content.splitlines()
+
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+
+        # Skip comment-only lines
+        if stripped.startswith("#"):
+            continue
+
+        # Skip the check file itself
+        if "sql_compat_checker" in filepath:
+            continue
+
+        # Only interested in LIKE placeholder lines
+        if not _LIKE_PATTERN_RE.search(line):
+            continue
+
+        # Must be escape_like-fed (same loose signal SQL003 uses — a call or an
+        # inline "-- escape_like used" comment within ±7 lines).
+        back_start = max(0, lineno - 1 - _ESCAPE_LIKE_WINDOW)
+        back_end = min(len(lines), lineno + _ESCAPE_LIKE_WINDOW)
+        if "escape_like" not in "\n".join(lines[back_start:back_end]):
+            continue
+
+        # ESCAPE clause present on this line or within the forward window?
+        fwd_end = min(len(lines), lineno + _SQL004_ESCAPE_FORWARD_WINDOW)
+        fwd_context = "\n".join(lines[lineno - 1 : fwd_end])
+        if _ESCAPE_CLAUSE_RE.search(fwd_context):
+            continue
+
+        # Skip NOT LIKE — hardcoded exclusion patterns don't need ESCAPE.
+        # Flag only if some LIKE on the line is NOT preceded by "not".
+        triggered = False
+        for m in _LIKE_PATTERN_RE.finditer(line):
+            if line[: m.start()].rstrip().lower().endswith("not"):
+                continue
+            triggered = True
+            break
+        if not triggered:
+            continue
+
+        violations.append(
+            {
+                "rule": "SQL004",
+                "file": filepath,
+                "line": lineno,
+                "message": "LIKE uses escape_like() but has no ESCAPE clause — wildcards still leak on SQLite (SQL standard has no default escape char)",
+            }
+        )
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Baseline management — all paths stored as relative to PROJECT_ROOT (#19)
 # ---------------------------------------------------------------------------
 
@@ -373,6 +467,7 @@ def check_file(filepath: Path) -> list[dict]:
     violations: list[dict] = []
     violations.extend(_check_sql001(content, fp_str))
     violations.extend(_check_sql003(content, fp_str))
+    violations.extend(_check_sql004(content, fp_str))
     return violations
 
 
