@@ -1,8 +1,13 @@
 """Integration tests for GovernanceRepository against real PostgreSQL database."""
 
-from unittest.mock import MagicMock, patch
-
 import pytest
+
+# Marks every test in this module as requiring a live PostgreSQL server.
+# CI runs `pytest -m 'not postgres'` so these are excluded; locally they
+# auto-skip via the pg_db fixture when no server is reachable.
+pytestmark = pytest.mark.postgres
+
+from unittest.mock import MagicMock, patch
 
 from app.repositories.governance_repo import GovernanceRepository
 

@@ -107,7 +107,7 @@ def get_daily_usage(date: str, tool_name: str = None) -> dict:
 pytest
 
 # Run specific test file
-pytest tests/test_db.py
+pytest tests/unit/test_db.py
 
 # Run with coverage
 pytest --cov=scripts/shared tests/

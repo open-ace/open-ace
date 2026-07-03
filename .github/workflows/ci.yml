@@ -59,7 +59,10 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --cov=scripts/shared --cov-report=xml --cov-report=html --ignore=tests/ui --ignore=tests/issues --ignore=tests/regression --ignore=tests/performance --ignore=tests/e2e --ignore=tests/integration/test_auth_service_pg.py --ignore=tests/integration/test_daily_stats_repo_pg.py --ignore=tests/integration/test_governance_repo_pg.py --ignore=tests/integration/test_project_repo_pg.py --ignore=tests/integration/test_tenant_repo_pg.py --ignore=tests/integration/test_user_tool_account_repo_pg.py --ignore=tests/integration/test_retention_pg.py
+          # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via
+          # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
+          # here since CI has no Postgres service (Issue #238).
+          pytest tests/ -v --cov=scripts/shared --cov-report=xml --cov-report=html -m "not postgres"
 
       - name: Upload coverage to Codecov
         timeout-minutes: 2

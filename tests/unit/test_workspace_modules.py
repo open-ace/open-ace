@@ -21,6 +21,39 @@ from app.modules.workspace.tool_connector import ToolConnector, ToolInfo, ToolTy
 # ==================== Fixtures ====================
 
 
+@pytest.fixture(autouse=True)
+def _pin_sqlite_dialect(monkeypatch):
+    """Force every workspace module onto the SQLite dialect.
+
+    ``app.repositories.database.is_postgresql()`` delegates to
+    ``scripts.shared.config.get_database_url()``, which defaults to PostgreSQL.
+    Each manager module binds ``is_postgresql`` at import time, so SQL written
+    with SQLite-specific syntax (``?`` placeholders, ``INSERT OR IGNORE``) is
+    routed to the real PG database and fails. Patch the bound name in every
+    module so all queries use the temporary SQLite files these fixtures create.
+    """
+    import app.modules.workspace.collaboration as collaboration_mod
+    import app.modules.workspace.prompt_library as prompt_library_mod
+    import app.modules.workspace.session_manager as session_manager_mod
+    import app.modules.workspace.state_sync as state_sync_mod
+    import app.repositories.database as db_mod
+
+    # Patch the canonical source: adapt_sql()/adapt_boolean_*() call
+    # db_mod.is_postgresql() at query time (not via the bound name), so this
+    # single patch covers SQL placeholder adaptation too.
+    monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
+
+    # Also patch each manager module's bound ``is_postgresql`` reference, which
+    # controls DDL id-type selection and connection routing.
+    for mod in (
+        collaboration_mod,
+        prompt_library_mod,
+        session_manager_mod,
+        state_sync_mod,
+    ):
+        monkeypatch.setattr(mod, "is_postgresql", lambda: False)
+
+
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing."""
@@ -531,12 +564,14 @@ class TestWorkspaceIntegration:
         """Test a complete session workflow."""
         # Create session
         session_mgr = SessionManager(db_path=temp_db)
+        session_mgr._ensure_tables()
         session = session_mgr.create_session(
             tool_name="claude", user_id=1, title="Integration Test"
         )
 
         # Emit sync events
         sync_mgr = StateSyncManager(db_path=temp_db)
+        sync_mgr._ensure_tables()
         sync_mgr.emit_event(
             SyncEvent(
                 event_id="event-1",
@@ -560,6 +595,7 @@ class TestWorkspaceIntegration:
     def test_collaboration_workflow(self, temp_db):
         """Test a complete collaboration workflow."""
         collab = CollaborationManager(db_path=temp_db)
+        collab._ensure_tables()
 
         # Create team
         team = collab.create_team(name="Workflow Team", owner_id=1)

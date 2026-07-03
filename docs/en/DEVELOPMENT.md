@@ -256,10 +256,10 @@ playwright install chromium
 
 ```bash
 # Run UI tests
-pytest tests/ui/
+pytest tests/e2e/ui/
 
 # Run specific test
-pytest tests/ui/test_screenshot.py
+pytest tests/e2e/ui/test_screenshot.py
 ```
 
 ### Example UI Test

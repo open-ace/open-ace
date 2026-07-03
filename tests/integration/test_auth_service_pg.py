@@ -1,9 +1,14 @@
 """Integration tests for auth_service against real PostgreSQL database."""
 
+import pytest
+
+# Marks every test in this module as requiring a live PostgreSQL server.
+# CI runs `pytest -m 'not postgres'` so these are excluded; locally they
+# auto-skip via the pg_db fixture when no server is reachable.
+pytestmark = pytest.mark.postgres
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
-
-import pytest
 
 from app.services import auth_service
 from app.services.auth_service import (
