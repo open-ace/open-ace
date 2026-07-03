@@ -11,10 +11,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from app.modules.workspace.autonomous.agent_runner import (
@@ -1741,8 +1743,32 @@ class AutonomousOrchestrator:
                 if strategy == "worktree":
                     # normpath collapses ".." so DB/JSONL encoding matches the
                     # real worktree dir (#814).
+                    worktree_path = os.path.normpath(
+                        f"{project_path}/../{branch_name.replace('/', '-')}"
+                    )
+
+                    # Check and clean up residual worktree directory (Issue #1442)
+                    if Path(worktree_path).exists():
+                        git_file = Path(worktree_path) / ".git"
+                        if git_file.exists() and git_file.is_file():
+                            # Valid worktree - remove via git
+                            try:
+                                gh.remove_worktree(worktree_path)
+                                logger.info("Removed residual worktree at %s", worktree_path)
+                            except GitHubOpsError:
+                                # Fallback to force delete
+                                shutil.rmtree(worktree_path)
+                                logger.info(
+                                    "Force removed worktree directory at %s",
+                                    worktree_path,
+                                )
+                        else:
+                            # Not a worktree, just a directory
+                            shutil.rmtree(worktree_path)
+                            logger.info("Removed residual directory at %s", worktree_path)
+
                     wt_data = gh.create_worktree(
-                        path=os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}"),
+                        path=worktree_path,
                         branch=branch_name,
                         base="origin/main",
                     )
