@@ -169,17 +169,26 @@ class MessageService:
             sender_name=sender_name,
         )
 
-    def get_conversation_timeline(self, session_id: str) -> list[dict]:
+    def get_conversation_timeline(
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> list[dict]:
         """
         Get timeline of messages for a conversation.
 
         Args:
             session_id: Conversation/session ID.
+            limit: Optional cap on number of messages.
+            offset: Offset for pagination.
 
         Returns:
-            List[Dict]: List of messages in the conversation.
+            List[Dict]: List of messages in the conversation (without
+            ``full_entry``, which is capped to keep responses small —
+            Issue #241 #22).
         """
-        return self.message_repo.get_conversation_timeline(session_id)
+        return self.message_repo.get_conversation_timeline(session_id, limit=limit, offset=offset)
 
     def get_conversation_details(self, session_id: str) -> Optional[dict]:
         """

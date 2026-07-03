@@ -20,6 +20,8 @@ export type {
   SessionFilters,
   SessionsListResponse,
   SessionStatsResponse,
+  SessionMessagesPage,
+  MessageCursor,
 } from './sessions';
 export { authApi } from './auth';
 export type { AuthCheckResponse, LoginRequest, LoginResponse } from './auth';

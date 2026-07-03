@@ -940,7 +940,7 @@ CREATE TABLE session_messages (
     content text,
     tokens_used integer DEFAULT 0,
     model text,
-    "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    "timestamp" timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metadata text,
     milestone_id text DEFAULT ''::text NOT NULL,
     source text DEFAULT ''::text NOT NULL,
@@ -2306,6 +2306,8 @@ CREATE INDEX idx_session_messages_external_message_id ON session_messages USING 
 --
 
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
+
+CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
 
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
 

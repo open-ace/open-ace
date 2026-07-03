@@ -112,8 +112,19 @@ def api_conversation_history():
 
 @messages_bp.route("/conversation-timeline/<path:session_id>")
 def api_conversation_timeline(session_id):
-    """Get timeline of messages for a conversation."""
-    messages = message_service.get_conversation_timeline(session_id)
+    """Get timeline of messages for a conversation.
+
+    Capped to the most recent ``limit`` rows (default 100, max 500) so a
+    conversation with thousands of long-``content`` rows no longer serializes a
+    multi-MB response. ``full_entry`` is dropped from every row regardless
+    (Issue #241 #22).
+    """
+    raw_limit = request.args.get("limit", default=100, type=int)
+    if raw_limit is None or raw_limit <= 0:
+        raw_limit = 100
+    limit = min(raw_limit, 500)
+    offset = request.args.get("offset", default=0, type=int) or 0
+    messages = message_service.get_conversation_timeline(session_id, limit=limit, offset=offset)
     return jsonify(messages)
 
 

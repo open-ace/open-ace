@@ -6,13 +6,15 @@
  * - Sessions page (feature page)
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { t, type Language } from '@/i18n';
 import { Badge } from './Badge';
 import type { BadgeVariant } from './Badge';
 import { formatDateTime, formatTimestampWithSeconds, formatTokens } from '@/utils';
 import { useRemoteSession } from '@/hooks';
-import type { AgentSession, SessionMessage, ContentBlock } from '@/api/sessions';
+import { sessionsApi } from '@/api';
+import type { AgentSession, SessionMessage, ContentBlock, MessageCursor } from '@/api/sessions';
 import { RunTimeline } from './RunTimeline';
 
 interface SessionDetailContentProps {
@@ -32,30 +34,118 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
   onRestore,
   restorePending,
 }) => {
+  const queryClient = useQueryClient();
+
   // Filter state: default to show user, assistant, and system messages
   const [showUser, setShowUser] = useState(true);
   const [showAssistant, setShowAssistant] = useState(true);
   const [showSystem, setShowSystem] = useState(true);
   const [searchText, setSearchText] = useState('');
 
-  // Filter messages based on role and search text
-  const filteredMessages = useMemo(() => {
-    if (!session.messages) return [];
+  // --- Message pagination (Issue #241 #22) ---
+  // session.messages holds the most-recent page (delivered with the session).
+  // olderPages holds pages walked further back via keyset cursor; each page is
+  // already oldest-first, so the rendered order is olderPages.flat() + newest.
+  const [olderPages, setOlderPages] = useState<SessionMessage[][]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [noMore, setNoMore] = useState(false);
+  const [oldestCursor, setOldestCursor] = useState<MessageCursor | null>(
+    session.messages_next_cursor ?? null
+  );
 
-    return session.messages.filter((msg: SessionMessage) => {
-      // Role filter
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Reset pagination whenever the session changes (open a different session).
+  useEffect(() => {
+    setOlderPages([]);
+    setLoadingOlder(false);
+    setNoMore(false);
+    setOldestCursor(session.messages_next_cursor ?? null);
+  }, [session.session_id, session.messages_next_cursor]);
+
+  const allMessages = useMemo(() => {
+    const newest = session.messages ?? [];
+    const older = olderPages.flat();
+    return [...older, ...newest];
+  }, [session.messages, olderPages]);
+
+  // Filter the *loaded* messages by role and search text. Search is scoped to
+  // loaded messages only — a banner reminds the user when not everything is
+  // loaded (Issue #241 #22 review, design decision B).
+  const filteredMessages = useMemo(() => {
+    return allMessages.filter((msg: SessionMessage) => {
       const roleMatch =
         (showUser && msg.role === 'user') ||
         (showAssistant && msg.role === 'assistant') ||
         (showSystem && msg.role === 'system');
 
-      // Search filter (case-insensitive)
       const searchMatch =
         !searchText || msg.content.toLowerCase().includes(searchText.toLowerCase());
 
       return roleMatch && searchMatch;
     });
-  }, [session.messages, showUser, showAssistant, showSystem, searchText]);
+  }, [allMessages, showUser, showAssistant, showSystem, searchText]);
+
+  const messagesTotal = session.messages_total ?? session.message_count ?? allMessages.length;
+  const hasMore = !noMore && (oldestCursor !== null || session.messages_has_more === true);
+
+  // Load the next older page, preserving the scroll position so prepended rows
+  // don't yank the viewport (anchor on container scrollHeight delta).
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || noMore || !oldestCursor) return;
+    setLoadingOlder(true);
+    const container = messagesContainerRef.current;
+    const prevHeight = container?.scrollHeight ?? 0;
+    try {
+      const resp = await sessionsApi.getSessionMessages(session.session_id, {
+        beforeTimestamp: oldestCursor.timestamp,
+        beforeId: oldestCursor.id,
+      });
+      const page = resp?.data;
+      if (page) {
+        setOlderPages((prev) => [...prev, page.messages]);
+        if (!page.has_more) {
+          setNoMore(true);
+          setOldestCursor(null);
+        } else {
+          setOldestCursor(page.next_cursor ?? null);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load older messages:', e);
+    } finally {
+      setLoadingOlder(false);
+      // Restore scroll anchor after the prepend renders.
+      window.requestAnimationFrame(() => {
+        const el = messagesContainerRef.current;
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    }
+  }, [loadingOlder, noMore, oldestCursor, session.session_id]);
+
+  // Top sentinel: trigger older-page load when it scrolls into view.
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = messagesContainerRef.current;
+    if (!sentinel || !container || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadOlder();
+      },
+      { root: container, rootMargin: '40px 0px 0px 0px', threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadOlder]);
+
+  // Refresh to latest: invalidate the session query and drop accumulated pages.
+  const refreshToLatest = useCallback(() => {
+    setOlderPages([]);
+    setNoMore(false);
+    setOldestCursor(session.messages_next_cursor ?? null);
+    queryClient.invalidateQueries({ queryKey: ['sessions', session.session_id] });
+  }, [queryClient, session.session_id, session.messages_next_cursor]);
 
   // Highlight search text in content
   const highlightText = (text: string, search: string) => {
@@ -211,12 +301,49 @@ export const SessionDetailContent: React.FC<SessionDetailContentProps> = ({
       </div>
 
       {/* Messages */}
-      <h6 className="mb-2">
-        {t('messages', language)}
-        {filteredMessages.length !== session.message_count &&
-          ` (${filteredMessages.length}/${session.message_count})`}
-      </h6>
-      <div className="messages-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="mb-0">
+          {t('messages', language)}
+          {` (${allMessages.length}/${messagesTotal})`}
+        </h6>
+        {hasMore || loadingOlder ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={loadOlder}
+            disabled={loadingOlder || !hasMore}
+          >
+            <i className="bi bi-arrow-bar-up me-1" />
+            {loadingOlder
+              ? (t('loading', language) ?? 'Loading...')
+              : (t('loadOlder', language) ?? 'Load older')}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={refreshToLatest}
+            title={t('refreshToLatest', language) ?? 'Refresh to latest'}
+          >
+            <i className="bi bi-arrow-repeat" />
+          </button>
+        )}
+      </div>
+      {/* Search/filter is scoped to loaded messages only (Issue #241 #22). */}
+      {((searchText && hasMore) || (searchText && allMessages.length < messagesTotal)) && (
+        <div className="alert alert-warning py-1 px-2 mb-2 small">
+          {t('searchScopedToLoaded', language) ??
+            'Only searching loaded messages. Load older to broaden the range.'}{' '}
+          ({allMessages.length}/{messagesTotal})
+        </div>
+      )}
+      <div
+        ref={messagesContainerRef}
+        className="messages-container"
+        style={{ maxHeight: '400px', overflowY: 'auto' }}
+      >
+        {/* Top sentinel for upward infinite scroll */}
+        {hasMore && <div ref={topSentinelRef} style={{ height: 1 }} />}
         {filteredMessages.length > 0 ? (
           filteredMessages.map((msg: SessionMessage, idx: number) => (
             <div
