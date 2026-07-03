@@ -9,7 +9,7 @@ This test verifies that:
 
 Usage:
     # Run standalone test
-    python3 tests/ui/test_anomaly_performance.py
+    python3 tests/e2e/performance/test_anomaly_performance.py
 """
 
 import os

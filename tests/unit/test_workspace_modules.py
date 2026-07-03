@@ -569,9 +569,8 @@ class TestWorkspaceIntegration:
             tool_name="claude", user_id=1, title="Integration Test"
         )
 
-        # Emit sync events
+        # Emit sync events (StateSyncManager.__init__ already calls _ensure_tables)
         sync_mgr = StateSyncManager(db_path=temp_db)
-        sync_mgr._ensure_tables()
         sync_mgr.emit_event(
             SyncEvent(
                 event_id="event-1",
