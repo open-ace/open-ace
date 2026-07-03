@@ -1371,9 +1371,9 @@ table .latency-row:hover td {
 }
 
 .role-badge.user {
-  background-color: rgba(var(--color-primary-rgb), 0.15);
+  background-color: rgba(var(--color-primary-rgb), 0.16);
   color: var(--color-primary);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.31);
 }
 
 .role-badge.assistant {
