@@ -160,20 +160,38 @@ class TestMessageRepositoryInsights:
     def test_get_user_conversation_samples_with_data(self):
         """Test get_user_conversation_samples returns conversations."""
         mock_db = MagicMock()
-        # First call: get session IDs
-        # Second call: get messages for each session
+        # N+1 eliminated: fetch_all is now called exactly twice — once for the
+        # session list, once for a single batch covering every session's
+        # messages (rows carry agent_session_id/conversation_id for grouping).
         mock_db.fetch_all.side_effect = [
             # Sessions
             [{"session_id": "session-1"}, {"session_id": "session-2"}],
-            # Messages for session-1
+            # Batch: all messages for both sessions in one query (timestamp-ordered)
             [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"},
-            ],
-            # Messages for session-2
-            [
-                {"role": "user", "content": "Help me"},
-                {"role": "assistant", "content": "Sure"},
+                {
+                    "agent_session_id": "session-1",
+                    "conversation_id": None,
+                    "role": "user",
+                    "content": "Hello",
+                },
+                {
+                    "agent_session_id": "session-1",
+                    "conversation_id": None,
+                    "role": "assistant",
+                    "content": "Hi there",
+                },
+                {
+                    "agent_session_id": "session-2",
+                    "conversation_id": None,
+                    "role": "user",
+                    "content": "Help me",
+                },
+                {
+                    "agent_session_id": "session-2",
+                    "conversation_id": None,
+                    "role": "assistant",
+                    "content": "Sure",
+                },
             ],
         ]
         repo = MessageRepository(db=mock_db)
@@ -182,6 +200,8 @@ class TestMessageRepositoryInsights:
         assert result[0]["session_id"] == "session-1"
         assert len(result[0]["messages"]) == 2
         assert result[1]["session_id"] == "session-2"
+        # Two sessions -> exactly two fetch_all calls (no per-session loop).
+        assert mock_db.fetch_all.call_count == 2
 
     def test_get_user_conversation_samples_no_sessions(self):
         """Test get_user_conversation_samples with no sessions."""

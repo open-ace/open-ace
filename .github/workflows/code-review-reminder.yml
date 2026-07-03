@@ -24,7 +24,8 @@ jobs:
           # 获取当前周数（从年初开始计算）
           week_number=$(date +%V)
           # 每3周提醒一次：周数 mod 3 == 0
-          if [ $(($week_number % 3)) -eq 0 ]; then
+          # workflow_dispatch 手动触发时强制创建，方便验证模板与体检报告
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ $(($week_number % 3)) -eq 0 ]; then
             echo "should_create=true" >> $GITHUB_OUTPUT
             echo "week_info=第 ${week_number} 周（每3周提醒）" >> $GITHUB_OUTPUT
           else
@@ -32,13 +33,220 @@ jobs:
             echo "week_info=第 ${week_number} 周（跳过，非第3周）" >> $GITHUB_OUTPUT
           fi
 
+      # ------------------------------------------------------------------
+      # 自动体检：以下步骤把可执行结果写入 health_report.md，再嵌入 Issue
+      # 正文。每个步骤都 continue-on-error，单个工具故障不阻断 Issue 创建。
+      # ------------------------------------------------------------------
+      - name: Checkout code
+        if: steps.check-week.outputs.should_create == 'true'
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        if: steps.check-week.outputs.should_create == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install inspection tools
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        run: pip install --quiet bandit pip-audit psycopg2-binary || true
+
+      - name: Initialize health report
+        if: steps.check-week.outputs.should_create == 'true'
+        run: |
+          echo "## 📊 本期自动体检报告" > health_report.md
+          echo "" >> health_report.md
+          echo "_以下结果由 workflow 自动采集；标记 ⚠️ 的项请重点排查。_" >> health_report.md
+          echo "" >> health_report.md
+
+      - name: 🔒 Security scan (bandit)
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          echo "<details><summary>🔒 Bandit 安全扫描（HIGH 及以上）</summary>" >> health_report.md
+          echo "" >> health_report.md
+          bandit -r app scripts -ll -q > /tmp/bandit.txt 2>&1
+          code=$?
+          if [ $code -eq 0 ]; then
+            echo "✅ 未发现 HIGH 及以上安全问题" >> health_report.md
+          else
+            echo "⚠️ 发现安全问题（详见下方）：" >> health_report.md
+            echo "" >> health_report.md
+            echo '```text' >> health_report.md
+            tail -n 60 /tmp/bandit.txt >> health_report.md
+            echo '```' >> health_report.md
+          fi
+          echo "" >> health_report.md
+          echo "</details>" >> health_report.md
+          echo "" >> health_report.md
+
+      - name: 📦 Dependency CVE scan (pip-audit)
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          echo "<details><summary>📦 依赖漏洞（pip-audit）</summary>" >> health_report.md
+          echo "" >> health_report.md
+          pip-audit -r requirements.txt > /tmp/audit.txt 2>&1
+          code=$?
+          if [ $code -eq 0 ]; then
+            echo "✅ requirements.txt 已知依赖漏洞均为 0" >> health_report.md
+          else
+            echo "⚠️ 发现依赖漏洞或扫描异常（详见下方）：" >> health_report.md
+            echo "" >> health_report.md
+            echo '```text' >> health_report.md
+            tail -n 60 /tmp/audit.txt >> health_report.md
+            echo '```' >> health_report.md
+          fi
+          echo "" >> health_report.md
+          echo "</details>" >> health_report.md
+          echo "" >> health_report.md
+
+      - name: 🗄️ Migration single-head check
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          echo "<details><summary>🗄️ 迁移健康（单一 head）</summary>" >> health_report.md
+          echo "" >> health_report.md
+          python3 - <<'PY' > /tmp/mig.txt 2>&1
+          import glob, re
+          revisions, down_refs = {}, []
+          for f in glob.glob('migrations/versions/*.py'):
+              txt = open(f, encoding='utf-8').read()
+              m = re.search(r'^revision[^=]*=\s*["\']([^"\']+)["\']', txt, re.M)
+              if not m:
+                  continue
+              rev = m.group(1)
+              revisions[rev] = f
+              d = re.search(r'^down_revision[^=]*=\s*(.+)$', txt, re.M)
+              if d:
+                  down_refs += re.findall(r'["\']([^"\']+)["\']', d.group(1))
+          children = {d for d in down_refs if d in revisions}
+          heads = [r for r in revisions if r not in children]
+          print(f"revisions={len(revisions)} heads={len(heads)}")
+          for h in heads:
+              print(f"  head: {h}  ({revisions[h]})")
+          raise SystemExit(0 if len(heads) == 1 else 1)
+          PY
+          code=$?
+          if [ $code -eq 0 ]; then
+            echo "✅ 迁移链单一 head（启发式解析，非权威；权威请跑 alembic heads）" >> health_report.md
+          else
+            echo "⚠️ 检测到多个 head 或解析异常（详见下方）：" >> health_report.md
+            echo "" >> health_report.md
+            echo '```text' >> health_report.md
+            cat /tmp/mig.txt >> health_report.md
+            echo '```' >> health_report.md
+          fi
+          echo "" >> health_report.md
+          echo "</details>" >> health_report.md
+          echo "" >> health_report.md
+
+      - name: 🖥️ Frontend bundle size
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        run: |
+          set +e
+          echo "<details><summary>🖥️ 前端包体积（构建后）</summary>" >> health_report.md
+          echo "" >> health_report.md
+          (cd frontend && npm ci --no-fund --no-audit && npm run build) > /tmp/fe.txt 2>&1
+          code=$?
+          if [ $code -eq 0 ] && [ -d static/js/dist ]; then
+            echo "构建产物大小（static/js/dist）：" >> health_report.md
+            echo "" >> health_report.md
+            echo '```text' >> health_report.md
+            du -sh static/js/dist >> health_report.md 2>&1
+            ls -lhS static/js/dist/*.js 2>/dev/null | head -n 15 >> health_report.md
+            echo '```' >> health_report.md
+          else
+            echo "⏭️ 前端构建失败或无产物，已跳过（不影响 Issue 创建）" >> health_report.md
+          fi
+          echo "" >> health_report.md
+          echo "</details>" >> health_report.md
+          echo "" >> health_report.md
+
+      - name: 🗄️ DB health (dead indexes / large tables)
+        if: steps.check-week.outputs.should_create == 'true'
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          echo "<details><summary>🗄️ DB 体检（死索引 / 大表 / 慢查询）</summary>" >> health_report.md
+          echo "" >> health_report.md
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ℹ️ 未配置 \`DATABASE_URL\` secret，未自动执行。请在具备 DB 访问的环境运行以下只读 SQL：" >> health_report.md
+            echo "" >> health_report.md
+            echo '```sql' >> health_report.md
+            echo "-- 零使用索引（idx_scan=0；partial/unique 索引需结合谓词另行评估，勿直接删）" >> health_report.md
+            echo "SELECT s.schemaname, s.relname AS tbl, s.indexrelname AS idx, s.idx_scan" >> health_report.md
+            echo "FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid = s.indexrelid" >> health_report.md
+            echo "WHERE s.idx_scan = 0 AND NOT i.indisunique AND NOT i.indisprimary ORDER BY 1,2,3;" >> health_report.md
+            echo "-- 大表 TOP10" >> health_report.md
+            echo "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) AS size" >> health_report.md
+            echo "FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 10;" >> health_report.md
+            echo "-- 慢查询 TOP10（需 pg_stat_statements 扩展）" >> health_report.md
+            echo "SELECT substring(query,1,120) AS query, calls, round(mean_exec_time::numeric,2) AS mean_ms" >> health_report.md
+            echo "FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 10;" >> health_report.md
+            echo '```' >> health_report.md
+          else
+            python3 - <<'PY' > /tmp/db.txt 2>&1
+          import os, psycopg2
+          conn = psycopg2.connect(os.environ['DATABASE_URL'])
+          cur = conn.cursor()
+          cur.execute("""SELECT s.relname AS tbl, s.indexrelname AS idx, s.idx_scan
+                         FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid=s.indexrelid
+                         WHERE s.idx_scan=0 AND NOT i.indisunique AND NOT i.indisprimary
+                         ORDER BY 1,2,3 LIMIT 50""")
+          dead = cur.fetchall()
+          cur.execute("""SELECT relname, pg_size_pretty(pg_total_relation_size(relid))
+                         FROM pg_catalog.pg_statio_user_tables
+                         ORDER BY pg_total_relation_size(relid) DESC LIMIT 10""")
+          big = cur.fetchall()
+          print(f"zero_scan_indexes={len(dead)}")
+          for r in dead[:20]:
+              print("  ", r)
+          print("largest_tables:")
+          for r in big:
+              print("  ", r)
+          conn.close()
+          PY
+            code=$?
+            if [ $code -eq 0 ]; then
+              echo '```text' >> health_report.md
+              cat /tmp/db.txt >> health_report.md
+              echo '```' >> health_report.md
+            else
+              echo "⚠️ DB 连接或查询失败，回退为手动 SQL（详见 workflow 日志）" >> health_report.md
+            fi
+          fi
+          echo "" >> health_report.md
+          echo "</details>" >> health_report.md
+          echo "" >> health_report.md
+
       - name: Create review reminder issue
         if: steps.check-week.outputs.should_create == 'true'
         uses: actions/github-script@v9
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
             const weekInfo = process.env.WEEK_INFO;
             const currentDate = new Date().toISOString().split('T')[0];
+
+            // 读取自动体检报告；缺失时不阻断 Issue 创建。
+            let healthReport = '';
+            try {
+              healthReport = fs.readFileSync(
+                path.join(process.env.GITHUB_WORKSPACE, 'health_report.md'),
+                'utf8'
+              );
+            } catch (e) {
+              healthReport = '_（体检步骤未生成报告，请检查 workflow 运行日志）_';
+            }
 
             const issueBody = `## 定期代码审查提醒
 
@@ -53,18 +261,22 @@ jobs:
             | 🖥️ 前端 | 包体积、渲染性能、组件优化、依赖更新 |
             | 🎨 UI | 用户体验、响应式设计、可访问性、交互流畅度 |
             | 📚 文档 | README、CHANGELOG、API 文档、部署指南 |
+            | 🛡️ 安全 | 依赖漏洞（CVE）、密钥泄漏、越权校验、依赖升级 SLA |
 
             ### 检查清单
 
-            - [ ] 数据库查询是否有慢查询需要优化？
+            - [ ] 数据库查询是否有慢查询需要优化？（参考下方 DB 体检）
             - [ ] 后端 API 是否有性能瓶颈？
-            - [ ] 前端包体积是否过大？
+            - [ ] 前端包体积是否过大？（参考下方前端构建体积）
             - [ ] UI 是否有用户体验问题？
             - [ ] 文档是否与当前版本同步？
+            - [ ] 🛡️ 安全：依赖漏洞/密钥泄漏/越权是否已清零？（参考下方 Bandit 与 pip-audit）
+
+            ${healthReport}
 
             ---
 
-            *此提醒每3周自动生成一次。完成后请关闭此 issue。*
+            *此提醒每3周自动生成一次，body 内体检报告由 \`.github/workflows/code-review-reminder.yml\` 自动采集（单项工具故障不影响 Issue 创建）。完成后请关闭此 issue。*
             `;
 
             await github.rest.issues.create({
@@ -79,7 +291,7 @@ jobs:
         run: |
           echo "检查结果: ${{ steps.check-week.outputs.week_info }}"
           if [ "${{ steps.check-week.outputs.should_create }}" == "true" ]; then
-            echo "✅ 已创建审查提醒 issue"
+            echo "✅ 已创建审查提醒 issue（含自动体检报告）"
           else
             echo "⏭️ 跳过创建（非第3周）"
           fi

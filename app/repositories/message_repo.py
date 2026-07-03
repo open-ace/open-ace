@@ -1288,8 +1288,8 @@ class MessageRepository:
         Returns:
             List[Dict]: List of conversations, each with session_id and messages.
         """
-        # Find distinct agent_session_ids that have user messages
-        # Use ORDER BY to ensure deterministic sampling (fixes #685)
+        # Find distinct session keys that have user messages.
+        # Use ORDER BY to ensure deterministic sampling (fixes #685).
         safe_prefix = escape_like(sender_prefix)
         session_query = """
             SELECT COALESCE(agent_session_id, conversation_id) as session_id
@@ -1309,10 +1309,85 @@ class MessageRepository:
         if not sessions:
             return []
 
-        # For each session, get messages
-        conversations = []
-        for session in sessions:
-            session_id = session["session_id"]
+        session_ids = [s["session_id"] for s in sessions]
+
+        # Fetch every sampled session's messages in ONE query instead of one
+        # query per session (previously an N+1: one fetch_all per session).
+        #
+        # Equivalence: each session previously ran
+        #   WHERE (agent_session_id = S OR conversation_id = S)
+        # The batch matches a row when EITHER field equals ANY session id, and
+        # rows are then assigned back to every session S for which
+        # (agent_session_id = S OR conversation_id = S) holds. This reproduces
+        # the per-session predicate exactly — including the value-collision
+        # case where the same id appears as both an agent_session_id and a
+        # conversation_id (the row legitimately belongs to multiple sessions),
+        # which is why grouping must NOT use a COALESCE key at this layer.
+        try:
+            rows = self._fetch_conversation_samples_batch(session_ids)
+        except Exception as e:
+            # Preserve historical resilience: a single bad row used to skip
+            # only its own session (per-session try/except). The batch fails
+            # atomically, so fall back to the per-session loop which can still
+            # skip just the offending session.
+            logger.warning(
+                f"Batch conversation fetch failed for {len(session_ids)} "
+                f"sessions, falling back to per-session fetch: {e}"
+            )
+            return self._fetch_conversation_samples_per_session(session_ids)
+
+        return self._group_conversation_samples(session_ids, rows)
+
+    def _fetch_conversation_samples_batch(self, session_ids: list[str]) -> list[dict]:
+        """Single-query batch fetch of messages for all session ids."""
+        # Cross-DB IN-list expansion ("?" for SQLite, adapted to "%s" for PG).
+        placeholders = ",".join(["?"] * len(session_ids))
+        msg_query = f"""
+            SELECT agent_session_id, conversation_id, role, LEFT(content, 300) as content
+            FROM daily_messages
+            WHERE (agent_session_id IN ({placeholders})
+                   OR conversation_id IN ({placeholders}))
+              AND role IN ('user', 'assistant')
+              AND content IS NOT NULL
+              AND content != ''
+            ORDER BY timestamp ASC
+        """
+        # Bind the id list once per IN-list (agent_session_id, conversation_id).
+        params = tuple(session_ids) + tuple(session_ids)
+        return self.db.fetch_all(msg_query, params)
+
+    @staticmethod
+    def _group_conversation_samples(session_ids: list[str], rows: list[dict]) -> list[dict]:
+        """Assign batched rows back to sessions in session_query order.
+
+        A row belongs to session S when ``agent_session_id = S`` OR
+        ``conversation_id = S`` (mirrors the original per-session predicate).
+        Sessions with no matching rows are dropped, matching prior behavior.
+        """
+        bucket: dict[str, list[dict]] = {sid: [] for sid in session_ids}
+        for row in rows:
+            asi = row.get("agent_session_id")
+            cid = row.get("conversation_id")
+            message = {"role": row["role"], "content": row["content"]}
+            if asi in bucket:
+                bucket[asi].append(message)
+            # Append to the conversation_id bucket too, unless it is the same
+            # session already fed via agent_session_id (avoids duplicating a
+            # row where both fields hold the same id).
+            if cid in bucket and cid != asi:
+                bucket[cid].append(message)
+
+        conversations: list[dict] = []
+        for sid in session_ids:
+            messages = bucket[sid]
+            if messages:
+                conversations.append({"session_id": sid, "messages": messages})
+        return conversations
+
+    def _fetch_conversation_samples_per_session(self, session_ids: list[str]) -> list[dict]:
+        """Fallback per-session fetch; skips a session on decode error."""
+        conversations: list[dict] = []
+        for session_id in session_ids:
             msg_query = """
                 SELECT role, LEFT(content, 300) as content
                 FROM daily_messages
@@ -1336,5 +1411,4 @@ class MessageRepository:
                         ],
                     }
                 )
-
         return conversations
