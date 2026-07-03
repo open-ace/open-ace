@@ -7,7 +7,6 @@ import asyncio
 import os
 import time
 
-import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -22,7 +21,6 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-@pytest.mark.asyncio
 async def test_create_flow(ui_screenshot_dir):
     global SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
