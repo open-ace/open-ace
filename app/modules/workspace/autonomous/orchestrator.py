@@ -1747,6 +1747,10 @@ class AutonomousOrchestrator:
                         f"{project_path}/../{branch_name.replace('/', '-')}"
                     )
 
+                    # Clean up prunable worktrees (directory lost but registered)
+                    # This happens when worktree dir was deleted externally (Issue #1442)
+                    gh._run_git(["worktree", "prune"])
+
                     # Check and clean up residual worktree directory (Issue #1442)
                     if Path(worktree_path).exists():
                         git_file = Path(worktree_path) / ".git"
