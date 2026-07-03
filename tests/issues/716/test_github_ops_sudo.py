@@ -86,8 +86,45 @@ class TestResolveOwnerRepo:
 
     def test_unparseable_url_returns_none(self):
         gh = GitHubOps("/tmp/repo", system_account="alice")
-        with patch.object(GitHubOps, "get_repo_url", return_value="https://gitlab.com/foo/bar"):
+        # A remote that doesn't match any known host/slug form (no owner/repo
+        # path component) yields None. Note: non-github.com hosts (gitlab/GHES)
+        # are now intentionally carried through as HOST/OWNER/REPO — see
+        # test_ghes_https_url_includes_host — so this must use a truly
+        # unparseable value.
+        with patch.object(GitHubOps, "get_repo_url", return_value="/local/path/repo"):
             assert gh._resolve_owner_repo() is None
+
+    def test_ssh_scheme_url(self):
+        # ssh://git@github.com/owner/repo.git — standard git SSH remote form
+        # that the original parser missed (review feedback).
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url", return_value="ssh://git@github.com/open-ace/open-ace.git"
+        ):
+            assert gh._resolve_owner_repo() == "open-ace/open-ace"
+
+    def test_ssh_scheme_url_without_git_suffix(self):
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url", return_value="ssh://git@github.com/open-ace/open-ace"
+        ):
+            assert gh._resolve_owner_repo() == "open-ace/open-ace"
+
+    def test_ghes_https_url_includes_host(self):
+        # A GHES host must be carried through as HOST/OWNER/REPO so gh's -R
+        # targets the right server (review feedback).
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url", return_value="https://gh.example.com/owner/repo.git"
+        ):
+            assert gh._resolve_owner_repo() == "gh.example.com/owner/repo"
+
+    def test_ghes_scp_url_includes_host(self):
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url", return_value="git@gh.example.com:owner/repo.git"
+        ):
+            assert gh._resolve_owner_repo() == "gh.example.com/owner/repo"
 
 
 class TestRunGhSudo:
@@ -139,6 +176,44 @@ class TestRunGhSudo:
         assert "-R" not in gh_cmd  # no explicit -R needed; cwd is kept
         # cwd is preserved so gh can resolve the repo from the working dir.
         assert mock_run.call_args.kwargs.get("cwd") == "/tmp/repo"
+
+
+class TestRunGhRepoScoped:
+    """repo create/view reject -R; repo_scoped=False omits it (review feedback)."""
+
+    @patch.object(GitHubOps, "_resolve_owner_repo", return_value="open-ace/open-ace")
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_repo_no_dash_r(self, mock_run, _needs, _resolve):
+        # `gh repo create` does not accept -R; even when a remote resolves, the
+        # command must run plain gh under sudo (previously the unconditional -R
+        # would regress to "unknown shorthand flag: 'R'").
+        mock_run.return_value = _completed(
+            stdout="https://github.com/open-ace/new-repo\n✓ Created repository"
+        )
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        gh.create_repo("new-repo", private=True)
+
+        gh_cmd = mock_run.call_args.args[0]
+        assert gh_cmd[:3] == ["sudo", "-u", "alice"]
+        assert gh_cmd[3] == "gh"
+        assert "-R" not in gh_cmd
+        assert "repo" in gh_cmd and "create" in gh_cmd
+
+    @patch.object(GitHubOps, "_resolve_owner_repo", return_value="open-ace/open-ace")
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_get_repo_name_no_dash_r(self, mock_run, _needs, _resolve):
+        # `gh repo view` likewise rejects -R.
+        mock_run.return_value = _completed(stdout='{"nameWithOwner": "open-ace/open-ace"}')
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        gh.get_repo_name()
+
+        gh_cmd = mock_run.call_args.args[0]
+        assert "-R" not in gh_cmd
+        assert "repo" in gh_cmd and "view" in gh_cmd
 
 
 class TestEnsureSafeDirectory:

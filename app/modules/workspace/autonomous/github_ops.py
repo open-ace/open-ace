@@ -167,17 +167,48 @@ class GitHubOps:
             return None
         if not url:
             return None
-        # Accept https://github.com/<owner>/<repo>[.git] and
-        # git@github.com:<owner>/<repo>[.git]. Tolerate an optional trailing
-        # .git and a trailing slash.
-        m = re.match(r"(?:https?://github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?/?$", url)
-        if not m:
+        # Parse the host and owner/repo from common git remote forms:
+        #   https://github.com/<owner>/<repo>[.git]
+        #   git@github.com:<owner>/<repo>[.git]            (SCP-style)
+        #   ssh://git@github.com/<owner>/<repo>[.git]
+        #   https://gh.example.com/<owner>/<repo>[.git]    (GHES)
+        # gh's -R/--repo accepts [HOST/]OWNER/REPO, so for non-github.com hosts
+        # (GHES) we include the host so the command targets the right server.
+        host: Optional[str] = None
+        slug: Optional[str] = None
+        m = re.match(
+            r"(?:https?://([^/]+)/|ssh://[^@]+@([^/]+)/|(?:[^@]+@([^:]+):))"  # host capture
+            r"([^/]+/[^/]+?)(?:\.git)?/?$",
+            url,
+        )
+        if m:
+            host = next((g for g in (m.group(1), m.group(2), m.group(3)) if g), None)
+            slug = m.group(4)
+        if not slug:
             return None
-        self._owner_repo = m.group(1)
+        # Only github.com is the public host; any other host is a GHES instance
+        # and must be passed through to gh's -R as HOST/OWNER/REPO.
+        if host and host != "github.com":
+            self._owner_repo = f"{host}/{slug}"
+        else:
+            self._owner_repo = slug
         return self._owner_repo
 
-    def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-        """Run a gh CLI command with transient-network-error retry."""
+    def _run_gh(
+        self, args: list[str], check: bool = True, repo_scoped: bool = True
+    ) -> subprocess.CompletedProcess:
+        """Run a gh CLI command with transient-network-error retry.
+
+        Args:
+            args: gh CLI argument list (e.g. ``["issue", "view", "42", "--json", ...]``).
+            check: Raise ``GitHubOpsError`` on non-zero exit when True.
+            repo_scoped: Whether the command targets a specific repo and should
+                carry ``-R owner/repo`` under a sudo wrapper. Most gh subcommands
+                (issue/pr/view) accept ``-R``, but ``repo create`` / ``repo view``
+                do not — for those the caller passes ``repo_scoped=False`` so the
+                sudo path runs plain ``gh`` without repo context (they don't need
+                an existing-repo context anyway).
+        """
         kwargs = self._build_subprocess_kwargs()
         account = self.system_account
         if self._needs_sudo():
@@ -187,14 +218,13 @@ class GitHubOps:
             # explicitly via `-R owner/repo` resolved from the local remote.
             assert account is not None  # _needs_sudo() guarantees non-empty
             cmd: list[str] = ["sudo", "-u", account]
-            owner_repo = self._resolve_owner_repo()
+            owner_repo = self._resolve_owner_repo() if repo_scoped else None
             if owner_repo:
                 cmd += ["gh", "-R", owner_repo] + args
             else:
-                # No resolvable remote (e.g. create_repo before the remote
-                # exists). gh runs without -R; this is best-effort since such
-                # commands (e.g. `gh repo create <name>`) don't need an
-                # existing remote context anyway.
+                # No resolvable remote, or a command (repo create/view) that
+                # rejects -R. Run plain gh; commands that need repo context
+                # (issue/pr) will already have a resolvable owner_repo above.
                 cmd += ["gh"] + args
             kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
@@ -352,7 +382,9 @@ class GitHubOps:
         if description:
             args.extend(["--description", description])
 
-        result = self._run_gh(args)
+        # `gh repo create` rejects -R (unlike issue/pr subcommands), so disable
+        # repo-scoped binding; it creates a new repo and needs no existing one.
+        result = self._run_gh(args, repo_scoped=False)
         # gh repo create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         repo_url = output.split("\n")[-1].strip()
@@ -366,7 +398,8 @@ class GitHubOps:
 
     def get_repo_name(self) -> str:
         """Get the repo name in owner/repo format."""
-        result = self._run_gh(["repo", "view", "--json", "nameWithOwner"])
+        # `gh repo view` also rejects -R, so disable repo-scoped binding.
+        result = self._run_gh(["repo", "view", "--json", "nameWithOwner"], repo_scoped=False)
         data = json.loads(result.stdout.strip())
         return data.get("nameWithOwner", "")
 
