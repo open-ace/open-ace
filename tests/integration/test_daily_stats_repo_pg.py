@@ -2,6 +2,11 @@
 
 import pytest
 
+# Marks every test in this module as requiring a live PostgreSQL server.
+# CI runs `pytest -m 'not postgres'` so these are excluded; locally they
+# auto-skip via the pg_db fixture when no server is reachable.
+pytestmark = pytest.mark.postgres
+
 from app.repositories.daily_stats_repo import DailyStatsRepository
 
 

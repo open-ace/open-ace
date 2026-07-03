@@ -32,6 +32,14 @@ class TestDatabaseInit:
         # Import db after patching config
         import db
 
+        # Pin SQLite dialect: config.get_database_url() defaults to PostgreSQL,
+        # and db._db_url_cache persists after first call. Without pinning,
+        # init_database() enters the PG "verify-only" branch and never creates
+        # the SQLite test.db file. (See test_machine_permission.py for the
+        # established pattern.)
+        db._db_url_cache = f"sqlite:///{tmp_path / 'test.db'}"
+        db.is_postgresql = lambda: False
+
         monkeypatch.setattr(db, "DB_DIR", str(tmp_path))
         monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
 
@@ -53,6 +61,12 @@ class TestUsageOperations:
         monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
 
         import db
+
+        # Pin SQLite dialect so db.init_database() creates the SQLite file
+        # instead of verifying a PostgreSQL schema. Without this, the module-
+        # level _db_url_cache routes all queries to the real PG database.
+        db._db_url_cache = f"sqlite:///{tmp_path / 'test.db'}"
+        db.is_postgresql = lambda: False
 
         monkeypatch.setattr(db, "DB_DIR", str(tmp_path))
         monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
@@ -135,6 +149,12 @@ class TestMessageOperations:
         monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
 
         import db
+
+        # Pin SQLite dialect so db.init_database() creates the SQLite file
+        # instead of verifying a PostgreSQL schema. Without this, the module-
+        # level _db_url_cache routes all queries to the real PG database.
+        db._db_url_cache = f"sqlite:///{tmp_path / 'test.db'}"
+        db.is_postgresql = lambda: False
 
         monkeypatch.setattr(db, "DB_DIR", str(tmp_path))
         monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))

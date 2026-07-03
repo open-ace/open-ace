@@ -19,24 +19,17 @@ tests/
 ├── integration/             # 集成测试
 │   └── test_*.py            # 使用真实 SQLite 数据库测试
 │
-├── e2e/                     # 端到端测试
+├── e2e/                     # 端到端测试（依赖运行中的服务器，CI 不收集）
 │   ├── remote/              # 远程会话相关 (16 个)
 │   ├── terminal/            # 终端会话相关 (6 个，含配额恢复)
 │   ├── work/                # 工作区/聊天相关 (2 个)
-│   └── manage/              # 管理/审计/API Key 等 (6 个)
-│
-├── ui/                      # UI 功能测试
-│   └── test_*.py            # Playwright UI 测试（不带 issue 编号）
+│   ├── manage/              # 管理/审计/API Key 等 (6 个)
+│   ├── ui/                  # UI 功能测试（Playwright，不带 issue 编号）
+│   ├── regression/          # 回归测试（各页面功能）
+│   └── performance/         # 性能测试（页面加载、图表渲染等）
 │
 ├── issues/                  # Issue 修复验证测试
 │   └── {issue_number}/      # 按 GitHub issue 编号组织
-│
-├── regression/              # 回归测试
-│   ├── test_login.py        # 登录功能
-│   ├── test_navigation.py   # 导航功能
-│   └── ...                  # 各页面功能测试
-│
-├── performance/             # 性能测试（页面加载、图表渲染等）
 │
 └── screenshots/             # 测试截图
 ```
@@ -99,15 +92,18 @@ pytest tests/unit/ -m unit
 # 集成测试
 pytest tests/integration/
 
-# E2E 测试
+# E2E 测试（UI / 回归 / 性能，依赖运行中的服务器）
 pytest tests/e2e/
 
 # UI 测试
-pytest tests/ui/ -m ui
+pytest tests/e2e/ui/ -m ui
 
 # 回归测试
-pytest tests/regression/ -m regression
-python tests/regression/run_regression.py
+pytest tests/e2e/regression/ -m regression
+python tests/e2e/regression/run_regression.py
+
+# PostgreSQL 集成测试（需可达的 PG 实例，否则自动跳过）
+pytest tests/integration/ -m postgres
 ```
 
 ### 运行特定 issue 的测试
@@ -121,8 +117,8 @@ pytest tests/issues/52/
 
 ### 运行单个测试文件
 ```bash
-pytest tests/ui/test_sessions_page.py
-pytest tests/regression/test_login.py
+pytest tests/e2e/ui/test_sessions_page.py
+pytest tests/e2e/regression/test_login.py
 ```
 
 ## 测试命名规范
