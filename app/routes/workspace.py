@@ -65,7 +65,10 @@ def load_user():
     # Skip auth for CORS preflight requests (browser-initiated, carries no business data)
     if request.method == "OPTIONS":
         return None
+    # Skip auth for public APIs (config endpoint needed for workspace UI initialization)
     if request.path.startswith("/api/workspace/llm-proxy"):
+        return None
+    if request.path == "/api/workspace/config":
         return None
 
     token = _extract_token()

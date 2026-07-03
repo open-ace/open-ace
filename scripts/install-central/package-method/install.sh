@@ -1825,13 +1825,26 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
     # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
     local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
 
-    # Build current user's complete rule block
+    # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
-$run_user ALL=(ALL) NOPASSWD: $webui_path *
-$webui_local_rule
-$utility_rule
-$cli_rule
-$fetch_rules"
+$run_user ALL=(ALL) NOPASSWD: $webui_path *"
+
+    # Only add webui_local_rule if not empty
+    if [ -n "$webui_local_rule" ]; then
+        current_user_rules="${current_user_rules}
+${webui_local_rule}"
+    fi
+
+    # Always add utility and CLI rules (they reference Cmnd_Alias, never empty)
+    current_user_rules="${current_user_rules}
+${utility_rule}
+${cli_rule}"
+
+    # Only add fetch_rules if not empty
+    if [ -n "$fetch_rules" ]; then
+        current_user_rules="${current_user_rules}
+${fetch_rules}"
+    fi
 
     # Build header and defaults section
     local header="# Open ACE WebUI - Multi-user mode sudo configuration
@@ -1916,10 +1929,11 @@ ${line}"
         done
 
         # 【修复 P2】Check chown rule (consistent with docker-entrypoint.sh)
-        # Match user+command: a stale old-user chown rule must not satisfy the
-        # check after a service-user switch (#1197 review).
-        if ! grep -E "^${run_user} .*(NOPASSWD: )?/usr/bin/chown( |\*|$)" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers missing /usr/bin/chown rule for user '$run_user'"
+        # chown is defined in OPENACE_UTILS Cmnd_Alias (line 1862), not as a direct user rule
+        # Check if OPENACE_UTILS Cmnd_Alias exists and contains chown
+        if ! grep -q "Cmnd_Alias OPENACE_UTILS" "$sudoers_file" 2>/dev/null || \
+           ! grep -E "Cmnd_Alias OPENACE_UTILS.*chown" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing OPENACE_UTILS Cmnd_Alias or chown command"
             need_update=true
         fi
 
