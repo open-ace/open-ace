@@ -27,8 +27,10 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_work_usage_page():
+def test_work_usage_page(ui_screenshot_dir):
     """测试 /work/usage 页面"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     console_messages = []

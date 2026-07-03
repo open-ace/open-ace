@@ -26,8 +26,10 @@ def take_screenshot(page, name):
     print(f"  Saved: {path}")
 
 
-def test_quota_token_unit():
+def test_quota_token_unit(ui_screenshot_dir):
     """Test that token quota inputs display values in M (millions) unit"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     with sync_playwright() as p:
         # Launch browser

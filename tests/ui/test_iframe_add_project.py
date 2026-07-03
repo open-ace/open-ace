@@ -29,7 +29,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_iframe_add_project_browse():
+def test_iframe_add_project_browse(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 60)
     print("iframe Add Project - Browse Directory Test")
     print("=" * 60)

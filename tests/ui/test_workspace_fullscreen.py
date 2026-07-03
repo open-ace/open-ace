@@ -26,8 +26,10 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/49"
 
 
-async def test_workspace_fullscreen():
+async def test_workspace_fullscreen(ui_screenshot_dir):
     """Test Workspace fullscreen mode functionality."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context()

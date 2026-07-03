@@ -42,8 +42,10 @@ def save_screenshot(page, name):
     return path
 
 
-def test_project_management():
+def test_project_management(ui_screenshot_dir):
     """Test Project Management page with all features."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("\n" + "=" * 60)
     print("Test: Project Management Full Feature")
     print("=" * 60)

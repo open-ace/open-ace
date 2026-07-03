@@ -22,8 +22,10 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_security_page():
+def test_security_page(ui_screenshot_dir):
     """Test Security Settings page"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     results = []
 
     with sync_playwright() as p:

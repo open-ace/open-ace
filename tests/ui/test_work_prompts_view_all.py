@@ -45,8 +45,10 @@ SCREENSHOT_DIR = os.path.join(
 
 
 @pytest.mark.asyncio
-async def test_work_prompts_view_all_button():
+async def test_work_prompts_view_all_button(ui_screenshot_dir):
     """Test Work Mode Prompts Tab View All Button"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     # Ensure screenshot directory exists
     os.makedirs(os.path.join(SCREENSHOT_DIR, "view_all"), exist_ok=True)

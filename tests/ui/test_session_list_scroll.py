@@ -34,8 +34,10 @@ SCREENSHOT_DIR = os.path.join(
 
 
 @pytest.mark.asyncio
-async def test_session_list_scroll():
+async def test_session_list_scroll(ui_screenshot_dir):
     """测试 Session List 滚动问题"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     # 确保截图目录存在
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)

@@ -33,8 +33,10 @@ def take_screenshot(page, name):
     print(f"  Saved: {path}")
 
 
-def test_quota_enter_save():
+def test_quota_enter_save(ui_screenshot_dir):
     """Test Enter key saves quota in edit quota dialog"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     with sync_playwright() as p:
         # Launch browser

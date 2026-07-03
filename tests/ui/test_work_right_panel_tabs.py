@@ -43,8 +43,10 @@ SCREENSHOT_DIR = os.path.join(
 
 
 @pytest.mark.asyncio
-async def test_work_right_panel_tabs_layout():
+async def test_work_right_panel_tabs_layout(ui_screenshot_dir):
     """Test Work Mode Right Panel Tabs Layout"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     # Ensure screenshot directory exists
     os.makedirs(os.path.join(SCREENSHOT_DIR, "work_tabs"), exist_ok=True)

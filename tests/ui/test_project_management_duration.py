@@ -49,8 +49,10 @@ def save_screenshot(page, name):
     return path
 
 
-def test_project_management_page():
+def test_project_management_page(ui_screenshot_dir):
     """Test Project Management page is accessible."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("\n" + "=" * 60)
     print("Test: Project Management Page")
     print("=" * 60)
@@ -122,8 +124,10 @@ def test_project_management_page():
     return all_passed
 
 
-def test_session_tracking_api():
+def test_session_tracking_api(ui_screenshot_dir):
     """Test session creation and completion API."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("\n" + "=" * 60)
     print("Test: Session Tracking API")
     print("=" * 60)

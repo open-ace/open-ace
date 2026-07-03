@@ -22,7 +22,9 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-async def test_create_button_full():
+async def test_create_button_full(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     async with async_playwright() as p:

@@ -34,7 +34,9 @@ def log_message(msg):
         f.write(log_line + "\n")
 
 
-async def test_interactive():
+async def test_interactive(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     # 清空日志文件

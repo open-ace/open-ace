@@ -18,8 +18,10 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/alert-icon"
 
 
-async def test_alert_icon():
+async def test_alert_icon(ui_screenshot_dir):
     """Test alert management page icon display"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     async with async_playwright() as p:

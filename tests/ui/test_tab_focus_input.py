@@ -26,8 +26,10 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/issues/63"
 
 
-async def test_tab_focus_input():
+async def test_tab_focus_input(ui_screenshot_dir):
     """Test tab focus input after switching tabs."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})

@@ -27,8 +27,10 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = "screenshots/ui"
 
 
-async def test_auto_fullscreen_on_chat():
+async def test_auto_fullscreen_on_chat(ui_screenshot_dir):
     """Test auto fullscreen when entering chat page in iframe."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})

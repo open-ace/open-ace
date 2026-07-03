@@ -21,7 +21,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_deep_debug():
+def test_deep_debug(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)
     print("Deep Debug: Create Button Analysis")
     print("=" * 70)

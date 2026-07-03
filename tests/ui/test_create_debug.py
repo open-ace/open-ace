@@ -22,7 +22,9 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
-def test_create_debug():
+def test_create_debug(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     print("=" * 70)
     print("Create Project Button Debug Test")
     print("=" * 70)
