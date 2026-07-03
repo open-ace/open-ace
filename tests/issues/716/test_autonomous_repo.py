@@ -94,22 +94,7 @@ class TestWorkflowCRUD:
         assert result["title"] == "Test Task"
         assert result["status"] == "pending"
         assert result["cli_tool"] == "claude-code"
-        assert result["require_full_review_rounds"] in (0, False)
         assert json.loads(result["definition_snapshot"])["requirements_mode"] == "text"
-
-    def test_create_workflow_persists_require_full_review_rounds(self, auto_db):
-        repo = AutonomousWorkflowRepository(auto_db)
-        result = repo.create_workflow(
-            {
-                "user_id": 1,
-                "title": "Full rounds",
-                "requirements_text": "Build a feature",
-                "cli_tool": "claude-code",
-                "project_path": "/tmp/test-project",
-                "require_full_review_rounds": True,
-            }
-        )
-        assert result["require_full_review_rounds"] in (1, True)
 
     def test_get_workflow(self, auto_db):
         repo = AutonomousWorkflowRepository(auto_db)

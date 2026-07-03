@@ -89,7 +89,6 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   const [branchName, setBranchName] = useState('');
   const [maxPlanRounds, setMaxPlanRounds] = useState(2);
   const [maxPRReviewRounds, setMaxPRReviewRounds] = useState(3);
-  const [requireFullReviewRounds, setRequireFullReviewRounds] = useState(false);
   const [title, setTitle] = useState('');
   const [autoMerge, setAutoMerge] = useState(true); // Auto merge for batch workflows
   const [errorMessage, setErrorMessage] = useState('');
@@ -221,7 +220,6 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       branch_name: branchName || undefined,
       max_plan_rounds: maxPlanRounds,
       max_pr_review_rounds: maxPRReviewRounds,
-      require_full_review_rounds: requireFullReviewRounds,
       auto_merge: autoMerge,
       // Persist the creator's current UI language as the workflow's content
       // language. AI-authored content is generated in this language.
@@ -261,7 +259,6 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     branchName,
     maxPlanRounds,
     maxPRReviewRounds,
-    requireFullReviewRounds,
     autoMerge,
     createWorkflow,
     language,
@@ -591,23 +588,6 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               value={maxPRReviewRounds}
               onChange={(e) => setMaxPRReviewRounds(parseInt(e.target.value))}
             />
-          </div>
-          <div className="col-12">
-            <div className="form-check form-switch">
-              <input
-                type="checkbox"
-                className="form-check-input"
-                id="requireFullReviewRounds"
-                checked={requireFullReviewRounds}
-                onChange={(e) => setRequireFullReviewRounds(e.target.checked)}
-              />
-              <label className="form-check-label" htmlFor="requireFullReviewRounds">
-                {t('autoRequireFullReviewRounds', language)}
-              </label>
-              <div className="form-text">
-                {t('autoRequireFullReviewRoundsHint', language)}
-              </div>
-            </div>
           </div>
 
           {/* Auto Merge - only show for batch workflows (URL mode with multiple issues) */}

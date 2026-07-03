@@ -244,7 +244,6 @@ CREATE TABLE autonomous_workflows (
     dev_round integer DEFAULT 1,
     max_plan_rounds integer DEFAULT 3,
     max_pr_review_rounds integer DEFAULT 5,
-    require_full_review_rounds boolean DEFAULT false,
     total_tokens integer DEFAULT 0,
     total_input_tokens integer DEFAULT 0,
     total_output_tokens integer DEFAULT 0,

@@ -68,7 +68,6 @@ def get_ddl_statements():
             dev_round INTEGER DEFAULT 1,
             max_plan_rounds INTEGER DEFAULT 3,
             max_pr_review_rounds INTEGER DEFAULT 5,
-            require_full_review_rounds {bool_type} DEFAULT {bool_false},
             total_tokens INTEGER DEFAULT 0,
             total_input_tokens INTEGER DEFAULT 0,
             total_output_tokens INTEGER DEFAULT 0,
@@ -107,9 +106,6 @@ def get_ddl_statements():
     # SQLite dev path. See schema_init transaction-cascade caveat.
     statements.append(
         "ALTER TABLE autonomous_workflows ADD COLUMN content_language TEXT DEFAULT 'en'"
-    )
-    statements.append(
-        f"ALTER TABLE autonomous_workflows ADD COLUMN require_full_review_rounds {bool_type} DEFAULT {bool_false}"
     )
     statements.extend(
         [

@@ -2452,7 +2452,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               [t('autoMergeAfterPR', language), snapshot.auto_merge],
               [t('autoMaxPlanRounds', language), snapshot.max_plan_rounds],
               [t('autoMaxPRReviewRounds', language), snapshot.max_pr_review_rounds],
-              [t('autoRequireFullReviewRounds', language), snapshot.require_full_review_rounds],
               [t('autoResolvedIssue', language), snapshot.resolved_issue_number],
               [t('autoResolvedIssueUrl', language), resolvedIssueUrl],
             ];

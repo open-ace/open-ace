@@ -102,7 +102,6 @@ def _make_repo():
         "title": "Mock",
         "status": "pending",
         "cli_tool": "claude-code",
-        "require_full_review_rounds": False,
     }
     repo.get_workflow.return_value = None
     repo.list_workflows.return_value = []
@@ -178,28 +177,6 @@ class TestCreateWorkflow:
         assert snapshot["requirements_mode"] == "text"
         assert snapshot["requirements_text"] == "Build a feature"
         assert snapshot["cli_tool"] == "claude-code"
-        assert payload["require_full_review_rounds"] is False
-        assert snapshot["require_full_review_rounds"] is False
-
-    def test_create_can_require_full_review_rounds(self, client):
-        repo = _make_repo()
-        with _mock_auth():
-            with patch("app.routes.autonomous.auto_repo", repo):
-                resp = client.post(
-                    "/api/autonomous/workflows",
-                    json={
-                        "title": "Test Task",
-                        "requirements_text": "Build a feature",
-                        "cli_tool": "claude-code",
-                        "project_path": "/tmp/test",
-                        "require_full_review_rounds": True,
-                    },
-                )
-        assert resp.status_code == 201
-        payload = repo.create_workflow.call_args[0][0]
-        snapshot = json.loads(payload["definition_snapshot"])
-        assert payload["require_full_review_rounds"] is True
-        assert snapshot["require_full_review_rounds"] is True
 
     def test_create_missing_requirements(self, client):
         with _mock_auth():

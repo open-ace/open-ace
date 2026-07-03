@@ -36,7 +36,6 @@ def _make_workflow(**overrides):
         "dev_round": 1,
         "max_plan_rounds": 3,
         "max_pr_review_rounds": 5,
-        "require_full_review_rounds": False,
         "total_tokens": 0,
         "total_input_tokens": 0,
         "total_output_tokens": 0,
@@ -459,34 +458,6 @@ class TestOrchestratorPlanning:
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
         assert "development" in phases
-
-    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_planning_force_full_rounds_does_not_end_early(self, mock_gh_cls):
-        wf = _make_workflow(
-            current_phase="planning",
-            current_round=0,
-            max_plan_rounds=3,
-            require_full_review_rounds=True,
-        )
-        orch, mock_repo = self._make_orchestrator(wf)
-
-        mock_gh = MagicMock()
-        mock_gh.add_issue_comment.return_value = {"id": 1}
-        mock_gh_cls.return_value = mock_gh
-
-        plan_result = _make_agent_result(text="Here is the implementation plan...")
-        review_result = _make_agent_result(text="The plan looks good. 方案通过审查。")
-        orch._runner = MagicMock()
-        orch._runner.run_agent_task.side_effect = [plan_result, review_result]
-        orch._gh = mock_gh
-
-        orch._do_planning(wf)
-
-        update_calls = mock_repo.update_workflow.call_args_list
-        phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
-        assert "development" not in phases
-        round_updates = [c for c in update_calls if "current_round" in c[0][1]]
-        assert round_updates[-1][0][1]["current_round"] == 1
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_planning_needs_refinement(self, mock_gh_cls):
@@ -1380,34 +1351,6 @@ class TestOrchestratorPrReview:
         final_update = mock_repo.update_workflow.call_args_list[-1][0][1]
         assert final_update["current_phase"] == "report"
         assert final_update["status"] == "reporting"
-
-    def test_pr_review_force_full_rounds_does_not_end_early(self):
-        """Approved PR review keeps going when fixed rounds are required."""
-        wf = _make_workflow(
-            current_phase="pr_review",
-            status="pr_review",
-            current_round=0,
-            max_pr_review_rounds=3,
-            require_full_review_rounds=True,
-            github_pr_number=99,
-        )
-        orch, mock_repo = self._make_orchestrator(wf)
-        orch._runner = MagicMock()
-        orch._gh.get_diff.return_value = "diff"
-        orch._runner.run_agent_task.return_value = _make_agent_result(
-            text="代码审查通过。没有遗留问题。"
-        )
-
-        orch._do_pr_review(wf)
-
-        milestone_types = [
-            c[0][0]["milestone_type"] for c in mock_repo.create_milestone.call_args_list
-        ]
-        assert "pr_review_summary" not in milestone_types
-        update_calls = mock_repo.update_workflow.call_args_list
-        final_payload = update_calls[-1][0][1]
-        assert final_payload["current_round"] == 1
-        assert final_payload.get("current_phase") != "report"
 
     def test_pr_review_posts_comment_to_pr(self):
         """Review result is posted as a PR comment."""

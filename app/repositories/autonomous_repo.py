@@ -55,7 +55,6 @@ class AutonomousWorkflowRepository:
         "dev_round",
         "max_plan_rounds",
         "max_pr_review_rounds",
-        "require_full_review_rounds",
         "total_tokens",
         "total_input_tokens",
         "total_output_tokens",
@@ -202,11 +201,11 @@ class AutonomousWorkflowRepository:
                      remote_machine_id, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
-                     max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
+                     max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -237,7 +236,6 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
-                    self._coerce_bool(data.get("require_full_review_rounds"), False),
                     data.get("parent_workflow_id"),
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),
@@ -260,11 +258,11 @@ class AutonomousWorkflowRepository:
                      remote_machine_id, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
-                     max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
+                     max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -294,7 +292,6 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
-                    self._coerce_bool(data.get("require_full_review_rounds"), False),
                     data.get("parent_workflow_id"),
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),

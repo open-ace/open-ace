@@ -30,7 +30,6 @@ export interface WorkflowDefinitionSnapshot {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
-  require_full_review_rounds?: boolean;
   auto_merge?: boolean;
   batch_id?: string | null;
   batch_order?: number | null;
@@ -71,7 +70,6 @@ export interface AutonomousWorkflow {
   dev_round: number;
   max_plan_rounds: number;
   max_pr_review_rounds: number;
-  require_full_review_rounds?: boolean;
   total_tokens: number;
   total_input_tokens: number;
   total_output_tokens: number;
@@ -160,7 +158,6 @@ export interface CreateWorkflowRequest {
   remote_machine_id?: string;
   max_plan_rounds?: number;
   max_pr_review_rounds?: number;
-  require_full_review_rounds?: boolean;
   auto_merge?: boolean; // Auto merge PR for batch workflows
   // Persist the workflow's content language at creation time (en/zh/ja/ko).
   // Defaults to the viewer's current UI language when omitted.

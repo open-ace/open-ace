@@ -126,12 +126,10 @@ describe('NewAutonomousModal', () => {
 
     const selects = screen.getAllByRole('combobox');
     const sliders = screen.getAllByRole('slider');
-    const fullRoundsSwitch = screen.getByLabelText('autoRequireFullReviewRounds');
 
     expect(selects[2]).toHaveValue('worktree');
     expect(sliders[0]).toHaveValue('2');
     expect(sliders[1]).toHaveValue('3');
-    expect(fullRoundsSwitch).not.toBeChecked();
     expect(screen.getByText('autoMaxPlanRounds: 2')).toBeInTheDocument();
     expect(screen.getByText('autoMaxPRReviewRounds: 3')).toBeInTheDocument();
   });
@@ -186,31 +184,7 @@ describe('NewAutonomousModal', () => {
     await waitFor(() => {
       expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
     });
-    expect(mutateAsyncMock).toHaveBeenCalledWith(
-      expect.objectContaining({ require_full_review_rounds: false })
-    );
     expect(localStorage.getItem('local-last-project-path')).toBe('/Users/final/project');
-  });
-
-  it('submits require_full_review_rounds when the switch is enabled', async () => {
-    render(<NewAutonomousModal {...defaultProps} />);
-
-    fireEvent.change(screen.getByPlaceholderText('autoRequirementsPlaceholder'), {
-      target: { value: 'Build a feature' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
-      target: { value: '/Users/final/project' },
-    });
-    fireEvent.click(screen.getByLabelText('autoRequireFullReviewRounds'));
-
-    fireEvent.click(screen.getByText('autoCreateTask'));
-
-    await waitFor(() => {
-      expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
-    });
-    expect(mutateAsyncMock).toHaveBeenCalledWith(
-      expect.objectContaining({ require_full_review_rounds: true })
-    );
   });
 
   it('disables remote browse until a machine is selected', () => {

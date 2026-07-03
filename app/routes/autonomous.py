@@ -454,7 +454,6 @@ def _build_definition_snapshot(
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": data.get("require_full_review_rounds", False),
         "auto_merge": data.get("auto_merge", True),
         "batch_id": batch_id,
         "batch_order": batch_order,
@@ -487,8 +486,6 @@ def _workflow_response(workflow: dict | None) -> dict | None:
     normalized["definition_snapshot"] = _parse_definition_snapshot(
         normalized.get("definition_snapshot")
     )
-    if normalized.get("require_full_review_rounds") is None:
-        normalized["require_full_review_rounds"] = False
     # content_language fallback for legacy workflows created before the column
     # existed (NULL/empty → default). Persisted AI content is unaffected; this
     # only provides a sensible default for downstream consumers.
@@ -632,7 +629,6 @@ def create_workflow():
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": data.get("require_full_review_rounds", False),
         "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
         # Persist the workflow's content language at creation time. This is the
         # source of truth for AI-authored content (plan/review/tldr) and does
@@ -1178,7 +1174,6 @@ def fork_milestone(workflow_id, milestone_id):
         "remote_machine_id": workflow.get("remote_machine_id", ""),
         "max_plan_rounds": workflow.get("max_plan_rounds", 3),
         "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": workflow.get("require_full_review_rounds", False),
         "github_issue_number": workflow.get("github_issue_number"),
         # Fork-specific fields
         "parent_workflow_id": workflow_id,
