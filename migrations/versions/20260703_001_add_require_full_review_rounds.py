@@ -1,7 +1,7 @@
 """Add require_full_review_rounds column to autonomous_workflows
 
 Revision ID: 20260703_001_add_require_full_review_rounds
-Revises: 20260630_001_add_retry_count_column
+Revises: 20260627_001_add_model_gateway_config
 Create Date: 2026-07-03
 
 Issue: add workflow-level toggle to force planning/PR review to consume the

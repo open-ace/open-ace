@@ -3088,8 +3088,10 @@ class AutonomousOrchestrator:
                 }
             )
             self._emit("phase_change", {"phase": "report"})
-        # Under cap and not approved: the fix above already ran; fall through so
-        # the scheduler re-enters _do_pr_review for the next review round.
+        # Under cap, the scheduler re-enters _do_pr_review for the next review
+        # round. In the default mode this path means "not approved and the fix
+        # above already ran"; with force-full enabled it also covers "approved
+        # early, but keep reviewing until the configured cap".
 
     def _apply_pr_review_fix(
         self,

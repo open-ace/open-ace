@@ -510,7 +510,12 @@ class AutonomousWorkflowRepository:
             return self.get_workflow(workflow_id)
 
         # Boolean columns — coerce to Python bool for PostgreSQL BOOLEAN type
-        _BOOL_COLS = {"is_new_project", "is_private", "auto_merge"}
+        _BOOL_COLS = {
+            "is_new_project",
+            "is_private",
+            "auto_merge",
+            "require_full_review_rounds",
+        }
 
         set_clauses = []
         params = []
