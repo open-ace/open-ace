@@ -14,6 +14,7 @@ import time
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -25,11 +26,13 @@ VIEWPORT_SIZE = {"width": 1400, "height": 900}
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
 )
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
-async def test_dashboard_first_load():
+@pytest.mark.asyncio
+async def test_dashboard_first_load(ui_screenshot_dir):
     """Test dashboard first load with detailed timing."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
 
     print("=" * 70)
     print("Dashboard First Load Analysis")

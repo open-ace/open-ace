@@ -7,6 +7,7 @@ import asyncio
 import os
 import time
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -21,7 +22,10 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
-async def test_create_flow():
+@pytest.mark.asyncio
+async def test_create_flow(ui_screenshot_dir):
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     async with async_playwright() as p:
         print("=== 启动浏览器 ===")
 
@@ -83,7 +87,7 @@ async def test_create_flow():
             if await path_display.count() > 0:
                 print("✅ 找到路径显示")
 
-        except:
+        except Exception:
             print("❌ 未进入 details 步骤，仍在 browse 步骤")
 
             # 检查是否还在 browse 步骤

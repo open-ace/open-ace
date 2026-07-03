@@ -14,6 +14,8 @@ import os
 import sys
 import time
 
+import pytest
+
 # Add skill scripts to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 skill_dir = os.path.join(PROJECT_ROOT, ".qwen", "skills", "ui-test", "scripts")
@@ -36,9 +38,6 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT = {"width": 1280, "height": 800}
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "9")
 
-# Ensure screenshot directory exists
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
 
 def take_screenshot(page, name):
     """Take screenshot and save to screenshot directory"""
@@ -60,8 +59,10 @@ def login(page):
     time.sleep(1)
 
 
-def test_tab_title_rename():
+def test_tab_title_rename(ui_screenshot_dir):
     """Test tab title default value and rename functionality"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
     test_results = []
 

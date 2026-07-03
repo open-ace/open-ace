@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 # Configuration - use environment variables or defaults
@@ -31,11 +32,11 @@ SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots", "issues", "208"
 )
 
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-
-def test_security_center_tooltip():
+def test_security_center_tooltip(ui_screenshot_dir):
     """Test Security Center Tooltip functionality"""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     results = []
 
     with sync_playwright() as p:

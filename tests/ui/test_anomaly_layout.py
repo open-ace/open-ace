@@ -20,6 +20,7 @@ sys.path.insert(0, project_root)
 
 import time
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 # Test configuration
@@ -33,7 +34,6 @@ VIEWPORT_SIZE = {"width": 1400, "height": 900}
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
 )
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
 def take_screenshot(page, name):
@@ -44,8 +44,10 @@ def take_screenshot(page, name):
     return path
 
 
-def test_anomaly_detection_layout():
+def test_anomaly_detection_layout(ui_screenshot_dir):
     """Test that Anomaly Detection page layout is correct."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
     results = {
         "cards_height_match": False,

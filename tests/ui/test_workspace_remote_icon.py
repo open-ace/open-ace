@@ -14,6 +14,7 @@ This test verifies that the icons are consistent between SessionList and Workspa
 import os
 import sys
 
+import pytest
 from playwright.sync_api import TimeoutError, sync_playwright
 
 # Add project root to path
@@ -29,12 +30,11 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 DEFAULT_TIMEOUT = 15000
 OUTPUT_DIR = "./screenshots"
 
-# Ensure output directory exists
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
-def test_remote_workspace_icon_consistency():
+def test_remote_workspace_icon_consistency(ui_screenshot_dir):
     """Test Remote Workspace Tab Icon consistency with SessionList"""
+    global OUTPUT_DIR
+    OUTPUT_DIR = ui_screenshot_dir
 
     print("=" * 60)
     print("Remote Workspace Tab Icon - UI Test")

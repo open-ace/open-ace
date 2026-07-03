@@ -18,6 +18,7 @@ sys.path.insert(0, project_root)
 
 import time
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 # Configuration
@@ -32,7 +33,6 @@ MOBILE_VIEWPORT_SIZE = {"width": 375, "height": 667}
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
 )
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
 def take_screenshot(page, name):
@@ -95,8 +95,10 @@ def change_language(page, language_code):
     return False
 
 
-def test_user_segmentation_tooltip():
+def test_user_segmentation_tooltip(ui_screenshot_dir):
     """Test tooltip enhancement for user segmentation pie chart."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     with sync_playwright() as p:
@@ -192,8 +194,10 @@ def test_user_segmentation_tooltip():
     return screenshots
 
 
-def test_user_segmentation_i18n():
+def test_user_segmentation_i18n(ui_screenshot_dir):
     """Test internationalization for user segmentation."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     with sync_playwright() as p:
@@ -280,8 +284,10 @@ def test_user_segmentation_i18n():
     return screenshots
 
 
-def test_user_segmentation_responsive():
+def test_user_segmentation_responsive(ui_screenshot_dir):
     """Test responsive layout for user segmentation on small screens."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     with sync_playwright() as p:

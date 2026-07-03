@@ -14,6 +14,7 @@ sys.path.insert(0, project_root)
 
 import time
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 # Configuration
@@ -27,7 +28,6 @@ VIEWPORT_SIZE = {"width": 1400, "height": 900}
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "screenshots"
 )
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
 def take_screenshot(page, name):
@@ -38,8 +38,10 @@ def take_screenshot(page, name):
     return path
 
 
-def test_dashboard_charts():
+def test_dashboard_charts(ui_screenshot_dir):
     """Test that dashboard charts display data."""
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
     screenshots = []
 
     with sync_playwright() as p:
