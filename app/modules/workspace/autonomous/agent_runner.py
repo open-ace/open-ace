@@ -47,14 +47,20 @@ def _iso_to_epoch(ts: str) -> float | None:
 
 # Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
 _extract_stream_usage: Any = None
+_is_cumulative_result_tool: Any = None
+_diff_cumulative_usage: Any = None
 
 
 def _ensure_usage_parser():
-    """Import extract_stream_usage once remote-agent is on sys.path."""
-    global _extract_stream_usage
+    """Import usage helpers once remote-agent is on sys.path."""
+    global _extract_stream_usage, _is_cumulative_result_tool, _diff_cumulative_usage
     if _extract_stream_usage is None:
         try:
-            from cli_adapters.usage_parser import extract_stream_usage
+            from cli_adapters.usage_parser import (
+                diff_cumulative_usage,
+                extract_stream_usage,
+                is_cumulative_result_tool,
+            )
         except (ImportError, ModuleNotFoundError):
             logger.warning("Falling back to built-in stream usage parser")
 
@@ -75,7 +81,18 @@ def _ensure_usage_parser():
                     "output": int(usage.get("output_tokens", 0) or 0),
                 }
 
+            # Safe fallbacks: treat no tool as cumulative → report as-is.
+            def is_cumulative_result_tool(_cli_tool: str) -> bool:
+                return False
+
+            def diff_cumulative_usage(
+                cur: dict, _last_in: int | None, _last_out: int | None
+            ) -> tuple[dict, int, int]:
+                return cur, int(cur.get("input", 0) or 0), int(cur.get("output", 0) or 0)
+
         _extract_stream_usage = extract_stream_usage
+        _is_cumulative_result_tool = is_cumulative_result_tool
+        _diff_cumulative_usage = diff_cumulative_usage
 
 
 # Default timeout for agent tasks — configurable via env var (default 1 hour)
@@ -119,6 +136,12 @@ class _LocalSession:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    # Cumulative-usage baseline for differencing per-turn deltas on tools
+    # whose result message reports a cross-turn running total (qwen-code-cli).
+    # Touched only by this session's stdout reader thread (see executor.py
+    # invariant); reset naturally when a new _LocalSession is created.
+    _last_cum_input: int | None = None
+    _last_cum_output: int | None = None
     request_count: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
@@ -2258,6 +2281,26 @@ class AutonomousAgentRunner:
             logger.error("Failed to write to stdin for %s: %s", session.session_id[:8], e)
             return False
 
+    def _accumulate_turn_usage(self, session: _LocalSession, usage: dict) -> None:
+        """Accumulate one result message's usage into session totals.
+
+        For tools whose result message reports CROSS-TURN CUMULATIVE usage
+        (qwen-code-cli), difference successive snapshots so the running total
+        isn't re-added every turn (which inflated total_*_tokens / quota).
+        Otherwise add the raw per-request value as-is.
+        """
+        if _is_cumulative_result_tool(session.cli_tool):
+            delta, session._last_cum_input, session._last_cum_output = _diff_cumulative_usage(
+                usage,
+                session._last_cum_input,
+                session._last_cum_output,
+            )
+            session.total_input_tokens += delta["input"]
+            session.total_output_tokens += delta["output"]
+        else:
+            session.total_input_tokens += usage["input"]
+            session.total_output_tokens += usage["output"]
+
     def _read_stdout(self, session: _LocalSession) -> None:
         """Read stdout lines from the subprocess."""
         try:
@@ -2348,8 +2391,7 @@ class AutonomousAgentRunner:
                         # (not here), since one --print result summarizes all turns.
                         usage = _extract_stream_usage(session.cli_tool, parsed)
                         if usage:
-                            session.total_input_tokens += usage["input"]
-                            session.total_output_tokens += usage["output"]
+                            self._accumulate_turn_usage(session, usage)
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )

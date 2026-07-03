@@ -78,11 +78,27 @@ class SessionProcess:
         self._restart_lock = threading.Lock()  # Prevents concurrent restarts
 
         # Cache the usage parser at init time (avoids per-message import)
-        from cli_adapters.usage_parser import extract_stream_usage
+        from cli_adapters.usage_parser import (
+            diff_cumulative_usage,
+            extract_stream_usage,
+            is_cumulative_result_tool,
+        )
 
         self._extract_stream_usage = extract_stream_usage
+        self._is_cumulative_result_tool = is_cumulative_result_tool
+        self._diff_cumulative_usage = diff_cumulative_usage
         self._paused = False
         self._pause_lock = threading.Lock()
+
+        # Cumulative-usage baseline for differencing per-turn deltas on tools
+        # whose result message reports a cross-turn running total (e.g.
+        # qwen-code-cli). INVARIANT: touched only by this session's stdout
+        # reader thread — usage extraction is guarded on ``stream_name ==
+        # "stdout"`` in _read_stream and no interrupt/stop/EOF flush exists,
+        # so no lock is required. Reset naturally on restart via a fresh
+        # SessionProcess instance.
+        self._last_cum_input: int | None = None
+        self._last_cum_output: int | None = None
 
         # SDK mode initialization tracking
         self._sdk_initialized = threading.Event()
@@ -229,9 +245,36 @@ class SessionProcess:
                         if msg_type == "result":
                             self._capture_cli_session_id(parsed, "result")
                             if self.usage_callback:
-                                tokens = self._extract_stream_usage(self.cli_tool, parsed)
-                                if tokens and (tokens["input"] or tokens["output"]):
-                                    self.usage_callback(self.session_id, tokens)
+                                cur = self._extract_stream_usage(self.cli_tool, parsed)
+                                if cur:
+                                    if self._is_cumulative_result_tool(self.cli_tool):
+                                        # qwen-code-cli reports cross-turn
+                                        # cumulative usage in the result message;
+                                        # derive the per-turn delta by
+                                        # differencing successive snapshots so
+                                        # the running total isn't re-added every
+                                        # turn (which inflated total_*_tokens
+                                        # and quota).
+                                        report, self._last_cum_input, self._last_cum_output = (
+                                            self._diff_cumulative_usage(
+                                                cur,
+                                                self._last_cum_input,
+                                                self._last_cum_output,
+                                            )
+                                        )
+                                        source = "delta-from-cumulative"
+                                    else:
+                                        report = cur
+                                        source = "as-is"
+                                    if report["input"] or report["output"]:
+                                        logger.debug(
+                                            "Usage %s: session=%s in=%s out=%s",
+                                            source,
+                                            self.session_id[:8],
+                                            report["input"],
+                                            report["output"],
+                                        )
+                                        self.usage_callback(self.session_id, report)
                     except (json.JSONDecodeError, ValueError):
                         pass
 
