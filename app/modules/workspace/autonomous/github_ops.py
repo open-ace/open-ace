@@ -91,6 +91,9 @@ class GitHubOps:
         # paths (gh api repos/<owner>/<repo>/...). Populated alongside
         # _owner_repo by _resolve_owner_repo().
         self._repo_slug: Optional[str] = None
+        # The remote host (e.g. "github.com" or "gh.example.com"), needed for
+        # gh api --hostname under a sudo wrapper on GHES. None until resolved.
+        self._repo_host: Optional[str] = None
         # Tracks whether _resolve_owner_repo has been attempted, so None can
         # distinguish "tried and failed" from "not yet tried".
         self._owner_repo_resolved: bool = False
@@ -194,6 +197,7 @@ class GitHubOps:
         # The API-path slug is always plain OWNER/REPO (REST paths don't carry
         # the host), regardless of host.
         self._repo_slug = slug
+        self._repo_host = host
         # Only github.com is the public host; any other host is a GHES instance
         # and must be passed through to gh's -R as HOST/OWNER/REPO.
         if host and host != "github.com":
@@ -626,16 +630,32 @@ class GitHubOps:
         logger.info("Added comment to PR #%s", number)
         return {"number": number, "body": body}
 
+    def _gh_api_args(self, extra: list[str]) -> list[str]:
+        """Build a ``gh api`` arg list with GHES hostname handling.
+
+        ``gh api`` rejects ``-R`` (unlike issue/pr subcommands) and resolves the
+        repo from the REST path; under a sudo wrapper we therefore call it with
+        ``repo_scoped=False`` (no ``-R`` injection). For a GHES host it instead
+        needs ``--hostname`` to target the right server.
+        """
+        self._resolve_owner_repo()
+        args = ["api"]
+        if self._repo_host and self._repo_host != "github.com":
+            args += ["--hostname", self._repo_host]
+        return args + extra
+
     def list_pr_comments(self, number: int) -> list:
         """List review comments on a PR."""
         repo = self.get_repo_name()
         result = self._run_gh(
-            [
-                "api",
-                f"repos/{repo}/pulls/{number}/comments",
-                "--jq",
-                ".[] | {id, path, body, line, created_at, user: .user.login}",
-            ]
+            self._gh_api_args(
+                [
+                    f"repos/{repo}/pulls/{number}/comments",
+                    "--jq",
+                    ".[] | {id, path, body, line, created_at, user: .user.login}",
+                ]
+            ),
+            repo_scoped=False,
         )
         if not result.stdout.strip():
             return []
@@ -652,12 +672,14 @@ class GitHubOps:
         """List issue-level comments on a PR."""
         repo = self.get_repo_name()
         result = self._run_gh(
-            [
-                "api",
-                f"repos/{repo}/issues/{number}/comments",
-                "--jq",
-                ".[] | {id, body, created_at, user: .user.login}",
-            ]
+            self._gh_api_args(
+                [
+                    f"repos/{repo}/issues/{number}/comments",
+                    "--jq",
+                    ".[] | {id, body, created_at, user: .user.login}",
+                ]
+            ),
+            repo_scoped=False,
         )
         if not result.stdout.strip():
             return []

@@ -235,7 +235,49 @@ class TestRunGhRepoScoped:
         assert name == "owner/repo"
 
 
-class TestEnsureSafeDirectory:
+class TestGhApiSudo:
+    """gh api rejects -R; under sudo it must use the REST path + GHES --hostname."""
+
+    @patch.object(
+        GitHubOps, "get_repo_url", return_value="https://github.com/open-ace/open-ace.git"
+    )
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_list_pr_comments_no_dash_r_under_sudo(self, mock_run, _needs, _url):
+        # gh api rejects -R (review: list_pr_comments under sudo would be
+        # injected with an illegal -R). It targets the repo via the REST path
+        # repos/<owner>/<repo>/pulls/.../comments, so no -R is needed.
+        mock_run.return_value = _completed(stdout="")
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        gh.list_pr_comments(10)
+
+        gh_cmd = mock_run.call_args.args[0]
+        assert gh_cmd[:3] == ["sudo", "-u", "alice"]
+        assert gh_cmd[3] == "gh"
+        assert gh_cmd[4] == "api"
+        assert "-R" not in gh_cmd
+        # The REST path uses the resolved owner/repo slug.
+        assert "repos/open-ace/open-ace/pulls/10/comments" in gh_cmd
+
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://gh.example.com/owner/repo.git")
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_list_pr_comments_ghes_adds_hostname(self, mock_run, _needs, _url):
+        # For GHES, gh api can't use -R; it needs --hostname to target the
+        # right server (review feedback).
+        mock_run.return_value = _completed(stdout="")
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        gh.list_pr_issue_comments(10)
+
+        gh_cmd = mock_run.call_args.args[0]
+        assert "--hostname" in gh_cmd
+        assert "gh.example.com" in gh_cmd
+        assert "-R" not in gh_cmd
+        # REST path uses the plain owner/repo (no host prefix).
+        assert "repos/owner/repo/issues/10/comments" in gh_cmd
+
     """_ensure_safe_directory must not crash on duplicate timeout kwarg."""
 
     def setup_method(self):
