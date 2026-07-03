@@ -52,8 +52,17 @@ class TestGitHubOpsRepo:
         url = self.gh.get_repo_url()
         assert url == "https://github.com/user/test-repo.git"
 
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://github.com/user/test-repo.git")
+    def test_get_repo_name(self, _mock_url):
+        # get_repo_name now resolves from the origin remote (not gh repo view),
+        # so it returns the parsed owner/repo slug without a gh subprocess call.
+        name = self.gh.get_repo_name()
+        assert name == "user/test-repo"
+
+    @patch.object(GitHubOps, "get_repo_url", side_effect=GitHubOpsError("no origin"))
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_get_repo_name(self, mock_run):
+    def test_get_repo_name_fallback_no_remote(self, mock_run, _mock_url):
+        # When no origin remote is resolvable, fall back to gh repo view.
         mock_run.return_value = MagicMock(
             returncode=0, stdout='{"nameWithOwner": "user/test-repo"}'
         )
@@ -229,25 +238,22 @@ class TestGitHubOpsPR:
         cmd = mock_run.call_args[0][0]
         assert "--squash" in cmd
 
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://github.com/user/test.git")
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_list_pr_comments(self, mock_run):
-        # First call for get_repo_name, second for list comments
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout='{"nameWithOwner": "user/test"}'),
-            MagicMock(
-                returncode=0,
-                stdout='{"id": 1, "path": "a.py", "body": "LGTM", "line": 10}\n{"id": 2, "path": "b.py", "body": "Fix", "line": 20}',
-            ),
-        ]
+    def test_list_pr_comments(self, mock_run, _mock_url):
+        # get_repo_name now resolves from the remote (no gh subprocess call),
+        # so only the gh api subprocess.run is mocked here.
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"id": 1, "path": "a.py", "body": "LGTM", "line": 10}\n{"id": 2, "path": "b.py", "body": "Fix", "line": 20}',
+        )
         comments = self.gh.list_pr_comments(10)
         assert len(comments) == 2
 
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://github.com/user/test.git")
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_list_pr_comments_empty(self, mock_run):
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout='{"nameWithOwner": "user/test"}'),
-            MagicMock(returncode=0, stdout=""),
-        ]
+    def test_list_pr_comments_empty(self, mock_run, _mock_url):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
         comments = self.gh.list_pr_comments(10)
         assert comments == []
 

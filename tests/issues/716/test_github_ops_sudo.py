@@ -201,19 +201,38 @@ class TestRunGhRepoScoped:
         assert "-R" not in gh_cmd
         assert "repo" in gh_cmd and "create" in gh_cmd
 
-    @patch.object(GitHubOps, "_resolve_owner_repo", return_value="open-ace/open-ace")
+    @patch.object(
+        GitHubOps, "get_repo_url", return_value="https://github.com/open-ace/open-ace.git"
+    )
     @patch.object(GitHubOps, "_needs_sudo", return_value=True)
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_get_repo_name_no_dash_r(self, mock_run, _needs, _resolve):
-        # `gh repo view` likewise rejects -R.
-        mock_run.return_value = _completed(stdout='{"nameWithOwner": "open-ace/open-ace"}')
+    def test_get_repo_name_resolves_from_remote_under_sudo(self, mock_run, _needs, _url):
+        # get_repo_name must resolve the slug from the origin remote (via
+        # _resolve_owner_repo, which uses git -C under sudo) — NOT gh repo view,
+        # which under sudo has lost cwd and would guess the wrong repo / fail.
+        # Review: the old repo_scoped=False path only asserted "no -R" without
+        # verifying the repo is actually resolved, masking this regression.
         gh = GitHubOps("/tmp/repo", system_account="alice")
 
-        gh.get_repo_name()
+        name = gh.get_repo_name()
 
-        gh_cmd = mock_run.call_args.args[0]
-        assert "-R" not in gh_cmd
-        assert "repo" in gh_cmd and "view" in gh_cmd
+        assert name == "open-ace/open-ace"
+        # No gh subprocess call at all: the slug comes purely from git remote.
+        for call in mock_run.call_args_list:
+            assert "gh" not in call.args[0]
+
+    @patch.object(GitHubOps, "get_repo_url", return_value="https://gh.example.com/owner/repo.git")
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_get_repo_name_ghes_strips_host_for_api_path(self, mock_run, _needs, _url):
+        # For GHES, _resolve_owner_repo carries the host for gh -R, but
+        # get_repo_name feeds gh api repos/<owner>/<repo>/... which must be a
+        # plain OWNER/REPO (no host in the REST path).
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        name = gh.get_repo_name()
+
+        assert name == "owner/repo"
 
 
 class TestEnsureSafeDirectory:

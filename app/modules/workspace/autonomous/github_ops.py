@@ -81,11 +81,16 @@ class GitHubOps:
         """
         self.repo_path = repo_path
         self.system_account = system_account
-        # Cached owner/repo (e.g. "open-ace/open-ace") resolved from the local
-        # repo's origin remote, used to target gh under a sudo wrapper where gh
-        # can no longer infer the repo from cwd. Lazily populated by
-        # _resolve_owner_repo(); None means "not resolvable / not yet tried".
+        # Cached owner/repo (e.g. "open-ace/open-ace", or "host/owner/repo" for
+        # GHES) resolved from the local repo's origin remote, used to target gh
+        # under a sudo wrapper where gh can no longer infer the repo from cwd.
+        # Lazily populated by _resolve_owner_repo(); None means "not resolvable
+        # / not yet tried".
         self._owner_repo: Optional[str] = None
+        # Pure OWNER/REPO slug (never carries the GHES host), used for REST API
+        # paths (gh api repos/<owner>/<repo>/...). Populated alongside
+        # _owner_repo by _resolve_owner_repo().
+        self._repo_slug: Optional[str] = None
         # Tracks whether _resolve_owner_repo has been attempted, so None can
         # distinguish "tried and failed" from "not yet tried".
         self._owner_repo_resolved: bool = False
@@ -186,6 +191,9 @@ class GitHubOps:
             slug = m.group(4)
         if not slug:
             return None
+        # The API-path slug is always plain OWNER/REPO (REST paths don't carry
+        # the host), regardless of host.
+        self._repo_slug = slug
         # Only github.com is the public host; any other host is a GHES instance
         # and must be passed through to gh's -R as HOST/OWNER/REPO.
         if host and host != "github.com":
@@ -397,11 +405,23 @@ class GitHubOps:
         return result.stdout.strip()
 
     def get_repo_name(self) -> str:
-        """Get the repo name in owner/repo format."""
-        # `gh repo view` also rejects -R, so disable repo-scoped binding.
-        result = self._run_gh(["repo", "view", "--json", "nameWithOwner"], repo_scoped=False)
-        data = json.loads(result.stdout.strip())
-        return data.get("nameWithOwner", "")
+        """Get the repo name in ``owner/repo`` format (no GHES host).
+
+        Resolved from the local ``origin`` remote via ``_resolve_owner_repo()``
+        (which uses ``git remote get-url``, valid under a sudo wrapper) rather
+        than ``gh repo view``: the latter rejects ``-R`` and, with ``cwd``
+        dropped under sudo, can only guess the repo from the parent process's
+        working directory — failing in non-repo dirs or returning the wrong
+        repo. Falls back to ``gh repo view`` only when the remote is absent.
+        """
+        if self._resolve_owner_repo() is None:
+            # No origin remote to parse (e.g. a freshly created repo before its
+            # remote is wired). gh repo view rejects -R, so this runs plain;
+            # under sudo it relies on cwd and is best-effort.
+            result = self._run_gh(["repo", "view", "--json", "nameWithOwner"], repo_scoped=False)
+            data = json.loads(result.stdout.strip())
+            return data.get("nameWithOwner", "")
+        return self._repo_slug or ""
 
     # ── Issue Operations ────────────────────────────────────────────
 
