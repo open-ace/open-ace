@@ -44,5 +44,6 @@ cd "$project_dir" || {
 
 # Drop privileges to the repo owner and exec the CLI. runuser inherits the
 # caller's environment (API keys preserved through sudo env_keep), so no -E
-# or explicit env passthrough is required.
-exec runuser -u "$target_user" -- "$@"
+# or explicit env passthrough is required. Absolute path because sudo's
+# secure_path may not include /usr/sbin on all distros.
+exec /usr/sbin/runuser -u "$target_user" -- "$@"
