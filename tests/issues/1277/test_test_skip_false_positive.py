@@ -241,3 +241,87 @@ class TestRetryCounterPersistence:
         assert not any(
             "skipped by agent" in (f.get("error_message") or "") for f in ms_fields
         ), "test milestone must not be marked 'skipped by agent'"
+
+
+# ── Legacy runtime DDL must include the new columns (#1476 review) ──────
+
+
+class TestLegacyDdlIncludesRetryColumns:
+    """The runtime ``get_ddl_statements()`` path (used by SQLite dev/test
+    setup) must create the three retry columns, otherwise
+    ``_update_workflow({"skip_retries": 1})`` fails with
+    ``OperationalError: no such column: skip_retries`` on fresh DBs that
+    bypass Alembic."""
+
+    def test_create_table_has_retry_columns(self):
+        from app.modules.workspace.autonomous import get_ddl_statements
+
+        ddl = "\n".join(get_ddl_statements())
+        # The CREATE TABLE block must list all three columns so fresh DBs
+        # have them without relying on the ALTER TABLE fallback.
+        for col in ("test_retries", "skip_retries", "dev_retries_on_test_fail"):
+            assert col in ddl, f"{col} missing from get_ddl_statements()"
+
+    def test_alter_table_adds_retry_columns_for_existing_dbs(self):
+        from app.modules.workspace.autonomous import get_ddl_statements
+
+        alters = [s for s in get_ddl_statements() if s.strip().upper().startswith("ALTER TABLE")]
+        for col in ("test_retries", "skip_retries", "dev_retries_on_test_fail"):
+            assert any(col in a for a in alters), f"no ALTER TABLE adds {col} for existing DBs"
+
+    def test_update_skip_retries_succeeds_on_fresh_sqlite(self, tmp_path):
+        """End-to-end: init a fresh SQLite DB via get_ddl_statements(), then
+        update_workflow with skip_retries must not raise."""
+        import sqlite3
+
+        from app.modules.workspace.autonomous import get_ddl_statements
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.cursor()
+            for sql in get_ddl_statements():
+                try:
+                    cursor.execute(sql)
+                except Exception:
+                    pass
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Minimal workflow row so update_workflow has something to update.
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO autonomous_workflows (workflow_id, title, status, cli_tool, "
+                "branch_strategy, workspace_type) VALUES (?, ?, ?, ?, ?, ?)",
+                ("wf-ddl", "t", "developing", "claude-code", "new-branch", "local"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        db = MagicMock()
+        db._db_path = db_path
+        repo = AutonomousWorkflowRepository.__new__(AutonomousWorkflowRepository)
+        repo.db = db
+
+        # Monkeypatch a real sqlite execute for this test.
+        def _execute(query, params=()):
+            c = sqlite3.connect(db_path)
+            c.execute(query, params)
+            c.commit()
+            c.close()
+
+        def _fetch_one(query, params=()):
+            c = sqlite3.connect(db_path)
+            row = c.execute(query, params).fetchone()
+            c.close()
+            return row
+
+        db.execute = _execute
+        db.fetch_one = _fetch_one
+
+        # This must not raise OperationalError.
+        repo.update_workflow("wf-ddl", {"skip_retries": 1})
