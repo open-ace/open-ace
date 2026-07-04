@@ -555,10 +555,14 @@ class AutonomousOrchestrator:
             if user:
                 system_account = user.get("system_account")
         main_gh = GitHubOps(project_path, system_account=system_account)
-        # Valid worktree: a .git file inside means git set it up. If the
-        # stored path was unnormalized (legacy ".."), persist the canonical
-        # form so JSONL session detection matches Claude's encoding.
-        if worktree_path and main_gh.path_exists_as_user(os.path.join(canonical, ".git")):
+        # Valid worktree: a .git FILE inside means git set it up (a plain
+        # clone has a .git directory instead). If the stored path was
+        # unnormalized (legacy ".."), persist the canonical form so JSONL
+        # session detection matches Claude's encoding. file_only keeps the
+        # original os.path.isfile() semantics (Issue #1395 review).
+        if worktree_path and main_gh.path_exists_as_user(
+            os.path.join(canonical, ".git"), file_only=True
+        ):
             if canonical != worktree_path:
                 self._update_workflow({"worktree_path": canonical})
             return canonical

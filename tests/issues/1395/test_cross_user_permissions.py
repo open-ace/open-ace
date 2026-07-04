@@ -92,6 +92,41 @@ class TestPathExistsAsUser:
 
         assert captured["cmd"][4] == "-d"
 
+    def test_cross_user_file_only_uses_f_flag(self, monkeypatch, tmp_path):
+        # file_only → test -f, distinguishes a worktree's .git FILE from a
+        # normal repo's .git DIRECTORY (Issue #1395 review).
+        gh = GitHubOps(str(tmp_path), system_account="rhuang")
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.pwd.getpwuid",
+            lambda _uid: MagicMock(pw_name="openace"),
+        )
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return MagicMock(returncode=0)
+
+        monkeypatch.setattr("app.modules.workspace.autonomous.github_ops.subprocess.run", fake_run)
+        gh.path_exists_as_user("/home/rhuang/repo/.git", file_only=True)
+
+        assert captured["cmd"][4] == "-f"
+
+    def test_same_user_file_only_false_for_directory(self, monkeypatch, tmp_path):
+        # A directory must NOT pass the file_only check — this is the core
+        # regression guard: a plain clone's .git directory must not be mistaken
+        # for a valid worktree's .git file.
+        gh = GitHubOps(str(tmp_path), system_account="openace")
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.pwd.getpwuid",
+            lambda _uid: MagicMock(pw_name="openace"),
+        )
+        # tmp_path itself is a directory.
+        assert gh.path_exists_as_user(str(tmp_path), file_only=True) is False
+        # A real file passes.
+        f = tmp_path / "gitfile"
+        f.write_text("gitdir: ../.git/worktrees/x")
+        assert gh.path_exists_as_user(str(f), file_only=True) is True
+
     def test_cross_user_sudo_failure_returns_false(self, monkeypatch, tmp_path):
         # test exits non-zero → path does not exist.
         gh = GitHubOps(str(tmp_path), system_account="rhuang")
@@ -312,10 +347,30 @@ class TestEnsureProjectDir:
         target = tmp_path / "exists"
         target.mkdir()
         captured = {}
-        monkeypatch.setattr(
-            agent_runner.subprocess,
-            "run",
-            lambda cmd, **_kw: captured.setdefault("cmd", cmd) or MagicMock(returncode=0),
-        )
+
+        def fake_run(cmd, **_kw):
+            captured["cmd"] = cmd
+            return MagicMock(returncode=0)
+
+        monkeypatch.setattr(agent_runner.subprocess, "run", fake_run)
         agent_runner.AutonomousAgentRunner._ensure_project_dir(str(target), "rhuang")
         assert captured["cmd"][:3] == ["sudo", "-u", "rhuang"]
+
+    def test_cross_user_mkdir_failure_raises(self, monkeypatch, tmp_path):
+        # sudo/mkdir failure must raise (fail-fast) instead of being swallowed,
+        # mirroring Path.mkdir's semantics (Issue #1395 review).
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+
+        def fake_run(cmd, **_kw):
+            return MagicMock(
+                returncode=1, stderr="mkdir: cannot create directory: Permission denied"
+            )
+
+        monkeypatch.setattr(agent_runner.subprocess, "run", fake_run)
+
+        import pytest
+
+        with pytest.raises(PermissionError, match="Permission denied"):
+            agent_runner.AutonomousAgentRunner._ensure_project_dir("/home/rhuang/no-perm", "rhuang")

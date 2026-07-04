@@ -383,7 +383,9 @@ class GitHubOps:
                 raise GitHubOpsError("git not found")
         raise last_error or GitHubOpsError(f"git {' '.join(args)} failed after retries")
 
-    def path_exists_as_user(self, path: str, *, dir_only: bool = False) -> bool:
+    def path_exists_as_user(
+        self, path: str, *, dir_only: bool = False, file_only: bool = False
+    ) -> bool:
         """Check whether ``path`` exists, executing as ``system_account``.
 
         Python's ``Path.exists()`` stats with the service process's identity
@@ -398,10 +400,21 @@ class GitHubOps:
             path: Absolute path to check.
             dir_only: When True require the path to be a directory (``test -d``);
                 otherwise any existing entry passes (``test -e``).
+            file_only: When True require the path to be a regular file
+                (``test -f``). Used to distinguish a worktree's ``.git`` file
+                from a normal repo's ``.git`` directory. Mutually exclusive
+                with ``dir_only``.
         """
         if not self._needs_sudo():
+            if file_only:
+                return Path(path).is_file()
             return Path(path).is_dir() if dir_only else Path(path).exists()
-        flag = "-d" if dir_only else "-e"
+        if file_only:
+            flag = "-f"
+        elif dir_only:
+            flag = "-d"
+        else:
+            flag = "-e"
         assert self.system_account is not None  # _needs_sudo() guarantees non-empty
         try:
             result = subprocess.run(

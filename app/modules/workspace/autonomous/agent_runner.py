@@ -635,13 +635,22 @@ class AutonomousAgentRunner:
             except (KeyError, OverflowError):
                 same_user = False
         if system_account and not same_user:
-            subprocess.run(
+            # Mirror Path.mkdir's failure semantics: raise on error so the
+            # caller fails fast instead of chalking it up to a later, fuzzier
+            # CLI-launch failure (Issue #1395 review).
+            result = subprocess.run(
                 ["sudo", "-u", system_account, "mkdir", "-p", project_path],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=False,
             )
+            if result.returncode != 0:
+                raise PermissionError(
+                    f"Failed to create project dir {project_path} as "
+                    f"{system_account} (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
         else:
             Path(project_path).mkdir(parents=True, exist_ok=True)
 
