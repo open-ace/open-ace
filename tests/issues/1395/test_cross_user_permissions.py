@@ -461,3 +461,108 @@ class TestIsCrossUser:
 
         monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
         assert agent_runner.AutonomousAgentRunner._is_cross_user("rhuang") is True
+
+
+# ── _build_agent_env (LLM proxy auth) ────────────────────────────────────
+
+
+class TestBuildAgentEnv:
+    """Local autonomous agents must authenticate through the Open ACE LLM proxy
+    with a signed proxy token — never the raw API key (security: key stays only
+    in the DB). _build_agent_env mints the token and injects adapter-specific
+    env vars (ANTHROPIC_API_KEY/OPENAI_API_KEY = proxy_token, *_BASE_URL =
+    proxy URL)."""
+
+    def _setup_proxy(self, monkeypatch):
+        """Stub get_api_key_proxy_service to return a fake proxy service."""
+        from app.modules.workspace.autonomous import agent_runner
+
+        fake_proxy = MagicMock()
+        fake_proxy.generate_proxy_token.return_value = "signedtoken.payload"
+
+        def fake_get_service():
+            return fake_proxy
+
+        # _build_agent_env imports the factory inside the function, so patch at
+        # the module where it's defined.
+        monkeypatch.setattr(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            fake_get_service,
+        )
+        return fake_proxy
+
+    def test_claude_code_gets_anthropic_proxy_env(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {
+            "ANTHROPIC_API_KEY": "signedtoken.payload",
+            "ANTHROPIC_BASE_URL": "http://localhost:5000/api/remote/llm-proxy",
+        }
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=5, session_id="sess-1", model="glm-5"
+        )
+
+        assert env["ANTHROPIC_API_KEY"] == "signedtoken.payload"
+        assert "/api/remote/llm-proxy" in env["ANTHROPIC_BASE_URL"]
+        assert env["OPENACE_PROXY_TOKEN"] == "signedtoken.payload"
+        assert env["OPENACE_MODEL"] == "glm-5"
+        adapter.get_env_vars.assert_called_once()
+
+    def test_qwen_code_gets_openai_proxy_env(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {
+            "OPENAI_API_KEY": "signedtoken.payload",
+            "OPENAI_BASE_URL": "http://localhost:5000/api/remote/llm-proxy",
+        }
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "qwen-code-cli", user_id=5, session_id="sess-2", model=""
+        )
+
+        assert env["OPENAI_API_KEY"] == "signedtoken.payload"
+        # generate_proxy_token called with provider=openai for qwen
+        _args, kwargs = fake_proxy.generate_proxy_token.call_args
+        assert kwargs["provider"] == "openai"
+
+    def test_proxy_token_is_signed_not_raw_key(self, monkeypatch):
+        # The injected API_KEY must be the proxy token, never a raw DB key.
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        fake_proxy.generate_proxy_token.return_value = "tok.abc123"
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {"ANTHROPIC_API_KEY": "tok.abc123"}
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=1, session_id="s", model=""
+        )
+
+        assert env["ANTHROPIC_API_KEY"] == "tok.abc123"
+        assert "." in env["ANTHROPIC_API_KEY"]  # signed token format
+
+    def test_fallback_on_proxy_failure(self, monkeypatch):
+        # If proxy setup throws, fall back to dict(os.environ) (dev box with
+        # env-injected keys keeps working).
+        from app.modules.workspace.autonomous import agent_runner
+
+        def fake_get_service():
+            raise RuntimeError("DB unavailable")
+
+        monkeypatch.setattr(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            fake_get_service,
+        )
+        adapter = MagicMock()
+        env = agent_runner.AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=None, session_id="s", model=""
+        )
+        # adapter.get_env_vars never called (setup failed before that)
+        adapter.get_env_vars.assert_not_called()
+        # env is a plain dict copy of os.environ
+        assert isinstance(env, dict)

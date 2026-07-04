@@ -109,6 +109,20 @@ _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 # via runuser. See scripts/openace-run-as.sh.
 _OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
 
+# CLI tool → LLM provider, used to mint proxy tokens for local autonomous
+# agents (mirrors remote_session_manager._cli_tool_to_provider). Local
+# autonomous agents must route through the Open ACE LLM proxy with a signed
+# proxy token — never the raw API key — so the key stays only in the DB.
+_CLI_TOOL_PROVIDER = {
+    "qwen-code-cli": "openai",
+    "claude-code": "anthropic",
+    "openclaw": "openai",
+    "codex": "openai",
+    "codex-cli": "openai",
+    "zcode": "anthropic",
+    "zcode-code": "anthropic",
+}
+
 
 class ZCodeSessionError(Exception):
     """Raised when a ZCode app-server session fails to start or send."""
@@ -704,6 +718,76 @@ class AutonomousAgentRunner:
             ] + cmd
             return wrapped, None  # wrapper chdir's internally; cwd must be None
         return cmd, project_path
+
+    @staticmethod
+    def _build_agent_env(
+        adapter: Any,
+        cli_tool: str,
+        user_id: int | None,
+        session_id: str,
+        model: str,
+    ) -> dict[str, str]:
+        """Build subprocess env with LLM proxy auth for a local agent.
+
+        Local autonomous agents (claude-code/qwen-code/etc.) must authenticate
+        through the Open ACE LLM proxy — never with the raw API key. This mints
+        a short-lived signed proxy token (via APIKeyProxyService) and asks the
+        adapter to map it onto the tool-specific env vars (e.g. ANTHROPIC_API_KEY
+        / ANTHROPIC_BASE_URL for claude-code). Mirrors executor._build_env but
+        runs in-process, without an HTTP round-trip.
+
+        Falls back to dict(os.environ) when proxy setup is unavailable (e.g. no
+        API key configured for this tool) so a dev box with env-injected keys
+        keeps working.
+        """
+        env = dict(os.environ)
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+            from app.utils.config import get_config_value
+
+            provider = _CLI_TOOL_PROVIDER.get(cli_tool, "openai")
+            api_proxy = get_api_key_proxy_service()
+
+            # Resolve the local server URL the CLI should call back to. Prefer
+            # the configured server_url/external_url; fall back to localhost:port
+            # so it works on a stock single-machine install.
+            server_url = (
+                get_config_value("server", "server_url")
+                or get_config_value(None, "external_url")
+                or f"http://localhost:{get_config_value('server', 'web_port', 5000)}"
+            ).rstrip("/")
+            proxy_url = f"{server_url}/api/remote/llm-proxy"
+
+            tenant_id = 1
+            if user_id:
+                try:
+                    from app.repositories.user_repo import UserRepository
+
+                    user = UserRepository().get_user_by_id(user_id)
+                    if user and user.get("tenant_id"):
+                        tenant_id = int(user["tenant_id"])
+                except Exception:
+                    pass  # default tenant
+
+            proxy_token = api_proxy.generate_proxy_token(
+                user_id=user_id or 0,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                provider=provider,
+                session_type="agent",
+            )
+            env.update(adapter.get_env_vars(proxy_url, proxy_token))
+            env["OPENACE_PROXY_URL"] = proxy_url
+            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            if model:
+                env["OPENACE_MODEL"] = model
+        except Exception as e:
+            logger.warning(
+                "Could not set up LLM proxy auth for %s (falling back to env): %s",
+                cli_tool,
+                e,
+            )
+        return env
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:
@@ -1312,8 +1396,9 @@ class AutonomousAgentRunner:
                 system_account=system_account,
             )
 
-        # Build env vars (use direct env vars, no proxy for local autonomous)
-        env = dict(os.environ)
+        # Build env vars with LLM proxy auth so the agent authenticates through
+        # Open ACE (short-lived proxy token, never the raw API key).
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
         # Build command
         # When resuming an established session, pass the real CLI session_id
@@ -1595,7 +1680,7 @@ class AutonomousAgentRunner:
         _ensure_usage_parser()
         adapter = get_adapter(cli_tool)
 
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
         # of the flag). The mode is set via session/setMode protocol call in
@@ -1957,7 +2042,7 @@ class AutonomousAgentRunner:
 
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, None, session_id, model)
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
