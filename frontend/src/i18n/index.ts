@@ -1330,8 +1330,7 @@ export const translations: Record<Language, Translations> = {
     autoModel: 'Model',
     autoDefaultModel: 'Default',
     autoSelectModel: 'Select a model…',
-    autoNoModelsForTool:
-      'No models configured for this tool. Add an API key in Settings first.',
+    autoNoModelsForTool: 'No models configured for this tool. Add an API key in Settings first.',
     autoLoadingModels: 'Loading models…',
     autoSelectToolFirst: 'Select an agent tool to see available models.',
     autoSelectMachineFirst: 'Select a remote machine to see available models.',
@@ -4125,7 +4124,8 @@ export const translations: Record<Language, Translations> = {
     autoModel: 'モデル',
     autoDefaultModel: 'デフォルト',
     autoSelectModel: 'モデルを選択…',
-    autoNoModelsForTool: 'このツールにモデルが設定されていません。先に設定で API キーを追加してください。',
+    autoNoModelsForTool:
+      'このツールにモデルが設定されていません。先に設定で API キーを追加してください。',
     autoLoadingModels: 'モデルを読み込み中…',
     autoSelectToolFirst: 'エージェントツールを選択すると利用可能なモデルが表示されます。',
     autoSelectMachineFirst: 'リモートマシンを選択すると利用可能なモデルが表示されます。',

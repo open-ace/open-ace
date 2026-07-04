@@ -457,19 +457,13 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                   ))}
               </select>
             ) : !cliTool ? (
-              <div className="form-text text-muted">
-                {t('autoSelectToolFirst', language)}
-              </div>
+              <div className="form-text text-muted">{t('autoSelectToolFirst', language)}</div>
             ) : workspaceType === 'remote' && !selectedMachineId ? (
-              <div className="form-text text-muted">
-                {t('autoSelectMachineFirst', language)}
-              </div>
+              <div className="form-text text-muted">{t('autoSelectMachineFirst', language)}</div>
             ) : modelsLoading ? (
               <div className="form-text text-muted">{t('autoLoadingModels', language)}</div>
             ) : (
-              <div className="form-text text-danger">
-                {t('autoNoModelsForTool', language)}
-              </div>
+              <div className="form-text text-danger">{t('autoNoModelsForTool', language)}</div>
             )}
           </div>
 
