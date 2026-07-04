@@ -101,6 +101,14 @@ COMPLETION_POLL_INTERVAL = 5.0
 # remote-agent/executor.py::_APPSERVER_TOOLS.
 _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 
+# Path to the cross-user agent launcher (Issue #1395). The service runs as
+# `openace` but agent CLIs (claude-code/qwen-code/openclaw) infer the project
+# root from cwd and have no --cwd flag, so they must launch with cwd=project.
+# Under a user-private repo path Popen's chdir fails as the service user; this
+# wrapper (root via a narrow sudoers rule) chdir's then drops to system_account
+# via runuser. See scripts/openace-run-as.sh.
+_OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
+
 
 class ZCodeSessionError(Exception):
     """Raised when a ZCode app-server session fails to start or send."""
@@ -653,6 +661,49 @@ class AutonomousAgentRunner:
                 )
         else:
             Path(project_path).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _is_cross_user(system_account: str | None) -> bool:
+        """Whether agent launch needs the run-as wrapper for a different user.
+
+        Mirrors github_ops._needs_sudo: True only when system_account is set
+        AND differs from the service process user. Same-user skips the wrapper
+        to avoid failing under systemd NoNewPrivileges (sudo is forbidden).
+        """
+        if not system_account:
+            return False
+        try:
+            return pwd.getpwuid(os.getuid()).pw_name != system_account
+        except (KeyError, OverflowError):
+            # Cannot determine the current user; assume cross-user to stay safe.
+            return True
+
+    @staticmethod
+    def _wrap_agent_cmd(
+        cmd: list[str], project_path: str, system_account: str | None
+    ) -> tuple[list[str], str | None]:
+        """Wrap an agent CLI command for cross-user launch (Issue #1395).
+
+        Returns (cmd, cwd) for subprocess.Popen. Same-user keeps the command
+        verbatim and cwd=project_path. Cross-user replaces the old
+        ``["sudo","-u",account]+cmd`` (which left Popen chdir'ing as the
+        service user and failing under a private home) with the run-as
+        wrapper: it chdir's as root then drops to system_account via runuser,
+        so the CLI inherits the project cwd with the owner's identity.
+        """
+        if AutonomousAgentRunner._is_cross_user(system_account):
+            assert system_account is not None  # _is_cross_user guarantees non-empty
+            wrapped = [
+                "sudo",
+                "-n",
+                "-u",
+                "root",
+                _OPENACE_RUN_AS,
+                system_account,
+                project_path,
+            ] + cmd
+            return wrapped, None  # wrapper chdir's internally; cwd must be None
+        return cmd, project_path
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:
@@ -1300,10 +1351,10 @@ class AutonomousAgentRunner:
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch: the run-as wrapper chdir's as root then drops to
+        # system_account (claude-code/qwen-code infer project root from cwd
+        # and have no --cwd flag). Same-user runs verbatim with cwd=project.
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 
@@ -1313,7 +1364,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1562,10 +1613,8 @@ class AutonomousAgentRunner:
             permission_mode=zcode_mode,
             resume=resume,
         )
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
@@ -1575,7 +1624,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1910,10 +1959,9 @@ class AutonomousAgentRunner:
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
         env = dict(os.environ)
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (single-shot CLIs also need
+        # cwd=project; openclaw documents it relies on the caller's cwd).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
 
@@ -1922,7 +1970,7 @@ class AutonomousAgentRunner:
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 timeout=timeout,
             )

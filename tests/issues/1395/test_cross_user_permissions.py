@@ -374,3 +374,90 @@ class TestEnsureProjectDir:
 
         with pytest.raises(PermissionError, match="Permission denied"):
             agent_runner.AutonomousAgentRunner._ensure_project_dir("/home/rhuang/no-perm", "rhuang")
+
+
+# ── _wrap_agent_cmd / _is_cross_user (agent launch) ─────────────────────
+
+
+class TestWrapAgentCmd:
+    """Cross-user agent launch must route through the run-as wrapper (which
+    chdir's as root then drops to system_account), not the old sudo -u prefix
+    that left Popen chdir'ing as the service user and failing under a private
+    home. Same-user keeps the command verbatim with cwd=project (Issue #1395)."""
+
+    def test_cross_user_wraps_with_run_as(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["/usr/local/bin/claude", "--print"]
+        project = "/home/rhuang/auto-dev-0b463e77"
+
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(base_cmd, project, "rhuang")
+
+        # Wrapper invocation: sudo -n -u root <wrapper> <user> <dir> <cmd...>
+        assert cmd[:6] == [
+            "sudo",
+            "-n",
+            "-u",
+            "root",
+            agent_runner._OPENACE_RUN_AS,
+            "rhuang",
+        ]
+        assert cmd[6] == project  # project dir passed to wrapper
+        assert cmd[7:] == base_cmd  # original command appended verbatim
+        # cwd must be None — the wrapper chdir's internally; a non-None cwd
+        # would make Popen chdir as the service user and re-trigger [Errno 13].
+        assert cwd is None
+
+    def test_same_user_keeps_cmd_verbatim(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["/usr/local/bin/claude", "--print"]
+        project = str(_tmp := __import__("pathlib").Path("/srv/proj"))
+
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
+            base_cmd, project, "openace"  # same as service user
+        )
+
+        assert cmd == base_cmd  # no wrapper
+        assert cwd == project  # Popen chdir's directly (same user has access)
+
+    def test_no_system_account_keeps_cmd(self):
+        from app.modules.workspace.autonomous import agent_runner
+
+        base_cmd = ["claude"]
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(base_cmd, "/srv/proj", None)
+        assert cmd == base_cmd
+        assert cwd == "/srv/proj"
+
+    def test_cross_user_preserves_complex_cmd(self, monkeypatch):
+        # Multi-element command (e.g. node engine for zcode) passes through intact.
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["node", "/path/to/zcode.cjs", "app-server", "--cwd", "/home/rhuang/p"]
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
+            base_cmd, "/home/rhuang/p", "rhuang"
+        )
+        assert cmd[7:] == base_cmd
+        assert cwd is None
+
+
+class TestIsCrossUser:
+    def test_none_account_is_not_cross_user(self):
+        from app.modules.workspace.autonomous import agent_runner
+
+        assert agent_runner.AutonomousAgentRunner._is_cross_user(None) is False
+
+    def test_same_user_is_not_cross_user(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        assert agent_runner.AutonomousAgentRunner._is_cross_user("openace") is False
+
+    def test_different_user_is_cross_user(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        assert agent_runner.AutonomousAgentRunner._is_cross_user("rhuang") is True
