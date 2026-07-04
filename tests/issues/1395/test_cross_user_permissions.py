@@ -374,3 +374,303 @@ class TestEnsureProjectDir:
 
         with pytest.raises(PermissionError, match="Permission denied"):
             agent_runner.AutonomousAgentRunner._ensure_project_dir("/home/rhuang/no-perm", "rhuang")
+
+
+# ── _wrap_agent_cmd / _is_cross_user (agent launch) ─────────────────────
+
+
+class TestWrapAgentCmd:
+    """Cross-user agent launch must route through the run-as wrapper (which
+    chdir's as root then drops to system_account), not the old sudo -u prefix
+    that left Popen chdir'ing as the service user and failing under a private
+    home. Same-user keeps the command verbatim with cwd=project (Issue #1395)."""
+
+    def test_cross_user_wraps_with_run_as(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["/usr/local/bin/claude", "--print"]
+        project = "/home/rhuang/auto-dev-0b463e77"
+
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(base_cmd, project, "rhuang")
+
+        # Wrapper invocation: sudo -n -u root <wrapper> <user> <dir> <cmd...>
+        assert cmd[:6] == [
+            "sudo",
+            "-n",
+            "-u",
+            "root",
+            agent_runner._OPENACE_RUN_AS,
+            "rhuang",
+        ]
+        assert cmd[6] == project  # project dir passed to wrapper
+        assert cmd[7:] == base_cmd  # original command appended verbatim
+        # cwd must be None — the wrapper chdir's internally; a non-None cwd
+        # would make Popen chdir as the service user and re-trigger [Errno 13].
+        assert cwd is None
+
+    def test_same_user_keeps_cmd_verbatim(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["/usr/local/bin/claude", "--print"]
+        project = str(_tmp := __import__("pathlib").Path("/srv/proj"))
+
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
+            base_cmd, project, "openace"  # same as service user
+        )
+
+        assert cmd == base_cmd  # no wrapper
+        assert cwd == project  # Popen chdir's directly (same user has access)
+
+    def test_no_system_account_keeps_cmd(self):
+        from app.modules.workspace.autonomous import agent_runner
+
+        base_cmd = ["claude"]
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(base_cmd, "/srv/proj", None)
+        assert cmd == base_cmd
+        assert cwd == "/srv/proj"
+
+    def test_cross_user_preserves_complex_cmd(self, monkeypatch):
+        # Multi-element command (e.g. node engine for zcode) passes through intact.
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        base_cmd = ["node", "/path/to/zcode.cjs", "app-server", "--cwd", "/home/rhuang/p"]
+        cmd, cwd = agent_runner.AutonomousAgentRunner._wrap_agent_cmd(
+            base_cmd, "/home/rhuang/p", "rhuang"
+        )
+        assert cmd[7:] == base_cmd
+        assert cwd is None
+
+
+class TestIsCrossUser:
+    def test_none_account_is_not_cross_user(self):
+        from app.modules.workspace.autonomous import agent_runner
+
+        assert agent_runner.AutonomousAgentRunner._is_cross_user(None) is False
+
+    def test_same_user_is_not_cross_user(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        assert agent_runner.AutonomousAgentRunner._is_cross_user("openace") is False
+
+    def test_different_user_is_cross_user(self, monkeypatch):
+        from app.modules.workspace.autonomous import agent_runner
+
+        monkeypatch.setattr(agent_runner.pwd, "getpwuid", lambda _uid: MagicMock(pw_name="openace"))
+        assert agent_runner.AutonomousAgentRunner._is_cross_user("rhuang") is True
+
+
+# ── _build_agent_env (LLM proxy auth) ────────────────────────────────────
+
+
+class TestBuildAgentEnv:
+    """Local autonomous agents must authenticate through the Open ACE LLM proxy
+    with a signed proxy token — never the raw API key (security: key stays only
+    in the DB). _build_agent_env mints the token and injects adapter-specific
+    env vars (ANTHROPIC_API_KEY/OPENAI_API_KEY = proxy_token, *_BASE_URL =
+    proxy URL)."""
+
+    def _setup_proxy(self, monkeypatch):
+        """Stub get_api_key_proxy_service to return a fake proxy service."""
+        from app.modules.workspace.autonomous import agent_runner
+
+        fake_proxy = MagicMock()
+        fake_proxy.generate_proxy_token.return_value = "signedtoken.payload"
+
+        def fake_get_service():
+            return fake_proxy
+
+        # _build_agent_env imports the factory inside the function, so patch at
+        # the module where it's defined.
+        monkeypatch.setattr(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            fake_get_service,
+        )
+        return fake_proxy
+
+    def test_claude_code_gets_anthropic_proxy_env(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {
+            "ANTHROPIC_API_KEY": "signedtoken.payload",
+            "ANTHROPIC_BASE_URL": "http://localhost:5000/api/remote/llm-proxy",
+        }
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=5, session_id="sess-1", model="glm-5"
+        )
+
+        assert env["ANTHROPIC_API_KEY"] == "signedtoken.payload"
+        assert "/api/remote/llm-proxy" in env["ANTHROPIC_BASE_URL"]
+        assert env["OPENACE_PROXY_TOKEN"] == "signedtoken.payload"
+        assert env["OPENACE_MODEL"] == "glm-5"
+        adapter.get_env_vars.assert_called_once()
+
+    def test_qwen_code_gets_openai_proxy_env(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {
+            "OPENAI_API_KEY": "signedtoken.payload",
+            "OPENAI_BASE_URL": "http://localhost:5000/api/remote/llm-proxy",
+        }
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "qwen-code-cli", user_id=5, session_id="sess-2", model=""
+        )
+
+        assert env["OPENAI_API_KEY"] == "signedtoken.payload"
+        # generate_proxy_token called with provider=openai for qwen
+        _args, kwargs = fake_proxy.generate_proxy_token.call_args
+        assert kwargs["provider"] == "openai"
+
+    def test_proxy_token_is_signed_not_raw_key(self, monkeypatch):
+        # The injected API_KEY must be the proxy token, never a raw DB key.
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        fake_proxy.generate_proxy_token.return_value = "tok.abc123"
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {"ANTHROPIC_API_KEY": "tok.abc123"}
+
+        env = AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=1, session_id="s", model=""
+        )
+
+        assert env["ANTHROPIC_API_KEY"] == "tok.abc123"
+        assert "." in env["ANTHROPIC_API_KEY"]  # signed token format
+
+    def test_fallback_on_proxy_failure(self, monkeypatch):
+        # If proxy setup throws, fall back to dict(os.environ) (dev box with
+        # env-injected keys keeps working).
+        from app.modules.workspace.autonomous import agent_runner
+
+        def fake_get_service():
+            raise RuntimeError("DB unavailable")
+
+        monkeypatch.setattr(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            fake_get_service,
+        )
+        adapter = MagicMock()
+        env = agent_runner.AutonomousAgentRunner._build_agent_env(
+            adapter, "claude-code", user_id=None, session_id="s", model=""
+        )
+        # adapter.get_env_vars never called (setup failed before that)
+        adapter.get_env_vars.assert_not_called()
+        # env is a plain dict copy of os.environ
+        assert isinstance(env, dict)
+
+    # ── Regression (PR #1467 review comment 2) ────────────────────────────
+    # _build_agent_env encodes user_id into the proxy token; the quota/
+    # accounting layer reads user_id back out of the token. If user_id is None
+    # it falls back to 0, which silently bills usage to a nonexistent account
+    # and bypasses per-user quotas. The single-shot path (codex/openclaw) used
+    # to pass user_id=None even though _run_local had the real id in hand.
+    # These tests pin the wiring: real user_id → generate_proxy_token(user_id=…).
+
+    def test_real_user_id_passed_to_token(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {"OPENAI_API_KEY": "tok"}
+
+        AutonomousAgentRunner._build_agent_env(
+            adapter, "codex", user_id=42, session_id="s", model=""
+        )
+
+        _args, kwargs = fake_proxy.generate_proxy_token.call_args
+        assert kwargs["user_id"] == 42  # not 0
+
+    def test_none_user_id_defaults_to_zero(self, monkeypatch):
+        # Sanity: the explicit fallback still produces user_id=0 (so callers
+        # that genuinely have no user — e.g. ad-hoc dev runs — don't crash).
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        fake_proxy = self._setup_proxy(monkeypatch)
+        adapter = MagicMock()
+        adapter.get_env_vars.return_value = {"OPENAI_API_KEY": "tok"}
+
+        AutonomousAgentRunner._build_agent_env(
+            adapter, "codex", user_id=None, session_id="s", model=""
+        )
+
+        _args, kwargs = fake_proxy.generate_proxy_token.call_args
+        assert kwargs["user_id"] == 0
+
+
+# ── _run_single_shot user_id propagation (PR #1467 comment 2) ────────────
+
+
+class TestSingleShotUserIdPropagation:
+    """_run_local must forward user_id to _run_single_shot, which must forward
+    it to _build_agent_env. Verified by patching _build_agent_env on the
+    instance and asserting the kwargs it received carry the real user_id
+    (not 0)."""
+
+    def _make_runner(self):
+        from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+        return AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+
+    def test_single_shot_passes_real_user_id_to_env(self, monkeypatch):
+        import sys
+        import types
+
+        runner = self._make_runner()
+        captured = {}
+
+        def fake_build_env(adapter, cli_tool, user_id, session_id, model):
+            captured["user_id"] = user_id
+            return {"PATH": "/bin"}
+
+        # _build_agent_env is a staticmethod; replace via the class.
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.agent_runner.AutonomousAgentRunner"
+            "._build_agent_env",
+            staticmethod(fake_build_env),
+        )
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.agent_runner.AutonomousAgentRunner"
+            "._wrap_agent_cmd",
+            staticmethod(lambda cmd, project_path, system_account: (cmd, None)),
+        )
+
+        adapter = MagicMock()
+        adapter.get_executable_name.return_value = "codex"
+        adapter.build_single_shot_args.return_value = ["codex", "--prompt", "x"]
+        # _run_single_shot lazily does `from cli_adapters import get_adapter`.
+        # Inject a stub module so the import resolves without the real
+        # remote-agent package on sys.path.
+        fake_mod = types.ModuleType("cli_adapters")
+        fake_mod.get_adapter = lambda name: adapter
+        monkeypatch.setitem(sys.modules, "cli_adapters", fake_mod)
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.agent_runner.shutil.which",
+            lambda exe: "/usr/local/bin/codex",
+        )
+
+        import app.modules.workspace.autonomous.agent_runner as mod
+
+        completed = MagicMock(stdout="", stderr="", returncode=0)
+        monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: completed)
+
+        runner._run_single_shot(
+            session_id="s",
+            cli_tool="codex",
+            model="",
+            project_path="/tmp/repo",
+            prompt="do work",
+            timeout=5,
+            workflow_id="wf",
+            user_id=77,
+        )
+
+        assert captured["user_id"] == 77  # real user, not 0

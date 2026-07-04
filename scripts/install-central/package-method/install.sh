@@ -1756,6 +1756,30 @@ find_webui_executable() {
     return 1
 }
 
+# Install the cross-user agent launcher wrapper (Issue #1395).
+# The wrapper lets the openace service launch agent CLIs (claude-code/qwen-code/
+# openclaw) with cwd=project_path under a user-private repo, by chdir'ing as
+# root then dropping to the target user via runuser. Must run BEFORE
+# configure_sudoers so the sudoers rule (which keys off -x $wrapper_path) sees it.
+install_run_as_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-run-as.sh"
+    local dst="/usr/local/bin/openace-run-as"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-run-as.sh not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-run-as.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed run-as wrapper to $dst"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -1825,6 +1849,16 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
     # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
     local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
 
+    # 【修复 Issue #1395】跨用户启动 agent CLI 的 run-as wrapper 权限。
+    # wrapper 以 root 身份 cd 到项目目录，再用 runuser 切换到目标用户 exec CLI，
+    # 解决 Popen(cwd=用户私有目录) 的 [Errno 13]。只授权 wrapper 本身，不放开
+    # bash/node/claude。wrapper 路径必须与 scripts/openace-run-as.sh 安装位置一致。
+    local wrapper_path="/usr/local/bin/openace-run-as"
+    local wrapper_rule=""
+    if [ -x "$wrapper_path" ]; then
+        wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path *"
+    fi
+
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 $run_user ALL=(ALL) NOPASSWD: $webui_path *"
@@ -1839,6 +1873,12 @@ ${webui_local_rule}"
     current_user_rules="${current_user_rules}
 ${utility_rule}
 ${cli_rule}"
+
+    # Add run-as wrapper rule if the wrapper is installed (Issue #1395)
+    if [ -n "$wrapper_rule" ]; then
+        current_user_rules="${current_user_rules}
+${wrapper_rule}"
+    fi
 
     # Only add fetch_rules if not empty
     if [ -n "$fetch_rules" ]; then
@@ -3089,6 +3129,10 @@ install_local() {
                 fi
             fi
         fi
+
+        # Install the run-as wrapper BEFORE configure_sudoers (Issue #1395):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-run-as ]`.
+        install_run_as_wrapper "$sudoers_install_dir"
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then

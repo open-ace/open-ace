@@ -101,6 +101,28 @@ COMPLETION_POLL_INTERVAL = 5.0
 # remote-agent/executor.py::_APPSERVER_TOOLS.
 _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 
+# Path to the cross-user agent launcher (Issue #1395). The service runs as
+# `openace` but agent CLIs (claude-code/qwen-code/openclaw) infer the project
+# root from cwd and have no --cwd flag, so they must launch with cwd=project.
+# Under a user-private repo path Popen's chdir fails as the service user; this
+# wrapper (root via a narrow sudoers rule) chdir's then drops to system_account
+# via runuser. See scripts/openace-run-as.sh.
+_OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
+
+# CLI tool → LLM provider, used to mint proxy tokens for local autonomous
+# agents (mirrors remote_session_manager._cli_tool_to_provider). Local
+# autonomous agents must route through the Open ACE LLM proxy with a signed
+# proxy token — never the raw API key — so the key stays only in the DB.
+_CLI_TOOL_PROVIDER = {
+    "qwen-code-cli": "openai",
+    "claude-code": "anthropic",
+    "openclaw": "openai",
+    "codex": "openai",
+    "codex-cli": "openai",
+    "zcode": "anthropic",
+    "zcode-code": "anthropic",
+}
+
 
 class ZCodeSessionError(Exception):
     """Raised when a ZCode app-server session fails to start or send."""
@@ -653,6 +675,119 @@ class AutonomousAgentRunner:
                 )
         else:
             Path(project_path).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _is_cross_user(system_account: str | None) -> bool:
+        """Whether agent launch needs the run-as wrapper for a different user.
+
+        Mirrors github_ops._needs_sudo: True only when system_account is set
+        AND differs from the service process user. Same-user skips the wrapper
+        to avoid failing under systemd NoNewPrivileges (sudo is forbidden).
+        """
+        if not system_account:
+            return False
+        try:
+            return pwd.getpwuid(os.getuid()).pw_name != system_account
+        except (KeyError, OverflowError):
+            # Cannot determine the current user; assume cross-user to stay safe.
+            return True
+
+    @staticmethod
+    def _wrap_agent_cmd(
+        cmd: list[str], project_path: str, system_account: str | None
+    ) -> tuple[list[str], str | None]:
+        """Wrap an agent CLI command for cross-user launch (Issue #1395).
+
+        Returns (cmd, cwd) for subprocess.Popen. Same-user keeps the command
+        verbatim and cwd=project_path. Cross-user replaces the old
+        ``["sudo","-u",account]+cmd`` (which left Popen chdir'ing as the
+        service user and failing under a private home) with the run-as
+        wrapper: it chdir's as root then drops to system_account via runuser,
+        so the CLI inherits the project cwd with the owner's identity.
+        """
+        if AutonomousAgentRunner._is_cross_user(system_account):
+            assert system_account is not None  # _is_cross_user guarantees non-empty
+            wrapped = [
+                "sudo",
+                "-n",
+                "-u",
+                "root",
+                _OPENACE_RUN_AS,
+                system_account,
+                project_path,
+            ] + cmd
+            return wrapped, None  # wrapper chdir's internally; cwd must be None
+        return cmd, project_path
+
+    @staticmethod
+    def _build_agent_env(
+        adapter: Any,
+        cli_tool: str,
+        user_id: int | None,
+        session_id: str,
+        model: str,
+    ) -> dict[str, str]:
+        """Build subprocess env with LLM proxy auth for a local agent.
+
+        Local autonomous agents (claude-code/qwen-code/etc.) must authenticate
+        through the Open ACE LLM proxy — never with the raw API key. This mints
+        a short-lived signed proxy token (via APIKeyProxyService) and asks the
+        adapter to map it onto the tool-specific env vars (e.g. ANTHROPIC_API_KEY
+        / ANTHROPIC_BASE_URL for claude-code). Mirrors executor._build_env but
+        runs in-process, without an HTTP round-trip.
+
+        Falls back to dict(os.environ) when proxy setup is unavailable (e.g. no
+        API key configured for this tool) so a dev box with env-injected keys
+        keeps working.
+        """
+        env = dict(os.environ)
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+            from app.utils.config import get_config_value
+
+            provider = _CLI_TOOL_PROVIDER.get(cli_tool, "openai")
+            api_proxy = get_api_key_proxy_service()
+
+            # Resolve the local server URL the CLI should call back to. Prefer
+            # the configured server_url/external_url; fall back to localhost:port
+            # so it works on a stock single-machine install.
+            server_url = (
+                get_config_value("server", "server_url")
+                or get_config_value(None, "external_url")
+                or f"http://localhost:{get_config_value('server', 'web_port', 5000)}"
+            ).rstrip("/")
+            proxy_url = f"{server_url}/api/remote/llm-proxy"
+
+            tenant_id = 1
+            if user_id:
+                try:
+                    from app.repositories.user_repo import UserRepository
+
+                    user = UserRepository().get_user_by_id(user_id)
+                    if user and user.get("tenant_id"):
+                        tenant_id = int(user["tenant_id"])
+                except Exception:
+                    pass  # default tenant
+
+            proxy_token = api_proxy.generate_proxy_token(
+                user_id=user_id or 0,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                provider=provider,
+                session_type="agent",
+            )
+            env.update(adapter.get_env_vars(proxy_url, proxy_token))
+            env["OPENACE_PROXY_URL"] = proxy_url
+            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            if model:
+                env["OPENACE_MODEL"] = model
+        except Exception as e:
+            logger.warning(
+                "Could not set up LLM proxy auth for %s (falling back to env): %s",
+                cli_tool,
+                e,
+            )
+        return env
 
     @staticmethod
     def _encode_project_path(project_path: str) -> str:
@@ -1259,10 +1394,12 @@ class AutonomousAgentRunner:
                 workflow_id=workflow_id,
                 milestone_id=milestone_id,
                 system_account=system_account,
+                user_id=user_id,
             )
 
-        # Build env vars (use direct env vars, no proxy for local autonomous)
-        env = dict(os.environ)
+        # Build env vars with LLM proxy auth so the agent authenticates through
+        # Open ACE (short-lived proxy token, never the raw API key).
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
         # Build command
         # When resuming an established session, pass the real CLI session_id
@@ -1300,10 +1437,10 @@ class AutonomousAgentRunner:
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch: the run-as wrapper chdir's as root then drops to
+        # system_account (claude-code/qwen-code infer project root from cwd
+        # and have no --cwd flag). Same-user runs verbatim with cwd=project.
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 
@@ -1313,7 +1450,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1544,7 +1681,7 @@ class AutonomousAgentRunner:
         _ensure_usage_parser()
         adapter = get_adapter(cli_tool)
 
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
         # of the flag). The mode is set via session/setMode protocol call in
@@ -1562,10 +1699,8 @@ class AutonomousAgentRunner:
             permission_mode=zcode_mode,
             resume=resume,
         )
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
@@ -1575,7 +1710,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1878,6 +2013,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         milestone_id: str = "",
         system_account: str | None = None,
+        user_id: int | None = None,
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
@@ -1908,12 +2044,11 @@ class AutonomousAgentRunner:
 
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (single-shot CLIs also need
+        # cwd=project; openclaw documents it relies on the caller's cwd).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
 
@@ -1922,7 +2057,7 @@ class AutonomousAgentRunner:
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 timeout=timeout,
             )
