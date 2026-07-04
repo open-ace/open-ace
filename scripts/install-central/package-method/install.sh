@@ -1983,6 +1983,24 @@ ${line}"
             need_update=true
         fi
 
+        # 【修复 Issue #1395 (PR #1467 评论)】Check run-as wrapper rule.
+        # The wrapper is installed just before configure_sudoers, but the
+        # incremental update above only rewrites the file when an existing
+        # check trips. A pre-#1467 sudoers file already has webui / utils /
+        # secure_path, so without this check the wrapper rule never gets
+        # added on upgrade — stock deployments stayed broken (the agent
+        # launch failed with "sudo: a password is required").
+        # Match user+path on the same line (like the webui/fetch checks above):
+        # a file-global grep would false-pass when another user already has a
+        # wrapper rule (other_user_rules are preserved), skipping the current
+        # user's authorization.
+        local wrapper_path="/usr/local/bin/openace-run-as"
+        if [ -x "$wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing run-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
+            need_update=true
+        fi
+
         # 【新增】Warn about sudoers vs systemd service user mismatch
         if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
