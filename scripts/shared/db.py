@@ -1219,7 +1219,7 @@ def get_messages_by_date(
         params.extend(roles)
 
     if search:
-        conditions.append("content LIKE ?")
+        conditions.append("content LIKE ? ESCAPE '\\'")
         params.append(f"%{escape_like(search)}%")
 
     # Get total count

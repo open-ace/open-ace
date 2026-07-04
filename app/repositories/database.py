@@ -173,7 +173,7 @@ def escape_like(value: str, escape_char: str = "\\") -> str:
 
     Usage::
 
-        query = "... WHERE name LIKE ? ESCAPE '\\\\'"
+        query = "... WHERE name LIKE ? ESCAPE '\\'"
         params = [escape_like(user_input) + "%"]
 
     Args:

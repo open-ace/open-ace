@@ -607,13 +607,13 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    LOWER(s.title) LIKE {p}  -- escape_like used
-                    OR LOWER(s.session_id) LIKE {p}  -- escape_like used
+                    LOWER(s.title) LIKE {p} ESCAPE '\\'  -- escape_like used
+                    OR LOWER(s.session_id) LIKE {p} ESCAPE '\\'  -- escape_like used
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND LOWER(sm.content) LIKE {p}  -- escape_like used
+                        AND LOWER(sm.content) LIKE {p} ESCAPE '\\'  -- escape_like used
                     )
                   )
             """
@@ -626,13 +626,13 @@ def list_sessions():
                 FROM agent_sessions s
                 WHERE {base_where_clause}
                   AND (
-                    LOWER(s.title) LIKE {p}  -- escape_like used
-                    OR LOWER(s.session_id) LIKE {p}  -- escape_like used
+                    LOWER(s.title) LIKE {p} ESCAPE '\\'  -- escape_like used
+                    OR LOWER(s.session_id) LIKE {p} ESCAPE '\\'  -- escape_like used
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
                         AND {time_cond}
-                        AND LOWER(sm.content) LIKE {p}  -- escape_like used
+                        AND LOWER(sm.content) LIKE {p} ESCAPE '\\'  -- escape_like used
                     )
                   )
                 ORDER BY s.updated_at DESC
