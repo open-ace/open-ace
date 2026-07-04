@@ -25,12 +25,19 @@ vi.mock('@/hooks/useAutonomous', () => ({
       ],
     },
   }),
-  useAvailableModels: () => ({
-    data: {
-      models: [{ name: 'glm-5' }],
-    },
-    isLoading: false,
-  }),
+  useAvailableModels: (params?: { workspace_type?: string; machine_id?: string }) => {
+    // Mirror the component's modelsEnabled gate: remote mode without a
+    // machine should not return models (the query is disabled).
+    if (params?.workspace_type === 'remote' && !params?.machine_id) {
+      return { data: undefined, isLoading: false };
+    }
+    return {
+      data: {
+        models: [{ name: 'glm-5' }],
+      },
+      isLoading: false,
+    };
+  },
 }));
 
 vi.mock('@/components/common', () => ({
@@ -344,6 +351,21 @@ describe('NewAutonomousModal', () => {
       expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
     });
     expect(localStorage.getItem('remote-last-project-path-machine-1')).toBe('C:\\final\\repo');
+  });
+
+  it('shows "select remote machine" hint when remote mode has no machine selected', () => {
+    // Regression: models query is gated in remote mode until a machine is
+    // picked. Without the dedicated UI branch the modal would show
+    // autoNoModelsForTool ("no models configured") which is misleading —
+    // the real reason is "no machine selected yet".
+    render(<NewAutonomousModal {...defaultProps} />);
+
+    // Switch to remote workspace but do NOT pick a machine.
+    fireEvent.click(screen.getByText('autoRemoteWorkspace'));
+
+    // Should show the machine hint, NOT the no-models error.
+    expect(screen.getByText('autoSelectMachineFirst')).toBeInTheDocument();
+    expect(screen.queryByText('autoNoModelsForTool')).not.toBeInTheDocument();
   });
 
   it('does not persist path memory in new project mode', async () => {
