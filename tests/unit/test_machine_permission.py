@@ -877,6 +877,116 @@ def test_route_session_access_unassigned_user():
 
 
 # ════════════════════════════════════════════
+#  P3-2: New tests for create_session and browse permissions
+# ════════════════════════════════════════════
+
+
+def test_route_create_session_by_unassigned_user():
+    """P1-1: Unassigned users cannot create sessions (security fix)."""
+    test("Route: unassigned user cannot create session")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # Simulate machine connection
+    mgr._connections["mid-machine-a"] = True
+
+    with app.test_client() as client:
+        resp = _auth_post(
+            client,
+            "/api/remote/sessions",
+            "test-token-99-user",  # Unassigned user
+            json={"machine_id": "mid-machine-a", "project_path": "/home/test"},
+        )
+        if resp.status_code == 403:
+            ok("unassigned user gets 403 for create_session")
+        else:
+            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+
+
+def test_route_create_session_by_assigned_user():
+    """P1-1: Assigned users can create sessions."""
+    test("Route: assigned user can create session")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # Simulate machine connection
+    mgr._connections["mid-machine-a"] = True
+
+    with app.test_client() as client:
+        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
+        _restore_patches(patches)
+        if result and result.get("session_id"):
+            ok(f"assigned user created session: {result['session_id'][:8]}...")
+        else:
+            fail(f"session creation failed: {result}")
+
+
+def test_route_create_session_by_machine_admin():
+    """P1-1: Machine admins can create sessions."""
+    test("Route: machine admin can create session")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # Simulate machine connection
+    mgr._connections["mid-machine-a"] = True
+
+    with app.test_client() as client:
+        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
+        _restore_patches(patches)
+        if result and result.get("session_id"):
+            ok(f"machine admin created session: {result['session_id'][:8]}...")
+        else:
+            fail(f"session creation failed: {result}")
+
+
+def test_route_browse_by_unassigned_user():
+    """P1-1: Unassigned users cannot browse machine files."""
+    test("Route: unassigned user cannot browse files")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    with app.test_client() as client:
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/mid-machine-a/browse",
+            "test-token-99-user",  # Unassigned user
+        )
+        if resp.status_code == 403:
+            ok("unassigned user gets 403 for browse")
+        else:
+            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+
+
+def test_route_list_machines_returns_user_role():
+    """P1-2: API returns explicit user_role field."""
+    test("Route: list_machines returns user_role")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    with app.test_client() as client:
+        # System admin
+        resp = _auth_get(client, "/api/remote/machines", "test-token-1-admin")
+        data = resp.get_json()
+        if data.get("user_role") == "admin":
+            ok(f"system admin gets user_role='admin'")
+        else:
+            fail(f"expected user_role='admin', got {data.get('user_role')}")
+
+        # Regular user
+        resp2 = _auth_get(client, "/api/remote/machines", "test-token-2-user")
+        data2 = resp2.get_json()
+        if data2.get("user_role") == "user":
+            ok(f"regular user gets user_role='user'")
+        else:
+            fail(f"expected user_role='user', got {data2.get('user_role')}")
+
+
+# ════════════════════════════════════════════
 
 
 def main():
@@ -915,6 +1025,13 @@ def main():
     test_route_session_access_machine_admin()
     test_route_session_access_denied_other_user()
     test_route_session_access_unassigned_user()
+
+    # P3-2: New tests for create_session and browse permissions
+    test_route_create_session_by_unassigned_user()
+    test_route_create_session_by_assigned_user()
+    test_route_create_session_by_machine_admin()
+    test_route_browse_by_unassigned_user()
+    test_route_list_machines_returns_user_role()
 
     all_passed = print_summary()
 
