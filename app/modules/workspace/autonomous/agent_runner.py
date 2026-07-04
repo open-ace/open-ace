@@ -12,6 +12,7 @@ remote execution.
 import json
 import logging
 import os
+import pwd
 import re
 import shutil
 import signal
@@ -616,6 +617,35 @@ class AutonomousAgentRunner:
         return cli_session_id
 
     @staticmethod
+    def _ensure_project_dir(project_path: str, system_account: str | None) -> None:
+        """Ensure ``project_path`` exists, cross-user safe (Issue #1395).
+
+        ``Path.mkdir`` stats/creates as the service user and raises
+        ``PermissionError`` when the path lives under a user-private parent
+        (e.g. a 0700 home). When ``system_account`` differs from the service
+        user, route through ``sudo -u <account> mkdir -p`` (``mkdir`` is
+        covered by the sudoers ``OPENACE_UTILS`` alias). Same-user skips sudo
+        to avoid failing under systemd ``NoNewPrivileges`` (mirrors
+        ``github_ops._needs_sudo``).
+        """
+        same_user = False
+        if system_account:
+            try:
+                same_user = pwd.getpwuid(os.getuid()).pw_name == system_account
+            except (KeyError, OverflowError):
+                same_user = False
+        if system_account and not same_user:
+            subprocess.run(
+                ["sudo", "-u", system_account, "mkdir", "-p", project_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        else:
+            Path(project_path).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
     def _encode_project_path(project_path: str) -> str:
         """Best-effort match for the encoded project path used by Claude session history.
 
@@ -1182,7 +1212,8 @@ class AutonomousAgentRunner:
 
         # Expand project path
         project_path = os.path.expanduser(project_path)
-        Path(project_path).mkdir(parents=True, exist_ok=True)
+        # Ensure the project dir exists (cross-user safe, Issue #1395).
+        self._ensure_project_dir(project_path, system_account)
 
         # Protocol dispatch: different CLI tools speak different stdin protocols.
         # The generic _LocalSession path below assumes Claude SDK stream-json,

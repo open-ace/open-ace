@@ -13,6 +13,7 @@ import pwd
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -381,6 +382,39 @@ class GitHubOps:
             except FileNotFoundError:
                 raise GitHubOpsError("git not found")
         raise last_error or GitHubOpsError(f"git {' '.join(args)} failed after retries")
+
+    def path_exists_as_user(self, path: str, *, dir_only: bool = False) -> bool:
+        """Check whether ``path`` exists, executing as ``system_account``.
+
+        Python's ``Path.exists()`` stats with the service process's identity
+        and raises ``PermissionError`` when the path sits under a user-private
+        parent (e.g. a 700 home dir) — the same cross-user gap that the
+        ``_run_git``/``_run_gh`` sudo wrapper closes for git/gh subprocesses
+        (Issue #1395/#1421). This routes the check through
+        ``sudo -u <system_account> test`` so it runs with the repo owner's
+        privileges; ``test`` is covered by the sudoers ``OPENACE_UTILS`` alias.
+
+        Args:
+            path: Absolute path to check.
+            dir_only: When True require the path to be a directory (``test -d``);
+                otherwise any existing entry passes (``test -e``).
+        """
+        if not self._needs_sudo():
+            return Path(path).is_dir() if dir_only else Path(path).exists()
+        flag = "-d" if dir_only else "-e"
+        assert self.system_account is not None  # _needs_sudo() guarantees non-empty
+        try:
+            result = subprocess.run(
+                ["sudo", "-u", self.system_account, "test", flag, path],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=self._build_subprocess_kwargs().get("env"),
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.warning("path_exists_as_user(%s) failed: %s", path, e)
+            return False
 
     # ── Repo Operations ────────────────────────────────────────────
 

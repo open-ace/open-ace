@@ -11,12 +11,10 @@ import json
 import logging
 import os
 import re
-import shutil
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from app.modules.workspace.autonomous.agent_runner import (
@@ -545,16 +543,9 @@ class AutonomousOrchestrator:
             return worktree_path or project_path
 
         canonical = os.path.realpath(worktree_path)
-        # Valid worktree: a .git file/dir inside means git set it up. If the
-        # stored path was unnormalized (legacy ".."), persist the canonical
-        # form so JSONL session detection matches Claude's encoding.
-        if worktree_path and os.path.isfile(os.path.join(canonical, ".git")):
-            if canonical != worktree_path:
-                self._update_workflow({"worktree_path": canonical})
-            return canonical
-
-        # Worktree missing — recreate from the main repo.
-        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
+        # Resolve system_account up front so the validity check below can use
+        # it: os.path.isfile() stats as the service user and raises
+        # PermissionError under a user-private parent (700 home, Issue #1395).
         # Get system_account for multi-user permission isolation (Issue #1395)
         system_account = None
         user_id = wf.get("user_id")
@@ -564,6 +555,16 @@ class AutonomousOrchestrator:
             if user:
                 system_account = user.get("system_account")
         main_gh = GitHubOps(project_path, system_account=system_account)
+        # Valid worktree: a .git file inside means git set it up. If the
+        # stored path was unnormalized (legacy ".."), persist the canonical
+        # form so JSONL session detection matches Claude's encoding.
+        if worktree_path and main_gh.path_exists_as_user(os.path.join(canonical, ".git")):
+            if canonical != worktree_path:
+                self._update_workflow({"worktree_path": canonical})
+            return canonical
+
+        # Worktree missing — recreate from the main repo.
+        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
         try:
             main_gh._run_git(["fetch", "origin", "main"])
             # Does the branch still exist locally or on origin?
@@ -1759,25 +1760,34 @@ class AutonomousOrchestrator:
                     # This happens when worktree dir was deleted externally (Issue #1442)
                     gh._run_git(["worktree", "prune"])
 
-                    # Check and clean up residual worktree directory (Issue #1442)
-                    if Path(worktree_path).exists():
-                        git_file = Path(worktree_path) / ".git"
-                        if git_file.exists() and git_file.is_file():
-                            # Valid worktree - remove via git
-                            try:
-                                gh.remove_worktree(worktree_path)
-                                logger.info("Removed residual worktree at %s", worktree_path)
-                            except GitHubOpsError:
-                                # Fallback to force delete
-                                shutil.rmtree(worktree_path)
-                                logger.info(
-                                    "Force removed worktree directory at %s",
-                                    worktree_path,
-                                )
-                        else:
-                            # Not a worktree, just a directory
-                            shutil.rmtree(worktree_path)
-                            logger.info("Removed residual directory at %s", worktree_path)
+                    # Check and clean up residual worktree (Issue #1442).
+                    # Path.exists()/shutil.rmtree() run as the service user and
+                    # hit [Errno 13] under a user-private parent (700 home),
+                    # so we cross-check via git's own worktree registry (already
+                    # routed through the sudo wrapper in _run_git) instead of
+                    # Python filesystem calls. Bare residual dirs (registered
+                    # then pruned, but the directory survived) are detected via
+                    # path_exists_as_user; removal of those falls back to git
+                    # and, on failure, is left in place with a warning rather
+                    # than force-deleting as the service user.
+                    if any(wt.get("path") == worktree_path for wt in gh.list_worktrees()):
+                        try:
+                            gh.remove_worktree(worktree_path)
+                            logger.info("Removed residual worktree at %s", worktree_path)
+                        except GitHubOpsError as e:
+                            logger.warning(
+                                "Could not remove residual worktree %s: %s", worktree_path, e
+                            )
+                    elif gh.path_exists_as_user(worktree_path, dir_only=True):
+                        # Directory present but not git-registered (e.g. pruned).
+                        # git worktree remove will reject it; we cannot safely
+                        # rmtree as the service user, so leave it and let
+                        # create_worktree surface a clear error if it blocks.
+                        logger.warning(
+                            "Residual non-worktree directory at %s is not git-registered; "
+                            "leaving in place (no rm privilege as service user)",
+                            worktree_path,
+                        )
 
                     wt_data = gh.create_worktree(
                         path=worktree_path,
