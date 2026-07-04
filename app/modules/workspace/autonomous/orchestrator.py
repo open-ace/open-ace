@@ -495,11 +495,21 @@ class AutonomousOrchestrator:
         return self.repo.get_workflow(self._workflow_id)
 
     def _get_gh(self) -> GitHubOps:
-        """Lazily initialize GitHubOps."""
+        """Lazily initialize GitHubOps.
+
+        Prefers ``worktree_path`` (the agent's working repo once preparation
+        has run) but falls back to ``project_path`` when the worktree dir does
+        not yet exist. This matters on rerun: a previous failure may have
+        removed the worktree dir while the stale ``worktree_path`` is still in
+        the DB, so binding GitHubOps to it makes every ``git -C <worktree>``
+        fail with ENOENT (Issue #1395 rerun regression). Preparation creates
+        the worktree; until it does, the main repo is the only valid repo_path.
+        """
         wf = self.workflow
         if not self._gh and wf:
-            project_path = wf.get("worktree_path") or wf.get("project_path", "")
-            # Get system_account for multi-user permission isolation (Issue #1395)
+            worktree_path = wf.get("worktree_path", "")
+            project_path = wf.get("project_path", "")
+            # Resolve system_account for multi-user permission isolation (Issue #1395)
             system_account = None
             user_id = wf.get("user_id")
             if user_id:
@@ -507,7 +517,16 @@ class AutonomousOrchestrator:
                 user = user_repo.get_user_by_id(user_id)
                 if user:
                     system_account = user.get("system_account")
-            self._gh = GitHubOps(project_path, system_account=system_account)
+            # Prefer the worktree once it exists; otherwise the main repo.
+            # path_exists_as_user cross-user-checks under a 700 home (the
+            # service user can't stat it directly), so it's correct both for
+            # same-user dev runs and the multi-user deployment.
+            chosen = project_path
+            if worktree_path:
+                probe = GitHubOps(project_path, system_account=system_account)
+                if probe.path_exists_as_user(worktree_path, dir_only=True):
+                    chosen = worktree_path
+            self._gh = GitHubOps(chosen, system_account=system_account)
         return self._gh
 
     def _ensure_worktree(self, wf: dict) -> str:
@@ -1575,6 +1594,9 @@ class AutonomousOrchestrator:
                         "branch_strategy": "worktree",
                     }
                 )
+                # Worktree now exists; drop the cached gh (bound to the main
+                # repo) so the next _get_gh() rebinds to the worktree path.
+                self._gh = None
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -1799,6 +1821,10 @@ class AutonomousOrchestrator:
                         base="origin/main",
                     )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
+                    # The worktree now exists; drop the cached gh (bound to the
+                    # main repo during preparation) so the next _get_gh() rebinds
+                    # to the worktree path — the agent's actual working repo.
+                    self._gh = None
                 else:
                     gh.create_branch(branch_name, base="origin/main")
                 self._create_milestone(

@@ -674,3 +674,116 @@ class TestSingleShotUserIdPropagation:
         )
 
         assert captured["user_id"] == 77  # real user, not 0
+
+
+# ── _get_gh() rerun path fallback (Issue #1395 rerun regression) ─────────
+
+
+class TestGetGhRerunFallback:
+    """On rerun, a worktree-strategy workflow may carry a stale
+    ``worktree_path`` in the DB whose dir was removed by a prior failure's
+    cleanup. ``_get_gh()`` previously bound ``GitHubOps`` to that stale path
+    unconditionally (``worktree_path or project_path``), making every
+    ``git -C <stale>`` fail with ENOENT during preparation. It must fall back
+    to ``project_path`` when the worktree dir is gone, and rebind to the
+    worktree once preparation recreates it."""
+
+    def _make_orchestrator(self, wf_data):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+            ) as mock_repo_cls,
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = wf_data
+            mock_repo.update_workflow.return_value = wf_data
+            mock_repo_cls.return_value = mock_repo
+            orch = AutonomousOrchestrator(wf_data["workflow_id"])
+            orch.repo = mock_repo
+            orch.emitter = MagicMock()
+            return orch
+
+    def _wf(self, **overrides):
+        base = {
+            "workflow_id": "wf-1395",
+            "user_id": 1,
+            "project_path": "/home/rhuang/open-ace",
+            "worktree_path": "/home/rhuang/auto-dev-dead",
+            "branch_strategy": "worktree",
+            "branch_name": "auto-dev/dead",
+        }
+        base.update(overrides)
+        return base
+
+    def test_falls_back_to_project_when_worktree_dir_missing(self, monkeypatch):
+        # Stale worktree_path in DB, dir gone → _get_gh must use project_path.
+        orch = self._make_orchestrator(self._wf())
+
+        # path_exists_as_user → False (worktree dir doesn't exist)
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
+            lambda self, path, **kw: False,
+        )
+
+        gh = orch._get_gh()
+        assert gh.repo_path == "/home/rhuang/open-ace"  # project_path, not stale
+
+    def test_uses_worktree_when_dir_exists(self, monkeypatch):
+        # Worktree dir present → _get_gh binds to worktree_path.
+        orch = self._make_orchestrator(self._wf())
+
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
+            lambda self, path, **kw: True,
+        )
+
+        gh = orch._get_gh()
+        assert gh.repo_path == "/home/rhuang/auto-dev-dead"  # worktree_path
+
+    def test_no_worktree_path_uses_project_path(self, monkeypatch):
+        # Empty worktree_path (e.g. merge cleanup cleared it) → project_path.
+        orch = self._make_orchestrator(self._wf(worktree_path=""))
+
+        called = []
+
+        def _probe(self, path, **kw):
+            called.append(path)
+            return False
+
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
+            _probe,
+        )
+
+        gh = orch._get_gh()
+        assert gh.repo_path == "/home/rhuang/open-ace"
+        # Must NOT probe an empty worktree path.
+        assert called == []
+
+    def test_cached_gh_not_rebuilt_until_reset(self, monkeypatch):
+        # After the first _get_gh() caches a gh bound to project_path, a
+        # second call returns the same instance even if the worktree later
+        # appears — unless self._gh is reset (preparation does this after
+        # creating the worktree).
+        orch = self._make_orchestrator(self._wf())
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
+            lambda self, path, **kw: False,
+        )
+
+        first = orch._get_gh()
+        second = orch._get_gh()
+        assert first is second  # cached
+
+        # Simulate preparation finishing: reset cache, worktree now exists.
+        orch._gh = None
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
+            lambda self, path, **kw: True,
+        )
+        third = orch._get_gh()
+        assert third.repo_path == "/home/rhuang/auto-dev-dead"  # rebound
+        assert third is not first
