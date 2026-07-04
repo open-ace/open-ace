@@ -851,6 +851,19 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
         print_info "更新现有 sudoers 文件（补齐 git/gh/CLI/wrapper 规则）..."
     fi
 
+    # Back up the existing sudoers file before overwriting so a visudo
+    # failure restores the last-known-good state rather than deleting the
+    # file and leaving the service with no sudoers at all.
+    local sudoers_backup=""
+    if [ -f "$sudoers_file" ]; then
+        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
+        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
+            print_info "已备份现有 sudoers 到 $sudoers_backup"
+        else
+            sudoers_backup=""
+        fi
+    fi
+
     # Write sudoers file
     echo "$sudoers_content" > "$sudoers_file"
     chmod 440 "$sudoers_file"
@@ -862,7 +875,16 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
         print_info "  sudo -u <username> $webui_path --port <port>"
     else
         print_error "Sudoers 语法错误，回滚..."
-        rm -f "$sudoers_file"
+        # Restore the pre-write backup if we have one (keeps the service
+        # functional on a botched rewrite). Only rm if there was no prior
+        # file (fresh install where a bad file is worse than none).
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "已从 $sudoers_backup 恢复上一个 sudoers（服务继续可用）"
+        else
+            rm -f "$sudoers_file"
+        fi
         return 1
     fi
 

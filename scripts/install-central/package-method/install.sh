@@ -2057,6 +2057,20 @@ ${other_user_rules}"
 ${current_user_rules}
 "
 
+    # Back up the existing sudoers file before overwriting so a visudo
+    # failure restores the last-known-good state rather than deleting the
+    # file and leaving the service with no sudoers at all (which took the
+    # 159 deployment down — agent launches got "a password is required").
+    local sudoers_backup=""
+    if [ -f "$sudoers_file" ]; then
+        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
+        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
+            print_info "Backed up existing sudoers to $sudoers_backup"
+        else
+            sudoers_backup=""  # couldn't back up; fall through to rm on failure
+        fi
+    fi
+
     # Write sudoers file
     echo "$sudoers_content" > "$sudoers_file"
     chmod 440 "$sudoers_file"
@@ -2069,7 +2083,16 @@ ${current_user_rules}
         print_info "  sudo python3 <fetch_script> --multi-user --config <config_path> (for multi-user data collection)"
     else
         print_error "Sudoers syntax error, rolling back..."
-        rm -f "$sudoers_file"
+        # Restore the pre-write backup if we have one (keeps the service
+        # functional on a botched rewrite). Only rm if there was no prior
+        # file (fresh install where a bad file is worse than none).
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "Restored previous sudoers from $sudoers_backup (service keeps running)"
+        else
+            rm -f "$sudoers_file"
+        fi
         return 1
     fi
 
