@@ -105,11 +105,17 @@ RUN groupadd -r open-ace && \
 # This ensures environment variables are preserved when running sudo -u <user>
 # Support both open-ace (container user) and openace (workspace user synced from database)
 # NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
+# Issue #1395: add OPENACE_CLI (autonomous CLI tools) + run-as wrapper rule so the
+# autonomous agent can be launched as the repo owner even under 700 home dirs.
 RUN echo '# Open ACE WebUI - Pre-configured sudoers for multi-user workspace\n\
 open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
 openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *\n\
-openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *\n\
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *\n\
+openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *\n\
+open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *\n\
+openace ALL=(ALL) NOPASSWD: /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *\n\
+open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as *\n\
+openace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as *\n\
 Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"\n' \
     > /etc/sudoers.d/open-ace-webui && \
     chmod 440 /etc/sudoers.d/open-ace-webui
@@ -129,6 +135,13 @@ COPY --from=frontend-builder --chown=open-ace:open-ace /app/static/js/dist ./sta
 # Copy and set up entrypoint script
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Install cross-user agent launcher wrapper (Issue #1395)
+# Lets the autonomous agent launch CLIs with cwd=<repo> under a 700 home dir by
+# chdir'ing as root then runuser -u <owner>. Owned by root so the sudoers rule
+# (ALL=(root) NOPASSWD) above can apply.
+COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
+RUN chmod 755 /usr/local/bin/openace-run-as && chown root:root /usr/local/bin/openace-run-as
 
 # NOTE: Container runs as root to support multi-user workspace mode (sudo -u <user>)
 # The entrypoint script handles privilege management and user creation.

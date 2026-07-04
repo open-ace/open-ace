@@ -251,7 +251,7 @@ class MessageRepository:
             params.append(sender_name)
 
         if search:
-            conditions.append("content LIKE ?")
+            conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
         query = f"""
@@ -320,7 +320,7 @@ class MessageRepository:
             params.append(sender_name)
 
         if search:
-            conditions.append("content LIKE ?")
+            conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
         query = f"""
@@ -666,7 +666,7 @@ class MessageRepository:
                 params.extend(roles)
 
         if search:
-            conditions.append("content LIKE ?")
+            conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -1270,7 +1270,7 @@ class MessageRepository:
                 COALESCE(SUM(tokens_used), 0) as total_tokens
             FROM daily_messages
             WHERE date >= ? AND date <= ?
-              AND sender_name LIKE ?
+              AND sender_name LIKE ? ESCAPE '\\'
               AND role IN ('user', 'assistant')
         """
         result = self.db.fetch_one(query, (start_date, end_date, f"{escape_like(sender_prefix)}%"))
@@ -1324,7 +1324,7 @@ class MessageRepository:
             SELECT COALESCE(agent_session_id, conversation_id) as session_id
             FROM daily_messages
             WHERE date >= ? AND date <= ?
-              AND sender_name LIKE ?
+              AND sender_name LIKE ? ESCAPE '\\'
               AND role = 'user'
               AND COALESCE(agent_session_id, conversation_id) IS NOT NULL
             GROUP BY session_id

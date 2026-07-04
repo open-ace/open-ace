@@ -1756,6 +1756,30 @@ find_webui_executable() {
     return 1
 }
 
+# Install the cross-user agent launcher wrapper (Issue #1395).
+# The wrapper lets the openace service launch agent CLIs (claude-code/qwen-code/
+# openclaw) with cwd=project_path under a user-private repo, by chdir'ing as
+# root then dropping to the target user via runuser. Must run BEFORE
+# configure_sudoers so the sudoers rule (which keys off -x $wrapper_path) sees it.
+install_run_as_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-run-as.sh"
+    local dst="/usr/local/bin/openace-run-as"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-run-as.sh not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-run-as.sh to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+    print_success "Installed run-as wrapper to $dst"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -1825,6 +1849,16 @@ $run_user ALL=(root) NOPASSWD: /usr/bin/python3 $script_path *"
     # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
     local cli_rule="$run_user ALL=(ALL) NOPASSWD: OPENACE_CLI"
 
+    # 【修复 Issue #1395】跨用户启动 agent CLI 的 run-as wrapper 权限。
+    # wrapper 以 root 身份 cd 到项目目录，再用 runuser 切换到目标用户 exec CLI，
+    # 解决 Popen(cwd=用户私有目录) 的 [Errno 13]。只授权 wrapper 本身，不放开
+    # bash/node/claude。wrapper 路径必须与 scripts/openace-run-as.sh 安装位置一致。
+    local wrapper_path="/usr/local/bin/openace-run-as"
+    local wrapper_rule=""
+    if [ -x "$wrapper_path" ]; then
+        wrapper_rule="$run_user ALL=(root) NOPASSWD: $wrapper_path *"
+    fi
+
     # Build current user's complete rule block (avoid empty lines from empty variables)
     local current_user_rules="# Rules for $run_user (updated on $(date '+%Y-%m-%d %H:%M:%S'))
 $run_user ALL=(ALL) NOPASSWD: $webui_path *"
@@ -1839,6 +1873,12 @@ ${webui_local_rule}"
     current_user_rules="${current_user_rules}
 ${utility_rule}
 ${cli_rule}"
+
+    # Add run-as wrapper rule if the wrapper is installed (Issue #1395)
+    if [ -n "$wrapper_rule" ]; then
+        current_user_rules="${current_user_rules}
+${wrapper_rule}"
+    fi
 
     # Only add fetch_rules if not empty
     if [ -n "$fetch_rules" ]; then
@@ -1876,24 +1916,36 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/
 
 # Autonomous development CLI tools (Issue #1395)
 # Allow running qwen-code/codex/etc. as target user for permission isolation
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *"
+Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
-        # 【修复 P0】Extract and preserve other users' rules
-        # Other users' rules = lines not starting with $run_user and not header/defaults
+        # 【修复 P0】Extract and preserve OTHER USERS' rules only.
+        # The header, defaults, Cmnd_Alias definitions, and the current
+        # $run_user's rules are all regenerated below, so they must NOT be
+        # carried over — otherwise stale comments, duplicate Cmnd_Alias
+        # definitions (visudo: "duplicate Cmnd_Alias"), or the current user's
+        # own stale rule block leak into the rewritten file.
+        #
+        # Allow-list approach: keep only genuine user-spec lines belonging to
+        # OTHER users, i.e. lines shaped "<user> ALL=...". A deny-list of
+        # comment substrings is fragile (new comments silently slip through),
+        # so match the structural pattern instead. This drops orphans
+        # (comments, Cmnd_Alias, Defaults) and the current user's block.
         local other_user_rules=""
         while IFS= read -r line; do
-            # Skip header lines, defaults, empty lines
-            if [[ "$line" =~ ^#.*Open\ ACE ]] || [[ "$line" =~ ^#.*Generated ]] || [[ "$line" =~ ^#.*Allows ]] || [[ "$line" =~ ^#.*service ]] || [[ "$line" =~ ^#.*Preserve ]] || [[ "$line" =~ ^#.*Fix ]] || [[ "$line" =~ ^#.*secure_path ]] || [[ "$line" =~ ^#.*qwen-code-webui ]] || [[ "$line" =~ ^#.*Order ]] || [[ "$line" =~ ^Defaults ]] || [[ -z "$line" ]]; then
-                continue
-            fi
-            # Skip current user's rules (will be regenerated)
-            # Use exact string matching to avoid regex issues
-            if [[ "$line" == "$run_user "* ]] || [[ "$line" == "# Allow $run_user"* ]]; then
-                continue
-            fi
-            # Preserve other users' lines
+            # Skip blank lines and comments outright.
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            # Skip Defaults / Cmnd_Alias / host-alias etc. (regenerated below).
+            [[ "$line" == Defaults* ]] && continue
+            [[ "$line" == Cmnd_Alias* || "$line" == Host_Alias* || "$line" == User_Alias* || "$line" == Runas_Alias* ]] && continue
+            # Skip the current user's rules (regenerated in current_user_rules).
+            # A user-spec looks like "$run_user ALL=(...) NOPASSWD: ...".
+            [[ "$line" == "$run_user "* ]] && continue
+            # Anything else that isn't a "<token> ALL=" user-spec is structural
+            # noise we don't know how to preserve safely — drop it rather than
+            # risk a visudo failure.
+            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_-]*\ ALL= ]] || continue
             other_user_rules="${other_user_rules}
 ${line}"
         done < "$sudoers_file"
@@ -1943,6 +1995,43 @@ ${line}"
             need_update=true
         fi
 
+        # 【修复 Issue #1395 (PR #1467 评论)】Check run-as wrapper rule.
+        # The wrapper is installed just before configure_sudoers, but the
+        # incremental update above only rewrites the file when an existing
+        # check trips. A pre-#1467 sudoers file already has webui / utils /
+        # secure_path, so without this check the wrapper rule never gets
+        # added on upgrade — stock deployments stayed broken (the agent
+        # launch failed with "sudo: a password is required").
+        # Match user+path on the same line (like the webui/fetch checks above):
+        # a file-global grep would false-pass when another user already has a
+        # wrapper rule (other_user_rules are preserved), skipping the current
+        # user's authorization.
+        local wrapper_path="/usr/local/bin/openace-run-as"
+        if [ -x "$wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing run-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
+            need_update=true
+        fi
+
+        # 【修复 Issue #1395】Check OPENACE_CLI Cmnd_Alias completeness.
+        # The CLI list grew over time (qwen-code/codex/qwen → +claude/openclaw/
+        # zcode). Without this probe a pre-existing sudoers file whose other
+        # checks all pass would skip the rewrite, leaving the stale short CLI
+        # list in place — claude/openclaw/zcode would lack direct-sudo fallback
+        # authorization. Check the Cmnd_Alias definition line for each newer
+        # CLI path; any missing one trips a rewrite.
+        local cli_alias_line=""
+        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null)
+        if [ -n "$cli_alias_line" ]; then
+            for cli in claude openclaw zcode; do
+                if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
+                    print_warning "Sudoers OPENACE_CLI missing '$cli' (CLI list incomplete)"
+                    need_update=true
+                    break
+                fi
+            done
+        fi
+
         # 【新增】Warn about sudoers vs systemd service user mismatch
         if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
@@ -1987,6 +2076,20 @@ ${other_user_rules}"
 ${current_user_rules}
 "
 
+    # Back up the existing sudoers file before overwriting so a visudo
+    # failure restores the last-known-good state rather than deleting the
+    # file and leaving the service with no sudoers at all (which took the
+    # 159 deployment down — agent launches got "a password is required").
+    local sudoers_backup=""
+    if [ -f "$sudoers_file" ]; then
+        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
+        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
+            print_info "Backed up existing sudoers to $sudoers_backup"
+        else
+            sudoers_backup=""  # couldn't back up; fall through to rm on failure
+        fi
+    fi
+
     # Write sudoers file
     echo "$sudoers_content" > "$sudoers_file"
     chmod 440 "$sudoers_file"
@@ -1999,7 +2102,16 @@ ${current_user_rules}
         print_info "  sudo python3 <fetch_script> --multi-user --config <config_path> (for multi-user data collection)"
     else
         print_error "Sudoers syntax error, rolling back..."
-        rm -f "$sudoers_file"
+        # Restore the pre-write backup if we have one (keeps the service
+        # functional on a botched rewrite). Only rm if there was no prior
+        # file (fresh install where a bad file is worse than none).
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "Restored previous sudoers from $sudoers_backup (service keeps running)"
+        else
+            rm -f "$sudoers_file"
+        fi
         return 1
     fi
 
@@ -3089,6 +3201,10 @@ install_local() {
                 fi
             fi
         fi
+
+        # Install the run-as wrapper BEFORE configure_sudoers (Issue #1395):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-run-as ]`.
+        install_run_as_wrapper "$sudoers_install_dir"
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then

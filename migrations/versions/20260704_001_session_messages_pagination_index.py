@@ -1,7 +1,7 @@
 """session_messages pagination index + NOT NULL timestamp
 
 Revision ID: 20260704_001_session_messages_pagination_index
-Revises: 20260703_002_add_sso_auth_states
+Revises: 20260704_001_add_test_retry_columns
 Create Date: 2026-07-04
 
 Issue: #241 adversarial review problem #22 — ``get_session`` /
@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 
 # revision identifiers, used by Alembic.
 revision: str = "20260704_001_session_messages_pagination_index"
-down_revision: str | None = "20260703_002_add_sso_auth_states"
+down_revision: str | None = "20260704_001_add_test_retry_columns"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

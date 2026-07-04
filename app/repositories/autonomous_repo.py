@@ -80,6 +80,9 @@ class AutonomousWorkflowRepository:
         "test_session_id",
         "transient_retry_count",
         "content_language",
+        "test_retries",
+        "skip_retries",
+        "dev_retries_on_test_fail",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",

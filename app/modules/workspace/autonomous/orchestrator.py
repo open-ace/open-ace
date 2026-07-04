@@ -11,12 +11,10 @@ import json
 import logging
 import os
 import re
-import shutil
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from app.modules.workspace.autonomous.agent_runner import (
@@ -497,11 +495,21 @@ class AutonomousOrchestrator:
         return self.repo.get_workflow(self._workflow_id)
 
     def _get_gh(self) -> GitHubOps:
-        """Lazily initialize GitHubOps."""
+        """Lazily initialize GitHubOps.
+
+        Prefers ``worktree_path`` (the agent's working repo once preparation
+        has run) but falls back to ``project_path`` when the worktree dir does
+        not yet exist. This matters on rerun: a previous failure may have
+        removed the worktree dir while the stale ``worktree_path`` is still in
+        the DB, so binding GitHubOps to it makes every ``git -C <worktree>``
+        fail with ENOENT (Issue #1395 rerun regression). Preparation creates
+        the worktree; until it does, the main repo is the only valid repo_path.
+        """
         wf = self.workflow
         if not self._gh and wf:
-            project_path = wf.get("worktree_path") or wf.get("project_path", "")
-            # Get system_account for multi-user permission isolation (Issue #1395)
+            worktree_path = wf.get("worktree_path", "")
+            project_path = wf.get("project_path", "")
+            # Resolve system_account for multi-user permission isolation (Issue #1395)
             system_account = None
             user_id = wf.get("user_id")
             if user_id:
@@ -509,7 +517,16 @@ class AutonomousOrchestrator:
                 user = user_repo.get_user_by_id(user_id)
                 if user:
                     system_account = user.get("system_account")
-            self._gh = GitHubOps(project_path, system_account=system_account)
+            # Prefer the worktree once it exists; otherwise the main repo.
+            # path_exists_as_user cross-user-checks under a 700 home (the
+            # service user can't stat it directly), so it's correct both for
+            # same-user dev runs and the multi-user deployment.
+            chosen = project_path
+            if worktree_path:
+                probe = GitHubOps(project_path, system_account=system_account)
+                if probe.path_exists_as_user(worktree_path, dir_only=True):
+                    chosen = worktree_path
+            self._gh = GitHubOps(chosen, system_account=system_account)
         return self._gh
 
     def _ensure_worktree(self, wf: dict) -> str:
@@ -545,16 +562,9 @@ class AutonomousOrchestrator:
             return worktree_path or project_path
 
         canonical = os.path.realpath(worktree_path)
-        # Valid worktree: a .git file/dir inside means git set it up. If the
-        # stored path was unnormalized (legacy ".."), persist the canonical
-        # form so JSONL session detection matches Claude's encoding.
-        if worktree_path and os.path.isfile(os.path.join(canonical, ".git")):
-            if canonical != worktree_path:
-                self._update_workflow({"worktree_path": canonical})
-            return canonical
-
-        # Worktree missing — recreate from the main repo.
-        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
+        # Resolve system_account up front so the validity check below can use
+        # it: os.path.isfile() stats as the service user and raises
+        # PermissionError under a user-private parent (700 home, Issue #1395).
         # Get system_account for multi-user permission isolation (Issue #1395)
         system_account = None
         user_id = wf.get("user_id")
@@ -564,6 +574,20 @@ class AutonomousOrchestrator:
             if user:
                 system_account = user.get("system_account")
         main_gh = GitHubOps(project_path, system_account=system_account)
+        # Valid worktree: a .git FILE inside means git set it up (a plain
+        # clone has a .git directory instead). If the stored path was
+        # unnormalized (legacy ".."), persist the canonical form so JSONL
+        # session detection matches Claude's encoding. file_only keeps the
+        # original os.path.isfile() semantics (Issue #1395 review).
+        if worktree_path and main_gh.path_exists_as_user(
+            os.path.join(canonical, ".git"), file_only=True
+        ):
+            if canonical != worktree_path:
+                self._update_workflow({"worktree_path": canonical})
+            return canonical
+
+        # Worktree missing — recreate from the main repo.
+        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
         try:
             main_gh._run_git(["fetch", "origin", "main"])
             # Does the branch still exist locally or on origin?
@@ -1562,7 +1586,30 @@ class AutonomousOrchestrator:
                 # dir on disk agree; an unnormalized path later breaks JSONL
                 # session detection (#814).
                 wt_path = os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}")
-                gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
+                # A prior fork attempt may have created the branch then failed
+                # before/after registering the worktree; cleanup only removes
+                # the worktree, not the branch. Probe for a surviving branch
+                # (local or remote) and attach via add_worktree (no -b) if it
+                # exists, otherwise create both fresh. Same pattern as the
+                # main prep path and _ensure_worktree (#814).
+                _fork_branch_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                _fork_remote_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                if _fork_branch_exists or _fork_remote_exists:
+                    gh.add_worktree(path=wt_path, branch=branch_name)
+                else:
+                    gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
                 self._update_workflow(
                     {
                         "worktree_path": wt_path,
@@ -1570,6 +1617,9 @@ class AutonomousOrchestrator:
                         "branch_strategy": "worktree",
                     }
                 )
+                # Worktree now exists; drop the cached gh (bound to the main
+                # repo) so the next _get_gh() rebinds to the worktree path.
+                self._gh = None
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -1759,32 +1809,75 @@ class AutonomousOrchestrator:
                     # This happens when worktree dir was deleted externally (Issue #1442)
                     gh._run_git(["worktree", "prune"])
 
-                    # Check and clean up residual worktree directory (Issue #1442)
-                    if Path(worktree_path).exists():
-                        git_file = Path(worktree_path) / ".git"
-                        if git_file.exists() and git_file.is_file():
-                            # Valid worktree - remove via git
-                            try:
-                                gh.remove_worktree(worktree_path)
-                                logger.info("Removed residual worktree at %s", worktree_path)
-                            except GitHubOpsError:
-                                # Fallback to force delete
-                                shutil.rmtree(worktree_path)
-                                logger.info(
-                                    "Force removed worktree directory at %s",
-                                    worktree_path,
-                                )
-                        else:
-                            # Not a worktree, just a directory
-                            shutil.rmtree(worktree_path)
-                            logger.info("Removed residual directory at %s", worktree_path)
+                    # Check and clean up residual worktree (Issue #1442).
+                    # Path.exists()/shutil.rmtree() run as the service user and
+                    # hit [Errno 13] under a user-private parent (700 home),
+                    # so we cross-check via git's own worktree registry (already
+                    # routed through the sudo wrapper in _run_git) instead of
+                    # Python filesystem calls. Bare residual dirs (registered
+                    # then pruned, but the directory survived) are detected via
+                    # path_exists_as_user; removal of those falls back to git
+                    # and, on failure, is left in place with a warning rather
+                    # than force-deleting as the service user.
+                    if any(wt.get("path") == worktree_path for wt in gh.list_worktrees()):
+                        try:
+                            gh.remove_worktree(worktree_path)
+                            logger.info("Removed residual worktree at %s", worktree_path)
+                        except GitHubOpsError as e:
+                            logger.warning(
+                                "Could not remove residual worktree %s: %s", worktree_path, e
+                            )
+                    elif gh.path_exists_as_user(worktree_path, dir_only=True):
+                        # Directory present but not git-registered (e.g. pruned).
+                        # git worktree remove will reject it; we cannot safely
+                        # rmtree as the service user, so leave it and let
+                        # create_worktree surface a clear error if it blocks.
+                        logger.warning(
+                            "Residual non-worktree directory at %s is not git-registered; "
+                            "leaving in place (no rm privilege as service user)",
+                            worktree_path,
+                        )
 
-                    wt_data = gh.create_worktree(
-                        path=worktree_path,
-                        branch=branch_name,
-                        base="origin/main",
+                    # A prior run may have created the branch then failed before
+                    # (or after) registering the worktree; the cleanup above only
+                    # removes the worktree registration, not the branch. Blindly
+                    # calling create_worktree (which uses ``-b``) would then fail
+                    # with "a branch named '<branch>' already exists". If the
+                    # branch survives (local or remote), attach a worktree to it
+                    # via add_worktree (no ``-b``); otherwise create both fresh.
+                    # Mirrors the recovery logic in _ensure_worktree.
+                    branch_exists = (
+                        gh._run_git(
+                            ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                            check=False,
+                        ).returncode
+                        == 0
                     )
+                    remote_exists = (
+                        gh._run_git(
+                            [
+                                "show-ref",
+                                "--verify",
+                                "--quiet",
+                                f"refs/remotes/origin/{branch_name}",
+                            ],
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                    if branch_exists or remote_exists:
+                        wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
+                    else:
+                        wt_data = gh.create_worktree(
+                            path=worktree_path,
+                            branch=branch_name,
+                            base="origin/main",
+                        )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
+                    # The worktree now exists; drop the cached gh (bound to the
+                    # main repo during preparation) so the next _get_gh() rebinds
+                    # to the worktree path — the agent's actual working repo.
+                    self._gh = None
                 else:
                     gh.create_branch(branch_name, base="origin/main")
                 self._create_milestone(
@@ -2569,7 +2662,19 @@ class AutonomousOrchestrator:
 
         # Detect if tests were actually skipped (agent couldn't run them)
         test_response_text = test_visible_text or test_summary
-        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
+        # TEST_STATUS: skipped is a status tag the agent emits on its own line
+        # at the end of the reply. Match it as a standalone line, not a bare
+        # substring — otherwise an agent that *explains* "TEST_STATUS: skipped
+        # 不适用" (i.e. asserts tests DID run) is false-positive matched and
+        # the workflow needlessly retries (#1277 regression).
+        _skip_tag_re = re.compile(r"(?mi)^\s*TEST_STATUS:\s*skipped\s*$")
+        # Chinese skip markers: only count when they appear as a short
+        # standalone statement (own line, <= 30 chars), not embedded in a
+        # longer sentence like "本次跳过测试是因为..." which is an explanation.
+        _cn_skip_re = re.compile(r"(?m)^\s*(测试被跳过|跳过测试)\s*[。.]?\s*$")
+        has_skip_tag = bool(_skip_tag_re.search(test_response_text)) or bool(
+            _cn_skip_re.search(test_response_text)
+        )
         _skipped_keywords = [
             "pytest 未安装",
             "pytest was not installed",
@@ -2602,7 +2707,7 @@ class AutonomousOrchestrator:
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
             test_status_tag == "skipped"
-            or any(m in test_response_text for m in _skipped_markers)
+            or has_skip_tag
             or (test_result.success and has_skip_keyword)
             or (test_result.success and not has_test_result)
         )

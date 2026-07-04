@@ -12,6 +12,7 @@ remote execution.
 import json
 import logging
 import os
+import pwd
 import re
 import shutil
 import signal
@@ -47,14 +48,20 @@ def _iso_to_epoch(ts: str) -> float | None:
 
 # Cached import — populated on first call to _run_local() which adds remote-agent to sys.path
 _extract_stream_usage: Any = None
+_is_cumulative_result_tool: Any = None
+_diff_cumulative_usage: Any = None
 
 
 def _ensure_usage_parser():
-    """Import extract_stream_usage once remote-agent is on sys.path."""
-    global _extract_stream_usage
+    """Import usage helpers once remote-agent is on sys.path."""
+    global _extract_stream_usage, _is_cumulative_result_tool, _diff_cumulative_usage
     if _extract_stream_usage is None:
         try:
-            from cli_adapters.usage_parser import extract_stream_usage
+            from cli_adapters.usage_parser import (
+                diff_cumulative_usage,
+                extract_stream_usage,
+                is_cumulative_result_tool,
+            )
         except (ImportError, ModuleNotFoundError):
             logger.warning("Falling back to built-in stream usage parser")
 
@@ -75,7 +82,18 @@ def _ensure_usage_parser():
                     "output": int(usage.get("output_tokens", 0) or 0),
                 }
 
+            # Safe fallbacks: treat no tool as cumulative → report as-is.
+            def is_cumulative_result_tool(_cli_tool: str) -> bool:
+                return False
+
+            def diff_cumulative_usage(
+                cur: dict, _last_in: int | None, _last_out: int | None
+            ) -> tuple[dict, int, int]:
+                return cur, int(cur.get("input", 0) or 0), int(cur.get("output", 0) or 0)
+
         _extract_stream_usage = extract_stream_usage
+        _is_cumulative_result_tool = is_cumulative_result_tool
+        _diff_cumulative_usage = diff_cumulative_usage
 
 
 # Default timeout for agent tasks — configurable via env var (default 1 hour)
@@ -100,6 +118,28 @@ COMPLETION_POLL_INTERVAL = 5.0
 # remote-agent/executor.py::_APPSERVER_TOOLS.
 _APPSERVER_TOOLS = frozenset({"zcode", "zcode-code"})
 
+# Path to the cross-user agent launcher (Issue #1395). The service runs as
+# `openace` but agent CLIs (claude-code/qwen-code/openclaw) infer the project
+# root from cwd and have no --cwd flag, so they must launch with cwd=project.
+# Under a user-private repo path Popen's chdir fails as the service user; this
+# wrapper (root via a narrow sudoers rule) chdir's then drops to system_account
+# via runuser. See scripts/openace-run-as.sh.
+_OPENACE_RUN_AS = os.environ.get("OPENACE_RUN_AS", "/usr/local/bin/openace-run-as")
+
+# CLI tool → LLM provider, used to mint proxy tokens for local autonomous
+# agents (mirrors remote_session_manager._cli_tool_to_provider). Local
+# autonomous agents must route through the Open ACE LLM proxy with a signed
+# proxy token — never the raw API key — so the key stays only in the DB.
+_CLI_TOOL_PROVIDER = {
+    "qwen-code-cli": "openai",
+    "claude-code": "anthropic",
+    "openclaw": "openai",
+    "codex": "openai",
+    "codex-cli": "openai",
+    "zcode": "anthropic",
+    "zcode-code": "anthropic",
+}
+
 
 class ZCodeSessionError(Exception):
     """Raised when a ZCode app-server session fails to start or send."""
@@ -119,6 +159,12 @@ class _LocalSession:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    # Cumulative-usage baseline for differencing per-turn deltas on tools
+    # whose result message reports a cross-turn running total (qwen-code-cli).
+    # Touched only by this session's stdout reader thread (see executor.py
+    # invariant); reset naturally when a new _LocalSession is created.
+    _last_cum_input: int | None = None
+    _last_cum_output: int | None = None
     request_count: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
@@ -616,6 +662,157 @@ class AutonomousAgentRunner:
         return cli_session_id
 
     @staticmethod
+    def _ensure_project_dir(project_path: str, system_account: str | None) -> None:
+        """Ensure ``project_path`` exists, cross-user safe (Issue #1395).
+
+        ``Path.mkdir`` stats/creates as the service user and raises
+        ``PermissionError`` when the path lives under a user-private parent
+        (e.g. a 0700 home). When ``system_account`` differs from the service
+        user, route through ``sudo -u <account> mkdir -p`` (``mkdir`` is
+        covered by the sudoers ``OPENACE_UTILS`` alias). Same-user skips sudo
+        to avoid failing under systemd ``NoNewPrivileges`` (mirrors
+        ``github_ops._needs_sudo``).
+        """
+        same_user = False
+        if system_account:
+            try:
+                same_user = pwd.getpwuid(os.getuid()).pw_name == system_account
+            except (KeyError, OverflowError):
+                same_user = False
+        if system_account and not same_user:
+            # Mirror Path.mkdir's failure semantics: raise on error so the
+            # caller fails fast instead of chalking it up to a later, fuzzier
+            # CLI-launch failure (Issue #1395 review).
+            result = subprocess.run(
+                ["sudo", "-u", system_account, "mkdir", "-p", project_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise PermissionError(
+                    f"Failed to create project dir {project_path} as "
+                    f"{system_account} (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
+        else:
+            Path(project_path).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _is_cross_user(system_account: str | None) -> bool:
+        """Whether agent launch needs the run-as wrapper for a different user.
+
+        Mirrors github_ops._needs_sudo: True only when system_account is set
+        AND differs from the service process user. Same-user skips the wrapper
+        to avoid failing under systemd NoNewPrivileges (sudo is forbidden).
+        """
+        if not system_account:
+            return False
+        try:
+            return pwd.getpwuid(os.getuid()).pw_name != system_account
+        except (KeyError, OverflowError):
+            # Cannot determine the current user; assume cross-user to stay safe.
+            return True
+
+    @staticmethod
+    def _wrap_agent_cmd(
+        cmd: list[str], project_path: str, system_account: str | None
+    ) -> tuple[list[str], str | None]:
+        """Wrap an agent CLI command for cross-user launch (Issue #1395).
+
+        Returns (cmd, cwd) for subprocess.Popen. Same-user keeps the command
+        verbatim and cwd=project_path. Cross-user replaces the old
+        ``["sudo","-u",account]+cmd`` (which left Popen chdir'ing as the
+        service user and failing under a private home) with the run-as
+        wrapper: it chdir's as root then drops to system_account via runuser,
+        so the CLI inherits the project cwd with the owner's identity.
+        """
+        if AutonomousAgentRunner._is_cross_user(system_account):
+            assert system_account is not None  # _is_cross_user guarantees non-empty
+            wrapped = [
+                "sudo",
+                "-n",
+                "-u",
+                "root",
+                _OPENACE_RUN_AS,
+                system_account,
+                project_path,
+            ] + cmd
+            return wrapped, None  # wrapper chdir's internally; cwd must be None
+        return cmd, project_path
+
+    @staticmethod
+    def _build_agent_env(
+        adapter: Any,
+        cli_tool: str,
+        user_id: int | None,
+        session_id: str,
+        model: str,
+    ) -> dict[str, str]:
+        """Build subprocess env with LLM proxy auth for a local agent.
+
+        Local autonomous agents (claude-code/qwen-code/etc.) must authenticate
+        through the Open ACE LLM proxy — never with the raw API key. This mints
+        a short-lived signed proxy token (via APIKeyProxyService) and asks the
+        adapter to map it onto the tool-specific env vars (e.g. ANTHROPIC_API_KEY
+        / ANTHROPIC_BASE_URL for claude-code). Mirrors executor._build_env but
+        runs in-process, without an HTTP round-trip.
+
+        Falls back to dict(os.environ) when proxy setup is unavailable (e.g. no
+        API key configured for this tool) so a dev box with env-injected keys
+        keeps working.
+        """
+        env = dict(os.environ)
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+            from app.utils.config import get_config_value
+
+            provider = _CLI_TOOL_PROVIDER.get(cli_tool, "openai")
+            api_proxy = get_api_key_proxy_service()
+
+            # Resolve the local server URL the CLI should call back to. Prefer
+            # the configured server_url/external_url; fall back to localhost:port
+            # so it works on a stock single-machine install.
+            server_url = (
+                get_config_value("server", "server_url")
+                or get_config_value(None, "external_url")
+                or f"http://localhost:{get_config_value('server', 'web_port', 5000)}"
+            ).rstrip("/")
+            proxy_url = f"{server_url}/api/remote/llm-proxy"
+
+            tenant_id = 1
+            if user_id:
+                try:
+                    from app.repositories.user_repo import UserRepository
+
+                    user = UserRepository().get_user_by_id(user_id)
+                    if user and user.get("tenant_id"):
+                        tenant_id = int(user["tenant_id"])
+                except Exception:
+                    pass  # default tenant
+
+            proxy_token = api_proxy.generate_proxy_token(
+                user_id=user_id or 0,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                provider=provider,
+                session_type="agent",
+            )
+            env.update(adapter.get_env_vars(proxy_url, proxy_token))
+            env["OPENACE_PROXY_URL"] = proxy_url
+            env["OPENACE_PROXY_TOKEN"] = proxy_token
+            if model:
+                env["OPENACE_MODEL"] = model
+        except Exception as e:
+            logger.warning(
+                "Could not set up LLM proxy auth for %s (falling back to env): %s",
+                cli_tool,
+                e,
+            )
+        return env
+
+    @staticmethod
     def _encode_project_path(project_path: str) -> str:
         """Best-effort match for the encoded project path used by Claude session history.
 
@@ -1043,6 +1240,35 @@ class AutonomousAgentRunner:
             except Exception as e:
                 logger.warning("Failed to create session record: %s", e)
 
+        # A resumed session line (main/review/test) may carry a completed/error
+        # status from a prior run (run_agent_task writes the terminal status at
+        # the end of every call). The LLM proxy token validator requires
+        # agent_sessions.status in (active, paused), so reactivate before any
+        # proxy-token-bearing env is built. Only touches the autonomous path —
+        # WebUI/other create_session callers are unaffected.
+        if self.session_manager and session_id:
+            try:
+                existing = self.session_manager.get_session(session_id)
+                if existing:
+                    cur_status = getattr(existing, "status", "") or (
+                        existing.get("status", "") if isinstance(existing, dict) else ""
+                    )
+                    if cur_status not in ("active", "paused"):
+                        # Clear stale terminal timestamps too — otherwise the
+                        # Sessions UI keeps rendering the old completed_at for a
+                        # row that is now active again (#1475 review).
+                        self.session_manager.update_session_fields(
+                            session_id,
+                            {"status": "active", "completed_at": None, "paused_at": None},
+                        )
+                        logger.info(
+                            "Reactivated session %s (was %s) for agent run",
+                            session_id[:8],
+                            cur_status,
+                        )
+            except Exception as e:
+                logger.warning("Failed to reactivate session %s: %s", session_id[:8], e)
+
         logger.info(
             "Starting agent task: tool=%s model=%s workspace=%s session=%s",
             cli_tool,
@@ -1182,7 +1408,8 @@ class AutonomousAgentRunner:
 
         # Expand project path
         project_path = os.path.expanduser(project_path)
-        Path(project_path).mkdir(parents=True, exist_ok=True)
+        # Ensure the project dir exists (cross-user safe, Issue #1395).
+        self._ensure_project_dir(project_path, system_account)
 
         # Protocol dispatch: different CLI tools speak different stdin protocols.
         # The generic _LocalSession path below assumes Claude SDK stream-json,
@@ -1219,10 +1446,12 @@ class AutonomousAgentRunner:
                 workflow_id=workflow_id,
                 milestone_id=milestone_id,
                 system_account=system_account,
+                user_id=user_id,
             )
 
-        # Build env vars (use direct env vars, no proxy for local autonomous)
-        env = dict(os.environ)
+        # Build env vars with LLM proxy auth so the agent authenticates through
+        # Open ACE (short-lived proxy token, never the raw API key).
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
         # Build command
         # When resuming an established session, pass the real CLI session_id
@@ -1260,10 +1489,10 @@ class AutonomousAgentRunner:
                 )
             cmd = [executable] + (adapter_args[1:] if len(adapter_args) > 1 else [])
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch: the run-as wrapper chdir's as root then drops to
+        # system_account (claude-code/qwen-code infer project root from cwd
+        # and have no --cwd flag). Same-user runs verbatim with cwd=project.
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching local agent: %s", " ".join(cmd))
 
@@ -1273,7 +1502,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1504,7 +1733,7 @@ class AutonomousAgentRunner:
         _ensure_usage_parser()
         adapter = get_adapter(cli_tool)
 
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
         # Resolve the ZCode session mode. The --mode CLI flag is ignored by
         # app-server (verified: sessions always start in "build" mode regardless
         # of the flag). The mode is set via session/setMode protocol call in
@@ -1522,10 +1751,8 @@ class AutonomousAgentRunner:
             permission_mode=zcode_mode,
             resume=resume,
         )
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (zcode needs cwd=project too).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching ZCode app-server (mode=%s): %s", zcode_mode, " ".join(cmd))
 
@@ -1535,7 +1762,7 @@ class AutonomousAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1838,6 +2065,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         milestone_id: str = "",
         system_account: str | None = None,
+        user_id: int | None = None,
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
@@ -1868,12 +2096,11 @@ class AutonomousAgentRunner:
 
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
-        env = dict(os.environ)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
-        # If system_account is set, wrap command with sudo -u for multi-user permission isolation
-        # (Issue #1395: Allow agent_runner to access user-private directories)
-        if system_account:
-            cmd = ["sudo", "-u", system_account] + cmd
+        # Cross-user launch via run-as wrapper (single-shot CLIs also need
+        # cwd=project; openclaw documents it relies on the caller's cwd).
+        cmd, cwd = self._wrap_agent_cmd(cmd, project_path, system_account)
 
         logger.info("Launching single-shot agent (%s): %s", cli_tool, " ".join(cmd))
 
@@ -1882,7 +2109,7 @@ class AutonomousAgentRunner:
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=project_path,
+                cwd=cwd,
                 env=env,
                 timeout=timeout,
             )
@@ -2258,6 +2485,26 @@ class AutonomousAgentRunner:
             logger.error("Failed to write to stdin for %s: %s", session.session_id[:8], e)
             return False
 
+    def _accumulate_turn_usage(self, session: _LocalSession, usage: dict) -> None:
+        """Accumulate one result message's usage into session totals.
+
+        For tools whose result message reports CROSS-TURN CUMULATIVE usage
+        (qwen-code-cli), difference successive snapshots so the running total
+        isn't re-added every turn (which inflated total_*_tokens / quota).
+        Otherwise add the raw per-request value as-is.
+        """
+        if _is_cumulative_result_tool(session.cli_tool):
+            delta, session._last_cum_input, session._last_cum_output = _diff_cumulative_usage(
+                usage,
+                session._last_cum_input,
+                session._last_cum_output,
+            )
+            session.total_input_tokens += delta["input"]
+            session.total_output_tokens += delta["output"]
+        else:
+            session.total_input_tokens += usage["input"]
+            session.total_output_tokens += usage["output"]
+
     def _read_stdout(self, session: _LocalSession) -> None:
         """Read stdout lines from the subprocess."""
         try:
@@ -2348,8 +2595,7 @@ class AutonomousAgentRunner:
                         # (not here), since one --print result summarizes all turns.
                         usage = _extract_stream_usage(session.cli_tool, parsed)
                         if usage:
-                            session.total_input_tokens += usage["input"]
-                            session.total_output_tokens += usage["output"]
+                            self._accumulate_turn_usage(session, usage)
                         session.total_tokens = (
                             session.total_input_tokens + session.total_output_tokens
                         )

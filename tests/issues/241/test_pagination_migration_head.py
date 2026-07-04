@@ -34,7 +34,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 NEW_REVISION = "20260704_001_session_messages_pagination_index"
-PARENT_REVISION = "20260703_002_add_sso_auth_states"
+PARENT_REVISION = "20260704_001_add_test_retry_columns"
 
 
 def _alembic_config() -> Config:

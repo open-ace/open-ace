@@ -362,7 +362,10 @@ CREATE TABLE autonomous_workflows (
     locked_at timestamp without time zone,
     locked_by text DEFAULT ''::text,
     transient_retry_count integer DEFAULT 0,
-    retry_count integer DEFAULT 0
+    retry_count integer DEFAULT 0,
+    test_retries integer DEFAULT 0,
+    skip_retries integer DEFAULT 0,
+    dev_retries_on_test_fail integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq

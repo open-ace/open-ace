@@ -15,9 +15,11 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from sql_compat_checker import (
     _ESCAPE_LIKE_WINDOW,
+    _SQL004_ESCAPE_FORWARD_WINDOW,
     PROJECT_ROOT,
     _check_sql001,
     _check_sql003,
+    _check_sql004,
     _extract_base_name,
     _is_boolean_field,
     _is_var_used_in_sql,
@@ -438,6 +440,133 @@ class TestSQL003:
 
 
 # ---------------------------------------------------------------------------
+# SQL004 tests — escape_like() without an ESCAPE clause
+# ---------------------------------------------------------------------------
+
+
+class TestSQL004:
+    """Tests for SQL004: LIKE uses escape_like() but has no ESCAPE clause.
+
+    Background: escape_like() only neutralizes wildcards when the SQL declares
+    an ESCAPE clause — the SQL standard has no default escape character. SQLite
+    has no default escape char, so an escape_like()'d value without ESCAPE still
+    leaks wildcards on SQLite. SQL004 enforces that escape_like()-fed LIKEs
+    carry ESCAPE.
+    """
+
+    def test_escape_like_without_escape_clause(self):  # ①
+        code = textwrap.dedent(
+            """\
+            value = escape_like(user_input)
+            conditions.append("name LIKE ?")
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 1
+        assert violations[0]["rule"] == "SQL004"
+
+    def test_same_line_escape_clause_ok(self):  # ②
+        code = textwrap.dedent(
+            r"""\
+            value = escape_like(user_input)
+            conditions.append("name LIKE ? ESCAPE '\\'")
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 0
+
+    def test_multiline_escape_clause_ok(self):  # ③ — mirrors session_manager:908-909
+        """ESCAPE on the line below LIKE must be recognized (forward window)."""
+        code = textwrap.dedent(
+            r"""\
+            value = escape_like(identity_value)
+            query = "SELECT * FROM t WHERE metadata LIKE ?"
+            "ESCAPE '\\'"
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 0
+
+    def test_like_without_escape_like_nearby_not_flagged(self):  # ④
+        """A raw LIKE (no escape_like nearby) is SQL003's concern, not SQL004's."""
+        code = textwrap.dedent(
+            """\
+            conditions.append("name LIKE ?")
+            params.append("hardcoded%")
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 0
+
+    def test_mixed_window_escape_like_feeds_all_likes(self):  # ⑤
+        """Both LIKE placeholders within an escape_like window are checked.
+
+        A hardcoded LIKE ? without ESCAPE that happens to sit inside another
+        site's escape_like window is flagged too. This window-based over-report
+        is an accepted edge case (absent in the current codebase) and is
+        documented here to pin the behavior.
+        """
+        code = textwrap.dedent(
+            """\
+            safe = escape_like(q)
+            conditions.append("a LIKE ?")
+            conditions.append("b LIKE ?")
+            params.extend([safe, "hardcoded%"])
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 2
+
+    def test_escape_like_beyond_window_not_flagged(self):  # ⑥
+        """escape_like beyond ±7 lines is not considered escape_like-fed."""
+        padding_lines = ["x = 1"] * 7
+        code = (
+            "safe = escape_like(q)\n"
+            + "\n".join(padding_lines)
+            + '\nconditions.append("name LIKE ?")\n'
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 0
+
+    def test_not_like_excluded(self):  # mirrors workspace.py:557 webui:%
+        """Hardcoded NOT LIKE exclusion patterns don't need ESCAPE."""
+        code = textwrap.dedent(
+            """\
+            # escape_like not needed: hard-coded pattern, no user input
+            conditions.append("session_id NOT LIKE ?")
+            params.append("webui:%")
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        assert len(violations) == 0
+
+    def test_param_placeholder_variants(self):
+        """SQL004 fires for all placeholder styles (?, %s, {_param()}, {p})."""
+        for snippet in [
+            'value = escape_like(q)\nquery = "x LIKE ?"\n',
+            'value = escape_like(q)\nquery = "x LIKE %s"\n',
+            'value = escape_like(q)\nquery = f"x LIKE {_param()}"\n',
+            'value = escape_like(q)\nquery = f"x LIKE {p}"\n',
+        ]:
+            assert len(_check_sql004(snippet, "test.py")) == 1, snippet
+
+    def test_forward_window_boundary(self):
+        """ESCAPE 3 lines below LIKE (beyond the +2 forward window) is flagged."""
+        code = textwrap.dedent(
+            r"""\
+            value = escape_like(q)
+            query = "x LIKE ?"
+            y = 1
+            z = 2
+            "ESCAPE '\\'"
+            """
+        )
+        violations = _check_sql004(code, "test.py")
+        # ESCAPE is on line 5, LIKE on line 2 → distance 3 (> forward window 2)
+        assert len(violations) == 1
+
+
+# ---------------------------------------------------------------------------
 # Baseline tests
 # ---------------------------------------------------------------------------
 
@@ -512,7 +641,7 @@ class TestCheckFile:
                 """\
             query = f"SELECT * FROM users WHERE {adapt_boolean_condition('is_active', True)}"
             value = escape_like(name)
-            conditions.append("name LIKE ?")
+            conditions.append("name LIKE ? ESCAPE '\\\\'")
             params.append(value)
         """
             )
@@ -558,3 +687,15 @@ class TestEscapeLike:
 
         result = escape_like("test%val", escape_char="!")
         assert result == "test!%val"
+
+    def test_escape_clause_renders_single_backslash(self):
+        """The documented ESCAPE source form must render to exactly one backslash.
+
+        Guards against the foot-gun of writing ``ESCAPE '\\\\'`` in source,
+        which renders to a two-character (illegal) SQL escape argument.
+        """
+        sql_fragment = "... LIKE ? ESCAPE '\\'"
+        # exactly one backslash between the quotes
+        assert "ESCAPE '\\" in sql_fragment
+        # never the illegal two-backslash form
+        assert "ESCAPE '\\\\'" not in sql_fragment

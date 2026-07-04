@@ -1475,7 +1475,7 @@ class SessionManager:
             params.append(session_type)
 
         if search:
-            conditions.append(f"title LIKE {_param()}")
+            conditions.append(f"title LIKE {_param()} ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"

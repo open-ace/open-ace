@@ -430,7 +430,9 @@ class PromptLibrary:
             params.append(category)
 
         if search:
-            conditions.append("(name LIKE ? OR description LIKE ? OR content LIKE ?)")
+            conditions.append(
+                "(name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')"
+            )
             params.extend(
                 [
                     f"%{escape_like(search)}%",
@@ -441,7 +443,7 @@ class PromptLibrary:
 
         if tags:
             for tag in tags:
-                conditions.append("tags LIKE ?")
+                conditions.append("tags LIKE ? ESCAPE '\\'")
                 params.append(f"%{escape_like(tag)}%")
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"

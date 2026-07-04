@@ -103,11 +103,14 @@ class TestEnsureWorktreeSelfHeal:
         wf = _make_workflow()
         canonical = os.path.realpath(wf["worktree_path"])
 
-        def fake_isfile(p):
-            # The .git marker exists inside the canonical worktree dir.
-            return p == os.path.join(canonical, ".git")
-
-        monkeypatch.setattr(os.path, "isfile", fake_isfile)
+        # _ensure_worktree now checks validity via main_gh.path_exists_as_user
+        # (cross-user safe; replaced the old os.path.isfile probe, Issue #1395).
+        fake_gh = MagicMock()
+        fake_gh.path_exists_as_user.return_value = True
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+            lambda _path, **_kw: fake_gh,
+        )
         o = _make_orchestrator(wf)
 
         result = o._ensure_worktree(wf)
@@ -122,7 +125,12 @@ class TestEnsureWorktreeSelfHeal:
         wf = _make_workflow(worktree_path=os.path.realpath("/srv/repo/../wt"))
         canonical = wf["worktree_path"]
 
-        monkeypatch.setattr(os.path, "isfile", lambda p: p == os.path.join(canonical, ".git"))
+        fake_gh = MagicMock()
+        fake_gh.path_exists_as_user.return_value = True
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+            lambda _path, **_kw: fake_gh,
+        )
         o = _make_orchestrator(wf)
 
         result = o._ensure_worktree(wf)
@@ -135,11 +143,10 @@ class TestEnsureWorktreeSelfHeal:
         wf = _make_workflow()
         canonical = os.path.realpath(wf["worktree_path"])
 
-        # No .git marker → worktree is considered missing.
-        monkeypatch.setattr(os.path, "isfile", lambda p: False)
-
         o = _make_orchestrator(wf)
         fake_gh = MagicMock()
+        # No .git marker → worktree is considered missing.
+        fake_gh.path_exists_as_user.return_value = False
         # Local branch exists.
         local_check = MagicMock(returncode=0)
         remote_check = MagicMock(returncode=1)
@@ -152,7 +159,7 @@ class TestEnsureWorktreeSelfHeal:
         ]
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path: fake_gh,
+            lambda _path, **_kw: fake_gh,
         )
 
         result = o._ensure_worktree(wf)
@@ -168,10 +175,9 @@ class TestEnsureWorktreeSelfHeal:
         wf = _make_workflow()
         canonical = os.path.realpath(wf["worktree_path"])
 
-        monkeypatch.setattr(os.path, "isfile", lambda p: False)
-
         o = _make_orchestrator(wf)
         fake_gh = MagicMock()
+        fake_gh.path_exists_as_user.return_value = False
         not_found = MagicMock(returncode=1)
         fake_gh._run_git.side_effect = [
             MagicMock(),  # fetch origin main
@@ -182,7 +188,7 @@ class TestEnsureWorktreeSelfHeal:
         ]
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path: fake_gh,
+            lambda _path, **_kw: fake_gh,
         )
 
         result = o._ensure_worktree(wf)

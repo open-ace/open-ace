@@ -1494,6 +1494,7 @@ def update_agent_sessions_stats(messages: list, tool_name: str = "openclaw") -> 
                                 WHERE session_id = {placeholder}
                                 AND role = {placeholder}
                                 AND metadata LIKE {placeholder}
+                                ESCAPE '\\'
                             """
                             # Use escape_like to prevent wildcard injection
                             escaped_msg_id = escape_like(msg_id)
