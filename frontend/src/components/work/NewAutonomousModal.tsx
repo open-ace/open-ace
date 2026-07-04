@@ -460,6 +460,10 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               <div className="form-text text-muted">
                 {t('autoSelectToolFirst', language)}
               </div>
+            ) : workspaceType === 'remote' && !selectedMachineId ? (
+              <div className="form-text text-muted">
+                {t('autoSelectMachineFirst', language)}
+              </div>
             ) : modelsLoading ? (
               <div className="form-text text-muted">{t('autoLoadingModels', language)}</div>
             ) : (
