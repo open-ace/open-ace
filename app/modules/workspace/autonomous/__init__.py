@@ -88,7 +88,10 @@ def get_ddl_statements():
             user_feedback TEXT DEFAULT '',
             original_branch_name TEXT DEFAULT '',
             transient_retry_count INTEGER DEFAULT 0,
-            content_language TEXT DEFAULT 'en'
+            content_language TEXT DEFAULT 'en',
+            test_retries INTEGER DEFAULT 0,
+            skip_retries INTEGER DEFAULT 0,
+            dev_retries_on_test_fail INTEGER DEFAULT 0
         )
         """,
     ]
@@ -110,6 +113,14 @@ def get_ddl_statements():
     )
     statements.append(
         f"ALTER TABLE autonomous_workflows ADD COLUMN require_full_review_rounds {bool_type} DEFAULT {bool_false}"
+    )
+    # test_retries / skip_retries / dev_retries_on_test_fail: counters for the
+    # development-phase test retry logic. Mirrors Alembic migration
+    # 20260704_001_add_test_retry_columns for the SQLite dev/test path.
+    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN test_retries INTEGER DEFAULT 0")
+    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN skip_retries INTEGER DEFAULT 0")
+    statements.append(
+        "ALTER TABLE autonomous_workflows ADD COLUMN dev_retries_on_test_fail INTEGER DEFAULT 0"
     )
     statements.extend(
         [

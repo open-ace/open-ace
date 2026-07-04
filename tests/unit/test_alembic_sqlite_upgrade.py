@@ -111,7 +111,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     # -> 005_add_policy_tables -> 001_add_model_gateway_config
     # -> 20260703_001_add_require_full_review_rounds
     # -> 20260703_002_add_sso_auth_states
-    assert version[0] == "20260703_002_add_sso_auth_states"
+    # -> 20260704_001_add_test_retry_columns
+    assert version[0] == "20260704_001_add_test_retry_columns"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
