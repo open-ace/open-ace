@@ -9,9 +9,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
 
 from cli_adapters.usage_parser import (
+    CUMULATIVE_RESULT_TOOLS,
+    diff_cumulative_usage,
     extract_claude_stream_usage,
     extract_qwen_stream_usage,
     extract_stream_usage,
+    is_cumulative_result_tool,
 )
 
 
@@ -164,3 +167,90 @@ class TestExtractStreamUsageDispatch:
         result = extract_stream_usage("some-unknown-tool", parsed)
         assert result is not None
         assert result["input"] == 50
+
+
+class TestCumulativeResultTools:
+    """Test cumulative-result-tool detection (cross-turn running totals)."""
+
+    def test_qwen_is_cumulative(self):
+        assert is_cumulative_result_tool("qwen-code-cli") is True
+
+    def test_claude_is_not_cumulative(self):
+        assert is_cumulative_result_tool("claude-code") is False
+
+    def test_unknown_tool_is_not_cumulative(self):
+        assert is_cumulative_result_tool("some-unknown-tool") is False
+
+    def test_qwen_in_cumulative_set(self):
+        # qwen-code-cli is in BOTH the qwen-format set and the cumulative set.
+        assert "qwen-code-cli" in CUMULATIVE_RESULT_TOOLS
+
+
+class TestDiffCumulativeUsage:
+    """Test per-turn delta derivation from cumulative snapshots."""
+
+    def test_first_turn_seeds_baseline_and_reports_full(self):
+        # First turn (last is None): delta == cur, baseline seeded to cur.
+        cur = {"input": 1000, "output": 100}
+        delta, new_in, new_out = diff_cumulative_usage(cur, None, None)
+        assert delta == {"input": 1000, "output": 100}
+        assert new_in == 1000
+        assert new_out == 100
+
+    def test_subsequent_turn_reports_difference(self):
+        # [1000, 2500] → deltas [1000, 1500]
+        delta1, last_in, last_out = diff_cumulative_usage(
+            {"input": 1000, "output": 100}, None, None
+        )
+        delta2, last_in, last_out = diff_cumulative_usage(
+            {"input": 2500, "output": 300}, last_in, last_out
+        )
+        assert delta1 == {"input": 1000, "output": 100}
+        assert delta2 == {"input": 1500, "output": 200}
+        assert (last_in, last_out) == (2500, 300)
+
+    def test_multi_turn_sequence_matches_increments(self):
+        # Cumulative [1000, 2500, 4500] → per-turn [1000, 1500, 2000]
+        seq = [(1000, 100), (2500, 300), (4500, 600)]
+        last_in, last_out = None, None
+        deltas = []
+        for cur_in, cur_out in seq:
+            delta, last_in, last_out = diff_cumulative_usage(
+                {"input": cur_in, "output": cur_out}, last_in, last_out
+            )
+            deltas.append((delta["input"], delta["output"]))
+        assert deltas == [(1000, 100), (1500, 200), (2000, 300)]
+
+    def test_non_monotonic_clamped_to_zero(self):
+        # cur < last (reset / correction) → delta clamped to 0, not negative.
+        delta, new_in, new_out = diff_cumulative_usage({"input": 100, "output": 10}, 5000, 500)
+        assert delta == {"input": 0, "output": 0}
+        # Baseline still advances to cur so subsequent turns re-seed correctly.
+        assert (new_in, new_out) == (100, 10)
+
+    def test_partial_none_baseline_treated_as_first_turn(self):
+        # If either baseline component is None, treat as first turn (safe).
+        delta, new_in, new_out = diff_cumulative_usage({"input": 700, "output": 70}, 700, None)
+        assert delta == {"input": 700, "output": 70}
+        assert (new_in, new_out) == (700, 70)
+
+    def test_missing_keys_default_to_zero(self):
+        delta, new_in, new_out = diff_cumulative_usage({}, None, None)
+        assert delta == {"input": 0, "output": 0}
+        assert (new_in, new_out) == (0, 0)
+
+    def test_string_numeric_values_coerced(self):
+        # Defensive: some payloads may carry stringified ints.
+        delta, new_in, new_out = diff_cumulative_usage(
+            {"input": "1500", "output": "200"}, "1000", "100"
+        )
+        assert delta == {"input": 500, "output": 100}
+        assert (new_in, new_out) == (1500, 200)
+
+    def test_returns_independent_dict(self):
+        # Mutating the returned delta must not affect future calls.
+        cur = {"input": 100, "output": 10}
+        delta, _, _ = diff_cumulative_usage(cur, None, None)
+        delta["input"] = 999999
+        delta2, _, _ = diff_cumulative_usage({"input": 110, "output": 11}, 100, 10)
+        assert delta2 == {"input": 10, "output": 1}
