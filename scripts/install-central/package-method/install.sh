@@ -1990,9 +1990,14 @@ ${line}"
         # secure_path, so without this check the wrapper rule never gets
         # added on upgrade — stock deployments stayed broken (the agent
         # launch failed with "sudo: a password is required").
+        # Match user+path on the same line (like the webui/fetch checks above):
+        # a file-global grep would false-pass when another user already has a
+        # wrapper rule (other_user_rules are preserved), skipping the current
+        # user's authorization.
         local wrapper_path="/usr/local/bin/openace-run-as"
-        if [ -x "$wrapper_path" ] && ! grep -qF "openace-run-as" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers missing run-as wrapper rule (wrapper installed but not authorized)"
+        if [ -x "$wrapper_path" ] && \
+           ! grep -E "^${run_user} .*(NOPASSWD: )?${wrapper_path}( |\*|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing run-as wrapper rule for user '$run_user' (wrapper installed but not authorized)"
             need_update=true
         fi
 
