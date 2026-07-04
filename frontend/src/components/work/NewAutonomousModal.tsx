@@ -96,9 +96,14 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
 
   // Data
   const { data: toolsData } = useAvailableTools();
+  // Remote mode requires a machine before we can resolve the tenant for the
+  // model pool; without it the backend falls back to tenant 1 and may surface
+  // the wrong (or cross-tenant) key list. Gate the query so remote only
+  // fetches once a machine is selected.
+  const modelsEnabled = !!cliTool && (workspaceType !== 'remote' || !!selectedMachineId);
   const { data: modelsData, isLoading: modelsLoading } = useAvailableModels(
     { tool: cliTool, workspace_type: workspaceType, machine_id: selectedMachineId || undefined },
-    !!cliTool
+    modelsEnabled
   );
   const createWorkflow = useCreateWorkflow();
 
@@ -202,11 +207,11 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
     const hasPath = isNewProject ? !!repoName.trim() : !!projectPath.trim();
     const hasRemote = workspaceType !== 'remote' || !!selectedMachineId;
-    // Model is required: an empty model lets the CLI pick its built-in
-    // default (e.g. claude-opus-4-8), which the LLM proxy may not support,
-    // causing a silent 400 mid-workflow. Force the user to pick a model
-    // from the list (which is sourced from the configured API key pool).
-    const hasModel = !!model.trim();
+    // Model is required AND must belong to the currently-loaded list. During
+    // a refetch (tool/workspace/machine switch) the old model is stale and
+    // may not exist for the new context — block submit until the fresh list
+    // confirms it (or the user picks a new one).
+    const hasModel = !!model.trim() && !modelsLoading && modelNames.has(model);
     return hasRequirements && !!cliTool && hasPath && hasRemote && hasModel;
   }, [
     requirementsMode,
@@ -219,6 +224,8 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     workspaceType,
     selectedMachineId,
     model,
+    modelsLoading,
+    modelNames,
   ]);
 
   const handleSubmit = useCallback(async () => {
