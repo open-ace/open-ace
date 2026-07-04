@@ -1815,11 +1815,41 @@ class AutonomousOrchestrator:
                             worktree_path,
                         )
 
-                    wt_data = gh.create_worktree(
-                        path=worktree_path,
-                        branch=branch_name,
-                        base="origin/main",
+                    # A prior run may have created the branch then failed before
+                    # (or after) registering the worktree; the cleanup above only
+                    # removes the worktree registration, not the branch. Blindly
+                    # calling create_worktree (which uses ``-b``) would then fail
+                    # with "a branch named '<branch>' already exists". If the
+                    # branch survives (local or remote), attach a worktree to it
+                    # via add_worktree (no ``-b``); otherwise create both fresh.
+                    # Mirrors the recovery logic in _ensure_worktree.
+                    branch_exists = (
+                        gh._run_git(
+                            ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                            check=False,
+                        ).returncode
+                        == 0
                     )
+                    remote_exists = (
+                        gh._run_git(
+                            [
+                                "show-ref",
+                                "--verify",
+                                "--quiet",
+                                f"refs/remotes/origin/{branch_name}",
+                            ],
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                    if branch_exists or remote_exists:
+                        wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
+                    else:
+                        wt_data = gh.create_worktree(
+                            path=worktree_path,
+                            branch=branch_name,
+                            base="origin/main",
+                        )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                     # The worktree now exists; drop the cached gh (bound to the
                     # main repo during preparation) so the next _get_gh() rebinds

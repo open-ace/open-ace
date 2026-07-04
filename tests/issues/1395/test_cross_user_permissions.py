@@ -290,6 +290,29 @@ class TestPreparationWorktreeCleanup:
         orch._do_preparation(wf)
         mock_gh.create_worktree.assert_called_once()
 
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_existing_branch_uses_add_worktree_not_create(self, mock_gh_cls):
+        # A prior failed run left the branch behind (worktree gone, branch
+        # survives). Blindly calling create_worktree (which uses -b) would
+        # fail "a branch named '...' already exists". The prep path must
+        # detect the surviving branch and attach via add_worktree (no -b).
+        from subprocess import CompletedProcess
+
+        mock_gh = self._setup_gh(mock_gh_cls, list_worktrees=[])
+        mock_gh.path_exists_as_user.return_value = False
+        # show-ref --verify for refs/heads/<branch> → found (rc=0).
+        found = CompletedProcess(args=[], returncode=0)
+        mock_gh._run_git.side_effect = lambda *a, **k: found
+        mock_gh.add_worktree.return_value = {"worktree_path": "/home/rhuang/auto-dev-wf-1395"}
+
+        wf = _make_workflow()
+        orch, _repo = _make_orchestrator(wf)
+
+        orch._do_preparation(wf)
+
+        mock_gh.add_worktree.assert_called_once()
+        mock_gh.create_worktree.assert_not_called()
+
 
 # ── _ensure_project_dir (agent_runner mkdir) ────────────────────────────
 
