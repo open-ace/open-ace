@@ -11,6 +11,7 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -930,27 +931,137 @@ def create_session():
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
+def _check_session_access(session, *, require_owner: bool = True):
+    """Shared ownership gate for session endpoints.
+
+    Returns a 403/404 jsonify response (with status code) when access must be
+    denied, or ``None`` when access is allowed. Mirrors the inline checks that
+    used to live in each route, so every message-loading endpoint enforces
+    ownership *before* touching ``session_messages`` (Issue #241 #22 — avoid
+    loading heavy data for a session the caller cannot see).
+    """
+    if session is None:
+        return jsonify({"success": False, "error": "Session not found"}), 404
+    if not require_owner:
+        return None
+    current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+    current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+    if current_role != "admin":
+        if not current_user_id or not session.user_id or session.user_id != current_user_id:
+            return jsonify({"success": False, "error": "Access denied"}), 403
+    return None
+
+
+def _messages_total(manager, session, milestone_id: Optional[str]) -> int:
+    """Milestone-aware message total for the pagination indicator.
+
+    ``agent_sessions.message_count`` is session-level; when a milestone filter
+    is active the total must come from a conditional COUNT so the
+    "loaded/total" indicator stays correct (Issue #241 #22 review).
+    """
+    if milestone_id is not None:
+        return int(manager.count_messages(session.session_id, milestone_id=milestone_id))
+    return int(session.message_count or 0)
+
+
 @workspace_bp.route("/sessions/<session_id>", methods=["GET"])
 def get_session(session_id):
-    """Get a session by ID."""
+    """Get a session by ID.
+
+    ``include_messages=true`` returns only the most recent page of messages
+    (default 100, max 500) plus pagination metadata — never the full history —
+    so sessions with thousands of messages no longer serialize megabytes of
+    JSON (Issue #241 #22). Load older pages via ``GET /sessions/<id>/messages``.
+    """
     try:
         include_messages = request.args.get("include_messages", "false").lower() == "true"
-
-        # First try to get from SessionManager (agent_sessions table)
         manager = get_session_manager()
-        session = manager.get_session(session_id, include_messages=include_messages)
 
-        if session:
-            # Ownership check: only the session owner or admin can access
-            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if current_role != "admin":
-                if not current_user_id or not session.user_id or session.user_id != current_user_id:
-                    return jsonify({"success": False, "error": "Access denied"}), 403
-            return jsonify({"success": True, "data": session.to_dict()})
-        return jsonify({"success": False, "error": "Session not found"}), 404
+        # Load the lightweight session (no messages) for ownership + metadata.
+        session = manager.get_session(session_id, include_messages=False)
+        denied = _check_session_access(session)
+        if denied:
+            return denied
+        assert session is not None  # _check_session_access returned the 404 above if it was None
+
+        data = session.to_dict()
+
+        if include_messages:
+            message_limit = request.args.get("message_limit", default=None, type=int)
+            milestone_id = request.args.get("milestone_id")
+            page = manager.get_messages_page(
+                session_id,
+                limit=message_limit,
+                milestone_id=milestone_id,
+            )
+            data["messages"] = [m.to_dict() for m in page["messages"]]
+            data["messages_total"] = _messages_total(manager, session, milestone_id)
+            data["messages_has_more"] = page["has_more"]
+            data["messages_next_cursor"] = page["next_cursor"]
+
+        return jsonify({"success": True, "data": data})
     except Exception as e:
         logger.error(f"Error getting session: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+@workspace_bp.route("/sessions/<session_id>/messages", methods=["GET"])
+def get_session_messages(session_id):
+    """Page through a session's messages with composite-key keyset pagination.
+
+    Query params:
+        limit (int): page size, default 100, clamped to [1, 500].
+        before_timestamp (str): cursor timestamp (raw stored ISO form).
+        before_id (int): cursor id (tiebreaker, paired with before_timestamp).
+        milestone_id (str): optional milestone filter.
+
+    Returns ``{messages, has_more, next_cursor, total}``. ``next_cursor`` is the
+    ``(timestamp, id)`` of the oldest retained message, or ``None`` when there
+    is no older page. Older pages are loaded by passing the previous response's
+    ``next_cursor`` back as ``before_timestamp``/``before_id`` (Issue #241 #22).
+    """
+    try:
+        manager = get_session_manager()
+        # Ownership must be checked on the session BEFORE reading messages.
+        session = manager.get_session(session_id, include_messages=False)
+        denied = _check_session_access(session)
+        if denied:
+            return denied
+        assert session is not None  # _check_session_access returned the 404 above if it was None
+
+        message_limit = request.args.get("limit", default=None, type=int)
+        before_timestamp = request.args.get("before_timestamp")
+        before_id = request.args.get("before_id", default=None, type=int)
+        milestone_id = request.args.get("milestone_id")
+
+        # A cursor is only meaningful when both parts are present; a lone
+        # before_timestamp would otherwise be silently ignored.
+        if before_timestamp is None or before_id is None:
+            before_timestamp = None
+            before_id = None
+
+        page = manager.get_messages_page(
+            session_id,
+            limit=message_limit,
+            before_timestamp=before_timestamp,
+            before_id=before_id,
+            milestone_id=milestone_id,
+        )
+        total = _messages_total(manager, session, milestone_id)
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "messages": [m.to_dict() for m in page["messages"]],
+                    "has_more": page["has_more"],
+                    "next_cursor": page["next_cursor"],
+                    "total": total,
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting session messages: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 

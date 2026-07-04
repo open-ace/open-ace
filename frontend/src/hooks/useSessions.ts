@@ -24,12 +24,44 @@ export function useSessions(options: UseSessionsOptions = {}) {
   });
 }
 
-export function useSession(sessionId: string, includeMessages: boolean = false, enabled = true) {
+export function useSession(
+  sessionId: string,
+  includeMessages: boolean = false,
+  enabled = true,
+  messageLimit?: number
+) {
   return useQuery<{ success: boolean; data: AgentSession; error?: string }>({
-    queryKey: ['sessions', sessionId, includeMessages],
-    queryFn: () => sessionsApi.getSession(sessionId, includeMessages),
+    queryKey: ['sessions', sessionId, includeMessages, messageLimit ?? null],
+    queryFn: () => sessionsApi.getSession(sessionId, includeMessages, messageLimit),
     enabled: enabled && !!sessionId,
     staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+/**
+ * Fetch one older page of session messages via keyset cursor (Issue #241 #22).
+ *
+ * The most-recent page is delivered embedded in ``useSession(..., true)``; this
+ * hook is for walking further back. It is keyed on the cursor so each distinct
+ * older page is cached independently, and ``enabled`` lets the caller wait
+ * until a cursor is available.
+ */
+export function useSessionMessages(
+  sessionId: string,
+  cursor: { timestamp: string; id: number } | null,
+  enabled = true,
+  limit?: number
+) {
+  return useQuery<{ success: boolean; data: import('@/api/sessions').SessionMessagesPage }>({
+    queryKey: ['session-messages', sessionId, cursor?.timestamp ?? null, cursor?.id ?? null],
+    queryFn: () =>
+      sessionsApi.getSessionMessages(sessionId, {
+        beforeTimestamp: cursor?.timestamp,
+        beforeId: cursor?.id,
+        limit,
+      }),
+    enabled: enabled && !!sessionId && !!cursor,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
 

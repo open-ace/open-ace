@@ -827,6 +827,158 @@ class SessionManager:
 
         return [self._row_to_message(row) for row in rows]
 
+    # Default / max page sizes for message keyset pagination (Issue #241 #22).
+    DEFAULT_MESSAGE_PAGE_SIZE = 100
+    MAX_MESSAGE_PAGE_SIZE = 500
+
+    @staticmethod
+    def _raw_timestamp(value: Any) -> Optional[str]:
+        """Return the canonical stored form of a timestamp column value.
+
+        The cursor round-trips through the HTTP layer, so the timestamp must be
+        a stable string that, when fed back into ``WHERE timestamp < ?``, matches
+        stored rows exactly. We therefore return the naive-UTC ISO form (no
+        timezone suffix) that ``add_message`` writes, rather than the
+        display-formatted value produced by ``_format_dt`` (which appends
+        ``+00:00`` and would break lexicographic comparison against stored
+        values that lack the suffix).
+        """
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    @staticmethod
+    def _desc_nulls_first_order() -> str:
+        """ORDER BY clause that yields newest-first with NULLs at the very top.
+
+        Reversing this yields the final oldest-first (``ASC NULLS LAST``) render
+        order. Crucially, NULL timestamps land in the *first* (most-recent) page
+        instead of being stranded past the cursor and silently dropped — the
+        defensive net required while pre-migration NULL rows may still exist
+        (Issue #241 #22, F7). After the NOT NULL migration backfills them, this
+        branch is moot but harmless.
+        """
+        if is_postgresql():
+            return "ORDER BY timestamp DESC NULLS FIRST, id DESC"
+        # SQLite: synthesize NULLS FIRST via the IS NULL boolean (1 sorts first
+        # under DESC). Older SQLite lacks NULLS FIRST/LAST keywords.
+        return "ORDER BY (timestamp IS NULL) DESC, timestamp DESC, id DESC"
+
+    def get_messages_page(
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+        before_timestamp: Optional[str] = None,
+        before_id: Optional[int] = None,
+        milestone_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Return one page of session messages using composite-key keyset paging.
+
+        Sort key is ``(timestamp ASC, id ASC)`` — ``id`` is the tiebreaker so the
+        order is total even when timestamps collide or were backfilled out of
+        insertion order (Issue #241 #22 review). The cursor is the *smallest*
+        sort key among the retained rows, so the caller can request the next
+        older page by passing it back as ``(before_timestamp, before_id)``.
+
+        Pages are fetched newest-first (``DESC``) then reversed in-memory, which
+        — unlike ``WHERE id<cursor ORDER BY timestamp ASC LIMIT n`` — returns the
+        page immediately adjacent to the cursor rather than the globally oldest
+        rows.
+
+        Args:
+            session_id: Session ID.
+            limit: Page size (clamped to ``[1, MAX]``; defaults to
+                ``DEFAULT_MESSAGE_PAGE_SIZE``).
+            before_timestamp: Cursor timestamp (raw stored ISO form). When
+                omitted, the most-recent page (tail) is returned.
+            before_id: Cursor id, the tiebreaker paired with ``before_timestamp``.
+            milestone_id: Optional milestone filter.
+
+        Returns:
+            Dict ``{messages, has_more, next_cursor}`` where ``next_cursor`` is
+            ``{"timestamp": str, "id": int}`` of the oldest retained message, or
+            ``None`` when ``has_more`` is False.
+        """
+        if limit is None or limit <= 0:
+            limit = self.DEFAULT_MESSAGE_PAGE_SIZE
+        limit = min(limit, self.MAX_MESSAGE_PAGE_SIZE)
+
+        # Fetch limit+1 to detect whether an older page exists, without a COUNT.
+        fetch_n = limit + 1
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        conditions = [f"session_id = {_param()}"]
+        params: list[Any] = [session_id]
+        if milestone_id is not None:
+            conditions.append(f"milestone_id = {_param()}")
+            params.append(milestone_id)
+
+        if before_timestamp is not None and before_id is not None:
+            # Composite keyset: rows strictly less than the cursor in (ts, id)
+            # total order. Expanded to the portable OR form so both PG and
+            # SQLite avoid row-value syntax differences.
+            conditions.append(
+                f"(timestamp < {_param()} OR (timestamp = {_param()} AND id < {_param()}))"
+            )
+            params.extend([before_timestamp, before_timestamp, before_id])
+
+        where_clause = " AND ".join(conditions)
+        query = (
+            f"SELECT * FROM session_messages WHERE {where_clause} "
+            f"{self._desc_nulls_first_order()} LIMIT {_param()}"
+        )
+        cursor.execute(query, params + [fetch_n])
+        rows = cursor.fetchall()
+        conn.close()
+
+        has_more = len(rows) > limit
+        kept = rows[:limit]
+        # Reverse newest-first -> oldest-first for rendering.
+        kept = list(reversed(kept))
+        messages = [self._row_to_message(row) for row in kept]
+
+        next_cursor = None
+        if has_more and messages:
+            oldest = messages[0]
+            oldest_ts = self._raw_timestamp(
+                oldest.timestamp if oldest.timestamp is not None else oldest.source_timestamp
+            )
+            if oldest_ts is not None and oldest.id is not None:
+                next_cursor = {"timestamp": oldest_ts, "id": oldest.id}
+
+        return {"messages": messages, "has_more": has_more, "next_cursor": next_cursor}
+
+    def count_messages(self, session_id: str, milestone_id: Optional[str] = None) -> int:
+        """Count messages in a session, optionally scoped to a milestone.
+
+        Used for the pagination ``total`` indicator. ``agent_sessions.message_count``
+        is session-level (not milestone-aware), so the milestone case needs a
+        real conditional COUNT (Issue #241 #22 review).
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        if milestone_id is None:
+            cursor.execute(
+                f"SELECT COUNT(*) AS c FROM session_messages WHERE session_id = {_param()}",
+                (session_id,),
+            )
+        else:
+            cursor.execute(
+                f"SELECT COUNT(*) AS c FROM session_messages "
+                f"WHERE session_id = {_param()} AND milestone_id = {_param()}",
+                (session_id, milestone_id),
+            )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return 0
+        value = row["c"] if isinstance(row, dict) else row[0]
+        return int(value or 0)
+
     @staticmethod
     def _normalize_message_timestamp(value: Optional[Union[datetime, str]]) -> Optional[datetime]:
         """Normalize message timestamps to naive UTC datetimes for storage."""

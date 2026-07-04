@@ -34,6 +34,26 @@ export interface AgentSession {
   machine_name?: string;
   first_message?: string; // First user message preview (for tooltip)
   messages: SessionMessage[];
+  // Pagination metadata for the embedded recent-messages page (Issue #241 #22).
+  // Present when include_messages=true. The full history is loaded on demand
+  // via getSessionMessages() using messages_next_cursor.
+  messages_total?: number;
+  messages_has_more?: boolean;
+  messages_next_cursor?: MessageCursor | null;
+}
+
+/** Composite-key keyset cursor (timestamp tiebreak + id). */
+export interface MessageCursor {
+  timestamp: string;
+  id: number;
+}
+
+/** A page of session messages with keyset pagination metadata. */
+export interface SessionMessagesPage {
+  messages: SessionMessage[];
+  has_more: boolean;
+  next_cursor: MessageCursor | null;
+  total: number;
 }
 
 export interface SessionMessage {
@@ -136,13 +156,45 @@ export const sessionsApi = {
    */
   async getSession(
     sessionId: string,
-    includeMessages: boolean = false
+    includeMessages: boolean = false,
+    messageLimit?: number
   ): Promise<{ success: boolean; data: AgentSession; error?: string }> {
     const params: Record<string, string> = {};
     if (includeMessages) params.include_messages = 'true';
+    if (messageLimit && messageLimit > 0) params.message_limit = String(messageLimit);
 
     const response = await apiClient.get<{ success: boolean; data: AgentSession; error?: string }>(
       `/api/workspace/sessions/${sessionId}`,
+      params
+    );
+    return response;
+  },
+
+  /**
+   * Page through a session's messages with composite-key keyset pagination
+   * (Issue #241 #22). Omit the cursor to fetch the most-recent page; pass the
+   * previous response's next_cursor as beforeTimestamp/beforeId to load the
+   * next older page.
+   */
+  async getSessionMessages(
+    sessionId: string,
+    opts: {
+      limit?: number;
+      beforeTimestamp?: string;
+      beforeId?: number;
+      milestoneId?: string;
+    } = {}
+  ): Promise<{ success: boolean; data: SessionMessagesPage }> {
+    const params: Record<string, string> = {};
+    if (opts.limit && opts.limit > 0) params.limit = String(opts.limit);
+    if (opts.beforeTimestamp && opts.beforeId !== undefined && opts.beforeId !== null) {
+      params.before_timestamp = opts.beforeTimestamp;
+      params.before_id = String(opts.beforeId);
+    }
+    if (opts.milestoneId) params.milestone_id = opts.milestoneId;
+
+    const response = await apiClient.get<{ success: boolean; data: SessionMessagesPage }>(
+      `/api/workspace/sessions/${sessionId}/messages`,
       params
     );
     return response;

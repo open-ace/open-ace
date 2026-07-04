@@ -494,24 +494,53 @@ class MessageRepository:
         result = self.db.fetch_one(query, tuple(params))
         return int(result["total"]) if result else 0
 
-    def get_conversation_timeline(self, session_id: str) -> list[dict]:
+    def get_conversation_timeline(
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> list[dict]:
         """
         Get timeline of messages for a conversation.
 
+        ``full_entry`` is intentionally omitted from the result set — it holds
+        the entire raw message JSON and can be hundreds of KB per row, so a
+        timeline of thousands of messages used to serialize multi-MB responses
+        (Issue #241 #22). Only the lightweight display columns are returned.
+
+        Note: the ``COALESCE(...)`` predicate defeats any B-tree index, so the
+        pagination here caps the *row count* + column size rather than relying
+        on an index. The savings come from dropping ``full_entry`` and the
+        ``LIMIT`` truncation, not from index acceleration.
+
         Args:
             session_id: Conversation/session ID.
+            limit: Optional cap on number of messages (default 100 when unset
+                via the route). ``None`` preserves the legacy unbounded behavior
+                for internal callers that still request it.
+            offset: Offset for pagination.
 
         Returns:
-            List[Dict]: List of messages in the conversation.
+            List[Dict]: List of messages (without ``full_entry``).
         """
-        # Use COALESCE to match session_id from multiple possible fields
+        # Use COALESCE to match session_id from multiple possible fields.
+        # Select only display columns; never full_entry (size bomb).
         query = """
-            SELECT * FROM daily_messages
+            SELECT id, date, tool_name, host_name, message_id, parent_id, role,
+                   content, tokens_used, input_tokens, output_tokens, model,
+                   timestamp, sender_id, sender_name, message_source,
+                   feishu_conversation_id, group_subject, is_group_chat,
+                   agent_session_id, conversation_id, user_id, project_path
+            FROM daily_messages
             WHERE COALESCE(conversation_id, feishu_conversation_id, agent_session_id) = ?
             ORDER BY timestamp ASC
         """
+        params: list = [session_id]
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
 
-        return self.db.fetch_all(query, (session_id,))
+        return self.db.fetch_all(query, tuple(params))
 
     def get_conversation_details(self, session_id: str) -> Optional[dict]:
         """
