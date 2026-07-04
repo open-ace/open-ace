@@ -2013,6 +2013,25 @@ ${line}"
             need_update=true
         fi
 
+        # 【修复 Issue #1395】Check OPENACE_CLI Cmnd_Alias completeness.
+        # The CLI list grew over time (qwen-code/codex/qwen → +claude/openclaw/
+        # zcode). Without this probe a pre-existing sudoers file whose other
+        # checks all pass would skip the rewrite, leaving the stale short CLI
+        # list in place — claude/openclaw/zcode would lack direct-sudo fallback
+        # authorization. Check the Cmnd_Alias definition line for each newer
+        # CLI path; any missing one trips a rewrite.
+        local cli_alias_line=""
+        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null)
+        if [ -n "$cli_alias_line" ]; then
+            for cli in claude openclaw zcode; do
+                if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
+                    print_warning "Sudoers OPENACE_CLI missing '$cli' (CLI list incomplete)"
+                    need_update=true
+                    break
+                fi
+            done
+        fi
+
         # 【新增】Warn about sudoers vs systemd service user mismatch
         if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
