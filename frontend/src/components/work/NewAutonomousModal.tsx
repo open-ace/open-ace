@@ -97,7 +97,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   // Data
   const { data: toolsData } = useAvailableTools();
   const { data: modelsData, isLoading: modelsLoading } = useAvailableModels(
-    { tool: cliTool, workspace_type: workspaceType },
+    { tool: cliTool, workspace_type: workspaceType, machine_id: selectedMachineId || undefined },
     !!cliTool
   );
   const createWorkflow = useCreateWorkflow();
@@ -122,13 +122,15 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   // Clear the selected model when the model list changes (tool / workspace /
   // machine switch refetches models). Otherwise the stale model survives in
   // state, `hasModel` passes, and the user submits a model that's no longer in
-  // the list. Also guards against the first-paint empty-list flash.
+  // the list — including the case where the new list is empty (e.g. switching
+  // to a tool with no configured models). Skip while loading to avoid clearing
+  // during the brief refetch window before data arrives.
   const modelNames = useMemo(() => new Set(models.map((m: any) => m.name)), [models]);
   useEffect(() => {
-    if (model && modelNames.size > 0 && !modelNames.has(model)) {
+    if (model && !modelsLoading && !modelNames.has(model)) {
       setModel('');
     }
-  }, [model, modelNames]);
+  }, [model, modelNames, modelsLoading]);
 
   const persistLastProjectPath = useCallback(
     (path: string, type: 'local' | 'remote', machineId?: string) => {
