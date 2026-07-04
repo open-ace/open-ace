@@ -2662,7 +2662,19 @@ class AutonomousOrchestrator:
 
         # Detect if tests were actually skipped (agent couldn't run them)
         test_response_text = test_visible_text or test_summary
-        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
+        # TEST_STATUS: skipped is a status tag the agent emits on its own line
+        # at the end of the reply. Match it as a standalone line, not a bare
+        # substring — otherwise an agent that *explains* "TEST_STATUS: skipped
+        # 不适用" (i.e. asserts tests DID run) is false-positive matched and
+        # the workflow needlessly retries (#1277 regression).
+        _skip_tag_re = re.compile(r"(?mi)^\s*TEST_STATUS:\s*skipped\s*$")
+        # Chinese skip markers: only count when they appear as a short
+        # standalone statement (own line, <= 30 chars), not embedded in a
+        # longer sentence like "本次跳过测试是因为..." which is an explanation.
+        _cn_skip_re = re.compile(r"(?m)^\s*(测试被跳过|跳过测试)\s*[。.]?\s*$")
+        has_skip_tag = bool(_skip_tag_re.search(test_response_text)) or bool(
+            _cn_skip_re.search(test_response_text)
+        )
         _skipped_keywords = [
             "pytest 未安装",
             "pytest was not installed",
@@ -2695,7 +2707,7 @@ class AutonomousOrchestrator:
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
             test_status_tag == "skipped"
-            or any(m in test_response_text for m in _skipped_markers)
+            or has_skip_tag
             or (test_result.success and has_skip_keyword)
             or (test_result.success and not has_test_result)
         )
