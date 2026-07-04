@@ -1920,20 +1920,32 @@ Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
-        # 【修复 P0】Extract and preserve other users' rules
-        # Other users' rules = lines not starting with $run_user and not header/defaults
+        # 【修复 P0】Extract and preserve OTHER USERS' rules only.
+        # The header, defaults, Cmnd_Alias definitions, and the current
+        # $run_user's rules are all regenerated below, so they must NOT be
+        # carried over — otherwise stale comments, duplicate Cmnd_Alias
+        # definitions (visudo: "duplicate Cmnd_Alias"), or the current user's
+        # own stale rule block leak into the rewritten file.
+        #
+        # Allow-list approach: keep only genuine user-spec lines belonging to
+        # OTHER users, i.e. lines shaped "<user> ALL=...". A deny-list of
+        # comment substrings is fragile (new comments silently slip through),
+        # so match the structural pattern instead. This drops orphans
+        # (comments, Cmnd_Alias, Defaults) and the current user's block.
         local other_user_rules=""
         while IFS= read -r line; do
-            # Skip header lines, defaults, empty lines
-            if [[ "$line" =~ ^#.*Open\ ACE ]] || [[ "$line" =~ ^#.*Generated ]] || [[ "$line" =~ ^#.*Allows ]] || [[ "$line" =~ ^#.*service ]] || [[ "$line" =~ ^#.*Preserve ]] || [[ "$line" =~ ^#.*Fix ]] || [[ "$line" =~ ^#.*secure_path ]] || [[ "$line" =~ ^#.*qwen-code-webui ]] || [[ "$line" =~ ^#.*Order ]] || [[ "$line" =~ ^Defaults ]] || [[ -z "$line" ]]; then
-                continue
-            fi
-            # Skip current user's rules (will be regenerated)
-            # Use exact string matching to avoid regex issues
-            if [[ "$line" == "$run_user "* ]] || [[ "$line" == "# Allow $run_user"* ]]; then
-                continue
-            fi
-            # Preserve other users' lines
+            # Skip blank lines and comments outright.
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            # Skip Defaults / Cmnd_Alias / host-alias etc. (regenerated below).
+            [[ "$line" == Defaults* ]] && continue
+            [[ "$line" == Cmnd_Alias* || "$line" == Host_Alias* || "$line" == User_Alias* || "$line" == Runas_Alias* ]] && continue
+            # Skip the current user's rules (regenerated in current_user_rules).
+            # A user-spec looks like "$run_user ALL=(...) NOPASSWD: ...".
+            [[ "$line" == "$run_user "* ]] && continue
+            # Anything else that isn't a "<token> ALL=" user-spec is structural
+            # noise we don't know how to preserve safely — drop it rather than
+            # risk a visudo failure.
+            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_-]*\ ALL= ]] || continue
             other_user_rules="${other_user_rules}
 ${line}"
         done < "$sudoers_file"
