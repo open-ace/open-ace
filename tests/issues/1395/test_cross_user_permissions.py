@@ -810,3 +810,119 @@ class TestGetGhRerunFallback:
         third = orch._get_gh()
         assert third.repo_path == "/home/rhuang/auto-dev-dead"  # rebound
         assert third is not first
+
+
+# ── run_agent_task session reactivation (proxy 401 on resumed line) ──────
+
+
+class TestRunAgentTaskSessionReactivation:
+    """A resumed session line (main/review/test) may carry a completed/error
+    status from a prior run. The LLM proxy token validator requires
+    agent_sessions.status in (active, paused), so run_agent_task must
+    reactivate the row before any proxy-token-bearing env is built. Without
+    this, the second call on a line 401s with "session not active"."""
+
+    def _make_runner(self, monkeypatch):
+        from app.modules.workspace.autonomous.agent_runner import (
+            AgentTaskResult,
+            AutonomousAgentRunner,
+        )
+
+        runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+        runner.session_manager = MagicMock()
+
+        # Stub _run_local so no real CLI launches; return a minimal success.
+        def fake_run_local(self, **kwargs):
+            return AgentTaskResult(session_id=kwargs.get("session_id", "s"), success=True)
+
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.agent_runner.AutonomousAgentRunner._run_local",
+            fake_run_local,
+        )
+        return runner
+
+    def test_completed_session_reactivated_to_active(self, monkeypatch):
+        runner = self._make_runner(monkeypatch)
+        # Session exists, status=completed (prior run finished).
+        runner.session_manager.get_session.return_value = MagicMock(status="completed")
+
+        runner.run_agent_task(
+            workflow_id="wf",
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="x",
+            session_id="sess-completed",
+        )
+
+        # The FIRST update_session_fields call is the reactivation (active);
+        # a later post-run call writes the terminal status. Assert the first.
+        calls = runner.session_manager.update_session_fields.call_args_list
+        assert calls[0] == (("sess-completed", {"status": "active"}),)
+
+    def test_error_session_reactivated_to_active(self, monkeypatch):
+        runner = self._make_runner(monkeypatch)
+        runner.session_manager.get_session.return_value = MagicMock(status="error")
+
+        runner.run_agent_task(
+            workflow_id="wf",
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="x",
+            session_id="sess-error",
+        )
+
+        calls = runner.session_manager.update_session_fields.call_args_list
+        assert calls[0] == (("sess-error", {"status": "active"}),)
+
+    def test_active_session_no_reactivation_call(self, monkeypatch):
+        runner = self._make_runner(monkeypatch)
+        runner.session_manager.get_session.return_value = MagicMock(status="active")
+
+        runner.run_agent_task(
+            workflow_id="wf",
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="x",
+            session_id="sess-active",
+        )
+
+        # No reactivation; only the post-run terminal-status write happens.
+        calls = runner.session_manager.update_session_fields.call_args_list
+        assert all(c.args[1] != {"status": "active"} for c in calls)
+
+    def test_paused_session_no_reactivation_call(self, monkeypatch):
+        runner = self._make_runner(monkeypatch)
+        runner.session_manager.get_session.return_value = MagicMock(status="paused")
+
+        runner.run_agent_task(
+            workflow_id="wf",
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="x",
+            session_id="sess-paused",
+        )
+
+        calls = runner.session_manager.update_session_fields.call_args_list
+        assert all(c.args[1] != {"status": "active"} for c in calls)
+
+    def test_missing_session_no_reactivation(self, monkeypatch):
+        runner = self._make_runner(monkeypatch)
+        # Session row absent (e.g. late-creating tools) — must not crash.
+        runner.session_manager.get_session.return_value = None
+
+        runner.run_agent_task(
+            workflow_id="wf",
+            cli_tool="claude-code",
+            model="m",
+            project_path="/tmp/p",
+            prompt="x",
+            session_id="sess-missing",
+        )
+
+        # Only the post-run write (if any) happens; no reactivation.
+        calls = runner.session_manager.update_session_fields.call_args_list
+        assert all(c.args[1] != {"status": "active"} for c in calls)

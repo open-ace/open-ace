@@ -1217,6 +1217,29 @@ class AutonomousAgentRunner:
             except Exception as e:
                 logger.warning("Failed to create session record: %s", e)
 
+        # A resumed session line (main/review/test) may carry a completed/error
+        # status from a prior run (run_agent_task writes the terminal status at
+        # the end of every call). The LLM proxy token validator requires
+        # agent_sessions.status in (active, paused), so reactivate before any
+        # proxy-token-bearing env is built. Only touches the autonomous path —
+        # WebUI/other create_session callers are unaffected.
+        if self.session_manager and session_id:
+            try:
+                existing = self.session_manager.get_session(session_id)
+                if existing:
+                    cur_status = getattr(existing, "status", "") or (
+                        existing.get("status", "") if isinstance(existing, dict) else ""
+                    )
+                    if cur_status not in ("active", "paused"):
+                        self.session_manager.update_session_fields(session_id, {"status": "active"})
+                        logger.info(
+                            "Reactivated session %s (was %s) for agent run",
+                            session_id[:8],
+                            cur_status,
+                        )
+            except Exception as e:
+                logger.warning("Failed to reactivate session %s: %s", session_id[:8], e)
+
         logger.info(
             "Starting agent task: tool=%s model=%s workspace=%s session=%s",
             cli_tool,
