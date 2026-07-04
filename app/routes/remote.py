@@ -302,6 +302,7 @@ def list_machines():
         {
             "success": True,
             "machines": machines,
+            "user_role": g.user.get("role"),  # P1-2: Explicit user role for frontend
         }
     )
 
@@ -549,6 +550,12 @@ def create_remote_session():
         return jsonify({"error": "machine_id is required"}), 400
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
+
+    # P1-1: Permission check - unassigned users cannot create sessions
+    if g.user.get("role") != "admin":
+        agent_mgr = get_remote_agent_manager()
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return jsonify({"error": "Permission denied"}), 403
 
     session_mgr = get_remote_session_manager()
     result = session_mgr.create_remote_session(

@@ -214,7 +214,7 @@ export interface RunApprovalsResponse {
 
 export const remoteApi = {
   // Machine management
-  listMachines(): Promise<{ success: boolean; machines: RemoteMachine[] }> {
+  listMachines(): Promise<{ success: boolean; machines: RemoteMachine[]; user_role?: string }> {
     return apiClient.get('/api/remote/machines');
   },
 
