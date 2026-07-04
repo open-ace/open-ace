@@ -96,9 +96,14 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
 
   // Data
   const { data: toolsData } = useAvailableTools();
-  const { data: modelsData } = useAvailableModels(
-    { tool: cliTool, workspace_type: workspaceType },
-    !!cliTool
+  // Remote mode requires a machine before we can resolve the tenant for the
+  // model pool; without it the backend falls back to tenant 1 and may surface
+  // the wrong (or cross-tenant) key list. Gate the query so remote only
+  // fetches once a machine is selected.
+  const modelsEnabled = !!cliTool && (workspaceType !== 'remote' || !!selectedMachineId);
+  const { data: modelsData, isLoading: modelsLoading } = useAvailableModels(
+    { tool: cliTool, workspace_type: workspaceType, machine_id: selectedMachineId || undefined },
+    modelsEnabled
   );
   const createWorkflow = useCreateWorkflow();
 
@@ -118,6 +123,19 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   }, [toolsData]);
   const models = modelsData?.models ?? [];
   const isCreating = createWorkflow.isPending;
+
+  // Clear the selected model when the model list changes (tool / workspace /
+  // machine switch refetches models). Otherwise the stale model survives in
+  // state, `hasModel` passes, and the user submits a model that's no longer in
+  // the list — including the case where the new list is empty (e.g. switching
+  // to a tool with no configured models). Skip while loading to avoid clearing
+  // during the brief refetch window before data arrives.
+  const modelNames = useMemo(() => new Set(models.map((m: any) => m.name)), [models]);
+  useEffect(() => {
+    if (model && !modelsLoading && !modelNames.has(model)) {
+      setModel('');
+    }
+  }, [model, modelNames, modelsLoading]);
 
   const persistLastProjectPath = useCallback(
     (path: string, type: 'local' | 'remote', machineId?: string) => {
@@ -189,7 +207,12 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
     const hasPath = isNewProject ? !!repoName.trim() : !!projectPath.trim();
     const hasRemote = workspaceType !== 'remote' || !!selectedMachineId;
-    return hasRequirements && !!cliTool && hasPath && hasRemote;
+    // Model is required AND must belong to the currently-loaded list. During
+    // a refetch (tool/workspace/machine switch) the old model is stale and
+    // may not exist for the new context — block submit until the fresh list
+    // confirms it (or the user picks a new one).
+    const hasModel = !!model.trim() && !modelsLoading && modelNames.has(model);
+    return hasRequirements && !!cliTool && hasPath && hasRemote && hasModel;
   }, [
     requirementsMode,
     requirementsText,
@@ -200,6 +223,9 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     repoName,
     workspaceType,
     selectedMachineId,
+    model,
+    modelsLoading,
+    modelNames,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -413,20 +439,32 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
             </select>
           </div>
           <div className="col-md-6">
-            <label className="form-label fw-semibold">{t('autoModel', language)}</label>
-            <select
-              className="form-select"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              <option value="">{t('autoDefaultModel', language)}</option>
-              {Array.isArray(models) &&
-                models.map((m: { name: string }) => (
-                  <option key={m.name} value={m.name}>
-                    {m.name}
-                  </option>
-                ))}
-            </select>
+            <label className="form-label fw-semibold">
+              {t('autoModel', language)} <span className="text-danger">*</span>
+            </label>
+            {models.length > 0 ? (
+              <select
+                className="form-select"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                <option value="">{t('autoSelectModel', language)}</option>
+                {Array.isArray(models) &&
+                  models.map((m: { name: string }) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+              </select>
+            ) : !cliTool ? (
+              <div className="form-text text-muted">{t('autoSelectToolFirst', language)}</div>
+            ) : workspaceType === 'remote' && !selectedMachineId ? (
+              <div className="form-text text-muted">{t('autoSelectMachineFirst', language)}</div>
+            ) : modelsLoading ? (
+              <div className="form-text text-muted">{t('autoLoadingModels', language)}</div>
+            ) : (
+              <div className="form-text text-danger">{t('autoNoModelsForTool', language)}</div>
+            )}
           </div>
 
           {/* Workspace Type */}
