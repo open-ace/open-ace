@@ -256,6 +256,62 @@ def _check_session_access(session_id):
     return check_session_access(session_id)
 
 
+# ════════════════════════════════════════════
+#  P2-1: Unified permission decorators
+# ════════════════════════════════════════════
+
+
+def _extract_machine_id():
+    """Extract machine_id from request (JSON body or query string)."""
+    # Try JSON body first
+    data = request.get_json(silent=True) or {}
+    machine_id = data.get("machine_id")
+    # Fall back to query string
+    if not machine_id:
+        machine_id = request.args.get("machine_id") or request.view_args.get("machine_id")
+    return machine_id
+
+
+def _check_machine_access(machine_id):
+    """Check if user has access to machine. Returns error or None."""
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+    if g.user.get("role") == "admin":
+        return None
+    mgr = get_remote_agent_manager()
+    if not mgr.check_user_access(machine_id, g.user["id"]):
+        return jsonify({"error": "Permission denied"}), 403
+    return None
+
+
+def machine_access_required(f):
+    """Decorator: Check machine access permission (system admin or assigned user)."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        machine_id = _extract_machine_id()
+        error = _check_machine_access(machine_id)
+        if error:
+            return error
+        return f(*args, **kwargs)
+    return decorated
+
+
+def machine_admin_required(f):
+    """Decorator: Check machine admin permission (system admin or machine admin)."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        machine_id = _extract_machine_id()
+        error = _require_machine_admin(machine_id)
+        if error:
+            return error
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ==================== Machine Management (Admin) ====================
 
 
@@ -344,11 +400,10 @@ def deregister_machine(machine_id):
 
 
 @remote_bp.route("/machines/<machine_id>/assign", methods=["POST"])
+@machine_admin_required
 def assign_user(machine_id):
     """Assign a user to a machine. System admin or machine admin."""
-    admin_error = _require_machine_admin(machine_id)
-    if admin_error:
-        return admin_error
+    # P2-1: Permission check moved to decorator @machine_admin_required
 
     data = request.get_json() or {}
     user_id = data.get("user_id")
@@ -375,11 +430,10 @@ def assign_user(machine_id):
 
 
 @remote_bp.route("/machines/<machine_id>/assign/<int:user_id>", methods=["DELETE"])
+@machine_admin_required
 def revoke_user(machine_id, user_id):
     """Revoke a user's access to a machine. System admin or machine admin."""
-    admin_error = _require_machine_admin(machine_id)
-    if admin_error:
-        return admin_error
+    # P2-1: Permission check moved to decorator @machine_admin_required
 
     # Machine admins cannot revoke other admins
     if g.user.get("role") != "admin":
@@ -495,12 +549,10 @@ def revoke_machine_token(machine_id):
 
 
 @remote_bp.route("/machines/<machine_id>/users", methods=["GET"])
+@machine_admin_required
 def get_machine_users(machine_id):
     """Get list of users assigned to a machine. System admin or machine admin."""
-    admin_error = _require_machine_admin(machine_id)
-    if admin_error:
-        return admin_error
-
+    # P2-1: Permission check moved to decorator @machine_admin_required
     agent_mgr = get_remote_agent_manager()
     assignments = agent_mgr.get_machine_assignments(machine_id)
 
@@ -534,6 +586,7 @@ def get_available_machines():
 
 
 @remote_bp.route("/sessions", methods=["POST"])
+@machine_access_required
 def create_remote_session():
     """Create a new remote session on a selected machine."""
 
@@ -546,17 +599,10 @@ def create_remote_session():
     permission_mode = data.get("permission_mode")
     ha_pool_token = data.get("ha_pool_token")
 
-    if not machine_id:
-        return jsonify({"error": "machine_id is required"}), 400
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
 
-    # P1-1: Permission check - unassigned users cannot create sessions
-    if g.user.get("role") != "admin":
-        agent_mgr = get_remote_agent_manager()
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Permission denied"}), 403
-
+    # P2-1: Permission check moved to decorator @machine_access_required
     session_mgr = get_remote_session_manager()
     result = session_mgr.create_remote_session(
         user_id=g.user["id"],
