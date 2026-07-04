@@ -27,7 +27,7 @@ vi.mock('@/hooks/useAutonomous', () => ({
   }),
   useAvailableModels: () => ({
     data: {
-      models: [],
+      models: [{ name: 'glm-5' }],
     },
   }),
 }));
@@ -115,6 +115,18 @@ describe('NewAutonomousModal', () => {
     mutateAsyncMock.mockResolvedValue({ workflow: { id: 'wf-1' } });
   });
 
+  /** Select a model from the dropdown. Required since model is now a mandatory field. */
+  const selectModel = () => {
+    // The model <select> is the one containing the 'autoSelectModel' option.
+    const selects = screen.getAllByRole('combobox');
+    const modelSelect = selects.find((s) =>
+      [...s.querySelectorAll('option')].some((o) => o.textContent === 'autoSelectModel')
+    );
+    if (modelSelect) {
+      fireEvent.change(modelSelect, { target: { value: 'glm-5' } });
+    }
+  };
+
   it('shows a browse button for local project paths', () => {
     render(<NewAutonomousModal {...defaultProps} />);
 
@@ -180,6 +192,7 @@ describe('NewAutonomousModal', () => {
     fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
       target: { value: '/Users/final/project' },
     });
+    selectModel();
 
     fireEvent.click(screen.getByText('autoCreateTask'));
 
@@ -202,6 +215,7 @@ describe('NewAutonomousModal', () => {
       target: { value: '/Users/final/project' },
     });
     fireEvent.click(screen.getByLabelText('autoRequireFullReviewRounds'));
+    selectModel();
 
     fireEvent.click(screen.getByText('autoCreateTask'));
 
@@ -321,6 +335,7 @@ describe('NewAutonomousModal', () => {
     fireEvent.change(screen.getByPlaceholderText('autoProjectPathPlaceholder'), {
       target: { value: 'C:\\final\\repo' },
     });
+    selectModel();
 
     fireEvent.click(screen.getByText('autoCreateTask'));
 
@@ -340,6 +355,7 @@ describe('NewAutonomousModal', () => {
     fireEvent.change(screen.getByPlaceholderText('autoRepoNamePlaceholder'), {
       target: { value: 'my-new-project' },
     });
+    selectModel();
 
     fireEvent.click(screen.getByText('autoCreateTask'));
 

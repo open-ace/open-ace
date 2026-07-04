@@ -189,7 +189,12 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
       requirementsMode === 'text' ? !!requirementsText.trim() : !!requirementsUrl.trim();
     const hasPath = isNewProject ? !!repoName.trim() : !!projectPath.trim();
     const hasRemote = workspaceType !== 'remote' || !!selectedMachineId;
-    return hasRequirements && !!cliTool && hasPath && hasRemote;
+    // Model is required: an empty model lets the CLI pick its built-in
+    // default (e.g. claude-opus-4-8), which the LLM proxy may not support,
+    // causing a silent 400 mid-workflow. Force the user to pick a model
+    // from the list (which is sourced from the configured API key pool).
+    const hasModel = !!model.trim();
+    return hasRequirements && !!cliTool && hasPath && hasRemote && hasModel;
   }, [
     requirementsMode,
     requirementsText,
@@ -200,6 +205,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
     repoName,
     workspaceType,
     selectedMachineId,
+    model,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -413,20 +419,30 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
             </select>
           </div>
           <div className="col-md-6">
-            <label className="form-label fw-semibold">{t('autoModel', language)}</label>
-            <select
-              className="form-select"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              <option value="">{t('autoDefaultModel', language)}</option>
-              {Array.isArray(models) &&
-                models.map((m: { name: string }) => (
-                  <option key={m.name} value={m.name}>
-                    {m.name}
-                  </option>
-                ))}
-            </select>
+            <label className="form-label fw-semibold">
+              {t('autoModel', language)} <span className="text-danger">*</span>
+            </label>
+            {models.length > 0 ? (
+              <select
+                className="form-select"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                <option value="">{t('autoSelectModel', language)}</option>
+                {Array.isArray(models) &&
+                  models.map((m: { name: string }) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+              </select>
+            ) : (
+              <div className="form-text text-danger">
+                {cliTool
+                  ? t('autoNoModelsForTool', language)
+                  : t('autoSelectToolFirst', language)}
+              </div>
+            )}
           </div>
 
           {/* Workspace Type */}
