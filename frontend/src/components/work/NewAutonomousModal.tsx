@@ -96,7 +96,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
 
   // Data
   const { data: toolsData } = useAvailableTools();
-  const { data: modelsData } = useAvailableModels(
+  const { data: modelsData, isLoading: modelsLoading } = useAvailableModels(
     { tool: cliTool, workspace_type: workspaceType },
     !!cliTool
   );
@@ -118,6 +118,17 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   }, [toolsData]);
   const models = modelsData?.models ?? [];
   const isCreating = createWorkflow.isPending;
+
+  // Clear the selected model when the model list changes (tool / workspace /
+  // machine switch refetches models). Otherwise the stale model survives in
+  // state, `hasModel` passes, and the user submits a model that's no longer in
+  // the list. Also guards against the first-paint empty-list flash.
+  const modelNames = useMemo(() => new Set(models.map((m: any) => m.name)), [models]);
+  useEffect(() => {
+    if (model && modelNames.size > 0 && !modelNames.has(model)) {
+      setModel('');
+    }
+  }, [model, modelNames]);
 
   const persistLastProjectPath = useCallback(
     (path: string, type: 'local' | 'remote', machineId?: string) => {
@@ -436,11 +447,15 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
                     </option>
                   ))}
               </select>
+            ) : !cliTool ? (
+              <div className="form-text text-muted">
+                {t('autoSelectToolFirst', language)}
+              </div>
+            ) : modelsLoading ? (
+              <div className="form-text text-muted">{t('autoLoadingModels', language)}</div>
             ) : (
               <div className="form-text text-danger">
-                {cliTool
-                  ? t('autoNoModelsForTool', language)
-                  : t('autoSelectToolFirst', language)}
+                {t('autoNoModelsForTool', language)}
               </div>
             )}
           </div>

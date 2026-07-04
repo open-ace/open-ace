@@ -29,6 +29,7 @@ vi.mock('@/hooks/useAutonomous', () => ({
     data: {
       models: [{ name: 'glm-5' }],
     },
+    isLoading: false,
   }),
 }));
 
