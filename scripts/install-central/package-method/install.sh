@@ -1916,24 +1916,36 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/
 
 # Autonomous development CLI tools (Issue #1395)
 # Allow running qwen-code/codex/etc. as target user for permission isolation
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *"
+Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then
-        # 【修复 P0】Extract and preserve other users' rules
-        # Other users' rules = lines not starting with $run_user and not header/defaults
+        # 【修复 P0】Extract and preserve OTHER USERS' rules only.
+        # The header, defaults, Cmnd_Alias definitions, and the current
+        # $run_user's rules are all regenerated below, so they must NOT be
+        # carried over — otherwise stale comments, duplicate Cmnd_Alias
+        # definitions (visudo: "duplicate Cmnd_Alias"), or the current user's
+        # own stale rule block leak into the rewritten file.
+        #
+        # Allow-list approach: keep only genuine user-spec lines belonging to
+        # OTHER users, i.e. lines shaped "<user> ALL=...". A deny-list of
+        # comment substrings is fragile (new comments silently slip through),
+        # so match the structural pattern instead. This drops orphans
+        # (comments, Cmnd_Alias, Defaults) and the current user's block.
         local other_user_rules=""
         while IFS= read -r line; do
-            # Skip header lines, defaults, empty lines
-            if [[ "$line" =~ ^#.*Open\ ACE ]] || [[ "$line" =~ ^#.*Generated ]] || [[ "$line" =~ ^#.*Allows ]] || [[ "$line" =~ ^#.*service ]] || [[ "$line" =~ ^#.*Preserve ]] || [[ "$line" =~ ^#.*Fix ]] || [[ "$line" =~ ^#.*secure_path ]] || [[ "$line" =~ ^#.*qwen-code-webui ]] || [[ "$line" =~ ^#.*Order ]] || [[ "$line" =~ ^Defaults ]] || [[ -z "$line" ]]; then
-                continue
-            fi
-            # Skip current user's rules (will be regenerated)
-            # Use exact string matching to avoid regex issues
-            if [[ "$line" == "$run_user "* ]] || [[ "$line" == "# Allow $run_user"* ]]; then
-                continue
-            fi
-            # Preserve other users' lines
+            # Skip blank lines and comments outright.
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            # Skip Defaults / Cmnd_Alias / host-alias etc. (regenerated below).
+            [[ "$line" == Defaults* ]] && continue
+            [[ "$line" == Cmnd_Alias* || "$line" == Host_Alias* || "$line" == User_Alias* || "$line" == Runas_Alias* ]] && continue
+            # Skip the current user's rules (regenerated in current_user_rules).
+            # A user-spec looks like "$run_user ALL=(...) NOPASSWD: ...".
+            [[ "$line" == "$run_user "* ]] && continue
+            # Anything else that isn't a "<token> ALL=" user-spec is structural
+            # noise we don't know how to preserve safely — drop it rather than
+            # risk a visudo failure.
+            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_-]*\ ALL= ]] || continue
             other_user_rules="${other_user_rules}
 ${line}"
         done < "$sudoers_file"
@@ -2001,6 +2013,25 @@ ${line}"
             need_update=true
         fi
 
+        # 【修复 Issue #1395】Check OPENACE_CLI Cmnd_Alias completeness.
+        # The CLI list grew over time (qwen-code/codex/qwen → +claude/openclaw/
+        # zcode). Without this probe a pre-existing sudoers file whose other
+        # checks all pass would skip the rewrite, leaving the stale short CLI
+        # list in place — claude/openclaw/zcode would lack direct-sudo fallback
+        # authorization. Check the Cmnd_Alias definition line for each newer
+        # CLI path; any missing one trips a rewrite.
+        local cli_alias_line=""
+        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null)
+        if [ -n "$cli_alias_line" ]; then
+            for cli in claude openclaw zcode; do
+                if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
+                    print_warning "Sudoers OPENACE_CLI missing '$cli' (CLI list incomplete)"
+                    need_update=true
+                    break
+                fi
+            done
+        fi
+
         # 【新增】Warn about sudoers vs systemd service user mismatch
         if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
@@ -2045,6 +2076,20 @@ ${other_user_rules}"
 ${current_user_rules}
 "
 
+    # Back up the existing sudoers file before overwriting so a visudo
+    # failure restores the last-known-good state rather than deleting the
+    # file and leaving the service with no sudoers at all (which took the
+    # 159 deployment down — agent launches got "a password is required").
+    local sudoers_backup=""
+    if [ -f "$sudoers_file" ]; then
+        sudoers_backup="${sudoers_file}.bak.$(date +%s)"
+        if cp -p "$sudoers_file" "$sudoers_backup" 2>/dev/null; then
+            print_info "Backed up existing sudoers to $sudoers_backup"
+        else
+            sudoers_backup=""  # couldn't back up; fall through to rm on failure
+        fi
+    fi
+
     # Write sudoers file
     echo "$sudoers_content" > "$sudoers_file"
     chmod 440 "$sudoers_file"
@@ -2057,7 +2102,16 @@ ${current_user_rules}
         print_info "  sudo python3 <fetch_script> --multi-user --config <config_path> (for multi-user data collection)"
     else
         print_error "Sudoers syntax error, rolling back..."
-        rm -f "$sudoers_file"
+        # Restore the pre-write backup if we have one (keeps the service
+        # functional on a botched rewrite). Only rm if there was no prior
+        # file (fresh install where a bad file is worse than none).
+        if [ -n "$sudoers_backup" ] && [ -f "$sudoers_backup" ]; then
+            cp -p "$sudoers_backup" "$sudoers_file"
+            chmod 440 "$sudoers_file"
+            print_warning "Restored previous sudoers from $sudoers_backup (service keeps running)"
+        else
+            rm -f "$sudoers_file"
+        fi
         return 1
     fi
 

@@ -558,7 +558,7 @@ openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} *"
 Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
 # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *
+Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *
 
 open-ace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
 openace ALL=(ALL) NOPASSWD: ${WEBUI_PATH} *
