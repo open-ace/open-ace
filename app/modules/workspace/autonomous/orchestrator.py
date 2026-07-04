@@ -1586,7 +1586,30 @@ class AutonomousOrchestrator:
                 # dir on disk agree; an unnormalized path later breaks JSONL
                 # session detection (#814).
                 wt_path = os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}")
-                gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
+                # A prior fork attempt may have created the branch then failed
+                # before/after registering the worktree; cleanup only removes
+                # the worktree, not the branch. Probe for a surviving branch
+                # (local or remote) and attach via add_worktree (no -b) if it
+                # exists, otherwise create both fresh. Same pattern as the
+                # main prep path and _ensure_worktree (#814).
+                _fork_branch_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                _fork_remote_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                if _fork_branch_exists or _fork_remote_exists:
+                    gh.add_worktree(path=wt_path, branch=branch_name)
+                else:
+                    gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
                 self._update_workflow(
                     {
                         "worktree_path": wt_path,
