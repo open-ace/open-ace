@@ -1394,6 +1394,7 @@ class AutonomousAgentRunner:
                 workflow_id=workflow_id,
                 milestone_id=milestone_id,
                 system_account=system_account,
+                user_id=user_id,
             )
 
         # Build env vars with LLM proxy auth so the agent authenticates through
@@ -2012,6 +2013,7 @@ class AutonomousAgentRunner:
         workflow_id: str,
         milestone_id: str = "",
         system_account: str | None = None,
+        user_id: int | None = None,
     ) -> AgentTaskResult:
         """Run a CLI tool in single-shot mode for tools without stdin protocol.
 
@@ -2042,7 +2044,7 @@ class AutonomousAgentRunner:
 
         args = adapter.build_single_shot_args(prompt, project_path, model)
         cmd = [executable] + (args[1:] if len(args) > 1 and args[0] == exe_name else args)
-        env = self._build_agent_env(adapter, cli_tool, None, session_id, model)
+        env = self._build_agent_env(adapter, cli_tool, user_id, session_id, model)
 
         # Cross-user launch via run-as wrapper (single-shot CLIs also need
         # cwd=project; openclaw documents it relies on the caller's cwd).
