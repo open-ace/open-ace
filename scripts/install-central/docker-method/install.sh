@@ -833,11 +833,22 @@ Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KE
 
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
-        if grep -q "$webui_path" "$sudoers_file" 2>/dev/null; then
-            print_success "Sudoers 规则已存在"
+        # 【修复 PR #1467 评论】旧逻辑只看 webui_path 命中就 return，导致已有部署
+        # 升级时不会补齐本 PR 新增的 git/gh / CLI / run-as wrapper 规则。改为校验
+        # 关键标记是否齐备：git 规则（Issue #1395 起所有版本都有），以及 wrapper
+        # 规则（仅在 wrapper 已安装时才要求）。任一缺失即重写。
+        local needs_update=false
+        if ! grep -qF '/usr/bin/git *' "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if [ -n "$wrapper_rule" ] && ! grep -qF 'openace-run-as' "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if [ "$needs_update" = false ]; then
+            print_success "Sudoers 规则已是最新"
             return 0
         fi
-        print_info "更新现有 sudoers 文件..."
+        print_info "更新现有 sudoers 文件（补齐 git/gh/CLI/wrapper 规则）..."
     fi
 
     # Write sudoers file
