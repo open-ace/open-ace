@@ -855,10 +855,14 @@ class TestRunAgentTaskSessionReactivation:
             session_id="sess-completed",
         )
 
-        # The FIRST update_session_fields call is the reactivation (active);
-        # a later post-run call writes the terminal status. Assert the first.
+        # The FIRST update_session_fields call is the reactivation (active +
+        # clear stale timestamps); a later post-run call writes the terminal
+        # status. Assert the first.
         calls = runner.session_manager.update_session_fields.call_args_list
-        assert calls[0] == (("sess-completed", {"status": "active"}),)
+        assert calls[0] == (
+            ("sess-completed", {"status": "active", "completed_at": None, "paused_at": None}),
+            {},
+        )
 
     def test_error_session_reactivated_to_active(self, monkeypatch):
         runner = self._make_runner(monkeypatch)
@@ -874,7 +878,10 @@ class TestRunAgentTaskSessionReactivation:
         )
 
         calls = runner.session_manager.update_session_fields.call_args_list
-        assert calls[0] == (("sess-error", {"status": "active"}),)
+        assert calls[0] == (
+            ("sess-error", {"status": "active", "completed_at": None, "paused_at": None}),
+            {},
+        )
 
     def test_active_session_no_reactivation_call(self, monkeypatch):
         runner = self._make_runner(monkeypatch)

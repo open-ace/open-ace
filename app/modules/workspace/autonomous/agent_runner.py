@@ -1231,7 +1231,13 @@ class AutonomousAgentRunner:
                         existing.get("status", "") if isinstance(existing, dict) else ""
                     )
                     if cur_status not in ("active", "paused"):
-                        self.session_manager.update_session_fields(session_id, {"status": "active"})
+                        # Clear stale terminal timestamps too — otherwise the
+                        # Sessions UI keeps rendering the old completed_at for a
+                        # row that is now active again (#1475 review).
+                        self.session_manager.update_session_fields(
+                            session_id,
+                            {"status": "active", "completed_at": None, "paused_at": None},
+                        )
                         logger.info(
                             "Reactivated session %s (was %s) for agent run",
                             session_id[:8],
