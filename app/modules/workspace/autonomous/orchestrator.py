@@ -1586,7 +1586,30 @@ class AutonomousOrchestrator:
                 # dir on disk agree; an unnormalized path later breaks JSONL
                 # session detection (#814).
                 wt_path = os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}")
-                gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
+                # A prior fork attempt may have created the branch then failed
+                # before/after registering the worktree; cleanup only removes
+                # the worktree, not the branch. Probe for a surviving branch
+                # (local or remote) and attach via add_worktree (no -b) if it
+                # exists, otherwise create both fresh. Same pattern as the
+                # main prep path and _ensure_worktree (#814).
+                _fork_branch_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                _fork_remote_exists = (
+                    gh._run_git(
+                        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
+                        check=False,
+                    ).returncode
+                    == 0
+                )
+                if _fork_branch_exists or _fork_remote_exists:
+                    gh.add_worktree(path=wt_path, branch=branch_name)
+                else:
+                    gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
                 self._update_workflow(
                     {
                         "worktree_path": wt_path,
@@ -1815,11 +1838,41 @@ class AutonomousOrchestrator:
                             worktree_path,
                         )
 
-                    wt_data = gh.create_worktree(
-                        path=worktree_path,
-                        branch=branch_name,
-                        base="origin/main",
+                    # A prior run may have created the branch then failed before
+                    # (or after) registering the worktree; the cleanup above only
+                    # removes the worktree registration, not the branch. Blindly
+                    # calling create_worktree (which uses ``-b``) would then fail
+                    # with "a branch named '<branch>' already exists". If the
+                    # branch survives (local or remote), attach a worktree to it
+                    # via add_worktree (no ``-b``); otherwise create both fresh.
+                    # Mirrors the recovery logic in _ensure_worktree.
+                    branch_exists = (
+                        gh._run_git(
+                            ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+                            check=False,
+                        ).returncode
+                        == 0
                     )
+                    remote_exists = (
+                        gh._run_git(
+                            [
+                                "show-ref",
+                                "--verify",
+                                "--quiet",
+                                f"refs/remotes/origin/{branch_name}",
+                            ],
+                            check=False,
+                        ).returncode
+                        == 0
+                    )
+                    if branch_exists or remote_exists:
+                        wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
+                    else:
+                        wt_data = gh.create_worktree(
+                            path=worktree_path,
+                            branch=branch_name,
+                            base="origin/main",
+                        )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                     # The worktree now exists; drop the cached gh (bound to the
                     # main repo during preparation) so the next _get_gh() rebinds
