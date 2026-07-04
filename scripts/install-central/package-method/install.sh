@@ -1916,7 +1916,7 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/
 
 # Autonomous development CLI tools (Issue #1395)
 # Allow running qwen-code/codex/etc. as target user for permission isolation
-Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *"
+Cmnd_Alias OPENACE_CLI = /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then

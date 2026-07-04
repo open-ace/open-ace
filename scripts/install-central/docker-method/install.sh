@@ -822,7 +822,7 @@ $RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /u
 $RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
 
 # CLI tools for autonomous development (Issue #1395)
-$RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *
+$RUN_USER ALL=(ALL) NOPASSWD: /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *
 
 # Run-as wrapper for cross-user agent launch (Issue #1395, PR #1467)
 ${wrapper_rule}
