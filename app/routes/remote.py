@@ -364,19 +364,16 @@ def list_machines():
 
 
 @remote_bp.route("/machines/<machine_id>", methods=["GET"])
+@machine_access_required
 def get_machine(machine_id):
     """Get details and status of a specific machine."""
+    # P2-1: Permission check moved to decorator @machine_access_required
 
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
 
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
-
-    # Check access for non-admin users
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
 
     return jsonify(
         {
@@ -1734,22 +1731,16 @@ def agent_message():
 
 
 @remote_bp.route("/terminal/start", methods=["POST"])
+@machine_access_required
 def start_terminal():
     """Start a web terminal on a remote machine."""
+    # P2-1: Permission check moved to decorator @machine_access_required
     data = request.get_json() or {}
     machine_id = data.get("machine_id")
     work_dir = data.get("work_dir")
 
-    if not machine_id:
-        return jsonify({"error": "machine_id is required"}), 400
-
-    # Check access
-    agent_mgr = get_remote_agent_manager()
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
     # Get machine info for title/hostname
+    agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
     hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
@@ -1840,6 +1831,7 @@ def start_terminal():
 
 
 @remote_bp.route("/terminal/cli/start", methods=["POST"])
+@machine_access_required
 def start_cli_terminal():
     """Start an SSH/local CLI-backed terminal session.
 
@@ -1848,19 +1840,13 @@ def start_cli_terminal():
     machine, so the server only creates the Open ACE session and returns short
     lived proxy tokens for local CLI processes.
     """
+    # P2-1: Permission check moved to decorator @machine_access_required
     data = request.get_json() or {}
     machine_id = data.get("machine_id")
     work_dir = data.get("work_dir") or ""
     source = data.get("source") or "ssh_cli"
 
-    if not machine_id:
-        return jsonify({"error": "machine_id is required"}), 400
-
     agent_mgr = get_remote_agent_manager()
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
     machine = agent_mgr.get_machine(machine_id)
     machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
     hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
@@ -1946,21 +1932,18 @@ def start_cli_terminal():
 
 
 @remote_bp.route("/terminal/stop", methods=["POST"])
+@machine_access_required
 def stop_terminal():
     """Stop a web terminal on a remote machine."""
+    # P2-1: Permission check moved to decorator @machine_access_required
     data = request.get_json() or {}
     terminal_id = data.get("terminal_id")
     machine_id = data.get("machine_id")
 
-    if not terminal_id or not machine_id:
-        return jsonify({"error": "terminal_id and machine_id are required"}), 400
+    if not terminal_id:
+        return jsonify({"error": "terminal_id is required"}), 400
 
-    # Check access
     agent_mgr = get_remote_agent_manager()
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
     cmd = {
         "type": "command",
         "command": "stop_terminal",
@@ -2147,25 +2130,16 @@ def usage_report():
 
 
 @remote_bp.route("/machines/<machine_id>/browse", methods=["GET"])
+@machine_access_required
 def browse_remote_directory(machine_id):
     """Browse the file system on a remote machine.
 
     Returns directory information for the specified path.
     If no path is specified, returns the machine's work_dir as the default.
     """
-
-    # Check authentication - g.user may not be set if before_request auth failed
-    # (e.g., invalid/expired token, missing session) - Issue #477
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
+    # P2-1: Permission check moved to decorator @machine_access_required
 
     agent_mgr = get_remote_agent_manager()
-
-    # Check access
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
-
     path = request.args.get("path")
 
     # Get machine info
@@ -2443,22 +2417,17 @@ def remote_git_file(machine_id):
 
 
 @remote_bp.route("/vscode/start", methods=["POST"])
+@machine_access_required
 def remote_vscode_start():
     """Start a code-server instance on a remote machine."""
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
-
+    # P2-1: Permission check moved to decorator @machine_access_required
     agent_mgr = get_remote_agent_manager()
     data = request.get_json() or {}
     machine_id = data.get("machine_id", "")
     project_path = data.get("project_path", "")
 
-    if not machine_id or not project_path:
-        return jsonify({"success": False, "error": "machine_id and project_path are required"}), 400
-
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
+    if not project_path:
+        return jsonify({"success": False, "error": "project_path is required"}), 400
 
     if not agent_mgr.is_agent_connected(machine_id):
         return jsonify({"success": False, "error": "Agent is not connected"}), 503
@@ -2478,22 +2447,17 @@ def remote_vscode_start():
 
 
 @remote_bp.route("/vscode/stop", methods=["POST"])
+@machine_access_required
 def remote_vscode_stop():
     """Stop a code-server instance on a remote machine."""
-    if not hasattr(g, "user") or g.user is None:
-        return jsonify({"error": "Unauthorized"}), 401
-
+    # P2-1: Permission check moved to decorator @machine_access_required
     agent_mgr = get_remote_agent_manager()
     data = request.get_json() or {}
     vscode_id = data.get("vscode_id", "")
     machine_id = data.get("machine_id", "")
 
-    if not vscode_id or not machine_id:
-        return jsonify({"success": False, "error": "vscode_id and machine_id are required"}), 400
-
-    if g.user.get("role") != "admin":
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return jsonify({"error": "Access denied"}), 403
+    if not vscode_id:
+        return jsonify({"success": False, "error": "vscode_id is required"}), 400
 
     agent_mgr.send_command(
         machine_id,
