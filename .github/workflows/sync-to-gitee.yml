@@ -29,7 +29,7 @@ jobs:
           git fetch gitee --prune
 
       - name: Push main branch to Gitee
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -41,7 +41,7 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
       - name: Push other branches to Gitee
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -51,7 +51,7 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
       - name: Push tags to Gitee
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 5
           max_attempts: 3
