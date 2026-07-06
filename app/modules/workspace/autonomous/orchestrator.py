@@ -161,7 +161,7 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
         "web_fetch",
         "write_file",
         "edit_file",
-        "execute_command",
+        "run_shell_command",
     ],
     "codex": [],
     "openclaw": [],
