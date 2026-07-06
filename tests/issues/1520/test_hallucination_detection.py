@@ -54,9 +54,7 @@ class TestPytestOutputDetection:
             r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
             r"AssertionError",
         ]
-        has_pytest = any(
-            re.search(p, text, re.IGNORECASE) for p in _pytest_output_patterns
-        )
+        has_pytest = any(re.search(p, text, re.IGNORECASE) for p in _pytest_output_patterns)
         assert has_pytest == expected
 
 
@@ -95,9 +93,7 @@ class TestHallucinationDetection:
             r"test\s+progress.*%",
             r"running\s+tests.*%",
         ]
-        has_hallucination = any(
-            re.search(p, text, re.IGNORECASE) for p in _hallucination_patterns
-        )
+        has_hallucination = any(re.search(p, text, re.IGNORECASE) for p in _hallucination_patterns)
         assert has_hallucination == expected
 
 
