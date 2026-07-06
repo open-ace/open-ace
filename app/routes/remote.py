@@ -842,7 +842,9 @@ def stream_session_output(session_id):
                     agent_mgr.set_last_delivered(session_id, last_index)
                 else:
                     idle_count += 1
-                    if idle_count >= 50:  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
+                    if (
+                        idle_count >= 50
+                    ):  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
                         yield ": keepalive\n\n"
                         idle_count = 0
 
