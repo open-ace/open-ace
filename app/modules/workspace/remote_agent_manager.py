@@ -12,6 +12,7 @@ import logging
 import threading
 import time
 import uuid
+from collections import deque
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -138,7 +139,7 @@ class RemoteAgentManager:
                         mid = row["remote_machine_id"]
                         if sid and mid:
                             self._session_machines[sid] = mid
-                            self._output_buffers.setdefault(sid, [])
+                            self._output_buffers.setdefault(sid, deque(maxlen=self.MAX_BUFFER_SIZE))
 
                 # Restore end flags for completed/stopped/error sessions
                 cursor.execute(
@@ -1210,14 +1211,22 @@ class RemoteAgentManager:
         """Bind a session to a machine."""
         with self._lock:
             self._session_machines[session_id] = machine_id
-            self._output_buffers[session_id] = []
+            self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
 
     def unbind_session(self, session_id: str) -> None:
-        """Remove session binding."""
+        """Remove session binding.
+
+        Cleans up all session-related state to prevent memory leaks:
+        - _session_machines: session → machine mapping
+        - _output_buffers: buffered output data
+        - _buffer_offsets: buffer trim offset tracking
+        - _last_delivered: SSE reconnect position (Issue #1511)
+        """
         with self._lock:
             self._session_machines.pop(session_id, None)
             self._output_buffers.pop(session_id, None)
-            self._buffer_offsets.pop(session_id, None)  # Issue #1511: cleanup buffer offset
+            self._buffer_offsets.pop(session_id, None)
+            self._last_delivered.pop(session_id, None)  # Issue #1511: cleanup SSE state
 
     def get_machine_for_session(self, session_id: str) -> str | None:
         """Get the machine ID for a session."""
@@ -1228,20 +1237,22 @@ class RemoteAgentManager:
     def buffer_output(self, session_id: str, output: dict[str, Any]) -> None:
         """Buffer output from a remote session.
 
-        If buffer exceeds MAX_BUFFER_SIZE, trim oldest entries and record
-        the offset to prevent data loss on get_buffered_output (Issue #1511).
+        Uses deque(maxlen=MAX_BUFFER_SIZE) for O(1) append and automatic trim.
+        When maxlen is reached, oldest entries are automatically dropped, and
+        we increment _buffer_offsets to track the dropped count (Issue #1511).
+
+        Limitation: If SSE disconnects for >3-5 minutes during high-frequency
+        output (>5000 messages), old data will be trimmed and lost on reconnect.
         """
         with self._lock:
             if session_id not in self._output_buffers:
-                self._output_buffers[session_id] = []
+                self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
                 self._buffer_offsets[session_id] = 0
             buf = self._output_buffers[session_id]
+            # Track if this append will cause a trim (deque at maxlen)
+            if len(buf) == self.MAX_BUFFER_SIZE:
+                self._buffer_offsets[session_id] += 1
             buf.append(output)
-            # Trim if exceeds MAX_BUFFER_SIZE
-            if len(buf) > self.MAX_BUFFER_SIZE:
-                trim_count = len(buf) - self.MAX_BUFFER_SIZE
-                self._output_buffers[session_id] = buf[trim_count:]
-                self._buffer_offsets[session_id] += trim_count
 
     def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Get buffered output for a session after a given index.
@@ -1250,16 +1261,22 @@ class RemoteAgentManager:
         the buffer was trimmed (Issue #1511).
 
         Example:
-            - Buffer grew to 13000 items, trimmed to 10000 (offset=3000)
-            - Client requests after_index=3000
-            - Without offset: buf[3000:] returns items 3000-12999 (missing 0-2999)
-            - With offset: effective_index = max(0, 3000-3000) = 0, returns all
+            - Buffer grew to 6000 items, trimmed to 5000 (offset=1000)
+            - Client requests after_index=1000
+            - Without offset: effective_index would be 1000, but deque only has 0-4999
+            - With offset: effective_index = max(0, 1000-1000) = 0, returns all 5000 items
+
+        Returns:
+            List of output entries (converted from deque slice).
         """
         with self._lock:
-            buf = self._output_buffers.get(session_id, [])
+            buf = self._output_buffers.get(session_id, deque())
             offset = self._buffer_offsets.get(session_id, 0)
             effective_index = max(0, after_index - offset)
-            return buf[effective_index:]
+            # Convert deque slice to list (deque doesn't support slicing directly)
+            if effective_index >= len(buf):
+                return []
+            return list(buf)[effective_index:]
 
     def mark_session_ended(self, session_id: str) -> None:
         """Mark a session as ended (completed/stopped/error).

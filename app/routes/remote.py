@@ -51,11 +51,6 @@ _CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli", "zcode"]
 
 remote_bp = Blueprint("remote", __name__)
 
-# SSE last delivered index tracking (Issue #1511)
-# When SSE disconnects and reconnects, this allows resuming from the last
-# SSE last delivered position is now managed by RemoteAgentManager (Issue #1511)
-# See: agent_mgr.get_last_delivered(), set_last_delivered(), clear_last_delivered()
-
 
 @remote_bp.before_request
 def load_user():
@@ -857,6 +852,10 @@ def stream_session_output(session_id):
             # Session completed — clean up last_delivered (Issue #1511)
             agent_mgr.clear_last_delivered(session_id)
         except GeneratorExit:
+            # Save delivered progress before disconnect (Issue #1511)
+            # Without this, data sent during the current batch but not yet recorded
+            # would be replayed on reconnect, causing duplicate messages.
+            agent_mgr.set_last_delivered(session_id, last_index)
             logger.info(
                 "Client disconnected during SSE for session %s, request continues in background",
                 session_id[:8],
