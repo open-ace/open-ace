@@ -8,7 +8,7 @@ Database schema is created by schema.sql during installation.
 
 import os
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 
 import bcrypt
 
@@ -107,8 +107,14 @@ def create_default_admin(
     email: str = "admin@localhost",
     system_account: Optional[str] = None,
     tenant_id: int = 1,
-) -> bool:
-    """Create a default admin user with forced password change on first login."""
+) -> Tuple[bool, bool]:
+    """Create a default admin user with forced password change on first login.
+
+    Returns:
+        Tuple[bool, bool]: (success, is_new_user)
+            - success: True if operation completed successfully
+            - is_new_user: True if a new user was created, False if user already existed
+    """
     # Hash password using bcrypt
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
 
@@ -122,14 +128,14 @@ def create_default_admin(
             # Validate system_account parameter
             if not system_account.strip():
                 print("Warning: system_account is empty string, skipping update")
-                return True
+                return (True, False)
             try:
                 db.update_user(existing["id"], system_account=system_account)
                 print(f"Updated system_account for '{username}' to '{system_account}'")
             except Exception as e:
                 print(f"Warning: Failed to update system_account for '{username}': {e}")
         print(f"Admin user '{username}' already exists")
-        return True
+        return (True, False)
 
     # Create admin user with must_change_password = True (force password change on first login)
     result = db.create_user_with_is_active(
@@ -151,10 +157,10 @@ def create_default_admin(
         print(f"Password: {password}")
         print(f"Tenant ID: {tenant_id}")
         print("\nIMPORTANT: You MUST change the password on first login!")
-        return True
+        return (True, True)
     else:
         print(f"Failed to create admin user '{username}'")
-        return False
+        return (False, False)
 
 
 def main():
@@ -172,12 +178,17 @@ def main():
     create_default_tenant()
 
     # Create default admin user with tenant_id=1
-    create_default_admin(system_account=system_account, tenant_id=1)
+    success, is_new_user = create_default_admin(system_account=system_account, tenant_id=1)
 
-    print("\nDefault admin credentials:")
-    print("  Username: admin")
-    print("  Password: admin123")
-    print("\nPlease change the default password after first login!")
+    # Only show default password message when a new user was actually created
+    if is_new_user:
+        print("\nDefault admin credentials:")
+        print("  Username: admin")
+        print("  Password: admin123")
+        print("\nPlease change the default password after first login!")
+    else:
+        print("\nAdmin user 'admin' already exists - password unchanged.")
+        print("If you forgot the password, please use the password reset feature.")
 
 
 if __name__ == "__main__":
