@@ -83,7 +83,7 @@ class RemoteAgentManager:
         # Session to machine mapping: {session_id: machine_id}
         self._session_machines: dict[str, str] = {}
         # Output buffers: {session_id: [output_lines]}
-        self._output_buffers: dict[str, list[dict]] = {}
+        self._output_buffers: dict[str, deque[dict]] = {}
         # Buffer offsets: {session_id: trimmed_count} — tracks how many items were trimmed
         # This prevents data loss when get_buffered_output(after_index) is called
         # after the buffer was trimmed (Issue #1511)
