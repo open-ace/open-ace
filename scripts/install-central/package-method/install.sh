@@ -1894,7 +1894,8 @@ ${fetch_rules}"
 
     local defaults_section="# Preserve auth environment variables for qwen CLI authentication
 # and webui environment variables for sudo env_keep passing
-Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH\"
+# GH_TOKEN and GIT_* vars are for autonomous dev GitHub operations (Issue #1517).
+Defaults env_keep += \"OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH GH_TOKEN GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 
 # Fix: Add /usr/local/bin to secure_path for Node.js v20+ compatibility
 # qwen-code-webui requires Node.js >= 20, which may be installed in /usr/local/bin
