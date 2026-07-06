@@ -55,7 +55,8 @@ class RemoteAgentManager:
 
     # Maximum output buffer size per session (Issue #1511)
     # Prevents unbounded memory growth when SSE disconnects but CLI continues
-    MAX_BUFFER_SIZE = 1000  # ~1000 messages per session
+    # 5000 messages ≈ 3-5 minutes of AI output, covers most brief disconnect scenarios
+    MAX_BUFFER_SIZE = 5000
 
     # Session recovery window (seconds) - allows reconnection after brief disconnects
     # Sessions are only cleaned up if they've been inactive longer than this window
@@ -90,6 +91,10 @@ class RemoteAgentManager:
         self._command_queues: dict[str, list[dict]] = {}
         # Session end flags: {session_id: True} — set when session completes/stops/errors
         self._session_end_flags: dict[str, bool] = {}
+        # SSE last delivered position: {session_id: last_index} (Issue #1511)
+        # Tracks the last index delivered to SSE client, so reconnect can resume
+        # from this position instead of replaying all buffered output from index 0.
+        self._last_delivered: dict[str, int] = {}
         # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
         self._last_heartbeat_db_write: dict[str, float] = {}
         # Browse results: {request_id: result} for directory browsing
@@ -1212,6 +1217,7 @@ class RemoteAgentManager:
         with self._lock:
             self._session_machines.pop(session_id, None)
             self._output_buffers.pop(session_id, None)
+            self._buffer_offsets.pop(session_id, None)  # Issue #1511: cleanup buffer offset
 
     def get_machine_for_session(self, session_id: str) -> str | None:
         """Get the machine ID for a session."""
@@ -1256,14 +1262,35 @@ class RemoteAgentManager:
             return buf[effective_index:]
 
     def mark_session_ended(self, session_id: str) -> None:
-        """Mark a session as ended (completed/stopped/error)."""
+        """Mark a session as ended (completed/stopped/error).
+
+        Also cleans up _last_delivered to prevent memory leak (Issue #1511).
+        """
         with self._lock:
             self._session_end_flags[session_id] = True
+            self._last_delivered.pop(session_id, None)  # Cleanup SSE state
 
     def is_session_ended(self, session_id: str) -> bool:
         """Check if a session has ended (in-memory, no DB query)."""
         with self._lock:
             return self._session_end_flags.get(session_id, False)
+
+    # ==================== SSE Last Delivered ====================
+
+    def get_last_delivered(self, session_id: str) -> int:
+        """Get the last delivered index for SSE reconnect (Issue #1511)."""
+        with self._lock:
+            return self._last_delivered.get(session_id, 0)
+
+    def set_last_delivered(self, session_id: str, index: int) -> None:
+        """Set the last delivered index for SSE reconnect (Issue #1511)."""
+        with self._lock:
+            self._last_delivered[session_id] = index
+
+    def clear_last_delivered(self, session_id: str) -> None:
+        """Clear the last delivered index (called when SSE stream ends)."""
+        with self._lock:
+            self._last_delivered.pop(session_id, None)
 
     # ==================== Heartbeat ====================
 

@@ -53,9 +53,8 @@ remote_bp = Blueprint("remote", __name__)
 
 # SSE last delivered index tracking (Issue #1511)
 # When SSE disconnects and reconnects, this allows resuming from the last
-# delivered position instead of replaying all buffered output from index 0.
-# Key: session_id, Value: last_index delivered to client
-_last_delivered: dict[str, int] = {}
+# SSE last delivered position is now managed by RemoteAgentManager (Issue #1511)
+# See: agent_mgr.get_last_delivered(), set_last_delivered(), clear_last_delivered()
 
 
 @remote_bp.before_request
@@ -786,7 +785,7 @@ def stream_session_output(session_id):
             yield ": connected\n\n"
             # Resume from last delivered index (Issue #1511)
             # This prevents replaying all buffered output on SSE reconnect
-            last_index = _last_delivered.get(session_id, 0)
+            last_index = agent_mgr.get_last_delivered(session_id)
             idle_count = 0
             while True:
                 new_output = agent_mgr.get_buffered_output(session_id, after_index=last_index)
@@ -815,7 +814,6 @@ def stream_session_output(session_id):
                             # can display CLI errors instead of silently hanging.
                             yield f"data: {json.dumps({'type': 'error', 'data': data})}\n\n"
                             last_index += 1
-                            _last_delivered[session_id] = last_index
                             continue
                         if stream == "request_state":
                             try:
@@ -828,7 +826,6 @@ def stream_session_output(session_id):
                                     data,
                                 )
                             last_index += 1
-                            _last_delivered[session_id] = last_index
                             continue
                         try:
                             parsed = json.loads(data)
@@ -839,9 +836,10 @@ def stream_session_output(session_id):
                                 # Wrap as claude_json to match local streaming format
                                 yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
                             last_index += 1
-                            _last_delivered[session_id] = last_index
                         except (json.JSONDecodeError, TypeError):
                             last_index += 1
+                    # Update last_delivered after processing all entries in this batch
+                    agent_mgr.set_last_delivered(session_id, last_index)
                 else:
                     idle_count += 1
                     if idle_count >= 50:  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
@@ -855,7 +853,7 @@ def stream_session_output(session_id):
 
             yield "data: [DONE]\n\n"
             # Session completed — clean up last_delivered (Issue #1511)
-            _last_delivered.pop(session_id, None)
+            agent_mgr.clear_last_delivered(session_id)
         except GeneratorExit:
             logger.info(
                 "Client disconnected during SSE for session %s, request continues in background",
