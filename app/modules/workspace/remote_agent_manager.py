@@ -1270,7 +1270,7 @@ class RemoteAgentManager:
             List of output entries (converted from deque slice).
         """
         with self._lock:
-            buf = self._output_buffers.get(session_id, deque())
+            buf: deque[dict] = self._output_buffers.get(session_id, deque())
             offset = self._buffer_offsets.get(session_id, 0)
             effective_index = max(0, after_index - offset)
             # Convert deque slice to list (deque doesn't support slicing directly)
