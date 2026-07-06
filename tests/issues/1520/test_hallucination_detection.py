@@ -10,7 +10,6 @@ exclude hallucination patterns.
 
 import pytest
 
-
 # ── Test result detection patterns ──────────────────────────────────────
 
 
