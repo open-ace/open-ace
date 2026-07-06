@@ -12,6 +12,7 @@ import logging
 import threading
 import time
 import uuid
+from collections import deque
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -53,6 +54,11 @@ class RemoteAgentManager:
     # Heartbeat rate-limiting interval (seconds)
     HEARTBEAT_DB_WRITE_INTERVAL = 30
 
+    # Maximum output buffer size per session (Issue #1511)
+    # Prevents unbounded memory growth when SSE disconnects but CLI continues
+    # 5000 messages ≈ 3-5 minutes of AI output, covers most brief disconnect scenarios
+    MAX_BUFFER_SIZE = 5000
+
     # Session recovery window (seconds) - allows reconnection after brief disconnects
     # Sessions are only cleaned up if they've been inactive longer than this window
     SESSION_RECOVERY_WINDOW_SECONDS = 300  # 5 minutes recovery window
@@ -77,11 +83,19 @@ class RemoteAgentManager:
         # Session to machine mapping: {session_id: machine_id}
         self._session_machines: dict[str, str] = {}
         # Output buffers: {session_id: [output_lines]}
-        self._output_buffers: dict[str, list[dict]] = {}
+        self._output_buffers: dict[str, deque[dict]] = {}
+        # Buffer offsets: {session_id: trimmed_count} — tracks how many items were trimmed
+        # This prevents data loss when get_buffered_output(after_index) is called
+        # after the buffer was trimmed (Issue #1511)
+        self._buffer_offsets: dict[str, int] = {}
         # Command queues for HTTP-mode agents: {machine_id: [commands]}
         self._command_queues: dict[str, list[dict]] = {}
         # Session end flags: {session_id: True} — set when session completes/stops/errors
         self._session_end_flags: dict[str, bool] = {}
+        # SSE last delivered position: {session_id: last_index} (Issue #1511)
+        # Tracks the last index delivered to SSE client, so reconnect can resume
+        # from this position instead of replaying all buffered output from index 0.
+        self._last_delivered: dict[str, int] = {}
         # Heartbeat rate limiter: {machine_id: last_db_write_timestamp}
         self._last_heartbeat_db_write: dict[str, float] = {}
         # Browse results: {request_id: result} for directory browsing
@@ -125,7 +139,7 @@ class RemoteAgentManager:
                         mid = row["remote_machine_id"]
                         if sid and mid:
                             self._session_machines[sid] = mid
-                            self._output_buffers.setdefault(sid, [])
+                            self._output_buffers.setdefault(sid, deque(maxlen=self.MAX_BUFFER_SIZE))
 
                 # Restore end flags for completed/stopped/error sessions
                 cursor.execute(
@@ -1197,13 +1211,22 @@ class RemoteAgentManager:
         """Bind a session to a machine."""
         with self._lock:
             self._session_machines[session_id] = machine_id
-            self._output_buffers[session_id] = []
+            self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
 
     def unbind_session(self, session_id: str) -> None:
-        """Remove session binding."""
+        """Remove session binding.
+
+        Cleans up all session-related state to prevent memory leaks:
+        - _session_machines: session → machine mapping
+        - _output_buffers: buffered output data
+        - _buffer_offsets: buffer trim offset tracking
+        - _last_delivered: SSE reconnect position (Issue #1511)
+        """
         with self._lock:
             self._session_machines.pop(session_id, None)
             self._output_buffers.pop(session_id, None)
+            self._buffer_offsets.pop(session_id, None)
+            self._last_delivered.pop(session_id, None)  # Issue #1511: cleanup SSE state
 
     def get_machine_for_session(self, session_id: str) -> str | None:
         """Get the machine ID for a session."""
@@ -1212,27 +1235,79 @@ class RemoteAgentManager:
     # ==================== Output Buffering ====================
 
     def buffer_output(self, session_id: str, output: dict[str, Any]) -> None:
-        """Buffer output from a remote session."""
+        """Buffer output from a remote session.
+
+        Uses deque(maxlen=MAX_BUFFER_SIZE) for O(1) append and automatic trim.
+        When maxlen is reached, oldest entries are automatically dropped, and
+        we increment _buffer_offsets to track the dropped count (Issue #1511).
+
+        Limitation: If SSE disconnects for >3-5 minutes during high-frequency
+        output (>5000 messages), old data will be trimmed and lost on reconnect.
+        """
         with self._lock:
             if session_id not in self._output_buffers:
-                self._output_buffers[session_id] = []
-            self._output_buffers[session_id].append(output)
+                self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
+                self._buffer_offsets[session_id] = 0
+            buf = self._output_buffers[session_id]
+            # Track if this append will cause a trim (deque at maxlen)
+            if len(buf) == self.MAX_BUFFER_SIZE:
+                self._buffer_offsets[session_id] += 1
+            buf.append(output)
 
     def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
-        """Get buffered output for a session after a given index."""
+        """Get buffered output for a session after a given index.
+
+        Takes into account _buffer_offsets to prevent data loss when
+        the buffer was trimmed (Issue #1511).
+
+        Example:
+            - Buffer grew to 6000 items, trimmed to 5000 (offset=1000)
+            - Client requests after_index=1000
+            - Without offset: effective_index would be 1000, but deque only has 0-4999
+            - With offset: effective_index = max(0, 1000-1000) = 0, returns all 5000 items
+
+        Returns:
+            List of output entries (converted from deque slice).
+        """
         with self._lock:
-            buf = self._output_buffers.get(session_id, [])
-            return buf[after_index:]
+            buf: deque[dict] = self._output_buffers.get(session_id, deque())
+            offset = self._buffer_offsets.get(session_id, 0)
+            effective_index = max(0, after_index - offset)
+            # Convert deque slice to list (deque doesn't support slicing directly)
+            if effective_index >= len(buf):
+                return []
+            return list(buf)[effective_index:]
 
     def mark_session_ended(self, session_id: str) -> None:
-        """Mark a session as ended (completed/stopped/error)."""
+        """Mark a session as ended (completed/stopped/error).
+
+        Also cleans up _last_delivered to prevent memory leak (Issue #1511).
+        """
         with self._lock:
             self._session_end_flags[session_id] = True
+            self._last_delivered.pop(session_id, None)  # Cleanup SSE state
 
     def is_session_ended(self, session_id: str) -> bool:
         """Check if a session has ended (in-memory, no DB query)."""
         with self._lock:
             return self._session_end_flags.get(session_id, False)
+
+    # ==================== SSE Last Delivered ====================
+
+    def get_last_delivered(self, session_id: str) -> int:
+        """Get the last delivered index for SSE reconnect (Issue #1511)."""
+        with self._lock:
+            return self._last_delivered.get(session_id, 0)
+
+    def set_last_delivered(self, session_id: str, index: int) -> None:
+        """Set the last delivered index for SSE reconnect (Issue #1511)."""
+        with self._lock:
+            self._last_delivered[session_id] = index
+
+    def clear_last_delivered(self, session_id: str) -> None:
+        """Clear the last delivered index (called when SSE stream ends)."""
+        with self._lock:
+            self._last_delivered.pop(session_id, None)
 
     # ==================== Heartbeat ====================
 

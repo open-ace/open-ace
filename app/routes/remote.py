@@ -778,7 +778,9 @@ def stream_session_output(session_id):
     def generate():
         try:
             yield ": connected\n\n"
-            last_index = 0
+            # Resume from last delivered index (Issue #1511)
+            # This prevents replaying all buffered output on SSE reconnect
+            last_index = agent_mgr.get_last_delivered(session_id)
             idle_count = 0
             while True:
                 new_output = agent_mgr.get_buffered_output(session_id, after_index=last_index)
@@ -828,12 +830,16 @@ def stream_session_output(session_id):
                             else:
                                 # Wrap as claude_json to match local streaming format
                                 yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
+                            last_index += 1
                         except (json.JSONDecodeError, TypeError):
-                            pass
-                        last_index += 1
+                            last_index += 1
+                    # Update last_delivered after processing all entries in this batch
+                    agent_mgr.set_last_delivered(session_id, last_index)
                 else:
                     idle_count += 1
-                    if idle_count >= 150:  # ~30 seconds (150 * 0.2s)
+                    if (
+                        idle_count >= 50
+                    ):  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
                         yield ": keepalive\n\n"
                         idle_count = 0
 
@@ -843,16 +849,19 @@ def stream_session_output(session_id):
                 time.sleep(0.2)
 
             yield "data: [DONE]\n\n"
+            # Session completed — clean up last_delivered (Issue #1511)
+            agent_mgr.clear_last_delivered(session_id)
         except GeneratorExit:
+            # Save delivered progress before disconnect (Issue #1511)
+            # Without this, data sent during the current batch but not yet recorded
+            # would be replayed on reconnect, causing duplicate messages.
+            agent_mgr.set_last_delivered(session_id, last_index)
             logger.info(
-                "Client disconnected during SSE for session %s, aborting request",
+                "Client disconnected during SSE for session %s, request continues in background",
                 session_id[:8],
             )
-            try:
-                session_mgr = get_remote_session_manager()
-                session_mgr.abort_request(session_id, reason="disconnect")
-            except Exception:
-                pass
+            # Don't abort_request — CLI continues running, data accumulates in buffer
+            # User can reconnect via SSE and receive buffered output
 
     return Response(
         stream_with_context(generate()),
