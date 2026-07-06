@@ -2739,9 +2739,9 @@ class AutonomousOrchestrator:
             "AssertionError",
             "error",
         ]
-        has_test_result = (
-            has_actual_pytest_output
-            or (any(kw in test_response_text for kw in _test_result_keywords) and not has_hallucination_desc)
+        has_test_result = has_actual_pytest_output or (
+            any(kw in test_response_text for kw in _test_result_keywords)
+            and not has_hallucination_desc
         )
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
