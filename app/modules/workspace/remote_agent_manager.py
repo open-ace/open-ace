@@ -53,6 +53,10 @@ class RemoteAgentManager:
     # Heartbeat rate-limiting interval (seconds)
     HEARTBEAT_DB_WRITE_INTERVAL = 30
 
+    # Maximum output buffer size per session (Issue #1511)
+    # Prevents unbounded memory growth when SSE disconnects but CLI continues
+    MAX_BUFFER_SIZE = 1000  # ~1000 messages per session
+
     # Session recovery window (seconds) - allows reconnection after brief disconnects
     # Sessions are only cleaned up if they've been inactive longer than this window
     SESSION_RECOVERY_WINDOW_SECONDS = 300  # 5 minutes recovery window
@@ -78,6 +82,10 @@ class RemoteAgentManager:
         self._session_machines: dict[str, str] = {}
         # Output buffers: {session_id: [output_lines]}
         self._output_buffers: dict[str, list[dict]] = {}
+        # Buffer offsets: {session_id: trimmed_count} — tracks how many items were trimmed
+        # This prevents data loss when get_buffered_output(after_index) is called
+        # after the buffer was trimmed (Issue #1511)
+        self._buffer_offsets: dict[str, int] = {}
         # Command queues for HTTP-mode agents: {machine_id: [commands]}
         self._command_queues: dict[str, list[dict]] = {}
         # Session end flags: {session_id: True} — set when session completes/stops/errors
@@ -1212,17 +1220,40 @@ class RemoteAgentManager:
     # ==================== Output Buffering ====================
 
     def buffer_output(self, session_id: str, output: dict[str, Any]) -> None:
-        """Buffer output from a remote session."""
+        """Buffer output from a remote session.
+
+        If buffer exceeds MAX_BUFFER_SIZE, trim oldest entries and record
+        the offset to prevent data loss on get_buffered_output (Issue #1511).
+        """
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = []
-            self._output_buffers[session_id].append(output)
+                self._buffer_offsets[session_id] = 0
+            buf = self._output_buffers[session_id]
+            buf.append(output)
+            # Trim if exceeds MAX_BUFFER_SIZE
+            if len(buf) > self.MAX_BUFFER_SIZE:
+                trim_count = len(buf) - self.MAX_BUFFER_SIZE
+                self._output_buffers[session_id] = buf[trim_count:]
+                self._buffer_offsets[session_id] += trim_count
 
     def get_buffered_output(self, session_id: str, after_index: int = 0) -> list[dict]:
-        """Get buffered output for a session after a given index."""
+        """Get buffered output for a session after a given index.
+
+        Takes into account _buffer_offsets to prevent data loss when
+        the buffer was trimmed (Issue #1511).
+
+        Example:
+            - Buffer grew to 13000 items, trimmed to 10000 (offset=3000)
+            - Client requests after_index=3000
+            - Without offset: buf[3000:] returns items 3000-12999 (missing 0-2999)
+            - With offset: effective_index = max(0, 3000-3000) = 0, returns all
+        """
         with self._lock:
             buf = self._output_buffers.get(session_id, [])
-            return buf[after_index:]
+            offset = self._buffer_offsets.get(session_id, 0)
+            effective_index = max(0, after_index - offset)
+            return buf[effective_index:]
 
     def mark_session_ended(self, session_id: str) -> None:
         """Mark a session as ended (completed/stopped/error)."""

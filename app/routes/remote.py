@@ -51,6 +51,12 @@ _CLI_SETTINGS_TOOLS = ["claude-code", "qwen-code", "codex-cli", "zcode"]
 
 remote_bp = Blueprint("remote", __name__)
 
+# SSE last delivered index tracking (Issue #1511)
+# When SSE disconnects and reconnects, this allows resuming from the last
+# delivered position instead of replaying all buffered output from index 0.
+# Key: session_id, Value: last_index delivered to client
+_last_delivered: dict[str, int] = {}
+
 
 @remote_bp.before_request
 def load_user():
@@ -778,7 +784,9 @@ def stream_session_output(session_id):
     def generate():
         try:
             yield ": connected\n\n"
-            last_index = 0
+            # Resume from last delivered index (Issue #1511)
+            # This prevents replaying all buffered output on SSE reconnect
+            last_index = _last_delivered.get(session_id, 0)
             idle_count = 0
             while True:
                 new_output = agent_mgr.get_buffered_output(session_id, after_index=last_index)
@@ -807,6 +815,7 @@ def stream_session_output(session_id):
                             # can display CLI errors instead of silently hanging.
                             yield f"data: {json.dumps({'type': 'error', 'data': data})}\n\n"
                             last_index += 1
+                            _last_delivered[session_id] = last_index
                             continue
                         if stream == "request_state":
                             try:
@@ -819,6 +828,7 @@ def stream_session_output(session_id):
                                     data,
                                 )
                             last_index += 1
+                            _last_delivered[session_id] = last_index
                             continue
                         try:
                             parsed = json.loads(data)
@@ -828,12 +838,13 @@ def stream_session_output(session_id):
                             else:
                                 # Wrap as claude_json to match local streaming format
                                 yield f"data: {json.dumps({'type': 'claude_json', 'data': parsed})}\n\n"
+                            last_index += 1
+                            _last_delivered[session_id] = last_index
                         except (json.JSONDecodeError, TypeError):
-                            pass
-                        last_index += 1
+                            last_index += 1
                 else:
                     idle_count += 1
-                    if idle_count >= 150:  # ~30 seconds (150 * 0.2s)
+                    if idle_count >= 50:  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
                         yield ": keepalive\n\n"
                         idle_count = 0
 
@@ -843,16 +854,15 @@ def stream_session_output(session_id):
                 time.sleep(0.2)
 
             yield "data: [DONE]\n\n"
+            # Session completed — clean up last_delivered (Issue #1511)
+            _last_delivered.pop(session_id, None)
         except GeneratorExit:
             logger.info(
-                "Client disconnected during SSE for session %s, aborting request",
+                "Client disconnected during SSE for session %s, request continues in background",
                 session_id[:8],
             )
-            try:
-                session_mgr = get_remote_session_manager()
-                session_mgr.abort_request(session_id, reason="disconnect")
-            except Exception:
-                pass
+            # Don't abort_request — CLI continues running, data accumulates in buffer
+            # User can reconnect via SSE and receive buffered output
 
     return Response(
         stream_with_context(generate()),
