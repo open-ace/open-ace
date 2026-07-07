@@ -106,8 +106,7 @@ class TestGetIssueFailureHandling:
         failed_milestones = [
             c
             for c in milestone_calls
-            if c[0][0].get("milestone_type") == "issue_linked"
-            and c[0][0].get("status") == "failed"
+            if c[0][0].get("milestone_type") == "issue_linked" and c[0][0].get("status") == "failed"
         ]
         assert len(failed_milestones) == 1
         ms = failed_milestones[0][0][0]
@@ -118,9 +117,5 @@ class TestGetIssueFailureHandling:
 
         # Workflow should NOT transition to planning (terminated early)
         update_calls = mock_repo.update_workflow.call_args_list
-        phases = [
-            c[0][1].get("current_phase")
-            for c in update_calls
-            if "current_phase" in c[0][1]
-        ]
+        phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
         assert "planning" not in phases
