@@ -75,6 +75,48 @@ validate_node_environment() {
     fi
     echo "  ps: $PS_PATH"
 
+    # === Git Verification ===
+    echo "Validating git and GitHub CLI..."
+
+    if ! command -v git &>/dev/null; then
+        echo "ERROR: git not found in PATH."
+        echo "       This indicates git package was not installed during Docker build."
+        echo "       Autonomous development requires git for clone, branch, commit, push operations."
+        echo "       Please rebuild the image with git package."
+        exit 1
+    fi
+
+    GIT_PATH=$(which git)
+    if [ ! -x "$GIT_PATH" ]; then
+        echo "ERROR: git at $GIT_PATH is not executable."
+        echo "       Please check file permissions or rebuild the image."
+        exit 1
+    fi
+
+    # Get and display git version
+    GIT_VERSION=$(git --version 2>/dev/null || echo "unknown")
+    echo "  git: $GIT_PATH ($GIT_VERSION)"
+
+    # === GitHub CLI Verification ===
+    if ! command -v gh &>/dev/null; then
+        echo "ERROR: gh CLI not found in PATH."
+        echo "       This indicates gh CLI was not installed during Docker build."
+        echo "       Autonomous development requires gh for PR, Issue, and GitHub API operations."
+        echo "       Please rebuild the image with gh CLI installed."
+        exit 1
+    fi
+
+    GH_PATH=$(which gh)
+    if [ ! -x "$GH_PATH" ]; then
+        echo "ERROR: gh CLI at $GH_PATH is not executable."
+        echo "       Please check file permissions or rebuild the image."
+        exit 1
+    fi
+
+    # Get and display gh version
+    GH_VERSION=$(gh --version 2>/dev/null | head -n1 || echo "unknown")
+    echo "  gh: $GH_PATH ($GH_VERSION)"
+
     echo "Node.js environment validated successfully."
 }
 
@@ -537,6 +579,11 @@ except Exception as e:
     # Allow open-ace (container user) and openace (workspace user) to run as any workspace user
     # NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
     WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
+
+    # Dynamic path resolution for git and gh (validated in validate_node_environment)
+    GIT_PATH=$(which git 2>/dev/null || echo "/usr/bin/git")
+    GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
+
     if [ -x "$WEBUI_PATH" ]; then
         # 【修复 Issue #1395】autonomous 开发所需的 git/gh/CLI 工具 + run-as wrapper
         # wrapper 必须存在才注入对应规则（与 Dockerfile COPY 保持一致）
@@ -555,7 +602,8 @@ openace ALL=(root) NOPASSWD: ${WRAPPER_PATH} *"
 # Commands must have '*' suffix to allow arguments
 # useradd/id: for creating system users in Docker multi-user mode (uid >= 1000 validated in code)
 # 【修复 Issue #1395】git/gh 用于 autonomous 开发工作流
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# Dynamic paths resolved from validate_node_environment
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/useradd *, /usr/bin/id *, ${GIT_PATH} *, ${GH_PATH} *, /usr/local/bin/git *, /usr/local/bin/gh *
 
 # 【修复 Issue #1395】autonomous 开发 CLI 工具权限
 Cmnd_Alias OPENACE_CLI = /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *
@@ -581,6 +629,8 @@ SUDOERS_EOF
         # Validate sudoers syntax
         if visudo -c -f /etc/sudoers.d/open-ace-webui &>/dev/null; then
             echo "Sudoers configured for qwen-code-webui at: $WEBUI_PATH"
+            echo "  git path: $GIT_PATH"
+            echo "  gh path: $GH_PATH"
         else
             echo "WARNING: Sudoers syntax validation failed. Removing invalid file."
             rm -f /etc/sudoers.d/open-ace-webui

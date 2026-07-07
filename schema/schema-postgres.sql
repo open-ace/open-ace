@@ -365,7 +365,8 @@ CREATE TABLE autonomous_workflows (
     retry_count integer DEFAULT 0,
     test_retries integer DEFAULT 0,
     skip_retries integer DEFAULT 0,
-    dev_retries_on_test_fail integer DEFAULT 0
+    dev_retries_on_test_fail integer DEFAULT 0,
+    system_account text DEFAULT ''::text
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
