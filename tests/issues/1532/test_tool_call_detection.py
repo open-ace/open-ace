@@ -20,11 +20,19 @@ class TestHasTestToolCall:
             # Python pytest detection
             ([{"tool": {"name": "Bash", "input": {"command": "pytest"}}}], "python", True),
             ([{"tool": {"name": "Bash", "input": {"command": "pytest tests/"}}}], "python", True),
-            ([{"tool": {"name": "Bash", "input": {"command": "python -m pytest"}}}], "python", True),
+            (
+                [{"tool": {"name": "Bash", "input": {"command": "python -m pytest"}}}],
+                "python",
+                True,
+            ),
             ([{"tool": {"name": "Bash", "input": {"command": "pytest -v"}}}], "python", True),
             # Help/version queries should NOT count as test execution
             ([{"tool": {"name": "Bash", "input": {"command": "pytest --help"}}}], "python", False),
-            ([{"tool": {"name": "Bash", "input": {"command": "pytest --version"}}}], "python", False),
+            (
+                [{"tool": {"name": "Bash", "input": {"command": "pytest --version"}}}],
+                "python",
+                False,
+            ),
             ([{"tool": {"name": "Bash", "input": {"command": "pytest -h"}}}], "python", False),
             # Non-test commands -> False
             ([{"tool": {"name": "Bash", "input": {"command": "ls -la"}}}], "python", False),
@@ -46,7 +54,11 @@ class TestHasTestToolCall:
             ([{"tool": {"name": "Bash", "input": {"command": "./gradlew test"}}}], "java", True),
             # Unknown framework -> fallback to generic_patterns (includes unittest)
             ([{"tool": {"name": "Bash", "input": {"command": "pytest"}}}], "unknown", True),
-            ([{"tool": {"name": "Bash", "input": {"command": "unittest discover"}}}], "unknown", True),
+            (
+                [{"tool": {"name": "Bash", "input": {"command": "unittest discover"}}}],
+                "unknown",
+                True,
+            ),
             ([{"tool": {"name": "Bash", "input": {"command": "jest"}}}], "unknown", True),
             ([{"tool": {"name": "Bash", "input": {"command": "go test"}}}], "unknown", True),
             ([{"tool": {"name": "Bash", "input": {"command": "cargo test"}}}], "unknown", True),
@@ -146,13 +158,10 @@ class TestSkipDetectionLogic:
         test_result_success = True
 
         tests_actually_run = (
-            test_status_tag in ("passed", "failed")
-            or has_test_tool_call
-            or has_test_result
+            test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
         )
-        tests_actually_skipped = (
-            test_status_tag == "skipped"
-            or (test_result_success and not tests_actually_run)
+        tests_actually_skipped = test_status_tag == "skipped" or (
+            test_result_success and not tests_actually_run
         )
         assert tests_actually_skipped is True
 
