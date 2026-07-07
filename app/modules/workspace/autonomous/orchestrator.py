@@ -225,7 +225,9 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     for tc in tool_calls:
         tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
         # P0: Ensure tool_input is dict (handle None case)
-        tool_input = (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
+        tool_input = (
+            (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
+        )
 
         # P2: Check non-Bash test tools first (pytest, run_tests, test)
         if tool_name in ("pytest", "run_tests", "test"):
@@ -3000,9 +3002,7 @@ class AutonomousOrchestrator:
         has_test_tool_call = _has_test_tool_call(test_result.tool_calls or [], framework_type)
 
         tests_actually_run = (
-            test_status_tag in ("passed", "failed")
-            or has_test_tool_call
-            or has_test_result
+            test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
         )
 
         tests_actually_skipped = (
