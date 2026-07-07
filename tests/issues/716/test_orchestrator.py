@@ -428,9 +428,9 @@ class TestOrchestratorPreparation:
         # Should create failed milestone with correct parameters
         milestone_calls = mock_repo.create_milestone.call_args_list
         failed_milestones = [
-            c for c in milestone_calls
-            if c[0][0].get("milestone_type") == "issue_linked"
-            and c[0][0].get("status") == "failed"
+            c
+            for c in milestone_calls
+            if c[0][0].get("milestone_type") == "issue_linked" and c[0][0].get("status") == "failed"
         ]
         assert len(failed_milestones) == 1
         ms = failed_milestones[0][0][0]
