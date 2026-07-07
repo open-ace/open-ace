@@ -176,6 +176,9 @@ class GitHubOps:
             return None
         if not url:
             return None
+        # Strip credentials from URL before parsing
+        # (handles https://user:token@host and https://user@host formats)
+        url = re.sub(r"^(https?://)([^@/:]+(?::[^@/]*)?@)", r"\1", url)
         # Parse the host and owner/repo from common git remote forms:
         #   https://github.com/<owner>/<repo>[.git]
         #   git@github.com:<owner>/<repo>[.git]            (SCP-style)

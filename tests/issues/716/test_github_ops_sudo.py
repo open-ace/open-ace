@@ -126,6 +126,33 @@ class TestResolveOwnerRepo:
         ):
             assert gh._resolve_owner_repo() == "gh.example.com/owner/repo"
 
+    def test_https_url_with_credentials(self):
+        """URL containing user:token@ credentials is stripped before parsing."""
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url",
+            return_value="https://user:ghp_token@github.com/open-ace/open-ace.git"
+        ):
+            assert gh._resolve_owner_repo() == "open-ace/open-ace"
+
+    def test_https_url_with_credentials_only_user(self):
+        """URL containing user@ (no password) is stripped before parsing."""
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url",
+            return_value="https://user@github.com/open-ace/open-ace.git"
+        ):
+            assert gh._resolve_owner_repo() == "open-ace/open-ace"
+
+    def test_ghes_https_url_with_credentials(self):
+        """GHES URL with credentials strips credentials and includes host."""
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+        with patch.object(
+            GitHubOps, "get_repo_url",
+            return_value="https://user:token@gh.example.com/owner/repo.git"
+        ):
+            assert gh._resolve_owner_repo() == "gh.example.com/owner/repo"
+
 
 class TestRunGhSudo:
     """_run_gh under a sudo wrapper uses -R owner/repo, never -C."""
