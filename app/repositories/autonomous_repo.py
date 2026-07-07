@@ -500,8 +500,23 @@ class AutonomousWorkflowRepository:
         finally:
             conn.close()
 
-    def update_workflow(self, workflow_id: str, updates: dict) -> Optional[dict]:
-        """Update a workflow's fields. Returns updated record."""
+    def update_workflow(
+        self, workflow_id: str, updates: dict, expected_values: Optional[dict] = None
+    ) -> Optional[dict]:
+        """Update a workflow's fields. Returns updated record.
+
+        **Phase 1 Enhancement (P0)**: Optional optimistic lock support.
+        If `expected_values` dict is provided, adds WHERE conditions checking
+        old values before update (prevents concurrent modification).
+
+        Args:
+            workflow_id: Workflow UUID
+            updates: Dict of fields to update
+            expected_values: Optional dict of {field: old_value} for optimistic lock
+
+        Returns:
+            Updated workflow dict if successful, None if optimistic lock failed
+        """
         if not updates:
             return self.get_workflow(workflow_id)
 
@@ -527,11 +542,38 @@ class AutonomousWorkflowRepository:
             params.append(self._coerce_bool(value) if key in _BOOL_COLS else value)
 
         params.append(workflow_id)
-        self.db.execute(
-            f"UPDATE autonomous_workflows SET {', '.join(set_clauses)} WHERE workflow_id = ?",
-            tuple(params),
-        )
-        return self.get_workflow(workflow_id)
+
+        # ── Optimistic lock support (Phase 1, P0) ──────────────────────
+        where_clauses = ["workflow_id = ?"]
+        if expected_values:
+            # Filter expected_values to retry fields only (保守策略)
+            _RETRY_FIELDS = {"test_retries", "skip_retries", "dev_retries_on_test_fail"}
+            safe_expected = {k: v for k, v in expected_values.items() if k in _RETRY_FIELDS}
+            for key, old_value in safe_expected.items():
+                where_clauses.append(f"{key} = ?")
+                params.append(old_value)
+
+        sql = f"UPDATE autonomous_workflows SET {', '.join(set_clauses)} WHERE {' AND '.join(where_clauses)}"
+
+        # Execute and check affected rows
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(adapt_sql(sql), tuple(params))
+            affected_rows = cursor.rowcount
+            conn.commit()
+
+            if expected_values and affected_rows == 0:
+                # Optimistic lock failed - concurrent modification detected
+                logger.warning(
+                    "Optimistic lock failed for workflow %s: expected_values=%s",
+                    workflow_id[:8], expected_values
+                )
+                return None
+
+            return self.get_workflow(workflow_id)
+        finally:
+            conn.close()
 
     def update_workflow_tokens(self, workflow_id: str, tokens: dict) -> None:
         """Accumulate token counts for a workflow."""

@@ -52,6 +52,117 @@ COMPLETION_KEYWORDS = [
     "workflow complete",
 ]
 
+# ── Framework inference for test detection (Phase 1, P0) ────────────────
+
+def _infer_test_framework(project_path: str, cli_tool: str) -> str:
+    """Infer test framework type from project structure and CLI tool.
+
+    Returns: "python", "javascript", "go", "mixed", or "unknown"
+    """
+    if not project_path:
+        return "unknown"
+
+    import os
+
+    # Check for JavaScript/Node project files
+    js_markers = ["package.json", "jest.config.js", "jest.config.ts", "vitest.config.ts"]
+    # Check for Python project files
+    py_markers = ["requirements.txt", "setup.py", "pyproject.toml", "pytest.ini", "tox.ini"]
+    # Check for Go project files
+    go_markers = ["go.mod", "go.sum"]
+    # Check for Rust project files
+    rust_markers = ["Cargo.toml"]
+    # Check for Java project files
+    java_markers = ["pom.xml", "build.gradle", "build.gradle.kts"]
+
+    detected_frameworks = []
+
+    # Scan for marker files (limit to 3 levels deep to avoid slow scans)
+    for root, dirs, files in os.walk(project_path):
+        # Limit depth
+        depth = root[len(project_path):].count(os.sep)
+        if depth > 2:
+            dirs[:] = []  # Don't recurse further
+            continue
+
+        # Skip common non-source directories
+        dirs[:] = [d for d in dirs if d not in ("node_modules", "venv", ".venv", "__pycache__", ".git", "dist", "build")]
+
+        for f in files:
+            if f in js_markers:
+                detected_frameworks.append("javascript")
+            elif f in py_markers:
+                detected_frameworks.append("python")
+            elif f in go_markers:
+                detected_frameworks.append("go")
+            elif f in rust_markers:
+                detected_frameworks.append("rust")
+            elif f in java_markers:
+                detected_frameworks.append("java")
+
+    # Deduplicate and determine result
+    unique_frameworks = list(set(detected_frameworks))
+
+    if len(unique_frameworks) == 1:
+        return unique_frameworks[0]
+    elif len(unique_frameworks) > 1:
+        return "mixed"
+    else:
+        # Fallback: cannot infer from files, use "unknown" (disable keyword fallback)
+        return "unknown"
+
+
+def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: bool) -> bool:
+    """Strict keyword detection with multiple conditions (Phase 1, P0).
+
+    Requires stronger evidence than single keyword match:
+    - Condition A: dual keywords (passed + PASSED, etc.)
+    - Condition B: keyword + timestamp ("in X.XXs")
+    - Condition C: keyword + file count ("X tests", "X files")
+    - Condition D: keyword + error details (AssertionError, expected)
+
+    Returns False if hallucination detected.
+    """
+    if has_hallucination_desc:
+        return False
+
+    import re
+
+    # Condition A: Dual keyword combination
+    dual_keywords = [
+        ("passed", "PASSED"),
+        ("failed", "FAILED"),
+        ("passed", "failures"),
+        ("failed", "failures"),
+    ]
+    has_dual = any(
+        kw1 in test_response_text.lower() and kw2 in test_response_text
+        for kw1, kw2 in dual_keywords
+    )
+
+    # Condition B: Keyword + timestamp pattern
+    timestamp_pattern = r"in\s+[\d.]+s"
+    has_timestamp_keyword = bool(
+        ("passed" in test_response_text.lower() and re.search(timestamp_pattern, test_response_text))
+        or ("completed" in test_response_text.lower() and re.search(timestamp_pattern, test_response_text))
+    )
+
+    # Condition C: Keyword + file/test count
+    count_pattern = r"\d+\s+(tests?|files?|specs?)"
+    has_count_keyword = bool(
+        ("passed" in test_response_text.lower() and re.search(count_pattern, test_response_text))
+        or ("failed" in test_response_text.lower() and re.search(count_pattern, test_response_text))
+    )
+
+    # Condition D: Keyword + error details
+    has_error_details = (
+        ("failed" in test_response_text.lower() and "AssertionError" in test_response_text)
+        or ("failed" in test_response_text.lower() and "expected" in test_response_text.lower())
+        or ("failed" in test_response_text.lower() and "Traceback" in test_response_text)
+    )
+
+    return has_dual or has_timestamp_keyword or has_count_keyword or has_error_details
+
 # Pre-compiled patterns for completion keyword matching (avoids recompilation in loop)
 _COMPLETION_PATTERNS = [
     re.compile(
@@ -1407,13 +1518,35 @@ class AutonomousOrchestrator:
         Unlike cancel, this does NOT clear _current_session_id so
         resume can find the session again.
 
-        Note: we intentionally do NOT set _cancel_requested here.
-        Since SIGSTOP freezes the process, _run_local's
-        session.completed.wait() will block until SIGCONT resumes
-        the process and it finishes. The scheduler won't re-poll
-        this workflow because its status is set to "paused" in the
-        database, which advance() checks at entry.
+        **Phase 1 Enhancement (P0)**: Persist retry state before pause
+        to ensure counts survive pause/resume cycle.
         """
+        # ── Phase 1: Persist retry state before pause ─────────────────────
+        wf = self.workflow
+        if wf and wf.get("status") in ("developing", "planning"):
+            # Read current retry counts
+            test_retries = wf.get("test_retries", 0)
+            skip_retries = wf.get("skip_retries", 0)
+            dev_retries = wf.get("dev_retries_on_test_fail", 0)
+
+            # Persist retry state + status + paused_at (原子写入)
+            try:
+                self._update_workflow({
+                    "test_retries": test_retries,
+                    "skip_retries": skip_retries,
+                    "dev_retries_on_test_fail": dev_retries,
+                    "status": "paused",
+                    "paused_at": datetime.now(timezone.utc),
+                })
+                logger.info(
+                    "Persisted retry state before pause: test=%d, skip=%d, dev=%d",
+                    test_retries, skip_retries, dev_retries,
+                )
+            except Exception as e:
+                # 写入失败仍允许 pause（避免阻塞用户操作）
+                logger.warning("Failed to persist retry state before pause: %s", e)
+
+        # ── Pause the agent process ───────────────────────────────────────
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:
@@ -2690,29 +2823,14 @@ class AutonomousOrchestrator:
             "test framework not found",
         ]
         has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
-        # Negative detection: if response contains no pytest output markers, the
-        # agent likely never actually ran tests. Use regex patterns to match
-        # pytest's standard output format, not bare keywords like "test" that
-        # would false-positive on agent's descriptive text (e.g., "测试在后台运行中",
-        # "测试进度约50%") — GLM-5 hallucination pattern (#1520).
-        _pytest_output_patterns = [
-            # pytest summary line: "3 passed, 2 failed" or "1 passed in 2.5s"
-            r"\d+\s+(passed|failed|skipped|warnings?|error)",
-            # pytest completion marker: "PASSED in 2.5s" / "FAILED in 1.2s"
-            r"(PASSED|FAILED)\s+in\s+[\d.]+s",
-            # pytest summary banner: "= 3 passed in 2.50s =" (short form)
-            r"={3,}\s*\d+\s+(passed|failed|skipped|error|warning)",
-            # pytest session start: "test session starts" / "collected 5 items"
-            r"test session starts",
-            r"collected\s+\d+\s+items",
-            # pytest individual test result: "PASSED" / "FAILED" as standalone
-            r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
-            # assertion error marker (real pytest output)
-            r"AssertionError",
-        ]
-        has_actual_pytest_output = any(
-            re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
+        # ── Framework-aware test detection (Phase 1, P0) ──────────────────────
+        # Infer framework type for layered detection strategy
+        framework_type = _infer_test_framework(
+            wf.get("project_path", ""),
+            wf.get("cli_tool", "")
         )
+        logger.debug("Inferred test framework: %s for workflow %s", framework_type, self._workflow_id[:8])
+
         # Detect hallucination patterns: agent claims tests are running but
         # outputs only descriptive text, not actual pytest results.
         _hallucination_patterns = [
@@ -2729,20 +2847,85 @@ class AutonomousOrchestrator:
         has_hallucination_desc = any(
             re.search(p, test_response_text, re.IGNORECASE) for p in _hallucination_patterns
         )
-        # Legacy keyword check as fallback (for non-pytest frameworks)
-        _test_result_keywords = [
-            "passed",
-            "failed",
-            "PASSED",
-            "FAILED",
-            "assertion",
-            "AssertionError",
-            "error",
+
+        # Framework-specific pytest output patterns (Layer 1)
+        _pytest_output_patterns = [
+            # pytest summary line: "3 passed, 2 failed" or "1 passed in 2.5s"
+            r"\d+\s+(passed|failed|skipped|warnings?|error)",
+            # pytest completion marker: "PASSED in 2.5s" / "FAILED in 1.2s"
+            r"(PASSED|FAILED)\s+in\s+[\d.]+s",
+            # pytest summary banner: "= 3 passed in 2.50s =" (short form)
+            r"={3,}\s*\d+\s+(passed|failed|skipped|error|warning)",
+            # pytest session start: "test session starts" / "collected 5 items"
+            r"test session starts",
+            r"collected\s+\d+\s+items",
+            # pytest individual test result: "PASSED" / "FAILED" as standalone
+            r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
+            # assertion error marker (real pytest output)
+            r"AssertionError",
         ]
-        has_test_result = has_actual_pytest_output or (
-            any(kw in test_response_text for kw in _test_result_keywords)
-            and not has_hallucination_desc
-        )
+
+        # Jest patterns for JavaScript projects
+        _jest_patterns = [
+            r"PASS\s+\d+\s+tests",
+            r"FAIL\s+\d+\s+tests",
+            r"Test Suites:\s*\d+\s+passed",
+            r"Tests:\s*\d+\s+passed",
+            r"Snapshots:\s*\d+\s+passed",
+        ]
+
+        # Go test patterns for Go projects
+        _go_test_patterns = [
+            r"PASS\s+ok",
+            r"FAIL\s+FAIL",
+            r"===\s+RUN",
+            r"---\s+PASS:",
+            r"---\s+FAIL:",
+            r"PASS\s+\(\d+\s+tests\)",
+        ]
+
+        # Unittest patterns for Python unittest
+        _unittest_patterns = [
+            r"OK\s+\(\d+\s+tests\)",
+            r"FAILED\s+\(failures=\d+\)",
+            r"ERROR\s+\(errors=\d+\)",
+            r"Traceback\s+\(most\s+recent\s+call\s+last\)",
+        ]
+
+        # Layered detection based on framework type
+        has_actual_pytest_output = False
+
+        if framework_type == "python":
+            # Python projects: pytest + unittest, no keyword fallback
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
+            ) or any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _unittest_patterns
+            )
+        elif framework_type == "javascript":
+            # JavaScript projects: Jest patterns + strict keywords
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _jest_patterns
+            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
+        elif framework_type == "go":
+            # Go projects: go test patterns + strict keywords (PASS/FAIL + ok)
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _go_test_patterns
+            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
+        elif framework_type == "mixed":
+            # Mixed projects: combine all patterns + strict keywords
+            all_patterns = _pytest_output_patterns + _jest_patterns + _go_test_patterns + _unittest_patterns
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in all_patterns
+            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
+        else:  # unknown
+            # Unknown framework: pytest only, NO keyword fallback (avoid false positives)
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
+            )
+
+        # Final test result determination
+        has_test_result = has_actual_pytest_output
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
             test_status_tag == "skipped"
