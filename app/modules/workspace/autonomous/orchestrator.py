@@ -198,6 +198,53 @@ def _is_bot_comment(comment: dict) -> bool:
     return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
 
 
+def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
+    """Check if tool_calls contains a test framework execution command.
+
+    This detects actual test execution by examining tool call commands,
+    complementing pytest output detection. Used to prevent false-negative
+    "Tests were not actually run" judgments when agent runs tests but
+    output is not captured in visible text (Issue #1532).
+    """
+    if not tool_calls:
+        return False
+
+    test_commands = {
+        "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
+        "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
+        "go": ["go test", "gotestsum"],
+        "rust": ["cargo test", "cargo t"],
+        "java": ["mvn test", "gradle test", "./gradlew test"],
+    }
+    # P1: generic_patterns includes unittest for unknown frameworks
+    generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
+    patterns_to_check = test_commands.get(framework_type, generic_patterns)
+    # Note: -v (verbose) is NOT excluded, only --help/--version/-h
+    exclude_flags = ["--help", "--version", "-h"]
+
+    for tc in tool_calls:
+        tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
+        # P0: Ensure tool_input is dict (handle None case)
+        tool_input = (
+            (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
+        )
+
+        # P2: Check non-Bash test tools first (pytest, run_tests, test)
+        if tool_name in ("pytest", "run_tests", "test"):
+            return True
+
+        # Then check Bash/run_shell_command for test commands
+        if tool_name in ("Bash", "run_shell_command"):
+            cmd = tool_input.get("command", "")
+            if not cmd or any(flag in cmd for flag in exclude_flags):
+                continue
+            for pattern in patterns_to_check:
+                if pattern in cmd:
+                    return True
+
+    return False
+
+
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
     "## 重要提示\n"
@@ -2950,11 +2997,19 @@ class AutonomousOrchestrator:
         # Final test result determination
         has_test_result = has_actual_pytest_output
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
+
+        # Issue #1532 fix: Reverse judgment logic with tool_calls check
+        has_test_tool_call = _has_test_tool_call(test_result.tool_calls or [], framework_type)
+
+        tests_actually_run = (
+            test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
+        )
+
         tests_actually_skipped = (
             test_status_tag == "skipped"
             or has_skip_tag
-            or (test_result.success and has_skip_keyword)
-            or (test_result.success and not has_test_result)
+            or (test_result.success and has_skip_keyword and not tests_actually_run)
+            or (test_result.success and not tests_actually_run)
         )
 
         # Post test results to issue
