@@ -285,8 +285,15 @@ def _enrich_milestones_with_diff_stats(
         return milestones
 
     from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.repositories.user_repo import user_repo
 
-    gh = GitHubOps(project_path)
+    # Get system_account for sudo execution (Issue #1530)
+    system_account = workflow.get("system_account")
+    if not system_account:
+        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        system_account = user.get("system_account") if user else None
+
+    gh = GitHubOps(project_path, system_account=system_account)
     by_id: dict[str, dict[str, Any]] = {}
     for milestone in targets:
         milestone_id = milestone.get("milestone_id", "")
@@ -614,6 +621,10 @@ def create_workflow():
         if ".." in project_path.split(os.sep):
             return jsonify({"error": "project_path must not contain path traversal"}), 400
 
+    # Get user's system_account for workflow persistence (Issue #1530)
+    user = user_repo.get_user_by_id(user_id)
+    user_system_account = user.get("system_account", "") if user else ""
+
     base_workflow_data = {
         "user_id": user_id,
         "title": data.get("title", ""),
@@ -643,6 +654,8 @@ def create_workflow():
             if data.get("content_language") in ALLOWED_CONTENT_LANGUAGES
             else DEFAULT_CONTENT_LANGUAGE
         ),
+        # Persist system_account for sudo execution (Issue #1530)
+        "system_account": user_system_account,
     }
 
     try:
@@ -1188,6 +1201,8 @@ def fork_milestone(workflow_id, milestone_id):
         # Inherit the parent's content language so forked AI content stays
         # consistent with the original workflow.
         "content_language": workflow.get("content_language", "en"),
+        # Inherit the parent's system_account for sudo execution (Issue #1530)
+        "system_account": workflow.get("system_account", ""),
         # Start at the next phase (preparation handles worktree + phase jump)
         "status": "pending",
         "current_phase": "preparation",
@@ -1397,9 +1412,17 @@ def get_milestone_diff(workflow_id, milestone_id):
 
     # Get diff for each commit
     from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.repositories.user_repo import user_repo
 
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
-    gh = GitHubOps(project_path)
+
+    # Get system_account for sudo execution (Issue #1530)
+    system_account = workflow.get("system_account")
+    if not system_account:
+        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        system_account = user.get("system_account") if user else None
+
+    gh = GitHubOps(project_path, system_account=system_account)
     diff_parts = []
     for sha in shas:
         try:
@@ -1432,9 +1455,17 @@ def get_workflow_pr_diff(workflow_id):
         return jsonify({"success": True, "diff": "", "pr_number": None})
 
     from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.repositories.user_repo import user_repo
 
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
-    gh = GitHubOps(project_path)
+
+    # Get system_account for sudo execution (Issue #1530)
+    system_account = workflow.get("system_account")
+    if not system_account:
+        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        system_account = user.get("system_account") if user else None
+
+    gh = GitHubOps(project_path, system_account=system_account)
     try:
         diff = gh.get_pr_diff(int(pr_number))
     except Exception as e:

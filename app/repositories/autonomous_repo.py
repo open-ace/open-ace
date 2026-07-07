@@ -83,6 +83,7 @@ class AutonomousWorkflowRepository:
         "test_retries",
         "skip_retries",
         "dev_retries_on_test_fail",
+        "system_account",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -207,9 +208,9 @@ class AutonomousWorkflowRepository:
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name, content_language,
+                     original_branch_name, content_language, system_account,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -246,6 +247,7 @@ class AutonomousWorkflowRepository:
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
                     data.get("content_language", "en"),
+                    data.get("system_account", ""),
                     now,
                     now,
                 ),
@@ -265,9 +267,9 @@ class AutonomousWorkflowRepository:
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name, content_language,
+                     original_branch_name, content_language, system_account,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -303,6 +305,7 @@ class AutonomousWorkflowRepository:
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
                     data.get("content_language", "en"),
+                    data.get("system_account", ""),
                     now,
                     now,
                 ),

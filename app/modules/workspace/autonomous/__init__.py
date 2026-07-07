@@ -91,7 +91,8 @@ def get_ddl_statements():
             content_language TEXT DEFAULT 'en',
             test_retries INTEGER DEFAULT 0,
             skip_retries INTEGER DEFAULT 0,
-            dev_retries_on_test_fail INTEGER DEFAULT 0
+            dev_retries_on_test_fail INTEGER DEFAULT 0,
+            system_account TEXT DEFAULT ''
         )
         """,
     ]
@@ -122,6 +123,10 @@ def get_ddl_statements():
     statements.append(
         "ALTER TABLE autonomous_workflows ADD COLUMN dev_retries_on_test_fail INTEGER DEFAULT 0"
     )
+    # system_account: user's system account for sudo execution when accessing
+    # private directories. Mirrors Alembic migration
+    # 20260707_001_add_system_account_to_workflows for the SQLite dev/test path.
+    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN system_account TEXT DEFAULT ''")
     statements.extend(
         [
             """
