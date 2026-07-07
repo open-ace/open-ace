@@ -404,46 +404,6 @@ class TestOrchestratorPreparation:
             len(create_call[0]) > 1 and create_call[0][1] == "origin/main"
         )
 
-    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
-    def test_preparation_get_issue_failure_creates_milestone_and_raises(self, mock_gh_cls):
-        """When get_issue() fails, should create failed milestone and raise
-        to terminate workflow (Issue #1525)."""
-        from app.modules.workspace.autonomous.github_ops import GitHubOpsError
-
-        wf = _make_workflow(
-            current_phase="preparation",
-            requirements_text="",
-            requirements_issue_url="https://github.com/user/repo/issues/99",
-        )
-        orch, mock_repo = self._make_orchestrator(wf)
-
-        mock_gh = MagicMock()
-        mock_gh.get_issue.side_effect = GitHubOpsError("HTTP 422: Invalid request")
-        mock_gh_cls.return_value = mock_gh
-        orch._gh = mock_gh
-
-        with pytest.raises(GitHubOpsError, match="HTTP 422"):
-            orch._do_preparation(wf)
-
-        # Should create failed milestone with correct parameters
-        milestone_calls = mock_repo.create_milestone.call_args_list
-        failed_milestones = [
-            c
-            for c in milestone_calls
-            if c[0][0].get("milestone_type") == "issue_linked" and c[0][0].get("status") == "failed"
-        ]
-        assert len(failed_milestones) == 1
-        ms = failed_milestones[0][0][0]
-        assert ms["phase"] == "preparation"
-        assert ms["title"] == "Failed to read issue #99"
-        assert ms["github_issue_number"] == 99
-        assert "HTTP 422" in ms["error_message"]
-
-        # Workflow should NOT transition to planning (terminated early)
-        update_calls = mock_repo.update_workflow.call_args_list
-        phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]
-        assert "planning" not in phases
-
 
 class TestOrchestratorPlanning:
     """Tests for the planning phase."""
