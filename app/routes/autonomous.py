@@ -285,12 +285,12 @@ def _enrich_milestones_with_diff_stats(
         return milestones
 
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import user_repo
+    from app.repositories.user_repo import UserRepository
 
     # Get system_account for sudo execution (Issue #1530)
     system_account = workflow.get("system_account")
     if not system_account:
-        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        user = UserRepository().get_user_by_id(workflow.get("user_id"))
         system_account = user.get("system_account") if user else None
 
     gh = GitHubOps(project_path, system_account=system_account)
@@ -1412,14 +1412,14 @@ def get_milestone_diff(workflow_id, milestone_id):
 
     # Get diff for each commit
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import user_repo
+    from app.repositories.user_repo import UserRepository
 
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
 
     # Get system_account for sudo execution (Issue #1530)
     system_account = workflow.get("system_account")
     if not system_account:
-        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        user = UserRepository().get_user_by_id(workflow.get("user_id"))
         system_account = user.get("system_account") if user else None
 
     gh = GitHubOps(project_path, system_account=system_account)
@@ -1455,14 +1455,14 @@ def get_workflow_pr_diff(workflow_id):
         return jsonify({"success": True, "diff": "", "pr_number": None})
 
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import user_repo
+    from app.repositories.user_repo import UserRepository
 
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
 
     # Get system_account for sudo execution (Issue #1530)
     system_account = workflow.get("system_account")
     if not system_account:
-        user = user_repo.get_user_by_id(workflow.get("user_id"))
+        user = UserRepository().get_user_by_id(workflow.get("user_id"))
         system_account = user.get("system_account") if user else None
 
     gh = GitHubOps(project_path, system_account=system_account)

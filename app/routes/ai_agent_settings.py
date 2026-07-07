@@ -145,20 +145,28 @@ def api_validate_github_token():
                     logger.info("Token validation successful via fallback API")
                     return jsonify({"valid": True, "username": username, "fallback": True})
                 else:
-                    return jsonify({"valid": False, "error": "Could not extract username from API response"})
+                    return jsonify(
+                        {"valid": False, "error": "Could not extract username from API response"}
+                    )
             else:
                 error_msg = f"GitHub API returned status {response.status_code}"
                 logger.warning("Fallback API validation failed: %s", error_msg)
-                return jsonify({"valid": False, "error": f"gh CLI not found, fallback API failed: {error_msg}"})
+                return jsonify(
+                    {"valid": False, "error": f"gh CLI not found, fallback API failed: {error_msg}"}
+                )
         except requests.Timeout:
             logger.warning("Fallback API timed out")
             return jsonify({"valid": False, "error": "gh CLI not found, fallback API timed out"})
         except requests.RequestException as e:
             logger.warning("Fallback API request failed: %s", e)
-            return jsonify({"valid": False, "error": f"gh CLI not found, fallback API failed: {str(e)}"})
+            return jsonify(
+                {"valid": False, "error": f"gh CLI not found, fallback API failed: {str(e)}"}
+            )
         except Exception as e:
             logger.error("Fallback API unexpected error: %s", e)
-            return jsonify({"valid": False, "error": f"gh CLI not found, fallback failed: {str(e)}"})
+            return jsonify(
+                {"valid": False, "error": f"gh CLI not found, fallback failed: {str(e)}"}
+            )
     except Exception as e:
         logger.error("Token validation error: %s", e)
         return jsonify({"valid": False, "error": "Validation failed"})
