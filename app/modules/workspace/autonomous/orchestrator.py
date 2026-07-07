@@ -2690,9 +2690,46 @@ class AutonomousOrchestrator:
             "test framework not found",
         ]
         has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
-        # Negative detection: if response contains no test-result keywords at
-        # all (passed, failed, error, test, assertion, PASSED, FAILED), the
-        # agent likely never ran tests.
+        # Negative detection: if response contains no pytest output markers, the
+        # agent likely never actually ran tests. Use regex patterns to match
+        # pytest's standard output format, not bare keywords like "test" that
+        # would false-positive on agent's descriptive text (e.g., "测试在后台运行中",
+        # "测试进度约50%") — GLM-5 hallucination pattern (#1520).
+        _pytest_output_patterns = [
+            # pytest summary line: "3 passed, 2 failed" or "1 passed in 2.5s"
+            r"\d+\s+(passed|failed|skipped|warnings?|error)",
+            # pytest completion marker: "PASSED in 2.5s" / "FAILED in 1.2s"
+            r"(PASSED|FAILED)\s+in\s+[\d.]+s",
+            # pytest summary banner: "= 3 passed in 2.50s =" (short form)
+            r"={3,}\s*\d+\s+(passed|failed|skipped|error|warning)",
+            # pytest session start: "test session starts" / "collected 5 items"
+            r"test session starts",
+            r"collected\s+\d+\s+items",
+            # pytest individual test result: "PASSED" / "FAILED" as standalone
+            r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
+            # assertion error marker (real pytest output)
+            r"AssertionError",
+        ]
+        has_actual_pytest_output = any(
+            re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
+        )
+        # Detect hallucination patterns: agent claims tests are running but
+        # outputs only descriptive text, not actual pytest results.
+        _hallucination_patterns = [
+            # Chinese: "测试在后台运行中", "测试进度约50%", etc.
+            r"测试在后台运行",
+            r"测试正在运行.*%",
+            r"测试进度.*%",
+            r"后台测试.*进度",
+            # English: "tests running in background", "progress 50%", etc.
+            r"tests\s+(are\s+)?running\s+in\s+(the\s+)?background",
+            r"test\s+progress.*%",
+            r"running\s+tests.*%",
+        ]
+        has_hallucination_desc = any(
+            re.search(p, test_response_text, re.IGNORECASE) for p in _hallucination_patterns
+        )
+        # Legacy keyword check as fallback (for non-pytest frameworks)
         _test_result_keywords = [
             "passed",
             "failed",
@@ -2701,9 +2738,11 @@ class AutonomousOrchestrator:
             "assertion",
             "AssertionError",
             "error",
-            "test",
         ]
-        has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
+        has_test_result = has_actual_pytest_output or (
+            any(kw in test_response_text for kw in _test_result_keywords)
+            and not has_hallucination_desc
+        )
         test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
         tests_actually_skipped = (
             test_status_tag == "skipped"
