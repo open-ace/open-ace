@@ -1934,7 +1934,15 @@ class AutonomousOrchestrator:
                 )
                 self._update_workflow({"requirements_text": requirements_text})
             except GitHubOpsError as e:
-                logger.warning("Failed to read issue #%s: %s", issue_number, e)
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="issue_linked",
+                    status="failed",
+                    title=f"Failed to read issue #{issue_number}",
+                    github_issue_number=issue_number,
+                    error_message=str(e),
+                )
+                raise
 
         # Create branch
         strategy = wf.get("branch_strategy", "new-branch")
