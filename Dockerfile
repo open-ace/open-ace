@@ -76,6 +76,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     procps \
     openssh-client \
     sshpass \
+    git \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     # === Node.js Installation Verification (Issue #1006) ===
@@ -92,6 +93,27 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \
+    # === Git Verification ===
+    && test -x /usr/bin/git \
+    && git --version \
+    # === GitHub CLI Installation (deb package with fallback) ===
+    && (curl -fsSL --connect-timeout 30 --max-time 60 -o /tmp/gh.deb https://github.com/cli/cli/releases/download/v2.42.1/gh_2.42.1_linux_amd64.deb \
+        && apt-get install -y /tmp/gh.deb \
+        && rm -f /tmp/gh.deb \
+        && echo "gh CLI installed from deb package" \
+        || (echo "deb package download failed, trying GitHub apt repository..." \
+            && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+            && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+            && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+            && apt-get update \
+            && apt-get install -y gh \
+            && rm -f /etc/apt/sources.list.d/github-cli.list \
+            && rm -f /usr/share/keyrings/githubcli-archive-keyring.gpg \
+            && apt-get clean \
+            && echo "gh CLI installed from apt repository")) \
+    # === GitHub CLI Verification ===
+    && test -x /usr/bin/gh \
+    && gh --version \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
 

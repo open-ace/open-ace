@@ -10,6 +10,7 @@ import logging
 import os
 import subprocess
 
+import requests
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
@@ -128,7 +129,36 @@ def api_validate_github_token():
     except subprocess.TimeoutExpired:
         return jsonify({"valid": False, "error": "Validation timed out"})
     except FileNotFoundError:
-        return jsonify({"valid": False, "error": "gh CLI not found"})
+        # Fallback: use GitHub API directly when gh CLI is not available
+        # Network dependency: GitHub API may be unstable in Chinese network environment
+        logger.warning("gh CLI not found, attempting fallback to GitHub API")
+        try:
+            response = requests.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"token {token}"},
+                timeout=15,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                username = data.get("login", "")
+                if username:
+                    logger.info("Token validation successful via fallback API")
+                    return jsonify({"valid": True, "username": username, "fallback": True})
+                else:
+                    return jsonify({"valid": False, "error": "Could not extract username from API response"})
+            else:
+                error_msg = f"GitHub API returned status {response.status_code}"
+                logger.warning("Fallback API validation failed: %s", error_msg)
+                return jsonify({"valid": False, "error": f"gh CLI not found, fallback API failed: {error_msg}"})
+        except requests.Timeout:
+            logger.warning("Fallback API timed out")
+            return jsonify({"valid": False, "error": "gh CLI not found, fallback API timed out"})
+        except requests.RequestException as e:
+            logger.warning("Fallback API request failed: %s", e)
+            return jsonify({"valid": False, "error": f"gh CLI not found, fallback API failed: {str(e)}"})
+        except Exception as e:
+            logger.error("Fallback API unexpected error: %s", e)
+            return jsonify({"valid": False, "error": f"gh CLI not found, fallback failed: {str(e)}"})
     except Exception as e:
         logger.error("Token validation error: %s", e)
         return jsonify({"valid": False, "error": "Validation failed"})

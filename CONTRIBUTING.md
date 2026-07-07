@@ -203,4 +203,54 @@ By contributing, you agree that your contributions will be licensed under the Ap
 
 ---
 
+## 🛠️ Docker Environment Tooling Maintenance
+
+### Git and GitHub CLI Version Management
+
+The Docker environment includes git and GitHub CLI (gh) for autonomous development workflows. These tools are critical for:
+- Git operations (clone, branch, commit, push, worktree)
+- GitHub API operations (PR/Issue creation, token validation, repo queries)
+
+**Current Versions:**
+- git: Installed via apt-get (Debian trixie repository)
+- gh CLI: v2.42.1 (installed from GitHub releases)
+
+**Version Update Policy:**
+
+We recommend quarterly evaluation of gh CLI version updates to track security patches and new features:
+
+1. **Check for new releases**: Visit [GitHub CLI releases](https://github.com/cli/cli/releases)
+2. **Review CVE vulnerabilities**: Monitor [GitHub CLI security advisories](https://github.com/cli/cli/security/advisories)
+3. **Update Dockerfile**: Update the version number in `Dockerfile` line for gh CLI installation
+4. **Test the build**: Ensure `docker compose build` succeeds with the new version
+5. **Update documentation**: Update this section with the new version number and date
+
+**Build Failure Handling:**
+
+If gh CLI installation fails during Docker build:
+- The Dockerfile includes a fallback mechanism: deb package → apt repository
+- Both methods failing indicates network connectivity issues
+- Recommended fixes:
+  - Check network connection and GitHub releases availability
+  - Try manual rebuild after network restoration
+  - Contact maintainers if issues persist
+
+### GitHub Token Configuration Isolation
+
+**Important**: Autonomous development operations use GH_TOKEN environment variable injection, not persistent configuration directories.
+
+**Configuration Isolation Boundaries:**
+- All autonomous development operations use GH_TOKEN environment variable passed via subprocess
+- gh CLI in autonomous workflows only executes commands, does not persist configuration
+- Commands requiring configuration directories (e.g., `gh auth status`) are not used in autonomous workflows
+- Different users' gh operations are isolated via independent GH_TOKEN injection
+- No configuration sharing between users in multi-user workspace mode
+
+**Implications:**
+- The `~/.config/gh` directory is not required for autonomous development
+- Users should not run `gh auth login` or `gh auth status` in autonomous workflow contexts
+- Token validation uses `gh api user` command (no config required) or fallback to direct API call
+
+---
+
 Thank you for contributing to Open ACE! 🎉
