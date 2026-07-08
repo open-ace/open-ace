@@ -1,7 +1,7 @@
 # 国内镜像源验证报告
 
-**验证日期**: 2026-07-08  
-**验证目的**: 验证阿里云和清华镜像源实际可用性，确定fallback顺序  
+**验证日期**: 2026-07-08
+**验证目的**: 验证阿里云和清华镜像源实际可用性，确定fallback顺序
 **验证方法**: curl -I验证URL返回状态码
 
 ## 一、验证方法
@@ -176,7 +176,7 @@ if [ -f "$CACHE_FILE" ]; then
     CURRENT_TIME=$(date +%s)
     AGE=$((CURRENT_TIME - CACHE_MTIME))
     MAX_AGE=$((6 * 30 * 24 * 3600))  # 6个月
-    
+
     if [ $AGE -gt $MAX_AGE ]; then
         echo "INFO: Cache expired (${AGE}s old), deleting and re-downloading"
         rm -f "$CACHE_FILE"
@@ -231,8 +231,8 @@ curl -I --connect-timeout 10 --max-time 15 \
 
 ## 九、验证总结
 
-**验证状态**: 待实际验证执行  
-**预期结果**: 
+**验证状态**: 待实际验证执行
+**预期结果**:
 - 阿里云镜像：可能可用（需验证）
 - 清华镜像：可能可用（需验证）
 - GitHub Releases：网络不稳定时可能失败
@@ -245,5 +245,5 @@ curl -I --connect-timeout 10 --max-time 15 \
 
 ---
 
-**验证负责人**: 自动化验证脚本  
+**验证负责人**: 自动化验证脚本
 **验证完成时间**: 待定

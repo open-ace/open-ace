@@ -1,7 +1,7 @@
 # gh CLI版本兼容性管理文档
 
-**文档版本**: 1.0  
-**创建日期**: 2026-07-08  
+**文档版本**: 1.0
+**创建日期**: 2026-07-08
 **锁定版本**: gh CLI v2.42.1
 
 ## 一、版本锁定策略
@@ -245,7 +245,7 @@ if [ -f "$CACHE_FILE" ]; then
     CACHE_MTIME=$(stat -c %Y "$CACHE_FILE" 2>/dev/null)
     CURRENT_TIME=$(date +%s)
     AGE_DAYS=$(( (CURRENT_TIME - CACHE_MTIME) / 86400 ))
-    
+
     if [ $AGE_DAYS -gt $MAX_AGE_DAYS ]; then
         echo "INFO: Cache expired (${AGE_DAYS} days old), deleting"
         rm -f "$CACHE_FILE"
@@ -297,7 +297,7 @@ echo "Cleaning gh CLI cache directory: $CACHE_DIR"
 if [ -d "$CACHE_DIR" ]; then
     echo "Current cache files:"
     ls -lh "$CACHE_DIR"
-    
+
     # 删除所有缓存
     rm -rf "$CACHE_DIR"
     echo "Cache directory cleaned"
@@ -465,7 +465,7 @@ WARN_AGE_DAYS=150  # 提前30天提醒
 
 if [ -f "$CACHE_FILE" ]; then
     AGE_DAYS=$(( ($(date +%s) - $(stat -c %Y "$CACHE_FILE")) / 86400 ))
-    
+
     if [ $AGE_DAYS -gt $WARN_AGE_DAYS ]; then
         echo "INFO: Cache approaching expiration (${AGE_DAYS} days old)"
         echo "  - Will expire in $((MAX_AGE_DAYS - AGE_DAYS)) days"
@@ -476,11 +476,11 @@ fi
 
 ## 九、总结
 
-**版本锁定**: gh CLI v2.42.1  
-**锁定原因**: 稳定性、API兼容性、中国网络适配、功能完整性  
-**过期时间**: 2027-07-08（1年）  
-**更新触发**: 安全漏洞、API变更、定期评估  
-**测试覆盖**: autonomous工作流、API兼容性、性能对比、网络容错、安全测试  
+**版本锁定**: gh CLI v2.42.1
+**锁定原因**: 稳定性、API兼容性、中国网络适配、功能完整性
+**过期时间**: 2027-07-08（1年）
+**更新触发**: 安全漏洞、API变更、定期评估
+**测试覆盖**: autonomous工作流、API兼容性、性能对比、网络容错、安全测试
 **缓存管理**: 6个月过期、版本变更触发清理、定期清理
 
 **下一步**:
@@ -491,5 +491,5 @@ fi
 
 ---
 
-**文档维护人**: 技术团队  
+**文档维护人**: 技术团队
 **更新日期**: 2026-07-08
