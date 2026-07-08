@@ -2612,3 +2612,66 @@ ALTER TABLE ONLY web_user_auth_sessions
 
 ALTER TABLE ONLY workflow_milestones
     ADD CONSTRAINT workflow_milestones_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE;
+
+-- Image upload feature: uploaded_images table
+CREATE TABLE IF NOT EXISTS uploaded_images (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    tenant_id integer,
+    session_id text,
+    project_id integer,
+    filename text NOT NULL,
+    stored_filename text NOT NULL,
+    stored_path text NOT NULL,
+    file_size integer NOT NULL,
+    mime_type text NOT NULL,
+    checksum text NOT NULL,
+    width integer,
+    height integer,
+    expires_at timestamp without time zone NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    is_svg boolean DEFAULT false,
+    CONSTRAINT chk_uploaded_images_file_size_positive CHECK ((file_size >= 0)),
+    CONSTRAINT chk_uploaded_images_width_positive CHECK ((width IS NULL OR width >= 0)),
+    CONSTRAINT chk_uploaded_images_height_positive CHECK ((height IS NULL OR height >= 0))
+);
+
+CREATE SEQUENCE IF NOT EXISTS uploaded_images_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE uploaded_images_id_seq OWNED BY uploaded_images.id;
+
+ALTER TABLE ONLY uploaded_images ALTER COLUMN id SET DEFAULT nextval('uploaded_images_id_seq'::regclass);
+
+ALTER TABLE ONLY uploaded_images
+    ADD CONSTRAINT uploaded_images_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY uploaded_images
+    ADD CONSTRAINT uploaded_images_stored_filename_key UNIQUE (stored_filename);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_user_id ON uploaded_images USING btree (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_session_id ON uploaded_images USING btree (session_id);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_expires_at ON uploaded_images USING btree (expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_created_at ON uploaded_images USING btree (created_at);
+
+ALTER TABLE ONLY uploaded_images
+    ADD CONSTRAINT uploaded_images_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY uploaded_images
+    ADD CONSTRAINT uploaded_images_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY uploaded_images
+    ADD CONSTRAINT uploaded_images_project_id_fkey FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
+
+-- Extend users table with storage quota fields
+ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_quota_bytes bigint DEFAULT 104857600;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS storage_used_bytes bigint DEFAULT 0;

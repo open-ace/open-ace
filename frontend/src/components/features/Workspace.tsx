@@ -41,6 +41,7 @@ import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { NewSessionModal } from '@/components/work/NewSessionModal';
 import { TerminalTab } from '@/components/features/TerminalTab';
+import { WorkspaceImageToolbar } from '@/components/features/WorkspaceImageToolbar';
 import { remoteApi } from '@/api/remote';
 import { cn } from '@/utils';
 
@@ -1834,6 +1835,11 @@ export const Workspace: React.FC = () => {
           )}
         </div>
         <div className="d-flex align-items-center gap-2">
+          {/* Image upload toolbar */}
+          <WorkspaceImageToolbar
+            sessionId={tabs.find((t) => t.id === activeTabId)?.sessionId}
+            disabled={isQuotaExceeded}
+          />
           {/* Fullscreen toggle button */}
           <button
             className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"

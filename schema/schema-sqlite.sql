@@ -1355,3 +1355,45 @@ CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key,
 CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
+
+-- Image upload feature: uploaded_images table
+CREATE TABLE IF NOT EXISTS uploaded_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    session_id TEXT,
+    project_id INTEGER,
+    filename TEXT NOT NULL,
+    stored_filename TEXT NOT NULL,
+    stored_path TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    mime_type TEXT NOT NULL,
+    checksum TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_svg INTEGER DEFAULT 0,
+    CONSTRAINT chk_uploaded_images_file_size_positive CHECK ((file_size >= 0)),
+    CONSTRAINT chk_uploaded_images_width_positive CHECK ((width IS NULL OR width >= 0)),
+    CONSTRAINT chk_uploaded_images_height_positive CHECK ((height IS NULL OR height >= 0))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uploaded_images_stored_filename_key ON uploaded_images (stored_filename);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_user_id ON uploaded_images (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_session_id ON uploaded_images (session_id);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_expires_at ON uploaded_images (expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_created_at ON uploaded_images (created_at);
+
+-- Extend users table with storage quota fields (using ALTER TABLE pattern for new columns)
+-- Note: SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we use direct ALTER
+-- These columns may already exist if the database was migrated; the IF NOT EXISTS pattern
+-- in schema_init.py handles re-running gracefully
+
+ALTER TABLE users ADD COLUMN storage_quota_bytes INTEGER DEFAULT 104857600;
+
+ALTER TABLE users ADD COLUMN storage_used_bytes INTEGER DEFAULT 0;
