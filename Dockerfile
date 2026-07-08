@@ -123,24 +123,21 @@ RUN groupadd -r open-ace && \
     mkdir -p /home/open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 
-# Pre-configure sudoers for multi-user workspace mode
+# ============================================================================
+# 【安全加固 Issue #1514】单一配置源原则
+# ============================================================================
+# Dockerfile不生成sudoers.d文件，避免与entrypoint.sh动态配置冲突
+# sudoers配置由entrypoint.sh在启动时动态生成（包含精确参数白名单）
+# wrapper脚本在构建时COPY，由entrypoint.sh在启动时验证并添加sudoers规则
+
+# Pre-configure sudoers comment for multi-user workspace mode
 # This ensures environment variables are preserved when running sudo -u <user>
 # Support both open-ace (container user) and openace (workspace user synced from database)
-# NOTE: Commands must have '*' suffix to allow arguments (e.g., 'test -r', 'ls -1')
-# Issue #1395: add OPENACE_CLI (autonomous CLI tools) + run-as wrapper rule so the
-# autonomous agent can be launched as the repo owner even under 700 home dirs.
-RUN echo '# Open ACE WebUI - Pre-configured sudoers for multi-user workspace\n\
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
-openace ALL=(ALL) NOPASSWD: /usr/bin/qwen-code-webui *\n\
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *\n\
-openace ALL=(ALL) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/cat *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/chown *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *\n\
-open-ace ALL=(ALL) NOPASSWD: /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *\n\
-openace ALL=(ALL) NOPASSWD: /usr/bin/qwen *, /usr/local/bin/qwen *, /usr/bin/qwen-code *, /usr/local/bin/qwen-code *, /usr/bin/codex *, /usr/local/bin/codex *, /usr/bin/claude *, /usr/local/bin/claude *, /usr/bin/openclaw *, /usr/local/bin/openclaw *, /usr/bin/zcode *, /usr/local/bin/zcode *\n\
-open-ace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as *\n\
-openace ALL=(root) NOPASSWD: /usr/local/bin/openace-run-as *\n\
-Defaults env_keep += "OPENAI_API_KEY OPENAI_BASE_URL BAILIAN_CODING_PLAN_API_KEY ANTHROPIC_API_KEY ANTHROPIC_BASE_URL GEMINI_API_KEY GEMINI_BASE_URL OPENCLAW_TOKEN OPENCLAW_GATEWAY_URL OPENACE_LOG_DIR OPENACE_PROXY_TOKEN OPENACE_PROXY_URL SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS PATH"\n' \
-    > /etc/sudoers.d/open-ace-webui && \
-    chmod 440 /etc/sudoers.d/open-ace-webui
+# NOTE: sudoers配置由entrypoint.sh动态生成，不在此处静态配置
+# Issue #1395: openace-run-as wrapper在构建时COPY，启动时验证
+
+# Wrapper脚本将在启动时由entrypoint.sh验证存在性，并动态添加sudoers规则
+# 如wrapper不存在，entrypoint.sh会跳过wrapper规则并WARNING日志
 
 WORKDIR /app
 
