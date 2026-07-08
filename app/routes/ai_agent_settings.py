@@ -131,8 +131,9 @@ def api_validate_github_token():
     except FileNotFoundError:
         # Fallback: use GitHub API directly when gh CLI is not available
         # Network dependency: GitHub API may be unstable in Chinese network environment
-        # In Docker environment, gh CLI absence is expected - use info level
-        logger.info("gh CLI not found, attempting fallback to GitHub API")
+        # In Docker environment, gh CLI absence is expected
+        # 【安全加固 Issue #1514】fallback触发WARNING告警（而非INFO）
+        logger.warning("gh CLI not found, attempting fallback to GitHub API (功能可能受限)")
         try:
             response = requests.get(
                 "https://api.github.com/user",
@@ -143,7 +144,7 @@ def api_validate_github_token():
                 data = response.json()
                 username = data.get("login", "")
                 if username:
-                    logger.info("Token validation successful via fallback API")
+                    logger.warning("Token validation successful via fallback API (降级模式)")
                     return jsonify({"valid": True, "username": username, "fallback": True})
                 else:
                     return jsonify(
