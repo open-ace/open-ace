@@ -133,43 +133,78 @@ def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: 
 
     import re
 
-    # Condition A: Dual keyword combination
+    # Condition A: Dual keyword combination (Issue #1538: extended to multilingual)
     dual_keywords = [
+        # English
         ("passed", "PASSED"),
         ("failed", "FAILED"),
         ("passed", "failures"),
         ("failed", "failures"),
+        # Chinese
+        ("通过", "成功"),
+        ("失败", "错误"),
+        # Japanese
+        ("通過", "成功"),
+        ("失敗", "エラー"),
+        # Korean
+        ("통과", "성공"),
+        ("실패", "오류"),
     ]
     has_dual = any(
         kw1 in test_response_text.lower() and kw2 in test_response_text
         for kw1, kw2 in dual_keywords
     )
 
-    # Condition B: Keyword + timestamp pattern
-    timestamp_pattern = r"in\s+[\d.]+s"
+    # Condition B: Keyword + timestamp pattern (Issue #1538: multilingual timestamps)
+    timestamp_patterns = [
+        r"in\s+[\d.]+s",  # English: "in 2.5s"
+        r"用时\s*[\d.]+\s*秒",  # Chinese: "用时2.5秒"
+        r"(所要時間|時間)\s*[\d.]+\s*秒",  # Japanese
+        r"소요\s*시간\s*[\d.]+\s*초",  # Korean
+    ]
     has_timestamp_keyword = bool(
         (
             "passed" in test_response_text.lower()
-            and re.search(timestamp_pattern, test_response_text)
+            or "通过" in test_response_text
+            or "通過" in test_response_text
+            or "통과" in test_response_text
         )
-        or (
-            "completed" in test_response_text.lower()
-            and re.search(timestamp_pattern, test_response_text)
-        )
+        and any(re.search(p, test_response_text) for p in timestamp_patterns)
+    ) or bool(
+        ("completed" in test_response_text.lower() or "完成" in test_response_text)
+        and any(re.search(p, test_response_text) for p in timestamp_patterns)
     )
 
     # Condition C: Keyword + file/test count
-    count_pattern = r"\d+\s+(tests?|files?|specs?)"
+    count_pattern = r"\d+\s+(tests?|files?|specs?|个|件|개)"
     has_count_keyword = bool(
-        ("passed" in test_response_text.lower() and re.search(count_pattern, test_response_text))
-        or ("failed" in test_response_text.lower() and re.search(count_pattern, test_response_text))
+        (
+            "passed" in test_response_text.lower()
+            or "通过" in test_response_text
+            or "通過" in test_response_text
+            or "통과" in test_response_text
+        )
+        and re.search(count_pattern, test_response_text)
+    ) or bool(
+        (
+            "failed" in test_response_text.lower()
+            or "失败" in test_response_text
+            or "失敗" in test_response_text
+            or "실패" in test_response_text
+        )
+        and re.search(count_pattern, test_response_text)
     )
 
     # Condition D: Keyword + error details
     has_error_details = (
-        ("failed" in test_response_text.lower() and "AssertionError" in test_response_text)
-        or ("failed" in test_response_text.lower() and "expected" in test_response_text.lower())
-        or ("failed" in test_response_text.lower() and "Traceback" in test_response_text)
+        "failed" in test_response_text.lower()
+        or "失败" in test_response_text
+        or "失敗" in test_response_text
+        or "실패" in test_response_text
+    ) and (
+        "AssertionError" in test_response_text
+        or "expected" in test_response_text.lower()
+        or "Traceback" in test_response_text
     )
 
     return has_dual or has_timestamp_keyword or has_count_keyword or has_error_details
@@ -2892,6 +2927,14 @@ class AutonomousOrchestrator:
             "could not run tests",
             "unable to execute tests",
             "test framework not found",
+            # Issue #1538: Japanese skipped keywords
+            "pytestがインストールされていません",
+            "テストフレームワークが利用できません",
+            "コマンドがブロックされました",
+            # Issue #1538: Korean skipped keywords
+            "pytest가 설치되지 않았습니다",
+            "테스트 프레임워크를 사용할 수 없습니다",
+            "명령이 차단되었습니다",
         ]
         has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
         # ── Framework-aware test detection (Phase 1, P0) ──────────────────────
@@ -2913,6 +2956,16 @@ class AutonomousOrchestrator:
             r"tests\s+(are\s+)?running\s+in\s+(the\s+)?background",
             r"test\s+progress.*%",
             r"running\s+tests.*%",
+            # Issue #1538: Japanese hallucination patterns
+            # Japanese: "テストがバックグラウンドで実行中", "テスト進捗50%"
+            r"テスト.*バックグラウンド",
+            r"テスト.*実行中",
+            r"テスト.*進捗.*%",
+            # Issue #1538: Korean hallucination patterns
+            # Korean: "테스트가 백그라운드에서 실행 중", "테스트 진행 50%"
+            r"테스트.*백그라운드",
+            r"테스트.*실행.*중",
+            r"테스트.*진행.*%",
         ]
         has_hallucination_desc = any(
             re.search(p, test_response_text, re.IGNORECASE) for p in _hallucination_patterns
@@ -2933,6 +2986,23 @@ class AutonomousOrchestrator:
             r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
             # assertion error marker (real pytest output)
             r"AssertionError",
+            # Issue #1538: Chinese output patterns
+            # Chinese: "通过: 2398 个", "失败: 5 个", "跳过: 69 个"
+            r"(通过|成功)[:：\s]+\d+\s*(个|项|件|测试)?",
+            r"(失败|错误)[:：\s]+\d+\s*(个|项|件|测试)?",
+            r"(跳过|忽略)[:：\s]+\d+\s*(个|项|件|测试)?",
+            # Chinese reverse format: "2398个测试通过", "2398 个 通过"
+            r"\d+\s*(个|项|件|测试)\s*(通过|成功|失败|跳过)",
+            # Issue #1538: Japanese output patterns
+            # Japanese: "通過: 2398 件", "失敗: 5件", "スキップ: 69件"
+            r"(通過|成功)[:：\s]+\d+\s*(件|テスト)?",
+            r"(失敗|エラー)[:：\s]+\d+\s*(件|テスト)?",
+            r"(スキップ|スキップ済み)[:：\s]+\d+\s*(件|テスト)?",
+            # Issue #1538: Korean output patterns
+            # Korean: "통과: 2398개", "실패: 5개", "건너뜀: 69개"
+            r"(통과|성공)[:：\s]+\d+\s*(개|테스트)?",
+            r"(실패|오류)[:：\s]+\d+\s*(개|테스트)?",
+            r"(건너뜀|스킵)[:：\s]+\d+\s*(개|테스트)?",
         ]
 
         # Jest patterns for JavaScript projects
@@ -2962,6 +3032,26 @@ class AutonomousOrchestrator:
             r"Traceback\s+\(most\s+recent\s+call\s+last\)",
         ]
 
+        # Issue #1538: Rust cargo test patterns
+        _rust_patterns = [
+            r"running\s+\d+\s+tests",
+            r"test\s+result:\s*ok",
+            r"test\s+result:\s*FAILED",
+            r"\d+\s+passed;\s*\d+\s+failed",
+            r"\d+\s+passed",
+        ]
+
+        # Issue #1538: Java Maven/Gradle patterns
+        _java_patterns = [
+            r"Tests\s+run:\s*\d+",
+            r"Failures:\s*\d+",
+            r"Errors:\s*\d+",
+            r"BUILD\s+SUCCESS",
+            r"BUILD\s+SUCCESSFUL",
+            r"BUILD\s+FAILURE",
+            r"FAILURE!",
+        ]
+
         # Layered detection based on framework type
         has_actual_pytest_output = False
 
@@ -2980,16 +3070,31 @@ class AutonomousOrchestrator:
             has_actual_pytest_output = any(
                 re.search(p, test_response_text, re.IGNORECASE) for p in _go_test_patterns
             ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
+        elif framework_type == "rust":
+            # Issue #1538: Rust projects: cargo test patterns + strict keywords
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _rust_patterns
+            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
+        elif framework_type == "java":
+            # Issue #1538: Java projects: Maven/Gradle patterns + strict keywords
+            has_actual_pytest_output = any(
+                re.search(p, test_response_text, re.IGNORECASE) for p in _java_patterns
+            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
         elif framework_type == "mixed":
             # Mixed projects: combine all patterns + strict keywords
             all_patterns = (
-                _pytest_output_patterns + _jest_patterns + _go_test_patterns + _unittest_patterns
+                _pytest_output_patterns
+                + _jest_patterns
+                + _go_test_patterns
+                + _unittest_patterns
+                + _rust_patterns
+                + _java_patterns
             )
             has_actual_pytest_output = any(
                 re.search(p, test_response_text, re.IGNORECASE) for p in all_patterns
             ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
         else:  # unknown
-            # Unknown framework: pytest only, NO keyword fallback (avoid false positives)
+            # Unknown framework: pytest + multilingual patterns, NO keyword fallback
             has_actual_pytest_output = any(
                 re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
             )
