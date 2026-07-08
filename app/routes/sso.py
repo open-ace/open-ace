@@ -132,6 +132,19 @@ def disable_provider(provider_name: str):
         return jsonify({"error": "Failed to disable provider"}), 500
 
 
+@sso_bp.route("/providers/<provider_name>/enable", methods=["POST"])
+@admin_required
+def enable_provider(provider_name: str):
+    """Enable an SSO provider (admin only)."""
+
+    success = get_sso_manager().enable_provider(provider_name)
+
+    if success:
+        return jsonify({"message": f"Provider {provider_name} enabled"})
+    else:
+        return jsonify({"error": "Failed to enable provider"}), 500
+
+
 @sso_bp.route("/login/<provider_name>", methods=["GET"])
 @public_endpoint
 def start_login(provider_name: str):

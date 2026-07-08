@@ -78,6 +78,10 @@ export const ssoApi = {
     await apiClient.delete<{ message: string }>(`/api/sso/providers/${providerName}`);
   },
 
+  async enableProvider(providerName: string): Promise<void> {
+    await apiClient.post<{ message: string }>(`/api/sso/providers/${providerName}/enable`);
+  },
+
   async startLogin(
     providerName: string,
     redirectUri?: string

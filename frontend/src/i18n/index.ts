@@ -1104,6 +1104,31 @@ export const translations: Record<Language, Translations> = {
     providerRegistered: 'Provider registered successfully',
     confirmDisableProvider: 'Are you sure you want to disable this provider?',
 
+    // SSO Enable/Disable
+    enableProvider: 'Enable Provider',
+    confirmEnableProvider: 'Are you sure you want to enable this provider?',
+    providerEnabled: 'Provider enabled successfully',
+    providerDisabled: 'Provider disabled successfully',
+
+    // SSO Empty State
+    noProvidersDescription: 'Register an OAuth or OIDC provider to enable SSO login',
+    addFirstProvider: 'Add First Provider',
+
+    // SSO Validation
+    invalidUrlFormat: 'Please enter a valid URL (e.g., https://example.com)',
+
+    // SSO Modal
+    discardChanges: 'Discard Changes',
+    confirmDiscardChanges: 'You have unsaved changes. Are you sure you want to discard them?',
+
+    // SSO Errors
+    providerAlreadyExists: 'Provider already exists',
+    clientIdInvalid: 'Invalid client ID',
+    clientSecretInvalid: 'Invalid client secret',
+    unknownError: 'An unknown error occurred',
+    enable: 'Enable',
+    disable: 'Disable',
+
     // Insights
     insights: 'AI Insights',
     insightsTitle: 'AI Conversation Insights',
@@ -2622,6 +2647,31 @@ export const translations: Record<Language, Translations> = {
     providerRegistered: '提供者注册成功',
     confirmDisableProvider: '确定要禁用此提供者吗？',
 
+    // SSO Enable/Disable (zh)
+    enableProvider: '启用提供者',
+    confirmEnableProvider: '确定要启用此提供者吗？',
+    providerEnabled: '提供者已成功启用',
+    providerDisabled: '提供者已成功禁用',
+
+    // SSO Empty State (zh)
+    noProvidersDescription: '注册 OAuth 或 OIDC 提供者以启用 SSO 登录',
+    addFirstProvider: '添加第一个提供者',
+
+    // SSO Validation (zh)
+    invalidUrlFormat: '请输入有效的 URL（例如：https://example.com）',
+
+    // SSO Modal (zh)
+    discardChanges: '丢弃更改',
+    confirmDiscardChanges: '您有未保存的更改。确定要丢弃吗？',
+
+    // SSO Errors (zh)
+    providerAlreadyExists: '提供者已存在',
+    clientIdInvalid: '无效的客户端 ID',
+    clientSecretInvalid: '无效的客户端密钥',
+    unknownError: '发生未知错误',
+    enable: '启用',
+    disable: '禁用',
+
     // Insights
     insights: 'AI 洞察',
     insightsTitle: 'AI 对话洞察报告',
@@ -3588,6 +3638,51 @@ export const translations: Record<Language, Translations> = {
     ipWhitelist: 'IPホワイトリスト',
     allowedIpAddresses: '許可されたIPアドレス',
     ipWhitelistHelp: '1行に1つのIPアドレスまたはCIDR範囲を入力。空の場合はすべてのIPを許可。',
+
+    // SSO Settings Additional (ja)
+    registeredProviders: '登録済みプロバイダー',
+    noProvidersRegistered: 'SSOプロバイダーが登録されていません',
+    availableProviders: '利用可能なプロバイダー',
+    addProvider: 'プロバイダー追加',
+    providerName: 'プロバイダー名',
+    providerType: 'プロバイダー種別',
+    selectProvider: 'プロバイダーを選択',
+    enterProviderName: 'プロバイダー名を入力',
+    clientId: 'クライアントID',
+    enterClientId: 'クライアントIDを入力',
+    clientSecret: 'クライアントシークレット',
+    enterClientSecret: 'クライアントシークレットを入力',
+    redirectUri: 'リダイレクトURI',
+    enterRedirectUri: 'リダイレクトURIを入力',
+    scope: 'スコープ',
+    customProviderUrls: 'カスタムプロバイダーURL',
+    authorizationUrl: '認証URL',
+    tokenUrl: 'トークンURL',
+    userinfoUrl: 'ユーザー情報URL',
+    issuerUrl: '発行者URL',
+    registerProvider: 'プロバイダー登録',
+    register: '登録',
+    clientIdRequired: 'クライアントIDは必須です',
+    clientSecretRequired: 'クライアントシークレットは必須です',
+    providerNameRequired: 'プロバイダー名は必須です',
+    registerFailed: 'プロバイダーの登録に失敗しました',
+    providerRegistered: 'プロバイダーが正常に登録されました',
+    confirmDisableProvider: 'このプロバイダーを無効化しますか？',
+    enableProvider: 'プロバイダー有効化',
+    confirmEnableProvider: 'このプロバイダーを有効化しますか？',
+    providerEnabled: 'プロバイダーが正常に有効化されました',
+    providerDisabled: 'プロバイダーが正常に無効化されました',
+    noProvidersDescription: 'SSOログインを有効化するにはOAuthまたはOIDCプロバイダーを登録してください',
+    addFirstProvider: '最初のプロバイダーを追加',
+    invalidUrlFormat: '有効なURLを入力してください（例：https://example.com）',
+    discardChanges: '変更を破棄',
+    confirmDiscardChanges: '未保存の変更があります。変更を破棄しますか？',
+    providerAlreadyExists: 'プロバイダーは既に存在します',
+    clientIdInvalid: '無効なクライアントID',
+    clientSecretInvalid: '無効なクライアントシークレット',
+    unknownError: '不明なエラーが発生しました',
+    enable: '有効化',
+    disable: '無効化',
 
     // Analysis
     overview: '概要',
@@ -4892,6 +4987,51 @@ export const translations: Record<Language, Translations> = {
     allowedIpAddresses: '허용된 IP 주소',
     ipWhitelistHelp:
       '한 줄에 하나의 IP 주소 또는 CIDR 범위를 입력하세요. 비워두면 모든 IP를 허용합니다.',
+
+    // SSO Settings Additional (ko)
+    registeredProviders: '등록된 제공자',
+    noProvidersRegistered: '등록된 SSO 제공자 없음',
+    availableProviders: '사용 가능한 제공자',
+    addProvider: '제공자 추가',
+    providerName: '제공자 이름',
+    providerType: '제공자 유형',
+    selectProvider: '제공자 선택',
+    enterProviderName: '제공자 이름 입력',
+    clientId: '클라이언트 ID',
+    enterClientId: '클라이언트 ID 입력',
+    clientSecret: '클라이언트 시크릿',
+    enterClientSecret: '클라이언트 시크릿 입력',
+    redirectUri: '리디렉션 URI',
+    enterRedirectUri: '리디렉션 URI 입력',
+    scope: '범위',
+    customProviderUrls: '커스텀 제공자 URL',
+    authorizationUrl: '인증 URL',
+    tokenUrl: '토큰 URL',
+    userinfoUrl: '사용자 정보 URL',
+    issuerUrl: '발급자 URL',
+    registerProvider: '제공자 등록',
+    register: '등록',
+    clientIdRequired: '클라이언트 ID 필수',
+    clientSecretRequired: '클라이언트 시크릿 필수',
+    providerNameRequired: '제공자 이름 필수',
+    registerFailed: '제공자 등록 실패',
+    providerRegistered: '제공자가 성공적으로 등록됨',
+    confirmDisableProvider: '이 제공자를 비활성화하시겠습니까?',
+    enableProvider: '제공자 활성화',
+    confirmEnableProvider: '이 제공자를 활성화하시겠습니까?',
+    providerEnabled: '제공자가 성공적으로 활성화됨',
+    providerDisabled: '제공자가 성공적으로 비활성화됨',
+    noProvidersDescription: 'SSO 로그인을 활성화하려면 OAuth 또는 OIDC 제공자를 등록하세요',
+    addFirstProvider: '첫 제공자 추가',
+    invalidUrlFormat: '유효한 URL을 입력하세요 (예: https://example.com)',
+    discardChanges: '변경 사항 삭제',
+    confirmDiscardChanges: '저장되지 않은 변경 사항이 있습니다. 변경 사항을 삭제하시겠습니까?',
+    providerAlreadyExists: '제공자가 이미 존재함',
+    clientIdInvalid: '유효하지 않은 클라이언트 ID',
+    clientSecretInvalid: '유효하지 않은 클라이언트 시크릿',
+    unknownError: '알 수 없는 오류 발생',
+    enable: '활성화',
+    disable: '비활성화',
 
     // Analysis
     overview: '개요',
