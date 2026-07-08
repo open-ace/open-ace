@@ -241,6 +241,7 @@ def register_blueprints(app):
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
+    from app.routes.images import images_bp
     from app.routes.insights import insights_bp
     from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.messages import messages_bp
@@ -271,6 +272,7 @@ def register_blueprints(app):
     app.register_blueprint(governance_bp, url_prefix="/api")
     app.register_blueprint(analytics_bp, url_prefix="/api")
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
+    app.register_blueprint(images_bp, url_prefix="/api")
     app.register_blueprint(tenant_bp)
     app.register_blueprint(sso_bp)
     app.register_blueprint(compliance_bp)
@@ -332,5 +334,12 @@ def start_background_services():
             )
     except Exception as e:
         logger.warning(f"Failed to start autonomous scheduler: {e}")
+
+    try:
+        from app.services.image_cleanup_scheduler import init_image_cleanup_scheduler
+
+        init_image_cleanup_scheduler()
+    except Exception as e:
+        logger.warning(f"Failed to start image cleanup scheduler: {e}")
 
     logger.info("Background services started")

@@ -5,6 +5,7 @@ from app.models.project import Project, ProjectDailyStats, ProjectStats, UserPro
 from app.models.project_category import ProjectCategory
 from app.models.session import Session
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantStatus, TenantUsage
+from app.models.uploaded_image import ImageUploadConfig, UploadedImage
 from app.models.usage import DailyUsage, Usage
 from app.models.user import User, UserRole
 
@@ -26,4 +27,6 @@ __all__ = [
     "ProjectStats",
     "ProjectDailyStats",
     "ProjectCategory",
+    "UploadedImage",
+    "ImageUploadConfig",
 ]
