@@ -47,17 +47,20 @@ class TestStandardFormatDetection:
     def test_standard_format_validation(self, text: str, expected_valid: bool):
         """Standard test output formats should be validated as valid."""
         # Import the validation function
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         # Create a mock instance to access the method
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
         is_valid, reason = orchestrator._validate_test_report_format(text)
-        assert is_valid == expected_valid, f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
+        assert (
+            is_valid == expected_valid
+        ), f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
 
 
 class TestNonStandardFormatDetection:
@@ -89,16 +92,19 @@ class TestNonStandardFormatDetection:
     )
     def test_non_standard_format_validation(self, text: str, expected_valid: bool):
         """Non-standard test output formats should be detected as invalid."""
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
         is_valid, reason = orchestrator._validate_test_report_format(text)
-        assert is_valid == expected_valid, f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
+        assert (
+            is_valid == expected_valid
+        ), f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
 
 
 class TestMixedFormatHandling:
@@ -118,16 +124,19 @@ class TestMixedFormatHandling:
     )
     def test_mixed_format_validation(self, text: str, expected_valid: bool):
         """Mixed format should be valid if standard format is present."""
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
         is_valid, reason = orchestrator._validate_test_report_format(text)
-        assert is_valid == expected_valid, f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
+        assert (
+            is_valid == expected_valid
+        ), f"Expected {expected_valid} for '{text}', got {is_valid} ({reason})"
 
 
 class TestEdgeCases:
@@ -150,17 +159,20 @@ class TestEdgeCases:
         self, text: str, expected_valid: bool, expected_reason_contains: str
     ):
         """Edge cases should be handled gracefully."""
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
         is_valid, reason = orchestrator._validate_test_report_format(text)
         assert is_valid == expected_valid
-        assert expected_reason_contains in reason, f"Expected '{expected_reason_contains}' in reason, got '{reason}'"
+        assert (
+            expected_reason_contains in reason
+        ), f"Expected '{expected_reason_contains}' in reason, got '{reason}'"
 
 
 class TestFormatValidationIntegration:
@@ -168,10 +180,11 @@ class TestFormatValidationIntegration:
 
     def test_format_validation_returns_tuple(self):
         """Format validation should return (bool, str) tuple."""
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
@@ -185,10 +198,11 @@ class TestFormatValidationIntegration:
 
     def test_format_validation_case_insensitive(self):
         """Format validation should be case-insensitive."""
-        import sys
         import os
+        import sys
 
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         )
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
@@ -201,6 +215,6 @@ class TestFormatValidationIntegration:
         # Mixed case
         is_valid_mixed, _ = orchestrator._validate_test_report_format("Build Success")
 
-        assert is_valid_lower == True
-        assert is_valid_upper == True
-        assert is_valid_mixed == True
+        assert is_valid_lower
+        assert is_valid_upper
+        assert is_valid_mixed

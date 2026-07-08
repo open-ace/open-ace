@@ -2916,9 +2916,7 @@ class AutonomousOrchestrator:
             r"测试进度.*%",
         ]
 
-        has_non_standard = any(
-            re.search(p, text, re.IGNORECASE) for p in _non_standard_patterns
-        )
+        has_non_standard = any(re.search(p, text, re.IGNORECASE) for p in _non_standard_patterns)
 
         # Validation logic:
         # 1. If has standard format → VALID (no retry needed)
@@ -2961,17 +2959,17 @@ class AutonomousOrchestrator:
             "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
             "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
             "测试结果报告必须严格遵循以下标准格式之一：\n"
-            "- Python pytest: \"X passed, Y failed, Z skipped\" 或 \"X passed in Y.Zs\"\n"
-            "- JavaScript Jest: \"X tests passed, Y tests failed\" 或 \"Test Suites: X passed\"\n"
-            "- Go test: \"PASS ok\" 或 \"FAIL FAIL\" 或 \"X tests passed\"\n"
-            "- Rust cargo: \"test result: ok. X passed; Y failed\" 或 \"running X tests\"\n"
-            "- Java Maven/Gradle: \"Tests run: X, Failures: Y\" 或 \"BUILD SUCCESS\"\n\n"
+            '- Python pytest: "X passed, Y failed, Z skipped" 或 "X passed in Y.Zs"\n'
+            '- JavaScript Jest: "X tests passed, Y tests failed" 或 "Test Suites: X passed"\n'
+            '- Go test: "PASS ok" 或 "FAIL FAIL" 或 "X tests passed"\n'
+            '- Rust cargo: "test result: ok. X passed; Y failed" 或 "running X tests"\n'
+            '- Java Maven/Gradle: "Tests run: X, Failures: Y" 或 "BUILD SUCCESS"\n\n'
             "禁止使用以下非标准格式：\n"
-            "- \"X个测试全部通过\" ❌\n"
-            "- \"所有测试都成功了\" ❌\n"
-            "- \"测试运行完成，全部通过\" ❌\n"
-            "- \"测试在后台运行中\" ❌\n"
-            "- \"测试进度约50%\" ❌\n"
+            '- "X个测试全部通过" ❌\n'
+            '- "所有测试都成功了" ❌\n'
+            '- "测试运行完成，全部通过" ❌\n'
+            '- "测试在后台运行中" ❌\n'
+            '- "测试进度约50%" ❌\n'
             "如果不遵守此格式要求，测试轮次将被判定为失败并触发 retry。\n"
         )
 
@@ -3311,7 +3309,9 @@ class AutonomousOrchestrator:
                     f"Tests were executed successfully, but format validation failed.\n"
                     f"Please ensure future reports follow standard format guidelines."
                 )
-                self._post_github_comment(gh, issue_number, format_comment, context="format-warning")
+                self._post_github_comment(
+                    gh, issue_number, format_comment, context="format-warning"
+                )
 
         # Handle test failure with retry logic
         if not test_result.success:
