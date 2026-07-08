@@ -17,7 +17,6 @@ interface DropZoneProps {
 
 export const DropZone: React.FC<DropZoneProps> = ({
   onFilesSelected,
-  accept = 'image/*',
   maxFiles = 1,
   disabled = false,
   children,
@@ -26,13 +25,16 @@ export const DropZone: React.FC<DropZoneProps> = ({
   const language = useLanguage();
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!disabled) {
-      setIsDragOver(true);
-    }
-  }, [disabled]);
+  const handleDragEnter = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!disabled) {
+        setIsDragOver(true);
+      }
+    },
+    [disabled]
+  );
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -89,15 +91,15 @@ export const DropZone: React.FC<DropZoneProps> = ({
         backgroundColor: isDragOver ? '#f8f9fa' : 'transparent',
       }}
     >
-      {children || (
+      {children ?? (
         <div className="dropzone-content">
           <i
             className={`bi ${isDragOver ? 'bi-cloud-upload' : 'bi-cloud-arrow-up'} fs-3 ${isDragOver ? 'text-primary' : 'text-muted'}`}
           />
           <p className={`mt-2 mb-0 ${isDragOver ? 'text-primary' : 'text-muted'}`}>
             {isDragOver
-              ? t('dropToUpload', language) || '释放上传'
-              : t('dragDropOrClick', language) || '拖放文件或点击选择'}
+              ? (t('dropToUpload', language) ?? '释放上传')
+              : (t('dragDropOrClick', language) ?? '拖放文件或点击选择')}
           </p>
         </div>
       )}

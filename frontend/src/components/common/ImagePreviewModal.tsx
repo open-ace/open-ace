@@ -40,7 +40,12 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t('previewImage', language) || '预览图片'} size="lg">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('previewImage', language) || '预览图片'}
+      size="lg"
+    >
       <div className="image-preview-container">
         {/* Image display */}
         <div

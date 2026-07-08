@@ -15,13 +15,8 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { useToast } from './Toast';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  uploadImage as uploadImageApi,
-  validateFile,
-  getUserQuota,
-  UploadedImage,
-  StorageQuota,
-} from '@/api/images';
+import { uploadImage as uploadImageApi, validateFile, getUserQuota } from '@/api/images';
+import type { UploadedImage, StorageQuota } from '@/api/images';
 
 interface ImageUploaderProps {
   sessionId?: string;
@@ -79,7 +74,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       const validation = validateFile(file, maxSizeMb, allowedTypes, allowSvg);
 
       if (!validation.valid) {
-        toast.error(validation.error || t('invalidFile', language) || '无效文件');
+        toast.error(validation.error ?? t('invalidFile', language) ?? '无效文件');
         return;
       }
 
@@ -109,11 +104,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setProgress(0);
 
     try {
-      const response = await uploadImageApi(
-        selectedFile,
-        sessionId,
-        projectId,
-        (p) => setProgress(p)
+      const response = await uploadImageApi(selectedFile, sessionId, projectId, (p) =>
+        setProgress(p)
       );
 
       if (response.success && response.image) {
@@ -138,7 +130,17 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     } finally {
       setUploading(false);
     }
-  }, [selectedFile, sessionId, projectId, showQuota, language, toast, onUploadSuccess, onUploadError, handleCancelPreview]);
+  }, [
+    selectedFile,
+    sessionId,
+    projectId,
+    showQuota,
+    language,
+    toast,
+    onUploadSuccess,
+    onUploadError,
+    handleCancelPreview,
+  ]);
 
   const handleClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -174,7 +176,8 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
       {showQuota && quota && (
         <div className="quota-display mb-2 d-flex justify-content-between align-items-center">
           <small className="text-muted">
-            {t('storageUsage', language) || '存储用量'}: {formatSize(quota.used_bytes)} / {formatSize(quota.quota_bytes)}
+            {t('storageUsage', language) || '存储用量'}: {formatSize(quota.used_bytes)} /{' '}
+            {formatSize(quota.quota_bytes)}
           </small>
           <small className={`text-${quota.usage_percentage >= 80 ? 'warning' : 'muted'}`}>
             {quota.usage_percentage.toFixed(0)}%

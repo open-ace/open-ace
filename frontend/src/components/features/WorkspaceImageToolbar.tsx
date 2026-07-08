@@ -8,11 +8,11 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { Button } from '@/components/common/Button';
 import { useToast } from '@/components/common/Toast';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { uploadImage, validateFile, getUserQuota, UploadedImage, StorageQuota } from '@/api/images';
+import { uploadImage, validateFile, getUserQuota } from '@/api/images';
+import type { UploadedImage, StorageQuota } from '@/api/images';
 
 interface WorkspaceImageToolbarProps {
   sessionId?: string;
@@ -54,7 +54,7 @@ export const WorkspaceImageToolbar: React.FC<WorkspaceImageToolbarProps> = ({
       // Validate
       const validation = validateFile(file);
       if (!validation.valid) {
-        toast.error(validation.error || t('invalidFile', language));
+        toast.error(validation.error ?? t('invalidFile', language));
         return;
       }
 

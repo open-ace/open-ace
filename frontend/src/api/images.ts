@@ -134,7 +134,7 @@ export async function uploadImage(
         } else {
           try {
             const error = JSON.parse(xhr.responseText);
-            reject(new Error(error.error || 'Upload failed'));
+            reject(new Error(error.error ?? 'Upload failed'));
           } catch {
             reject(new Error('Upload failed'));
           }
@@ -174,7 +174,7 @@ export async function uploadImage(
 
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(errorData.error || 'Upload failed');
+    throw new Error(errorData.error ?? 'Upload failed');
   }
 
   return response.json();
@@ -183,7 +183,9 @@ export async function uploadImage(
 /**
  * Get image information by ID
  */
-export async function getImage(imageId: number): Promise<{ success: boolean; image: UploadedImage }> {
+export async function getImage(
+  imageId: number
+): Promise<{ success: boolean; image: UploadedImage }> {
   return apiClient.get(`/images/${imageId}`);
 }
 
@@ -263,7 +265,7 @@ export function validateFile(
   }
 
   // Check extension
-  const extension = file.name.split('.').pop()?.toLowerCase() || '';
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
   if (extension === 'svg') {
     if (!allowSvg) {
       return {
