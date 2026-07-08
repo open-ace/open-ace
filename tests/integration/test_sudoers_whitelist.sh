@@ -49,20 +49,22 @@ test_command() {
 echo "一、git安全命令测试（期望执行成功）"
 echo "============================================================================"
 
-# 测试git安全命令
+# 测试git安全命令（只测试白名单中实际使用的命令）
 test_command "git status --porcelain" "git status --porcelain" "success"
 test_command "git branch --show-current" "git branch --show-current" "success"
 test_command "git rev-parse HEAD" "git rev-parse HEAD" "success"
-test_command "git log --oneline -1" "git log --oneline -1" "success"
-test_command "git remote -v" "git remote -v" "success"
+test_command "git rev-list --count HEAD" "git rev-list --count HEAD" "success"
+test_command "git remote get-url origin" "git remote get-url origin" "success"
 
 echo "二、gh安全命令测试（期望执行成功）"
 echo "============================================================================"
 
-# 测试gh安全命令（需要GH_TOKEN配置）
-test_command "gh --version" "gh --version" "success"
-test_command "gh auth status" "gh auth status" "success"
+# 注意：gh --version和gh auth status不在白名单中，autonomous工作流不需要这些命令
+# gh CLI通过GH_TOKEN环境变量认证，无需单独auth status检查
+# 实际使用的gh命令需要GH_TOKEN和repo上下文，在CI环境中难以模拟
+# 白名单设计遵循最小权限原则，只包含必需命令
 
+echo ""
 echo "三、危险命令阻断测试（期望权限拒绝）"
 echo "============================================================================"
 
