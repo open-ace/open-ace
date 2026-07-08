@@ -37,10 +37,33 @@ user_repo = UserRepository()
 @sso_bp.route("/providers", methods=["GET"])
 @public_endpoint
 def list_sso_providers():
-    """List available SSO providers."""
-    tenant_id = request.args.get("tenant_id", type=int)
+    """
+    List available SSO providers.
 
-    providers = get_sso_manager().list_providers(tenant_id=tenant_id)
+    Query parameters:
+        tenant_id: Filter by tenant ID
+        is_active: Filter by active status (true/false)
+        provider_type: Filter by provider type (oauth2/oidc)
+        limit: Limit number of results (default 100, max 1000)
+        offset: Offset for pagination (default 0)
+
+    Returns metadata only (no sensitive config fields).
+    """
+    # Parse query parameters
+    tenant_id = request.args.get("tenant_id", type=int)
+    is_active = request.args.get("is_active", type=lambda v: v.lower() == "true" if v else None)
+    provider_type = request.args.get("provider_type")
+    limit = request.args.get("limit", default=100, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+
+    # Get providers with filters
+    providers, total = get_sso_manager().list_providers(
+        tenant_id=tenant_id,
+        is_active=is_active,
+        provider_type=provider_type,
+        limit=limit,
+        offset=offset,
+    )
 
     # Also include predefined providers with full config (type, display_name, icon)
     predefined_names = list_providers()
@@ -61,8 +84,67 @@ def list_sso_providers():
         {
             "registered": providers,
             "predefined": predefined,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
         }
     )
+
+
+@sso_bp.route("/providers/<provider_name>", methods=["GET"])
+@admin_required
+def get_provider_detail(provider_name: str):
+    """
+    Get detailed configuration for a specific SSO provider (admin only).
+
+    Returns complete configuration without client_secret.
+    """
+    provider_info = get_sso_manager().get_provider_info(provider_name)
+
+    if not provider_info:
+        return jsonify({"error": "Provider not found", "code": "PROVIDER_NOT_FOUND"}), 404
+
+    return jsonify(provider_info)
+
+
+@sso_bp.route("/providers/<provider_name>", methods=["PATCH"])
+@admin_required
+def update_provider(provider_name: str):
+    """
+    Update an SSO provider configuration (admin only).
+
+    Supports partial updates for allowed fields:
+        client_secret: Update OAuth client secret
+        redirect_uri: Update redirect URI
+        scope: Update OAuth scopes
+        is_active: Enable/disable provider
+        extra_params: Update additional parameters
+
+    Legacy endpoints:
+        POST /providers/<name>/enable - Use PATCH with {is_active: true}
+        DELETE /providers/<name> - Use PATCH with {is_active: false}
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    # Validate is_active field if provided
+    if "is_active" in data and not isinstance(data["is_active"], bool):
+        return jsonify({"error": "is_active must be a boolean"}), 400
+
+    success = get_sso_manager().update_provider(provider_name, data)
+
+    if success:
+        # Return updated provider info
+        provider_info = get_sso_manager().get_provider_info(provider_name)
+        return jsonify({"success": True, "provider": provider_info})
+    else:
+        # Check if provider exists
+        provider_info = get_sso_manager().get_provider_info(provider_name)
+        if not provider_info:
+            return jsonify({"error": "Provider not found", "code": "PROVIDER_NOT_FOUND"}), 404
+        return jsonify({"error": "Failed to update provider", "code": "UPDATE_FAILED"}), 500
 
 
 @sso_bp.route("/providers", methods=["POST"])
@@ -122,28 +204,103 @@ def register_provider():
 
 @sso_bp.route("/providers/<provider_name>", methods=["DELETE"])
 @admin_required
-def disable_provider(provider_name: str):
-    """Disable an SSO provider (admin only)."""
+def delete_provider(provider_name: str):
+    """
+    Delete an SSO provider (admin only).
 
-    success = get_sso_manager().disable_provider(provider_name)
+    Query parameters:
+        hard: If 'true', permanently delete all data; otherwise soft delete (default false)
+
+    Soft delete: disables provider and clears sessions, preserves identities
+    Hard delete: removes provider, sessions, and identities permanently
+    """
+    hard = request.args.get("hard", "false").lower() == "true"
+
+    success = get_sso_manager().delete_provider(provider_name, hard=hard)
 
     if success:
-        return jsonify({"message": f"Provider {provider_name} disabled"})
+        message = f"Provider {provider_name} {'permanently deleted' if hard else 'disabled'}"
+        return jsonify({"success": True, "message": message})
     else:
-        return jsonify({"error": "Failed to disable provider"}), 500
+        return jsonify({"error": "Failed to delete provider", "code": "DELETE_FAILED"}), 500
 
 
 @sso_bp.route("/providers/<provider_name>/enable", methods=["POST"])
 @admin_required
 def enable_provider(provider_name: str):
-    """Enable an SSO provider (admin only)."""
+    """
+    Enable an SSO provider (admin only).
 
+    @deprecated: Use PATCH /providers/<name> with {is_active: true} instead.
+    Will be removed on 2027-01-01.
+    """
     success = get_sso_manager().enable_provider(provider_name)
 
     if success:
-        return jsonify({"message": f"Provider {provider_name} enabled"})
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Provider {provider_name} enabled",
+                "deprecated": True,
+                "migration_guide": "Use PATCH /api/sso/providers/<name> with {is_active: true}",
+            }
+        )
     else:
-        return jsonify({"error": "Failed to enable provider"}), 500
+        return jsonify({"error": "Failed to enable provider", "code": "ENABLE_FAILED"}), 500
+
+
+@sso_bp.route("/providers/<provider_name>/disable", methods=["POST"])
+@admin_required
+def disable_provider_route(provider_name: str):
+    """
+    Disable an SSO provider (admin only).
+
+    @deprecated: Use PATCH /providers/<name> with {is_active: false} instead.
+    Will be removed on 2027-01-01.
+    """
+    success = get_sso_manager().disable_provider(provider_name)
+
+    if success:
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Provider {provider_name} disabled",
+                "deprecated": True,
+                "migration_guide": "Use PATCH /api/sso/providers/<name> with {is_active: false}",
+            }
+        )
+    else:
+        return jsonify({"error": "Failed to disable provider", "code": "DISABLE_FAILED"}), 500
+
+
+@sso_bp.route("/providers/<provider_name>/test", methods=["POST"])
+@admin_required
+def test_provider_connection_route(provider_name: str):
+    """
+    Test SSO provider connection and configuration (admin only).
+
+    Tests:
+        - Authorization URL reachability
+        - Token URL reachability
+        - OIDC discovery document (for OIDC providers)
+        - SSL certificate validity
+        - Client ID format
+
+    Returns detailed test results and recommendations.
+    """
+    result = get_sso_manager().test_provider_connection(provider_name)
+
+    if result.get("success"):
+        return jsonify({"success": True, "tests": result["tests"], "warnings": result.get("warnings", [])})
+    else:
+        return jsonify(
+            {
+                "success": False,
+                "tests": result.get("tests", {}),
+                "errors": result.get("errors", []),
+                "warnings": result.get("warnings", []),
+            }
+        ), 400
 
 
 @sso_bp.route("/login/<provider_name>", methods=["GET"])
