@@ -2840,6 +2840,97 @@ class AutonomousOrchestrator:
 
         self._post_github_comment(gh, issue_number, msg, context="dev-progress")
 
+    def _validate_test_report_format(self, text: str) -> tuple[bool, str]:
+        """Validate that test report follows standard format (Issue #1547).
+
+        Returns:
+            (is_valid, reason): True if format is valid, False with reason otherwise.
+
+        Standard formats (enforced by prompt):
+        - pytest: "X passed, Y failed, Z skipped" or "X passed in Y.Zs"
+        - Jest: "X tests passed" or "Test Suites: X passed"
+        - Go test: "PASS ok" or "X tests passed"
+        - Rust: "test result: ok" or "running X tests"
+        - Java: "Tests run: X" or "BUILD SUCCESS"
+
+        Invalid formats (trigger retry):
+        - "X个测试全部通过" (Chinese non-standard)
+        - "所有测试都成功了" (Chinese non-standard)
+        - "测试运行完成，全部通过" (Chinese non-standard)
+        - "测试在后台运行中" (hallucination)
+        - "测试进度约50%" (hallucination)
+        """
+        if not text or not text.strip():
+            return False, "Empty test report"
+
+        # Standard format patterns (these are VALID)
+        _standard_patterns = [
+            # pytest standard formats
+            r"\d+\s+passed(?:\s*,\s*\d+\s+failed)?(?:\s*,\s*\d+\s+skipped)?(?:\s+in\s+[\d.]+s)?",
+            r"\d+\s+passed\s+in\s+[\d.]+s",
+            # Jest standard formats
+            r"\d+\s+tests\s+passed(?:\s*,\s*\d+\s+tests\s+failed)?",
+            r"Test\s+Suites:\s*\d+\s+passed",
+            # Go test standard formats
+            r"PASS\s+ok",
+            r"FAIL\s+FAIL",
+            r"\d+\s+tests\s+passed",
+            # Rust cargo test standard formats
+            r"test\s+result:\s*ok(?:\.\s*\d+\s+passed(?:;\s*\d+\s+failed)?)?",
+            r"running\s+\d+\s+tests",
+            # Java Maven/Gradle standard formats
+            r"Tests\s+run:\s*\d+",
+            r"BUILD\s+SUCCESS(?:FUL)?",
+            r"BUILD\s+FAILURE",
+            # pytest session markers (valid indicators)
+            r"test\s+session\s+starts",
+            r"collected\s+\d+\s+items",
+            r"={3,}\s*\d+\s+(passed|failed|skipped)",
+        ]
+
+        # Check if text contains standard format
+        has_standard = any(re.search(p, text, re.IGNORECASE) for p in _standard_patterns)
+
+        # Non-standard format patterns (these are INVALID)
+        # Issue #1544/1538: Chinese formats that were previously missed
+        _non_standard_patterns = [
+            # Chinese non-standard formats
+            r"\d+\s*(个|项|件)\s*测试\s*(全部|全都|都)?\s*(通过|成功)",
+            r"(所有|全部|全部的)\s*\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
+            r"\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
+            r"(通过|成功)[:：\s]+\d+\s*(个|项|件|测试)?",  # Mixed colon formats
+            r"(失败|错误)[:：\s]+\d+\s*(个|项|件|测试)?",
+            r"\d+\s*(个|项|件|测试)\s*(通过|成功|失败|跳过)",
+            # Japanese non-standard formats
+            r"(通過|成功)[:：\s]+\d+\s*(件|テスト)?",
+            r"(失敗|エラー)[:：\s]+\d+\s*(件|テスト)?",
+            # Korean non-standard formats
+            r"(통과|성공)[:：\s]+\d+\s*(개|테스트)?",
+            r"(실패|오류)[:：\s]+\d+\s*(개|테스트)?",
+            # Natural language descriptions (hallucination indicators)
+            r"测试(全部|都)?(成功|通过)",
+            r"所有测试(都)?(成功|通过)",
+            r"测试运行完成",
+            r"测试.*后台.*运行",
+            r"测试正在.*运行",
+            r"测试进度.*%",
+        ]
+
+        has_non_standard = any(
+            re.search(p, text, re.IGNORECASE) for p in _non_standard_patterns
+        )
+
+        # Validation logic:
+        # 1. If has standard format → VALID (no retry needed)
+        # 2. If has non-standard format AND no standard → INVALID (trigger retry)
+        if has_standard:
+            return True, "Standard format detected"
+        elif has_non_standard:
+            return False, "Non-standard format detected (requires retry)"
+        else:
+            # No recognizable format → likely hallucination or empty
+            return False, "No test result format detected"
+
     def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run tests, post results to issue, handle retries.
 
@@ -2867,7 +2958,21 @@ class AutonomousOrchestrator:
             '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
             "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
             "   - 手动验证核心功能逻辑\n"
-            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n"
+            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
+            "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
+            "测试结果报告必须严格遵循以下标准格式之一：\n"
+            "- Python pytest: \"X passed, Y failed, Z skipped\" 或 \"X passed in Y.Zs\"\n"
+            "- JavaScript Jest: \"X tests passed, Y tests failed\" 或 \"Test Suites: X passed\"\n"
+            "- Go test: \"PASS ok\" 或 \"FAIL FAIL\" 或 \"X tests passed\"\n"
+            "- Rust cargo: \"test result: ok. X passed; Y failed\" 或 \"running X tests\"\n"
+            "- Java Maven/Gradle: \"Tests run: X, Failures: Y\" 或 \"BUILD SUCCESS\"\n\n"
+            "禁止使用以下非标准格式：\n"
+            "- \"X个测试全部通过\" ❌\n"
+            "- \"所有测试都成功了\" ❌\n"
+            "- \"测试运行完成，全部通过\" ❌\n"
+            "- \"测试在后台运行中\" ❌\n"
+            "- \"测试进度约50%\" ❌\n"
+            "如果不遵守此格式要求，测试轮次将被判定为失败并触发 retry。\n"
         )
 
         test_result = self._run_agent(
@@ -3110,6 +3215,11 @@ class AutonomousOrchestrator:
             test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
         )
 
+        # Issue #1547: Validate test report format
+        # If agent used non-standard format but tests actually ran, trigger retry
+        format_valid, format_reason = self._validate_test_report_format(test_response_text)
+        has_non_standard_format = not format_valid and tests_actually_run
+
         tests_actually_skipped = (
             test_status_tag == "skipped"
             or has_skip_tag
@@ -3166,6 +3276,42 @@ class AutonomousOrchestrator:
                 }
             )
             return
+
+        # Issue #1547: Handle non-standard format with retry
+        # If agent used non-standard format but tests actually ran, trigger retry
+        if has_non_standard_format:
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "error_message": f"Non-standard test report format: {format_reason}",
+                },
+            )
+            format_retries = wf.get("format_retries", 0) + 1
+            if format_retries <= 1:
+                logger.warning(
+                    "Non-standard test report format for dev round %d, retry %d/1: %s",
+                    dev_round,
+                    format_retries,
+                    format_reason,
+                )
+                self._update_workflow({"format_retries": format_retries})
+                return  # Scheduler will re-call _run_test_phase
+            logger.warning(
+                "Non-standard test report format after retry for dev round %d: %s",
+                dev_round,
+                format_reason,
+            )
+            # After retry exhausted, still proceed (tests did run, just format issue)
+            # But log warning and post comment to issue
+            if issue_number:
+                format_comment = (
+                    f"⚠️ **Format Warning**: Test report used non-standard format.\n"
+                    f"Reason: {format_reason}\n\n"
+                    f"Tests were executed successfully, but format validation failed.\n"
+                    f"Please ensure future reports follow standard format guidelines."
+                )
+                self._post_github_comment(gh, issue_number, format_comment, context="format-warning")
 
         # Handle test failure with retry logic
         if not test_result.success:
