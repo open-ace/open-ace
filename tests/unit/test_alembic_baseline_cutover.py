@@ -42,6 +42,8 @@ def _temporary_postgres_database(tmp_path):
 
     cluster_dir = tmp_path / "pg-cluster"
     log_path = tmp_path / "postgres.log"
+    socket_dir = tmp_path / "pg-socket"
+    socket_dir.mkdir(parents=True, exist_ok=True)
     port = "55435"
     env = os.environ.copy()
     env.update({"LC_ALL": "C", "LANG": "C"})
@@ -54,7 +56,7 @@ def _temporary_postgres_database(tmp_path):
         env=env,
     )
     subprocess.run(
-        ["pg_ctl", "-D", str(cluster_dir), "-l", str(log_path), "-o", f"-p {port}", "start"],
+        ["pg_ctl", "-D", str(cluster_dir), "-l", str(log_path), "-o", f"-p {port} -k {socket_dir}", "start"],
         check=True,
         capture_output=True,
         text=True,
