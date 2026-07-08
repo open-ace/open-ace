@@ -3003,6 +3003,11 @@ class AutonomousOrchestrator:
             r"(통과|성공)[:：\s]+\d+\s*(개|테스트)?",
             r"(실패|오류)[:：\s]+\d+\s*(개|테스트)?",
             r"(건너뜀|스킵)[:：\s]+\d+\s*(개|테스트)?",
+            # Issue #1544: Additional Chinese output patterns
+            # Chinese: "2216 个测试全部通过", "所有 2216 个单元测试通过"
+            r"\d+\s*(个|项|件)\s*测试\s*(全部|全都|都)?\s*(通过|成功)",
+            r"(所有|全部|全部的)\s*\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
+            r"\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
         ]
 
         # Jest patterns for JavaScript projects
