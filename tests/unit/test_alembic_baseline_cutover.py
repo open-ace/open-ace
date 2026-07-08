@@ -56,7 +56,16 @@ def _temporary_postgres_database(tmp_path):
         env=env,
     )
     subprocess.run(
-        ["pg_ctl", "-D", str(cluster_dir), "-l", str(log_path), "-o", f"-p {port} -k {socket_dir}", "start"],
+        [
+            "pg_ctl",
+            "-D",
+            str(cluster_dir),
+            "-l",
+            str(log_path),
+            "-o",
+            f"-p {port} -k {socket_dir}",
+            "start",
+        ],
         check=True,
         capture_output=True,
         text=True,
