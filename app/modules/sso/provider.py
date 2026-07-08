@@ -269,6 +269,7 @@ class SSOProvider(ABC):
 PROVIDER_CONFIGS = {
     "google": {
         "name": "Google",
+        "icon": "bi-google",
         "provider_type": "oidc",
         "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
@@ -279,6 +280,7 @@ PROVIDER_CONFIGS = {
     },
     "microsoft": {
         "name": "Microsoft",
+        "icon": "bi-microsoft",
         "provider_type": "oidc",
         "authorization_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
         "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -289,6 +291,7 @@ PROVIDER_CONFIGS = {
     },
     "github": {
         "name": "GitHub",
+        "icon": "bi-github",
         "provider_type": "oauth2",
         "authorization_url": "https://github.com/login/oauth/authorize",
         "token_url": "https://github.com/login/oauth/access_token",
@@ -297,6 +300,7 @@ PROVIDER_CONFIGS = {
     },
     "okta": {
         "name": "Okta",
+        "icon": "bi-shield-lock",
         "provider_type": "oidc",
         # These need to be configured per-tenant
         "authorization_url": "",  # https://{domain}/oauth2/v1/authorize
@@ -307,6 +311,7 @@ PROVIDER_CONFIGS = {
     },
     "auth0": {
         "name": "Auth0",
+        "icon": "bi-shield-check",
         "provider_type": "oidc",
         # These need to be configured per-tenant
         "authorization_url": "",  # https://{domain}/authorize

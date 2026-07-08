@@ -22,6 +22,11 @@ vi.mock('@/hooks', () => ({
   useAuth: () => ({
     user: { tenant_id: 1, role: 'admin' },
   }),
+  useApiError: () => ({
+    handleAndGetMessage: vi.fn().mockReturnValue('Error message'),
+    handleError: vi.fn(),
+    getErrorMessage: vi.fn().mockReturnValue('Error message'),
+  }),
 }));
 
 // Mock permissions

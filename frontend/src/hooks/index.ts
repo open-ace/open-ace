@@ -121,3 +121,6 @@ export {
   type UsePageRefreshReturn,
 } from './usePageRefresh';
 export { useGlobalRefreshPause } from './useGlobalRefreshPause';
+
+// Error handling hooks
+export { useApiError } from './useApiError';

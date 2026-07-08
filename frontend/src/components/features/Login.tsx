@@ -8,6 +8,7 @@ import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { Button } from '@/components/common';
 import { ssoApi, tenantApi, type SSOProvider } from '@/api';
+import { getProviderIcon } from '@/utils';
 import type { Language } from '@/types';
 import './Login.css';
 
@@ -89,16 +90,6 @@ const translations: Record<Language, Record<string, string>> = {
 
 function getTranslation(key: string, language: Language): string {
   return translations[language]?.[key] || translations.en[key] || key;
-}
-
-function getProviderIcon(name: string): string {
-  const icons: Record<string, string> = {
-    google: 'bi-google',
-    microsoft: 'bi-microsoft',
-    github: 'bi-github',
-    okta: 'bi-shield-lock',
-  };
-  return icons[name.toLowerCase()] || 'bi-key';
 }
 
 export const Login: React.FC = () => {

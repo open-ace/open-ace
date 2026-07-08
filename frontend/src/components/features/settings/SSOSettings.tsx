@@ -17,9 +17,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
-import { useAuth } from '@/hooks';
-import { t, type Language } from '@/i18n';
+import { useAuth, useApiError } from '@/hooks';
+import { t } from '@/i18n';
 import { canManageAllTenants } from '@/utils/permissions';
+import { getProviderIcon } from '@/utils/icons';
 import {
   Card,
   Button,
@@ -41,15 +42,6 @@ import {
   type RegisterProviderRequest,
   type Tenant,
 } from '@/api';
-import type { ApiError } from '@/types';
-
-const PREDEFINED_PROVIDERS = [
-  { value: '', label: 'Custom Provider' },
-  { value: 'google', label: 'Google' },
-  { value: 'microsoft', label: 'Microsoft' },
-  { value: 'github', label: 'GitHub' },
-  { value: 'okta', label: 'Okta' },
-];
 
 // URL validation helper
 const isValidUrl = (url: string): boolean => {
@@ -71,27 +63,6 @@ const hasUnsavedFormData = (formData: RegisterProviderRequest): boolean => {
   );
 };
 
-// Map API error to localized message
-const mapApiError = (error: unknown, language: Language): string => {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const apiError = error as ApiError;
-    // Check for specific error codes
-    if (apiError.code) {
-      const errorCodeMap: Record<string, string> = {
-        provider_already_exists: 'providerAlreadyExists',
-        invalid_client_id: 'clientIdInvalid',
-        invalid_client_secret: 'clientSecretInvalid',
-      };
-      const translationKey = errorCodeMap[apiError.code];
-      if (translationKey) {
-        return t(translationKey, language);
-      }
-    }
-    return apiError.message || t('unknownError', language);
-  }
-  return t('unknownError', language);
-};
-
 const emptyFormData: RegisterProviderRequest = {
   name: '',
   provider_type: 'oauth2',
@@ -111,39 +82,52 @@ export const SSOSettings: React.FC = () => {
   const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const confirm = useConfirm();
+  const { handleAndGetMessage } = useApiError();
 
   // Admin tenant selection
   const isAdmin = canManageAllTenants(user);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  // NOTE: Using ref to avoid useEffect circular dependency
+  // Scenario: After async loading tenants, need to set default tenant
+  // Problem: Directly calling setSelectedTenantId in useEffect triggers other useEffects that depend on this state
+  // Solution: Use ref as an "initialized" flag to prevent duplicate setting
+  // This is a standard React pattern for handling such initialization scenarios
   const selectedTenantIdRef = useRef<number | null>(null);
   const [isLoadingTenants, setIsLoadingTenants] = useState(false);
 
   // Compute effective tenant ID
   const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
 
+  // Provider data state (separate - frequently updated independently)
   const [registeredProviders, setRegisteredProviders] = useState<SSOProvider[]>([]);
   const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // SSO settings state
+  // SSO settings state (separate - frequent user interaction)
   const [ssoEnabled, setSsoEnabled] = useState(false);
   const [autoProvision, setAutoProvision] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [successHighlight, setSuccessHighlight] = useState(false);
 
-  // Provider toggle state
+  // Provider operation state
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
 
-  // Modal state
-  const [showModal, setShowModal] = useState(false);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [formData, setFormData] = useState<RegisterProviderRequest>(emptyFormData);
+  // Modal state group (strongly related - updated together)
+  const [modalState, setModalState] = useState({
+    show: false,
+    error: null as string | null,
+    isSubmitting: false,
+    formData: emptyFormData,
+    validationErrors: {} as Record<string, string>,
+  });
 
-  // URL validation errors
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  // Dynamic provider options for Modal (from API data)
+  const providerOptions = [
+    { value: '', label: t('customProvider', language) },
+    ...predefinedProviders.map((p) => ({ value: p.name, label: p.display_name })),
+  ];
 
   // Clear success highlight after 3 seconds
   useEffect(() => {
@@ -230,27 +214,30 @@ export const SSOSettings: React.FC = () => {
     (field: string, value: string): void => {
       if (!value.trim()) {
         // Clear error for empty field
-        setValidationErrors((prev) => {
-          const next = { ...prev };
+        setModalState((prev) => {
+          const next = { ...prev.validationErrors };
           delete next[field];
-          return next;
+          return { ...prev, validationErrors: next };
         });
         return;
       }
 
       if (!isValidUrl(value)) {
-        setValidationErrors((prev) => ({
+        setModalState((prev) => ({
           ...prev,
-          [field]: t('invalidUrlFormat', language),
+          validationErrors: {
+            ...prev.validationErrors,
+            [field]: t('invalidUrlFormat', language),
+          },
         }));
         return;
       }
 
       // Clear error if valid
-      setValidationErrors((prev) => {
-        const next = { ...prev };
+      setModalState((prev) => {
+        const next = { ...prev.validationErrors };
         delete next[field];
-        return next;
+        return { ...prev, validationErrors: next };
       });
     },
     [language]
@@ -258,25 +245,31 @@ export const SSOSettings: React.FC = () => {
 
   // Handlers
   const handleOpenCreate = () => {
-    setFormData(emptyFormData);
-    setValidationErrors({});
-    setRegisterError(null);
-    setShowModal(true);
+    setModalState({
+      show: true,
+      error: null,
+      isSubmitting: false,
+      formData: emptyFormData,
+      validationErrors: {},
+    });
   };
 
   const handleCloseModalWithConfirm = useCallback(async () => {
-    if (hasUnsavedFormData(formData)) {
+    if (hasUnsavedFormData(modalState.formData)) {
       const confirmed = await confirm({
         message: t('confirmDiscardChanges', language),
         variant: 'warning',
       });
       if (!confirmed) return;
     }
-    setFormData(emptyFormData);
-    setValidationErrors({});
-    setRegisterError(null);
-    setShowModal(false);
-  }, [formData, confirm, language]);
+    setModalState({
+      show: false,
+      error: null,
+      isSubmitting: false,
+      formData: emptyFormData,
+      validationErrors: {},
+    });
+  }, [modalState.formData, confirm, language]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,12 +296,15 @@ export const SSOSettings: React.FC = () => {
 
   const handlePredefinedChange = (value: string) => {
     const isPredefined = value !== '';
-    setFormData({
-      ...formData,
-      name: value,
-      predefined: isPredefined,
-      provider_type: value === 'okta' ? 'oidc' : 'oauth2',
-    });
+    setModalState((prev) => ({
+      ...prev,
+      formData: {
+        ...prev.formData,
+        name: value,
+        predefined: isPredefined,
+        provider_type: value === 'okta' ? 'oidc' : 'oauth2',
+      },
+    }));
   };
 
   // Validate all URL fields before submit
@@ -321,65 +317,86 @@ export const SSOSettings: React.FC = () => {
       'issuer_url',
     ];
     let allValid = true;
+    const newErrors: Record<string, string> = {};
 
     for (const field of urlFields) {
-      const value = formData[field as keyof RegisterProviderRequest] as string;
+      const value = modalState.formData[field as keyof RegisterProviderRequest] as string;
       if (!isValidUrl(value)) {
         allValid = false;
-        setValidationErrors((prev) => ({
-          ...prev,
-          [field]: t('invalidUrlFormat', language),
-        }));
+        newErrors[field] = t('invalidUrlFormat', language);
       }
+    }
+
+    if (!allValid) {
+      setModalState((prev) => ({
+        ...prev,
+        validationErrors: { ...prev.validationErrors, ...newErrors },
+      }));
     }
 
     return allValid;
   };
 
   const handleSubmit = async () => {
-    setRegisterError(null);
+    setModalState((prev) => ({ ...prev, error: null }));
 
     // Validate URL fields first
     if (!validateAllUrls()) {
-      setRegisterError(t('invalidUrlFormat', language));
+      setModalState((prev) => ({
+        ...prev,
+        error: t('invalidUrlFormat', language),
+      }));
       return;
     }
 
     // Validate required fields
-    if (!formData.client_id.trim()) {
-      setRegisterError(t('clientIdRequired', language));
+    if (!modalState.formData.client_id.trim()) {
+      setModalState((prev) => ({
+        ...prev,
+        error: t('clientIdRequired', language),
+      }));
       return;
     }
 
-    if (!formData.client_secret.trim()) {
-      setRegisterError(t('clientSecretRequired', language));
+    if (!modalState.formData.client_secret.trim()) {
+      setModalState((prev) => ({
+        ...prev,
+        error: t('clientSecretRequired', language),
+      }));
       return;
     }
 
     // Custom provider requires name
-    if (!formData.predefined && !formData.name.trim()) {
-      setRegisterError(t('providerNameRequired', language));
+    if (!modalState.formData.predefined && !modalState.formData.name.trim()) {
+      setModalState((prev) => ({
+        ...prev,
+        error: t('providerNameRequired', language),
+      }));
       return;
     }
 
-    setIsRegistering(true);
+    setModalState((prev) => ({ ...prev, isSubmitting: true }));
     try {
       await ssoApi.registerProvider({
-        ...formData,
+        ...modalState.formData,
         tenant_id: effectiveTenantId ?? undefined,
       });
       // Clear form and close modal on success
-      setFormData(emptyFormData);
-      setValidationErrors({});
-      setShowModal(false);
+      setModalState({
+        show: false,
+        error: null,
+        isSubmitting: false,
+        formData: emptyFormData,
+        validationErrors: {},
+      });
       fetchProviders();
       success(t('providerRegistered', language));
     } catch (err) {
       console.error('Failed to register provider:', err);
-      const errorMsg = mapApiError(err, language);
-      setRegisterError(errorMsg);
+      const errorMsg = handleAndGetMessage(err, 'Failed to register provider', 'unknownError');
+      setModalState((prev) => ({ ...prev, error: errorMsg }));
     } finally {
-      setIsRegistering(false);
+      setModalState((prev) => ({ ...prev, isSubmitting: false }));
     }
   };
 
@@ -409,13 +426,13 @@ export const SSOSettings: React.FC = () => {
         fetchProviders();
       } catch (err) {
         console.error('Failed to toggle provider:', err);
-        const errorMsg = mapApiError(err, language);
+        const errorMsg = handleAndGetMessage(err, 'Failed to toggle provider', 'unknownError');
         toastError(errorMsg);
       } finally {
         setToggleLoading(null);
       }
     },
-    [confirm, language, success, toastError, fetchProviders]
+    [confirm, language, success, toastError, fetchProviders, handleAndGetMessage]
   );
 
   // Loading state for tenant list (admin only)
@@ -642,7 +659,7 @@ export const SSOSettings: React.FC = () => {
 
       {/* Register Provider Modal */}
       <Modal
-        isOpen={showModal}
+        isOpen={modalState.show}
         onClose={handleCloseModalWithConfirm}
         title={t('registerProvider', language)}
         size="lg"
@@ -651,17 +668,17 @@ export const SSOSettings: React.FC = () => {
             <Button variant="secondary" onClick={handleCloseModalWithConfirm}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleSubmit} loading={isRegistering}>
+            <Button variant="primary" onClick={handleSubmit} loading={modalState.isSubmitting}>
               {t('register', language)}
             </Button>
           </>
         }
       >
         {/* Error message */}
-        {registerError && (
+        {modalState.error && (
           <div className="alert alert-danger mb-3">
             <i className="bi bi-exclamation-circle me-2" />
-            {registerError}
+            {modalState.error}
           </div>
         )}
         <div className="row g-3">
@@ -669,22 +686,27 @@ export const SSOSettings: React.FC = () => {
           <div className="col-12">
             <label className="form-label">{t('selectProvider', language)}</label>
             <Select
-              options={PREDEFINED_PROVIDERS}
-              value={formData.predefined ? formData.name : ''}
+              options={providerOptions}
+              value={modalState.formData.predefined ? modalState.formData.name : ''}
               onChange={handlePredefinedChange}
-              disabled={isRegistering}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
           {/* Custom Provider Name */}
-          {!formData.predefined && (
+          {!modalState.formData.predefined && (
             <div className="col-md-6">
               <label className="form-label">{t('providerName', language)} *</label>
               <TextInput
-                value={formData.name}
-                onChange={(value: string) => setFormData({ ...formData, name: value })}
+                value={modalState.formData.name}
+                onChange={(value: string) =>
+                  setModalState((prev) => ({
+                    ...prev,
+                    formData: { ...prev.formData, name: value },
+                  }))
+                }
                 placeholder={t('enterProviderName', language)}
-                disabled={isRegistering}
+                disabled={modalState.isSubmitting}
               />
             </div>
           )}
@@ -697,11 +719,17 @@ export const SSOSettings: React.FC = () => {
                 { value: 'oauth2', label: 'OAuth 2.0' },
                 { value: 'oidc', label: 'OpenID Connect' },
               ]}
-              value={formData.provider_type ?? 'oauth2'}
+              value={modalState.formData.provider_type ?? 'oauth2'}
               onChange={(value) =>
-                setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' })
+                setModalState((prev) => ({
+                  ...prev,
+                  formData: {
+                    ...prev.formData,
+                    provider_type: value as 'oauth2' | 'oidc',
+                  },
+                }))
               }
-              disabled={isRegistering}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
@@ -709,10 +737,15 @@ export const SSOSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('clientId', language)} *</label>
             <TextInput
-              value={formData.client_id}
-              onChange={(value: string) => setFormData({ ...formData, client_id: value })}
+              value={modalState.formData.client_id}
+              onChange={(value: string) =>
+                setModalState((prev) => ({
+                  ...prev,
+                  formData: { ...prev.formData, client_id: value },
+                }))
+              }
               placeholder={t('enterClientId', language)}
-              disabled={isRegistering}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
@@ -721,10 +754,15 @@ export const SSOSettings: React.FC = () => {
             <label className="form-label">{t('clientSecret', language)} *</label>
             <TextInput
               type="password"
-              value={formData.client_secret}
-              onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
+              value={modalState.formData.client_secret}
+              onChange={(value: string) =>
+                setModalState((prev) => ({
+                  ...prev,
+                  formData: { ...prev.formData, client_secret: value },
+                }))
+              }
               placeholder={t('enterClientSecret', language)}
-              disabled={isRegistering}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
@@ -732,14 +770,17 @@ export const SSOSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('redirectUri', language)}</label>
             <TextInput
-              value={formData.redirect_uri ?? ''}
+              value={modalState.formData.redirect_uri ?? ''}
               onChange={(value: string) => {
-                setFormData({ ...formData, redirect_uri: value });
+                setModalState((prev) => ({
+                  ...prev,
+                  formData: { ...prev.formData, redirect_uri: value },
+                }));
                 validateUrlField('redirect_uri', value);
               }}
               placeholder={t('enterRedirectUri', language)}
-              error={validationErrors['redirect_uri']}
-              disabled={isRegistering}
+              error={modalState.validationErrors['redirect_uri']}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
@@ -747,15 +788,20 @@ export const SSOSettings: React.FC = () => {
           <div className="col-md-6">
             <label className="form-label">{t('scope', language)}</label>
             <TextInput
-              value={formData.scope ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, scope: value })}
+              value={modalState.formData.scope ?? ''}
+              onChange={(value: string) =>
+                setModalState((prev) => ({
+                  ...prev,
+                  formData: { ...prev.formData, scope: value },
+                }))
+              }
               placeholder="openid profile email"
-              disabled={isRegistering}
+              disabled={modalState.isSubmitting}
             />
           </div>
 
           {/* Custom Provider URLs */}
-          {!formData.predefined && (
+          {!modalState.formData.predefined && (
             <>
               <div className="col-12">
                 <hr />
@@ -764,53 +810,65 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('authorizationUrl', language)}</label>
                 <TextInput
-                  value={formData.authorization_url ?? ''}
+                  value={modalState.formData.authorization_url ?? ''}
                   onChange={(value: string) => {
-                    setFormData({ ...formData, authorization_url: value });
+                    setModalState((prev) => ({
+                      ...prev,
+                      formData: { ...prev.formData, authorization_url: value },
+                    }));
                     validateUrlField('authorization_url', value);
                   }}
                   placeholder="https://provider.com/oauth/authorize"
-                  error={validationErrors['authorization_url']}
-                  disabled={isRegistering}
+                  error={modalState.validationErrors['authorization_url']}
+                  disabled={modalState.isSubmitting}
                 />
               </div>
               <div className="col-md-6">
                 <label className="form-label">{t('tokenUrl', language)}</label>
                 <TextInput
-                  value={formData.token_url ?? ''}
+                  value={modalState.formData.token_url ?? ''}
                   onChange={(value: string) => {
-                    setFormData({ ...formData, token_url: value });
+                    setModalState((prev) => ({
+                      ...prev,
+                      formData: { ...prev.formData, token_url: value },
+                    }));
                     validateUrlField('token_url', value);
                   }}
                   placeholder="https://provider.com/oauth/token"
-                  error={validationErrors['token_url']}
-                  disabled={isRegistering}
+                  error={modalState.validationErrors['token_url']}
+                  disabled={modalState.isSubmitting}
                 />
               </div>
               <div className="col-md-6">
                 <label className="form-label">{t('userinfoUrl', language)}</label>
                 <TextInput
-                  value={formData.userinfo_url ?? ''}
+                  value={modalState.formData.userinfo_url ?? ''}
                   onChange={(value: string) => {
-                    setFormData({ ...formData, userinfo_url: value });
+                    setModalState((prev) => ({
+                      ...prev,
+                      formData: { ...prev.formData, userinfo_url: value },
+                    }));
                     validateUrlField('userinfo_url', value);
                   }}
                   placeholder="https://provider.com/oauth/userinfo"
-                  error={validationErrors['userinfo_url']}
-                  disabled={isRegistering}
+                  error={modalState.validationErrors['userinfo_url']}
+                  disabled={modalState.isSubmitting}
                 />
               </div>
               <div className="col-md-6">
                 <label className="form-label">{t('issuerUrl', language)}</label>
                 <TextInput
-                  value={formData.issuer_url ?? ''}
+                  value={modalState.formData.issuer_url ?? ''}
                   onChange={(value: string) => {
-                    setFormData({ ...formData, issuer_url: value });
+                    setModalState((prev) => ({
+                      ...prev,
+                      formData: { ...prev.formData, issuer_url: value },
+                    }));
                     validateUrlField('issuer_url', value);
                   }}
                   placeholder="https://provider.com"
-                  error={validationErrors['issuer_url']}
-                  disabled={isRegistering}
+                  error={modalState.validationErrors['issuer_url']}
+                  disabled={modalState.isSubmitting}
                 />
               </div>
             </>
@@ -820,13 +878,3 @@ export const SSOSettings: React.FC = () => {
     </div>
   );
 };
-
-function getProviderIcon(name: string): string {
-  const icons: Record<string, string> = {
-    google: 'bi-google',
-    microsoft: 'bi-microsoft',
-    github: 'bi-github',
-    okta: 'bi-shield-lock',
-  };
-  return icons[name.toLowerCase()] || 'bi-key';
-}

@@ -42,7 +42,7 @@ def list_sso_providers():
 
     providers = get_sso_manager().list_providers(tenant_id=tenant_id)
 
-    # Also include predefined providers with full config (type, display_name)
+    # Also include predefined providers with full config (type, display_name, icon)
     predefined_names = list_providers()
     predefined = []
     for name in predefined_names:
@@ -53,6 +53,7 @@ def list_sso_providers():
                     "name": name,
                     "type": config["provider_type"],
                     "display_name": config.get("name", name),
+                    "icon": config.get("icon"),
                 }
             )
 
