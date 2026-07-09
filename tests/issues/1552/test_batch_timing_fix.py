@@ -13,8 +13,9 @@ Fix components:
 4. orchestrator.py: Distinguish timing issue from no changes (方案2)
 """
 
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 
 class TestBatchWorkflowBaseCommitLocking:
@@ -22,16 +23,12 @@ class TestBatchWorkflowBaseCommitLocking:
 
     def test_batch_creation_locks_base_commit_sha(self):
         """When creating batch workflows, all should use the same locked base_commit_sha."""
-        # Mock GitHubOps to return a fixed SHA
-        mock_sha = "abc123def456"
-
         # Simulate batch creation logic
         from app.routes.autonomous import create_workflow
 
         # This test verifies the logic is implemented correctly
         # In production, the actual git rev-parse would be called
         # For this test, we mock the GitHubOps._run_git call
-
         # Key assertion: All workflows in batch should have same base_commit_sha
         # Implementation verification: autonomous.py:670-690
         pass
@@ -45,14 +42,6 @@ class TestBatchWorkflowBaseCommitLocking:
     def test_batch_workflow_uses_locked_sha_for_worktree(self):
         """When creating worktree, orchestrator should use locked base_commit_sha."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        # Mock workflow with locked base_commit_sha
-        mock_workflow = {
-            "workflow_id": "test-batch",
-            "base_commit_sha": "abc123def456",
-            "branch_strategy": "new-branch",
-            "project_path": "/test/project",
-        }
 
         # Mock GitHubOps
         mock_gh = MagicMock()
@@ -70,14 +59,6 @@ class TestBranchBehindMainDetection:
     def test_branch_behind_main_is_detected_as_timing_issue(self):
         """When branch is behind main, it should be detected as timing issue."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        # Mock workflow
-        mock_workflow = {
-            "workflow_id": "test-timing",
-            "branch_name": "auto-dev/test-branch",
-            "base_commit_sha": "oldsha123",  # Old SHA that's now in main
-            "dev_round": 1,
-        }
 
         # Mock GitHubOps
         mock_gh = MagicMock()

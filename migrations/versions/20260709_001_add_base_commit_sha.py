@@ -54,8 +54,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove base_commit_sha column."""
-    connection = op.get_bind()
-
     # Use batch_alter_table for SQLite compatibility
     with op.batch_alter_table("autonomous_workflows") as batch_op:
         batch_op.drop_column("base_commit_sha")
