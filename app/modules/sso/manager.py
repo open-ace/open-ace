@@ -9,10 +9,10 @@ import logging
 import secrets
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import OIDCProvider, get_provider_class
@@ -342,7 +342,7 @@ class SSOManager:
         """
         # Build WHERE conditions
         conditions = []
-        params = []
+        params: list[Any] = []
 
         if tenant_id is not None:
             conditions.append("tenant_id = ?")
@@ -584,7 +584,11 @@ class SSOManager:
                 # Soft delete - disable and preserve data
                 self.db.execute(
                     "UPDATE sso_providers SET is_active = ?, updated_at = ? WHERE name = ?",
-                    (adapt_boolean_value(False), datetime.now(timezone.utc).replace(tzinfo=None), name),
+                    (
+                        adapt_boolean_value(False),
+                        datetime.now(timezone.utc).replace(tzinfo=None),
+                        name,
+                    ),
                 )
 
                 # Optionally clear sessions (disable active logins)
@@ -615,7 +619,7 @@ class SSOManager:
         Returns:
             Dict: Test results with detailed information.
         """
-        result = {
+        result: Dict[str, Any] = {
             "success": False,
             "tests": {},
             "warnings": [],
@@ -688,7 +692,9 @@ class SSOManager:
         # Determine overall success
         critical_tests_passed = (
             result["tests"].get("provider_exists", False)
-            and (not auth_url or result["tests"].get("authorization_url", {}).get("reachable", False))
+            and (
+                not auth_url or result["tests"].get("authorization_url", {}).get("reachable", False)
+            )
             and (not token_url or result["tests"].get("token_url", {}).get("reachable", False))
         )
         result["success"] = critical_tests_passed and len(result["errors"]) == 0
@@ -706,7 +712,7 @@ class SSOManager:
         Returns:
             Dict: Test result with reachable status and latency.
         """
-        result = {"reachable": False, "latency_ms": None, "error": None}
+        result: Dict[str, Any] = {"reachable": False, "latency_ms": None, "error": None}
 
         try:
             start_time = time.time()
@@ -737,7 +743,9 @@ class SSOManager:
 
         return result
 
-    def _test_oidc_discovery(self, provider_name: str, provider_info: dict[str, Any]) -> dict[str, Any]:
+    def _test_oidc_discovery(
+        self, provider_name: str, provider_info: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Test OIDC discovery document availability.
 
@@ -748,7 +756,7 @@ class SSOManager:
         Returns:
             Dict: Discovery test result.
         """
-        result = {"available": False, "endpoints": None, "error": None}
+        result: Dict[str, Any] = {"available": False, "endpoints": None, "error": None}
 
         # Try to get issuer URL
         issuer_url = provider_info.get("issuer_url", "")
@@ -799,10 +807,11 @@ class SSOManager:
         Returns:
             Dict: SSL test result.
         """
-        result = {"valid": True, "error": None}
+        result: Dict[str, Any] = {"valid": True, "error": None}
 
         try:
             import ssl
+
             context = ssl.create_default_context()
             request = urllib.request.Request(url, method="HEAD")
             urllib.request.urlopen(request, timeout=10, context=context)

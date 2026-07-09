@@ -33,11 +33,12 @@ if project_root not in sys.path:
 def app():
     """Create test Flask app."""
     from flask import Flask
+
     from app.routes.sso import sso_bp
 
     test_app = Flask(__name__)
-    test_app.config['TESTING'] = True
-    test_app.config['SECRET_KEY'] = 'test-secret-key'
+    test_app.config["TESTING"] = True
+    test_app.config["SECRET_KEY"] = "test-secret-key"
     test_app.register_blueprint(sso_bp)
     return test_app
 
@@ -96,8 +97,7 @@ class TestProviderDetailAPI:
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.get(
-                "/api/sso/providers/google",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                "/api/sso/providers/google", headers={"Authorization": f"Bearer {admin_token}"}
             )
 
         assert response.status_code == 200
@@ -105,14 +105,15 @@ class TestProviderDetailAPI:
         assert data["name"] == "google"
         assert "client_secret" not in data
 
-    def test_get_provider_detail_not_found(self, client, mock_manager, mock_admin_auth, admin_token):
+    def test_get_provider_detail_not_found(
+        self, client, mock_manager, mock_admin_auth, admin_token
+    ):
         """Test getting provider detail when provider not found."""
         mock_manager.get_provider_info.return_value = None
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.get(
-                "/api/sso/providers/nonexistent",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                "/api/sso/providers/nonexistent", headers={"Authorization": f"Bearer {admin_token}"}
             )
 
         assert response.status_code == 404
@@ -138,14 +139,17 @@ class TestProviderUpdateAPI:
             "is_active": True,
         }
 
-        update_data = {"client_secret": "new_secret", "redirect_uri": "https://new.example.com/callback"}
+        update_data = {
+            "client_secret": "new_secret",
+            "redirect_uri": "https://new.example.com/callback",
+        }
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.patch(
                 "/api/sso/providers/google",
                 data=json.dumps(update_data),
                 content_type="application/json",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 200
@@ -167,14 +171,16 @@ class TestProviderUpdateAPI:
                 "/api/sso/providers/google",
                 data=json.dumps(update_data),
                 content_type="application/json",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data.get("success") is True
 
-    def test_update_provider_invalid_is_active(self, client, mock_manager, mock_admin_auth, admin_token):
+    def test_update_provider_invalid_is_active(
+        self, client, mock_manager, mock_admin_auth, admin_token
+    ):
         """Test updating provider with invalid is_active field."""
         update_data = {"is_active": "not_a_boolean"}
 
@@ -183,7 +189,7 @@ class TestProviderUpdateAPI:
                 "/api/sso/providers/google",
                 data=json.dumps(update_data),
                 content_type="application/json",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 400
@@ -200,7 +206,7 @@ class TestProviderUpdateAPI:
                 "/api/sso/providers/nonexistent",
                 data=json.dumps(update_data),
                 content_type="application/json",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 404
@@ -221,7 +227,7 @@ class TestProviderEnableDisable:
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.post(
                 "/api/sso/providers/google/enable",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 200
@@ -236,7 +242,7 @@ class TestProviderEnableDisable:
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.post(
                 "/api/sso/providers/google/disable",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 200
@@ -259,8 +265,7 @@ class TestProviderDeleteAPI:
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.delete(
-                "/api/sso/providers/google",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                "/api/sso/providers/google", headers={"Authorization": f"Bearer {admin_token}"}
             )
 
         assert response.status_code == 200
@@ -275,7 +280,7 @@ class TestProviderDeleteAPI:
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.delete(
                 "/api/sso/providers/google?hard=true",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                headers={"Authorization": f"Bearer {admin_token}"},
             )
 
         assert response.status_code == 200
@@ -292,7 +297,9 @@ class TestProviderDeleteAPI:
 class TestProviderTestConnection:
     """Test POST /api/sso/providers/<name>/test endpoint."""
 
-    def test_test_provider_connection_success(self, client, mock_manager, mock_admin_auth, admin_token):
+    def test_test_provider_connection_success(
+        self, client, mock_manager, mock_admin_auth, admin_token
+    ):
         """Test provider connection test."""
         mock_manager.test_provider_connection.return_value = {
             "success": True,
@@ -305,15 +312,16 @@ class TestProviderTestConnection:
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.post(
-                "/api/sso/providers/google/test",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                "/api/sso/providers/google/test", headers={"Authorization": f"Bearer {admin_token}"}
             )
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data.get("success") is True
 
-    def test_test_provider_connection_failure(self, client, mock_manager, mock_admin_auth, admin_token):
+    def test_test_provider_connection_failure(
+        self, client, mock_manager, mock_admin_auth, admin_token
+    ):
         """Test provider connection test when connection fails."""
         mock_manager.test_provider_connection.return_value = {
             "success": False,
@@ -324,8 +332,7 @@ class TestProviderTestConnection:
 
         with mock_admin_auth, patch("app.routes.sso.get_sso_manager", return_value=mock_manager):
             response = client.post(
-                "/api/sso/providers/google/test",
-                headers={"Authorization": f"Bearer {admin_token}"}
+                "/api/sso/providers/google/test", headers={"Authorization": f"Bearer {admin_token}"}
             )
 
         assert response.status_code == 400
@@ -435,9 +442,7 @@ class TestSSOManager:
             {"name": "google", "provider_type": "oidc", "tenant_id": 1, "is_active": 1},
         ]
 
-        providers, total = manager.list_providers(
-            tenant_id=1, is_active=True, provider_type="oidc"
-        )
+        providers, total = manager.list_providers(tenant_id=1, is_active=True, provider_type="oidc")
 
         assert total == 5
 
@@ -570,7 +575,9 @@ class TestSSOManager:
             }
         )
 
-        manager._test_url_reachability = MagicMock(return_value={"reachable": True, "latency_ms": 100})
+        manager._test_url_reachability = MagicMock(
+            return_value={"reachable": True, "latency_ms": 100}
+        )
         manager._test_oidc_discovery = MagicMock(return_value={"available": False})
         manager._test_ssl_certificate = MagicMock(return_value={"valid": True})
 

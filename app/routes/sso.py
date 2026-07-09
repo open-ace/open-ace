@@ -291,16 +291,21 @@ def test_provider_connection_route(provider_name: str):
     result = get_sso_manager().test_provider_connection(provider_name)
 
     if result.get("success"):
-        return jsonify({"success": True, "tests": result["tests"], "warnings": result.get("warnings", [])})
-    else:
         return jsonify(
-            {
-                "success": False,
-                "tests": result.get("tests", {}),
-                "errors": result.get("errors", []),
-                "warnings": result.get("warnings", []),
-            }
-        ), 400
+            {"success": True, "tests": result["tests"], "warnings": result.get("warnings", [])}
+        )
+    else:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "tests": result.get("tests", {}),
+                    "errors": result.get("errors", []),
+                    "warnings": result.get("warnings", []),
+                }
+            ),
+            400,
+        )
 
 
 @sso_bp.route("/login/<provider_name>", methods=["GET"])
