@@ -244,4 +244,3 @@ def downgrade() -> None:
 
         op.drop_table("users")
         op.rename_table("users_new", "users")
-

@@ -53,7 +53,9 @@ def test_user_role_options():
                 if role_select.count() > 0:
                     # Get all option values
                     options = role_select.locator("option").all()
-                    option_values = [opt.get_attribute("value") or opt.text_content() for opt in options]
+                    option_values = [
+                        opt.get_attribute("value") or opt.text_content() for opt in options
+                    ]
                     print(f"Role options found: {option_values}")
 
                     # Verify expected roles
