@@ -92,6 +92,24 @@ const translateTenantError = (error: string, lang: Language): string => {
   return key ? t(key, lang) : error;
 };
 
+// Trial days validation (Issue #1501)
+const validateTrialDays = (
+  value: string | number | undefined,
+  language: Language
+): string | null => {
+  if (value === undefined || value === null || value === '') {
+    return null; // Optional field, empty is valid
+  }
+  const num = Number(value);
+  if (!Number.isInteger(num) || num <= 0) {
+    return t('validationTrialDaysPositive', language);
+  }
+  if (num > 365) {
+    return t('validationTrialDaysMax', language);
+  }
+  return null;
+};
+
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -111,6 +129,7 @@ export const TenantManagement: React.FC = () => {
     plan: 'standard',
     contact_email: '',
     contact_name: '',
+    trial_days: undefined,
   });
   const [createAdminAccount, setCreateAdminAccount] = useState(false);
   const [adminFormData, setAdminFormData] = useState({
@@ -127,6 +146,7 @@ export const TenantManagement: React.FC = () => {
     max_sessions_per_user: 5,
   });
   const [formError, setFormError] = useState<string | null>(null);
+  const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
 
   // Dynamic options with useMemo for performance (Issue #1500)
   const statusOptions = useMemo(() => getTenantStatusOptions(language), [language]);
@@ -188,12 +208,14 @@ export const TenantManagement: React.FC = () => {
   const handleOpenCreate = () => {
     setEditingTenant(null);
     setFormError(null);
+    setTrialDaysError(null);
     setFormData({
       name: '',
       slug: '',
       plan: 'standard',
       contact_email: '',
       contact_name: '',
+      trial_days: undefined,
     });
     setCreateAdminAccount(false);
     setAdminFormData({
@@ -207,6 +229,7 @@ export const TenantManagement: React.FC = () => {
   const handleOpenEdit = (tenant: Tenant) => {
     setEditingTenant(tenant);
     setFormError(null);
+    setTrialDaysError(null);
     setFormData({
       name: tenant.name,
       slug: tenant.slug,
@@ -260,6 +283,15 @@ export const TenantManagement: React.FC = () => {
     if (!formData.name.trim()) {
       setFormError(t('tenantNameRequired', language));
       return;
+    }
+
+    // Validate trial days (Issue #1501)
+    if (!editingTenant && formData.trial_days !== undefined) {
+      const error = validateTrialDays(formData.trial_days, language);
+      if (error) {
+        setTrialDaysError(error);
+        return;
+      }
     }
 
     // Validate admin account fields if creating admin
@@ -666,6 +698,32 @@ export const TenantManagement: React.FC = () => {
                 placeholder={t('enterContactName', language)}
               />
             </div>
+            {/* Trial Days - Only for new tenants (Issue #1501) */}
+            {!editingTenant && (
+              <div className="col-md-6">
+                <label className="form-label">{t('tenantTrialDays', language)}</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className={`form-control ${trialDaysError ? 'is-invalid' : ''}`}
+                    min="1"
+                    max="365"
+                    placeholder="7"
+                    value={formData.trial_days ?? ''}
+                    onChange={(e) => {
+                      const value = e.target.value ? parseInt(e.target.value) : undefined;
+                      setFormData({ ...formData, trial_days: value });
+                      // Validate on change
+                      const error = validateTrialDays(value, language);
+                      setTrialDaysError(error);
+                    }}
+                  />
+                  <span className="input-group-text">{t('days', language)}</span>
+                </div>
+                <small className="text-muted">{t('tenantTrialDaysHelp', language)}</small>
+                {trialDaysError && <div className="invalid-feedback d-block">{trialDaysError}</div>}
+              </div>
+            )}
             {/* Admin Account Creation - Only for new tenants */}
             {!editingTenant && (
               <>
