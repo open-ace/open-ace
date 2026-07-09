@@ -535,8 +535,8 @@ class DailyStatsRepository:
         sender_filter = get_sender_filter_sql("sender_name")
 
         if is_postgresql():
-            # PostgreSQL: use subquery for user_id resolution
-            # Fallback to sender_name when user_id cannot be resolved
+            # PostgreSQL: use CASE WHEN to maintain type consistency
+            # user_id is integer, cannot mix with sender_name (varchar)
             query = f"""
                 SELECT
                     SUM(message_count) as total_messages,
@@ -545,12 +545,18 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {sender_filter} THEN COALESCE(user_id,
-                        (SELECT u.id FROM users u
-                         WHERE sender_name LIKE (u.system_account || '-%%')
-                            OR sender_name = u.username
-                         LIMIT 1),
-                        sender_name) END) as unique_users,
+                    COUNT(DISTINCT CASE WHEN {sender_filter} THEN
+                        CASE
+                            WHEN user_id IS NOT NULL THEN user_id
+                            ELSE COALESCE(
+                                (SELECT u.id FROM users u
+                                 WHERE sender_name LIKE (u.system_account || '-%%')
+                                    OR sender_name = u.username
+                                 LIMIT 1),
+                                -1
+                            )
+                        END
+                    END) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}

@@ -559,16 +559,16 @@ class TestDailyStatsRepository:
         self.db.fetch_all.return_value = []
         self.repo.get_user_totals()
         query = self.db.fetch_all.call_args[0][0]
-        # Should contain the ou_ filter condition
-        assert "NOT (ds.sender_name LIKE 'ou_%' AND LENGTH(ds.sender_name) > 10)" in query
+        # Should contain the ou_ filter condition (%% is escaped %)
+        assert "NOT (ds.sender_name LIKE 'ou_%%' AND LENGTH(ds.sender_name) > 10)" in query
 
     def test_get_user_totals_filters_ou_prefix_variants(self):
         """Long ou_ names (length > 10) should be filtered in SQL."""
         self.db.fetch_all.return_value = []
         self.repo.get_user_totals()
         query = self.db.fetch_all.call_args[0][0]
-        # Verify both parts of the condition are present
-        assert "LIKE 'ou_%'" in query
+        # Verify both parts of the condition are present (%% is escaped %)
+        assert "LIKE 'ou_%%'" in query
         assert "LENGTH(ds.sender_name) > 10" in query
 
     def test_get_user_totals_keeps_valid_senders(self):
@@ -598,8 +598,8 @@ class TestDailyStatsRepository:
         self.db.fetch_all.return_value = []
         self.repo.get_user_totals()
         query = self.db.fetch_all.call_args[0][0]
-        # Should filter placeholder format <...>
-        assert "NOT LIKE '<%>'" in query
+        # Should filter placeholder format <...> (%% is escaped %)
+        assert "NOT LIKE '<%%>'" in query
 
     # -------------------------------------------------------------------------
     # get_batch_aggregates - unique_users excludes Feishu IDs
@@ -621,7 +621,8 @@ class TestDailyStatsRepository:
         query = self.db.fetch_one.call_args[0][0]
         # unique_users should use CASE WHEN with Feishu filter
         assert "CASE WHEN" in query
-        assert "NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)" in query
+        # %% is escaped % for psycopg2/SQLite compatibility
+        assert "NOT (sender_name LIKE 'ou_%%' AND LENGTH(sender_name) > 10)" in query
         # total_messages/tokens should NOT have the CASE filter
         assert "SUM(message_count)" in query
         assert "SUM(total_tokens)" in query

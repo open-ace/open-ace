@@ -99,7 +99,8 @@ class TestGetSenderFilterSql:
         """Default column name should be 'sender_name'."""
         sql = get_sender_filter_sql()
         assert "sender_name" in sql
-        assert "LIKE 'ou_%'" in sql
+        # %% is escaped % for psycopg2/SQLite compatibility
+        assert "LIKE 'ou_%%'" in sql
         assert "LENGTH(sender_name)" in sql
 
     def test_get_sender_filter_sql_custom_column(self):
@@ -122,11 +123,13 @@ class TestGetSenderFilterSql:
     def test_get_sender_filter_sql_placeholder_format(self):
         """SQL should include placeholder format filter."""
         sql = get_sender_filter_sql()
-        assert "NOT LIKE '<%>'" in sql
+        # %% is escaped % for psycopg2/SQLite compatibility
+        assert "NOT LIKE '<%%>'" in sql
 
     def test_get_sender_filter_sql_feishu_id_filter(self):
         """SQL should include Feishu ID filter."""
         sql = get_sender_filter_sql()
         assert "NOT (" in sql
-        assert "LIKE 'ou_%'" in sql
+        # %% is escaped % for psycopg2/SQLite compatibility
+        assert "LIKE 'ou_%%'" in sql
         assert "> 10" in sql
