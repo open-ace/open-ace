@@ -104,7 +104,7 @@ def upgrade() -> None:
                 core_columns.append(col)
 
         # Create new table with updated CHECK constraint
-        # Build CREATE TABLE statement dynamically
+        # Build CREATE TABLE statement dynamically based on existing columns
         create_sql = """
             CREATE TABLE users_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,8 +120,15 @@ def upgrade() -> None:
                 daily_request_quota INTEGER,
                 monthly_request_quota INTEGER,
                 tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
-            )
         """
+        # Add optional columns if they exist in current schema
+        if "system_account" in column_names:
+            create_sql += ",\n                system_account TEXT"
+        if "avatar_url" in column_names:
+            create_sql += ",\n                avatar_url TEXT"
+        if "must_change_password" in column_names:
+            create_sql += ",\n                must_change_password INTEGER"
+        create_sql += "\n            )\n        "
         op.execute(create_sql)
 
         # Copy data from old table to new table
@@ -212,6 +219,7 @@ def downgrade() -> None:
             """
         )
 
+        # Build CREATE TABLE statement dynamically based on existing columns
         create_sql = """
             CREATE TABLE users_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,8 +235,15 @@ def downgrade() -> None:
                 daily_request_quota INTEGER,
                 monthly_request_quota INTEGER,
                 tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
-            )
         """
+        # Add optional columns if they exist in current schema
+        if "system_account" in column_names:
+            create_sql += ",\n                system_account TEXT"
+        if "avatar_url" in column_names:
+            create_sql += ",\n                avatar_url TEXT"
+        if "must_change_password" in column_names:
+            create_sql += ",\n                must_change_password INTEGER"
+        create_sql += "\n            )\n        "
         op.execute(create_sql)
 
         columns_str = ", ".join(core_columns)
