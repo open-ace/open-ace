@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { login } from './helpers';
+import { login, waitForApp } from './helpers';
 
 test.describe('Remote Directory Browser', () => {
   test.beforeEach(async ({ page }) => {
@@ -14,6 +14,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('new session modal opens and displays workspace type buttons', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -33,6 +34,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('selecting remote workspace shows machine list and project path', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -50,6 +52,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('selecting terminal workspace shows machine list', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -66,6 +69,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('browse button appears when machine is selected for remote workspace', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -88,6 +92,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('project path input appears for terminal workspace when machine selected', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -109,6 +114,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('create button state reflects machine selection', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
@@ -133,6 +139,7 @@ test.describe('Remote Directory Browser', () => {
 
   test('modal can be closed with cancel button', async ({ page }) => {
     await page.goto('/work');
+    await waitForApp(page);
 
     const newSessionBtn = page.getByTestId('new-session-btn');
     await expect(newSessionBtn).toBeVisible();
