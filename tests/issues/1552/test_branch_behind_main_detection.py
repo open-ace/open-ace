@@ -158,18 +158,15 @@ class TestTimingIssueDiagnosticMessage:
 
     def test_timing_issue_message_mentions_base_commit_sha(self):
         """Timing issue message should mention base_commit_sha for diagnosis."""
-        # The message should help users understand the root cause
-        pass
+        pass  # The message should help users understand the root cause
 
     def test_timing_issue_message_provides_recommendation(self):
         """Timing issue message should provide fix recommendation."""
-        # Message should mention "locking base commit during batch creation"
-        pass
+        pass  # Message should mention "locking base commit during batch creation"
 
     def test_no_changes_message_is_different_from_timing_issue(self):
         """No changes message should be different from timing issue message."""
-        # Two different messages should not be confused
-        pass
+        pass  # Two different messages should not be confused
 
 
 class TestEdgeCases:

@@ -94,14 +94,11 @@ class TestBatchWorkflowBaseCommitLock:
 
     def test_batch_workflows_have_same_base_commit_sha(self):
         """All workflows in a batch should have the same base_commit_sha."""
-        # When batch creation succeeds, all workflows should have the same locked SHA
-        pass
+        pass  # When batch creation succeeds, all workflows should have the same locked SHA
 
     def test_base_commit_sha_lock_failure_falls_back_to_dynamic(self):
         """If locking fails, workflows should use dynamic origin/main."""
-        # If git rev-parse fails, base_commit_sha should be None
-        # and orchestrator should fall back to "origin/main"
-        pass
+        pass  # If git rev-parse fails, base_commit_sha should be None
 
 
 class TestWorktreeCreationWithLockedSHA:
@@ -132,13 +129,13 @@ class TestWorktreeCreationWithLockedSHA:
                     with patch.object(orch, "_create_milestone"):
                         # Call the preparation phase logic directly
                         # This is a structural test to verify the code path
+                        pass
 
         # The actual test would verify that create_worktree was called with base=locked_sha
 
     def test_orchestrator_uses_dynamic_origin_main_for_single(self):
         """When base_commit_sha is NULL, orchestrator should use origin/main."""
-        # Single workflows should use dynamic "origin/main"
-        pass
+        pass  # Single workflows should use dynamic "origin/main"
 
 
 class TestMigrationBaseCommitSha:
@@ -146,8 +143,7 @@ class TestMigrationBaseCommitSha:
 
     def test_migration_adds_column(self):
         """Migration should add base_commit_sha column."""
-        # This would be tested by running the migration
-        pass
+        pass  # This would be tested by running the migration
 
     def test_migration_is_reversible(self):
         """Migration should be reversible (downgrade removes column)."""
