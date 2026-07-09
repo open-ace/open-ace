@@ -1076,6 +1076,16 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: 'Max Sessions/User',
     quota: 'Quota',
 
+    // Tenant i18n fixes (Issue #1500)
+    tenantAllStatuses: 'All Statuses',
+    tenantAllPlans: 'All Plans',
+    tenantPlanStandard: 'Standard',
+    tenantPlanPremium: 'Premium',
+    tenantPlanEnterprise: 'Enterprise',
+    tenantStatusActive: 'Active',
+    tenantStatusSuspended: 'Suspended',
+    tenantStatusTrial: 'Trial',
+
     // SSO Settings
     registeredProviders: 'Registered Providers',
     noProvidersRegistered: 'No SSO providers registered',
@@ -2596,6 +2606,16 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: '每用户最大会话数',
     quota: '配额',
 
+    // Tenant i18n fixes (Issue #1500)
+    tenantAllStatuses: '全部状态',
+    tenantAllPlans: '全部套餐',
+    tenantPlanStandard: '标准版',
+    tenantPlanPremium: '高级版',
+    tenantPlanEnterprise: '企业版',
+    tenantStatusActive: '活跃',
+    tenantStatusSuspended: '已暂停',
+    tenantStatusTrial: '试用',
+
     // SSO Settings
     registeredProviders: '已注册提供者',
     noProvidersRegistered: '暂无已注册的 SSO 提供者',
@@ -4004,6 +4024,16 @@ export const translations: Record<Language, Translations> = {
     maxUsers: '最大ユーザー数',
     maxSessionsPerUser: 'ユーザー最大セッション数',
 
+    // Tenant i18n fixes (Issue #1500)
+    tenantAllStatuses: 'すべての状態',
+    tenantAllPlans: 'すべてのプラン',
+    tenantPlanStandard: 'スタンダード',
+    tenantPlanPremium: 'プレミアム',
+    tenantPlanEnterprise: 'エンタープライズ',
+    tenantStatusActive: 'アクティブ',
+    tenantStatusSuspended: '一時停止',
+    tenantStatusTrial: '試用',
+
     // Insights
     insights: 'AI インサイト',
     insightsTitle: 'AI 会話インサイトレポート',
@@ -5312,6 +5342,16 @@ export const translations: Record<Language, Translations> = {
     dailyRequestLimit: '일간 요청 제한',
     maxUsers: '최대 사용자',
     maxSessionsPerUser: '사용자 최대 세션',
+
+    // Tenant i18n fixes (Issue #1500)
+    tenantAllStatuses: '모든 상태',
+    tenantAllPlans: '모든 플랜',
+    tenantPlanStandard: '스탠다드',
+    tenantPlanPremium: '프리미엄',
+    tenantPlanEnterprise: '엔터프라이즈',
+    tenantStatusActive: '활성',
+    tenantStatusSuspended: '일시 중단',
+    tenantStatusTrial: '체험',
 
     // Insights
     insights: 'AI 인사이트',
