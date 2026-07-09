@@ -5,8 +5,9 @@ This test verifies that the role options in user management page
 include admin, manager, user, and readonly (not viewer).
 """
 
-import sys
 import os
+import sys
+
 from playwright.sync_api import sync_playwright
 
 # Test configuration
