@@ -66,9 +66,7 @@ const getTenantStatusOptions = (language: Language) => [
 ];
 
 const getTenantPlanOptions = (language: Language, includeAll: boolean = true) => {
-  const options = includeAll
-    ? [{ value: '', label: t('tenantAllPlans', language) }]
-    : [];
+  const options = includeAll ? [{ value: '', label: t('tenantAllPlans', language) }] : [];
   return [
     ...options,
     { value: 'standard', label: t('tenantPlanStandard', language) },
@@ -78,7 +76,10 @@ const getTenantPlanOptions = (language: Language, includeAll: boolean = true) =>
 };
 
 // Trial days validation
-const validateTrialDays = (value: string | number | undefined, language: Language): string | null => {
+const validateTrialDays = (
+  value: string | number | undefined,
+  language: Language
+): string | null => {
   if (value === undefined || value === null || value === '') {
     return null; // Optional field, empty is valid
   }
@@ -720,9 +721,7 @@ export const TenantManagement: React.FC = () => {
                   <span className="input-group-text">{t('days', language)}</span>
                 </div>
                 <small className="text-muted">{t('tenantTrialDaysHelp', language)}</small>
-                {trialDaysError && (
-                  <div className="invalid-feedback d-block">{trialDaysError}</div>
-                )}
+                {trialDaysError && <div className="invalid-feedback d-block">{trialDaysError}</div>}
               </div>
             )}
             {/* Admin Account Creation - Only for new tenants */}
