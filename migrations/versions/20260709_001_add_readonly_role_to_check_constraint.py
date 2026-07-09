@@ -86,19 +86,22 @@ def upgrade() -> None:
             "username",
             "password_hash",
             "email",
-            "role",
+            "is_admin",
             "is_active",
             "created_at",
             "last_login",
+            "role",
             "daily_token_quota",
             "monthly_token_quota",
             "daily_request_quota",
             "monthly_request_quota",
+            "deleted_at",
+            "system_account",
             "tenant_id",
         ]
 
         # Additional columns that may exist (added after initial schema)
-        optional_columns = ["system_account", "avatar_url", "must_change_password"]
+        optional_columns = ["must_change_password", "avatar_url", "auto_mapping_enabled"]
         for col in optional_columns:
             if col in column_names:
                 core_columns.append(col)
@@ -111,23 +114,27 @@ def upgrade() -> None:
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 email TEXT,
-                role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'manager', 'user', 'readonly')),
+                is_admin INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP,
+                role TEXT DEFAULT 'user',
                 daily_token_quota INTEGER,
                 monthly_token_quota INTEGER,
                 daily_request_quota INTEGER,
                 monthly_request_quota INTEGER,
+                deleted_at TIMESTAMP,
+                system_account TEXT,
                 tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
         """
         # Add optional columns if they exist in current schema
-        if "system_account" in column_names:
-            create_sql += ",\n                system_account TEXT"
+        if "must_change_password" in column_names:
+            create_sql += ",\n                must_change_password INTEGER DEFAULT 0"
         if "avatar_url" in column_names:
             create_sql += ",\n                avatar_url TEXT"
-        if "must_change_password" in column_names:
-            create_sql += ",\n                must_change_password INTEGER"
+        if "auto_mapping_enabled" in column_names:
+            create_sql += ",\n                auto_mapping_enabled INTEGER DEFAULT 1"
+        create_sql += ",\n                CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user', 'readonly'))"
         create_sql += "\n            )\n        "
         op.execute(create_sql)
 
@@ -195,17 +202,20 @@ def downgrade() -> None:
             "username",
             "password_hash",
             "email",
-            "role",
+            "is_admin",
             "is_active",
             "created_at",
             "last_login",
+            "role",
             "daily_token_quota",
             "monthly_token_quota",
             "daily_request_quota",
             "monthly_request_quota",
+            "deleted_at",
+            "system_account",
             "tenant_id",
         ]
-        optional_columns = ["system_account", "avatar_url", "must_change_password"]
+        optional_columns = ["must_change_password", "avatar_url", "auto_mapping_enabled"]
         for col in optional_columns:
             if col in column_names:
                 core_columns.append(col)
@@ -226,23 +236,27 @@ def downgrade() -> None:
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 email TEXT,
-                role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'manager', 'user')),
+                is_admin INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP,
+                role TEXT DEFAULT 'user',
                 daily_token_quota INTEGER,
                 monthly_token_quota INTEGER,
                 daily_request_quota INTEGER,
                 monthly_request_quota INTEGER,
+                deleted_at TIMESTAMP,
+                system_account TEXT,
                 tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
         """
         # Add optional columns if they exist in current schema
-        if "system_account" in column_names:
-            create_sql += ",\n                system_account TEXT"
+        if "must_change_password" in column_names:
+            create_sql += ",\n                must_change_password INTEGER DEFAULT 0"
         if "avatar_url" in column_names:
             create_sql += ",\n                avatar_url TEXT"
-        if "must_change_password" in column_names:
-            create_sql += ",\n                must_change_password INTEGER"
+        if "auto_mapping_enabled" in column_names:
+            create_sql += ",\n                auto_mapping_enabled INTEGER DEFAULT 1"
+        create_sql += ",\n                CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user'))"
         create_sql += "\n            )\n        "
         op.execute(create_sql)
 
