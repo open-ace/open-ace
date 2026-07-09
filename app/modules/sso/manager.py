@@ -214,7 +214,7 @@ class SSOManager:
             logger.info(f"Registered SSO provider: {name}")
             return True
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to register SSO provider: {e}")
             return False
 
@@ -312,7 +312,7 @@ class SSOManager:
 
             return cast("Optional[SSOProvider]", provider)
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to load SSO provider {name}: {e}")
             return None
 
@@ -352,7 +352,7 @@ class SSOManager:
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to disable provider: {e}")
             return False
 
@@ -366,7 +366,7 @@ class SSOManager:
 
             return True
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to enable provider: {e}")
             return False
 
@@ -505,7 +505,7 @@ class SSOManager:
             )
             return True
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to link SSO identity: {e}")
             return False
 
@@ -573,7 +573,7 @@ class SSOManager:
 
             return session_token
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to create SSO session: {e}")
             return None
 
@@ -606,7 +606,7 @@ class SSOManager:
             self.db.execute("DELETE FROM sso_sessions WHERE session_token = ?", (session_token,))
             return True
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to delete SSO session: {e}")
             return False
 
@@ -619,7 +619,7 @@ class SSOManager:
             )
             return cast("int", cursor.rowcount)
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to cleanup sessions: {e}")
             return 0
 
@@ -646,7 +646,7 @@ class SSOManager:
                 (state, code_verifier, provider_name, nonce),
             )
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to store auth state: {e}")
 
     def _get_auth_state(self, state: str) -> Optional[dict[str, Any]]:
@@ -655,7 +655,7 @@ class SSOManager:
             row = self.db.fetch_one("SELECT * FROM sso_auth_states WHERE state = ?", (state,))
             return dict(row) if row else None
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to get auth state: {e}")
             return None
 
@@ -664,7 +664,7 @@ class SSOManager:
         try:
             self.db.execute("DELETE FROM sso_auth_states WHERE state = ?", (state,))
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to delete auth state: {e}")
 
 
