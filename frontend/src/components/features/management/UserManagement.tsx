@@ -73,9 +73,10 @@ export const UserManagement: React.FC = () => {
   });
 
   const roleOptions = [
-    { value: 'admin', label: 'Admin' },
-    { value: 'user', label: 'User' },
-    { value: 'viewer', label: 'Viewer' },
+    { value: 'admin', label: t('roleAdmin', language) },
+    { value: 'manager', label: t('roleManager', language) },
+    { value: 'user', label: t('roleUser', language) },
+    { value: 'readonly', label: t('roleReadonly', language) },
   ];
 
   const activeStatusOptions = [
