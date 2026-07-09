@@ -44,23 +44,24 @@ import type {
   AuditThresholds as AuditThresholdsType,
 } from '@/api';
 
-const TYPE_OPTIONS = [
-  { value: 'keyword', label: 'Keyword' },
-  { value: 'regex', label: 'Regex' },
-  { value: 'pii', label: 'PII' },
-];
+// Translation key mappings for filter rule values
+const TYPE_LABEL_KEYS: Record<string, string> = {
+  keyword: 'typeKeyword',
+  regex: 'typeRegex',
+  pii: 'typePii',
+};
 
-const SEVERITY_OPTIONS = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-];
+const SEVERITY_LABEL_KEYS: Record<string, string> = {
+  low: 'severityLow',
+  medium: 'severityMedium',
+  high: 'severityHigh',
+};
 
-const ACTION_OPTIONS = [
-  { value: 'warn', label: 'Warn' },
-  { value: 'block', label: 'Block' },
-  { value: 'redact', label: 'Redact' },
-];
+const ACTION_LABEL_KEYS: Record<string, string> = {
+  warn: 'actionWarn',
+  block: 'actionBlock',
+  redact: 'actionRedact',
+};
 
 type TabType = 'filter' | 'settings' | 'audit';
 
@@ -80,6 +81,31 @@ export const SecurityCenter: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('filter');
+
+  // Generate translated options for Select components
+  const getTypeOptions = () => [
+    { value: 'keyword', label: t('typeKeyword', language) },
+    { value: 'regex', label: t('typeRegex', language) },
+    { value: 'pii', label: t('typePii', language) },
+  ];
+
+  const getSeverityOptions = () => [
+    { value: 'low', label: t('severityLow', language) },
+    { value: 'medium', label: t('severityMedium', language) },
+    { value: 'high', label: t('severityHigh', language) },
+  ];
+
+  const getActionOptions = () => [
+    { value: 'warn', label: t('actionWarn', language) },
+    { value: 'block', label: t('actionBlock', language) },
+    { value: 'redact', label: t('actionRedact', language) },
+  ];
+
+  // Translation helper functions for table data
+  const getFilterTypeLabel = (type: string) => t(TYPE_LABEL_KEYS[type] || type, language);
+  const getFilterSeverityLabel = (severity: string) =>
+    t(SEVERITY_LABEL_KEYS[severity] || severity, language);
+  const getFilterActionLabel = (action: string) => t(ACTION_LABEL_KEYS[action] || action, language);
 
   // --- Page Refresh Control ---
   const pageRefresh = usePageRefresh({
@@ -407,13 +433,17 @@ export const SecurityCenter: React.FC = () => {
                       )}
                     </td>
                     <td>
-                      <Badge variant="secondary">{rule.type}</Badge>
+                      <Badge variant="secondary">{getFilterTypeLabel(rule.type)}</Badge>
                     </td>
                     <td>
-                      <Badge variant={getSeverityVariant(rule.severity)}>{rule.severity}</Badge>
+                      <Badge variant={getSeverityVariant(rule.severity)}>
+                        {getFilterSeverityLabel(rule.severity)}
+                      </Badge>
                     </td>
                     <td>
-                      <Badge variant={getActionVariant(rule.action)}>{rule.action}</Badge>
+                      <Badge variant={getActionVariant(rule.action)}>
+                        {getFilterActionLabel(rule.action)}
+                      </Badge>
                     </td>
                     <td>
                       <div className="form-check form-switch">
@@ -491,7 +521,7 @@ export const SecurityCenter: React.FC = () => {
               <div className="col-md-4">
                 <label className="form-label">{t('tableType', language)}</label>
                 <Select
-                  options={TYPE_OPTIONS}
+                  options={getTypeOptions()}
                   value={ruleFormData.type}
                   onChange={(value) =>
                     setRuleFormData({
@@ -509,7 +539,7 @@ export const SecurityCenter: React.FC = () => {
               <div className="col-md-4">
                 <label className="form-label">{t('tableSeverity', language)}</label>
                 <Select
-                  options={SEVERITY_OPTIONS}
+                  options={getSeverityOptions()}
                   value={ruleFormData.severity}
                   onChange={(value) =>
                     setRuleFormData({
@@ -522,7 +552,7 @@ export const SecurityCenter: React.FC = () => {
               <div className="col-md-4">
                 <label className="form-label">{t('tableAction', language)}</label>
                 <Select
-                  options={ACTION_OPTIONS}
+                  options={getActionOptions()}
                   value={ruleFormData.action}
                   onChange={(value) =>
                     setRuleFormData({
