@@ -1086,6 +1086,12 @@ export const translations: Record<Language, Translations> = {
     tenantStatusSuspended: 'Suspended',
     tenantStatusTrial: 'Trial',
 
+    // Trial days field (Issue #1501)
+    tenantTrialDays: 'Trial Days',
+    tenantTrialDaysHelp: 'Number of days for trial period. Leave empty for active tenant.',
+    validationTrialDaysPositive: 'Trial days must be a positive integer',
+    validationTrialDaysMax: 'Trial days cannot exceed 365',
+
     // SSO Settings
     registeredProviders: 'Registered Providers',
     noProvidersRegistered: 'No SSO providers registered',
@@ -2616,6 +2622,12 @@ export const translations: Record<Language, Translations> = {
     tenantStatusSuspended: '已暂停',
     tenantStatusTrial: '试用',
 
+    // Trial days field (Issue #1501)
+    tenantTrialDays: '试用期天数',
+    tenantTrialDaysHelp: '试用期天数。留空则创建活跃租户。',
+    validationTrialDaysPositive: '试用期天数必须为正整数',
+    validationTrialDaysMax: '试用期天数不能超过365天',
+
     // SSO Settings
     registeredProviders: '已注册提供者',
     noProvidersRegistered: '暂无已注册的 SSO 提供者',
@@ -4034,6 +4046,12 @@ export const translations: Record<Language, Translations> = {
     tenantStatusSuspended: '一時停止',
     tenantStatusTrial: '試用',
 
+    // Trial days field (Issue #1501)
+    tenantTrialDays: 'トライアル期間(日)',
+    tenantTrialDaysHelp: 'トライアル期間の日数。空の場合はアクティブテナントになります。',
+    validationTrialDaysPositive: 'トライアル期間は正の整数で入力してください',
+    validationTrialDaysMax: 'トライアル期間は365日以内で入力してください',
+
     // Insights
     insights: 'AI インサイト',
     insightsTitle: 'AI 会話インサイトレポート',
@@ -5352,6 +5370,12 @@ export const translations: Record<Language, Translations> = {
     tenantStatusActive: '활성',
     tenantStatusSuspended: '일시 중단',
     tenantStatusTrial: '체험',
+
+    // Trial days field (Issue #1501)
+    tenantTrialDays: '체험 기간(일)',
+    tenantTrialDaysHelp: '체험 기간 일수. 비워두면 활성 테넌트가 생성됩니다.',
+    validationTrialDaysPositive: '체험 기간은 양의 정수여야 합니다',
+    validationTrialDaysMax: '체험 기간은 365일 이하로 입력하세요',
 
     // Insights
     insights: 'AI 인사이트',
