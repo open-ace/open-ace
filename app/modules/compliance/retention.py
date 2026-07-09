@@ -347,8 +347,8 @@ class DataRetentionManager:
                     adapt_sql(
                         f"""
                     UPDATE daily_messages
-                    SET sender = 'ANONYMIZED',
-                        recipient = 'ANONYMIZED'
+                    SET sender_id = 'ANONYMIZED',
+                        sender_name = 'ANONYMIZED'
                     WHERE {time_col} < ?
                 """
                     ),
