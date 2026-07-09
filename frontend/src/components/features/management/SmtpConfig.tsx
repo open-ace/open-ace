@@ -45,6 +45,12 @@ export const SmtpConfig: React.FC = () => {
     use_tls: true,
   });
 
+  // Check if port is 465 (SSL port)
+  const isPort465 = parseInt(formData.smtp_port, 10) === 465;
+  // Check if port is non-standard (not 25, 587, 465)
+  const isNonStandardPort =
+    !['25', '587', '465'].includes(formData.smtp_port) && formData.smtp_port !== '';
+
   // Fetch config on mount
   useEffect(() => {
     fetchConfig();
@@ -256,6 +262,18 @@ export const SmtpConfig: React.FC = () => {
                 onChange={(value) => setFormData({ ...formData, smtp_port: value })}
                 placeholder="587"
               />
+              {isPort465 && (
+                <small className="text-info d-block mt-1">
+                  <i className="bi bi-info-circle me-1" />
+                  {t('smtpPort465AutoSSL', language)}
+                </small>
+              )}
+              {isNonStandardPort && (
+                <small className="text-warning d-block mt-1">
+                  <i className="bi bi-exclamation-triangle me-1" />
+                  {t('smtpNonStandardPortWarning', language)}
+                </small>
+              )}
             </div>
 
             <div className="col-md-6">
@@ -301,10 +319,16 @@ export const SmtpConfig: React.FC = () => {
                   id="useTLS"
                   checked={formData.use_tls}
                   onChange={(e) => setFormData({ ...formData, use_tls: e.target.checked })}
+                  disabled={isPort465}
                 />
                 <label className="form-check-label" htmlFor="useTLS">
                   {t('useTLS', language)}
                 </label>
+                {isPort465 && (
+                  <small className="text-muted d-block mt-1">
+                    {t('smtpPort465AutoSSL', language)}
+                  </small>
+                )}
               </div>
             </div>
 
@@ -386,6 +410,19 @@ export const SmtpConfig: React.FC = () => {
             <li>{t('smtpSetupGuide2', language)}</li>
             <li>{t('smtpSetupGuide3', language)}</li>
             <li>{t('smtpSetupGuide4', language)}</li>
+          </ul>
+          <hr className="my-2" />
+          <h6 className="alert-heading mb-2">{t('smtpPortGuide', language) || 'Port Guide'}</h6>
+          <ul className="mb-0">
+            <li>
+              <strong>25</strong>: {t('smtpHelpPort25', language)}
+            </li>
+            <li>
+              <strong>587</strong>: {t('smtpHelpPort587', language)}
+            </li>
+            <li>
+              <strong>465</strong>: {t('smtpHelpPort465', language)}
+            </li>
           </ul>
         </div>
       </Card>

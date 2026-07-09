@@ -6,8 +6,10 @@ Provides SMTP configuration management and connection testing.
 
 import logging
 import smtplib
+import socket
+import ssl
 from email.mime.text import MIMEText
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from app.repositories.email_notification_log_repository import get_email_log_repository
 from app.repositories.smtp_config_repository import get_smtp_config_repository
@@ -115,7 +117,12 @@ class SMTPConfigService:
 
         try:
             # Create SMTP connection
-            if use_tls:
+            # Port 465 uses SSL connection (SMTPS), other ports use SMTP with optional STARTTLS
+            smtp: Union[smtplib.SMTP, smtplib.SMTP_SSL]
+            use_ssl = smtp_port == 465
+            if use_ssl:
+                smtp = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+            elif use_tls:
                 smtp = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
                 smtp.starttls()
             else:
@@ -142,9 +149,22 @@ class SMTPConfigService:
             if config_id:
                 self.config_repo.update_verified_status(config_id, True)
 
+            # Return success message with connection mode information
+            if use_ssl:
+                success_msg = (
+                    "SMTP SSL connection test successful (port 465 automatically uses SSL)"
+                )
+            elif use_tls:
+                success_msg = "SMTP STARTTLS connection test successful"
+            else:
+                success_msg = (
+                    "SMTP connection test successful (plain connection, recommend enabling TLS)"
+                )
+
             return {
                 "success": True,
-                "message": "SMTP connection test successful",
+                "message": success_msg,
+                "connection_mode": "ssl" if use_ssl else ("starttls" if use_tls else "plain"),
             }
 
         except smtplib.SMTPAuthenticationError as e:
@@ -163,6 +183,38 @@ class SMTPConfigService:
                 e.smtp_error.decode() if isinstance(e.smtp_error, bytes) else str(e.smtp_error)
             )
             error_msg = f"SMTP connection failed: {e.smtp_code} - {smtp_error_str}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+            }
+
+        except ssl.SSLError as e:
+            error_msg = f"SSL connection failed: certificate verification error or handshake failure - {str(e)}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+            }
+
+        except socket.timeout as e:
+            error_msg = f"Connection timeout: unable to connect within 10 seconds - {str(e)}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+            }
+
+        except socket.gaierror as e:
+            error_msg = f"Server address resolution failed: unable to find SMTP server - {str(e)}"
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "message": error_msg,
+            }
+
+        except ConnectionRefusedError as e:
+            error_msg = f"Connection refused: SMTP server not responding - {str(e)}"
             logger.error(error_msg)
             return {
                 "success": False,

@@ -898,6 +898,19 @@ export const translations: Record<Language, Translations> = {
     smtpSetupGuide3: 'Enter the sender email address',
     smtpSetupGuide4:
       'Click "Test Connection" to verify the configuration before enabling email notifications',
+    smtpPort465AutoSSL: 'Port 465 automatically uses SSL connection',
+    smtpSslConnectionSuccess: 'SMTP SSL connection test successful',
+    smtpStarttlsConnectionSuccess: 'SMTP STARTTLS connection test successful',
+    smtpPlainConnectionSuccess:
+      'SMTP connection test successful (plain connection, recommend enabling TLS)',
+    smtpSslError: 'SSL connection failed: certificate verification error or handshake failure',
+    smtpConnectionTimeout: 'Connection timeout: unable to connect within 10 seconds',
+    smtpNonStandardPortWarning: 'Non-standard port, please confirm server configuration is correct',
+    smtpHelpPort25: 'Port 25: Traditional SMTP, plain connection (not recommended)',
+    smtpHelpPort587: 'Port 587: Modern SMTP, STARTTLS encryption (recommended)',
+    smtpHelpPort465:
+      'Port 465: SMTPS, immediate SSL encryption (for Tencent Enterprise Mail, etc.)',
+    smtpPortGuide: 'Port Guide',
     help: 'Help',
 
     // Data Retention
@@ -2489,6 +2502,17 @@ export const translations: Record<Language, Translations> = {
     smtpSetupGuide2: '如果需要认证，输入 SMTP 凭证',
     smtpSetupGuide3: '输入发件人邮箱地址',
     smtpSetupGuide4: '点击"测试连接"验证配置后再启用邮件通知',
+    smtpPort465AutoSSL: '端口 465 自动使用 SSL 连接',
+    smtpSslConnectionSuccess: 'SMTP SSL 连接测试成功',
+    smtpStarttlsConnectionSuccess: 'SMTP STARTTLS 连接测试成功',
+    smtpPlainConnectionSuccess: 'SMTP 连接测试成功（明文连接，建议启用 TLS）',
+    smtpSslError: 'SSL 连接失败：证书验证错误或加密握手失败',
+    smtpConnectionTimeout: '连接超时：无法在 10 秒内建立连接',
+    smtpNonStandardPortWarning: '非标准端口，请确认服务器配置是否正确',
+    smtpHelpPort25: '端口 25：传统 SMTP，明文连接（不推荐）',
+    smtpHelpPort587: '端口 587：现代 SMTP，STARTTLS 加密（推荐）',
+    smtpHelpPort465: '端口 465：SMTPS，立即 SSL 加密（腾讯企业邮箱等）',
+    smtpPortGuide: '端口指南',
     help: '帮助',
     message: '消息',
     time: '时间',
@@ -4629,6 +4653,19 @@ export const translations: Record<Language, Translations> = {
     priorityHelp: '高いほど優先されます。デフォルト：0',
     weight: '重み',
     weightHelp: '同じ優先度内での加重ランダム用。デフォルト：100',
+
+    // SMTP Configuration (Japanese)
+    smtpPort465AutoSSL: 'ポート465は自動的にSSL接続を使用します',
+    smtpSslConnectionSuccess: 'SMTP SSL接続テスト成功',
+    smtpStarttlsConnectionSuccess: 'SMTP STARTTLS接続テスト成功',
+    smtpPlainConnectionSuccess: 'SMTP接続テスト成功（平文接続、TLSを推奨）',
+    smtpSslError: 'SSL接続失敗：証明書検証エラーまたはハンドシェイク失敗',
+    smtpConnectionTimeout: '接続タイムアウト：10秒以内に接続できません',
+    smtpNonStandardPortWarning: '非標準ポート、サーバー設定が正しいか確認してください',
+    smtpHelpPort25: 'ポート25：従来のSMTP、平文接続（非推奨）',
+    smtpHelpPort587: 'ポート587：現代SMTP、STARTTLS暗号化（推奨）',
+    smtpHelpPort465: 'ポート465：SMTPS、即時SSL暗号化（テンセント企業メール等）',
+    smtpPortGuide: 'ポートガイド',
   },
   ko: {
     // Common
@@ -6062,6 +6099,19 @@ export const translations: Record<Language, Translations> = {
     priorityHelp: '높을수록 우선합니다. 기본값: 0',
     weight: '가중치',
     weightHelp: '동일 우선순위 내에서 가중 랜덤용. 기본값: 100',
+
+    // SMTP Configuration (Korean)
+    smtpPort465AutoSSL: '포트 465는 자동으로 SSL 연결을 사용합니다',
+    smtpSslConnectionSuccess: 'SMTP SSL 연결 테스트 성공',
+    smtpStarttlsConnectionSuccess: 'SMTP STARTTLS 연결 테스트 성공',
+    smtpPlainConnectionSuccess: 'SMTP 연결 테스트 성공 (평문 연결, TLS 사용 권장)',
+    smtpSslError: 'SSL 연결 실패: 인증서 검증 오류 또는 핸드셰이크 실패',
+    smtpConnectionTimeout: '연결 시간 초과: 10초 내에 연결할 수 없습니다',
+    smtpNonStandardPortWarning: '비표준 포트, 서버 설정이 올바른지 확인하세요',
+    smtpHelpPort25: '포트 25: 기본 SMTP, 평문 연결 (비권장)',
+    smtpHelpPort587: '포트 587: 현대 SMTP, STARTTLS 암호화 (권장)',
+    smtpHelpPort465: '포트 465: SMTPS, 즉시 SSL 암호화 (텐센트 기업 메일 등)',
+    smtpPortGuide: '포트 가이드',
   },
 };
 
