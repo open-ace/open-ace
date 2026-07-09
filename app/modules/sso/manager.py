@@ -8,11 +8,8 @@ import json
 import logging
 import secrets
 import threading
-import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, cast
+from typing import Any, Optional, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import OIDCProvider, get_provider_class
@@ -217,7 +214,7 @@ class SSOManager:
             logger.info(f"Registered SSO provider: {name}")
             return True
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to register SSO provider: {e}")
             return False
 
@@ -315,85 +312,31 @@ class SSOManager:
 
             return cast("Optional[SSOProvider]", provider)
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to load SSO provider {name}: {e}")
             return None
 
-    def list_providers(
-        self,
-        tenant_id: Optional[int] = None,
-        is_active: Optional[bool] = None,
-        provider_type: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    def list_providers(self, tenant_id: Optional[int] = None) -> list[dict[str, Any]]:
         """
         List all registered SSO providers.
 
         Args:
             tenant_id: Filter by tenant ID.
-            is_active: Filter by active status.
-            provider_type: Filter by provider type.
-            limit: Limit number of results (max 1000).
-            offset: Offset for pagination.
 
         Returns:
-            Tuple[List[Dict], int]: List of provider info (without sensitive fields) and total count.
+            List[Dict]: List of provider info.
         """
-        # Build WHERE conditions
-        conditions = []
-        params: list[Any] = []
+        if tenant_id:
+            rows = self.db.fetch_all(
+                "SELECT name, provider_type, tenant_id, is_active FROM sso_providers WHERE tenant_id = ?",
+                (tenant_id,),
+            )
+        else:
+            rows = self.db.fetch_all(
+                "SELECT name, provider_type, tenant_id, is_active FROM sso_providers"
+            )
 
-        if tenant_id is not None:
-            conditions.append("tenant_id = ?")
-            params.append(tenant_id)
-
-        if is_active is not None:
-            conditions.append(f"is_active = {adapt_boolean_value(is_active)}")
-
-        if provider_type is not None:
-            conditions.append("provider_type = ?")
-            params.append(provider_type)
-
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-        # Get total count
-        count_row = self.db.fetch_one(
-            f"SELECT COUNT(*) as total FROM sso_providers WHERE {where_clause}",
-            tuple(params) if params else (),
-        )
-        total = count_row["total"] if count_row else 0
-
-        # Get paginated results (only metadata, no config field)
-        limit = min(limit, 1000)  # Cap at 1000
-        rows = self.db.fetch_all(
-            f"""
-            SELECT name, provider_type, tenant_id, is_active, created_at, updated_at
-            FROM sso_providers
-            WHERE {where_clause}
-            ORDER BY name
-            LIMIT ? OFFSET ?
-            """,
-            tuple(params + [limit, offset]) if params else (limit, offset),
-        )
-
-        # Return metadata only (no sensitive config data)
-        providers = []
-        for row in rows:
-            provider_data = {
-                "name": row["name"],
-                "provider_type": row["provider_type"],
-                "tenant_id": row["tenant_id"],
-                "is_active": bool(row["is_active"]),
-            }
-            # Add timestamps if available
-            if "created_at" in row and row["created_at"]:
-                provider_data["created_at"] = row["created_at"]
-            if "updated_at" in row and row["updated_at"]:
-                provider_data["updated_at"] = row["updated_at"]
-            providers.append(provider_data)
-
-        return providers, total
+        return [dict(row) for row in rows]
 
     def disable_provider(self, name: str) -> bool:
         """Disable an SSO provider."""
@@ -409,7 +352,7 @@ class SSOManager:
 
             return True
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to disable provider: {e}")
             return False
 
@@ -423,408 +366,9 @@ class SSOManager:
 
             return True
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to enable provider: {e}")
             return False
-
-    def get_provider_info(self, name: str) -> Optional[dict[str, Any]]:
-        """
-        Get detailed information for a single SSO provider.
-
-        Args:
-            name: Provider name.
-
-        Returns:
-            Optional[Dict]: Provider details (without client_secret) or None.
-        """
-        row = self.db.fetch_one(
-            "SELECT * FROM sso_providers WHERE name = ?",
-            (name,),
-        )
-
-        if not row:
-            return None
-
-        try:
-            config_data = json.loads(row["config"])
-
-            # Build response without sensitive fields
-            provider_info = {
-                "name": row["name"],
-                "provider_type": row["provider_type"],
-                "tenant_id": row["tenant_id"],
-                "is_active": bool(row["is_active"]),
-                # Config fields (excluding client_secret)
-                "client_id": config_data.get("client_id", ""),
-                "redirect_uri": config_data.get("redirect_uri"),
-                "scope": config_data.get("scope", ["openid", "profile", "email"]),
-                "authorization_url": config_data.get("authorization_url", ""),
-                "token_url": config_data.get("token_url", ""),
-                "userinfo_url": config_data.get("userinfo_url"),
-                "issuer_url": config_data.get("issuer_url"),
-                "extra_params": config_data.get("extra_params", {}),
-            }
-
-            # Add timestamps if available
-            if "created_at" in row and row["created_at"]:
-                provider_info["created_at"] = row["created_at"]
-            if "updated_at" in row and row["updated_at"]:
-                provider_info["updated_at"] = row["updated_at"]
-
-            return provider_info
-
-        except Exception:
-            logger.error(f"Failed to get provider info for {name}: {e}")
-            return None
-
-    def update_provider(self, name: str, updates: dict[str, Any]) -> bool:
-        """
-        Update an SSO provider configuration.
-
-        Args:
-            name: Provider name.
-            updates: Fields to update (supports partial updates).
-                Allowed fields: client_secret, redirect_uri, scope, is_active, extra_params
-
-        Returns:
-            bool: True if successful.
-        """
-        # Validate allowed fields
-        allowed_fields = {"client_secret", "redirect_uri", "scope", "is_active", "extra_params"}
-        invalid_fields = set(updates.keys()) - allowed_fields
-        if invalid_fields:
-            logger.error(f"Invalid fields for update: {invalid_fields}")
-            return False
-
-        try:
-            # Get current config
-            row = self.db.fetch_one(
-                "SELECT config FROM sso_providers WHERE name = ?",
-                (name,),
-            )
-
-            if not row:
-                logger.error(f"Provider not found: {name}")
-                return False
-
-            config_data = json.loads(row["config"])
-
-            # Apply updates to config
-            for field, value in updates.items():
-                if field == "is_active":
-                    # is_active is a separate column, handle specially
-                    continue
-                config_data[field] = value
-
-            # Update database
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            update_fields = ["config = ?", "updated_at = ?"]
-            update_values = [json.dumps(config_data), now]
-
-            if "is_active" in updates:
-                update_fields.append("is_active = ?")
-                update_values.append(adapt_boolean_value(updates["is_active"]))
-
-            update_values.append(name)
-
-            self.db.execute(
-                f"""
-                UPDATE sso_providers
-                SET {', '.join(update_fields)}
-                WHERE name = ?
-                """,
-                tuple(update_values),
-            )
-
-            # Clear cached provider
-            with self._providers_lock:
-                if name in self._providers:
-                    del self._providers[name]
-
-            logger.info(f"Updated SSO provider: {name}")
-            return True
-
-        except Exception:
-            logger.error(f"Failed to update provider {name}: {e}")
-            return False
-
-    def delete_provider(self, name: str, hard: bool = False) -> bool:
-        """
-        Delete an SSO provider.
-
-        Args:
-            name: Provider name.
-            hard: If True, permanently delete; if False, soft delete (disable).
-
-        Returns:
-            bool: True if successful.
-        """
-        try:
-            if hard:
-                # Hard delete - remove all data
-                # Clear sessions
-                self.db.execute(
-                    "DELETE FROM sso_sessions WHERE provider_name = ?",
-                    (name,),
-                )
-
-                # Clear identities (optional - could preserve for history)
-                self.db.execute(
-                    "DELETE FROM sso_identities WHERE provider_name = ?",
-                    (name,),
-                )
-
-                # Delete provider record
-                self.db.execute(
-                    "DELETE FROM sso_providers WHERE name = ?",
-                    (name,),
-                )
-
-            else:
-                # Soft delete - disable and preserve data
-                self.db.execute(
-                    "UPDATE sso_providers SET is_active = ?, updated_at = ? WHERE name = ?",
-                    (
-                        adapt_boolean_value(False),
-                        datetime.now(timezone.utc).replace(tzinfo=None),
-                        name,
-                    ),
-                )
-
-                # Optionally clear sessions (disable active logins)
-                self.db.execute(
-                    "DELETE FROM sso_sessions WHERE provider_name = ?",
-                    (name,),
-                )
-
-            # Clear cached provider
-            with self._providers_lock:
-                if name in self._providers:
-                    del self._providers[name]
-
-            logger.info(f"{'Hard' if hard else 'Soft'} deleted SSO provider: {name}")
-            return True
-
-        except Exception:
-            logger.error(f"Failed to delete provider {name}: {e}")
-            return False
-
-    def test_provider_connection(self, name: str) -> dict[str, Any]:
-        """
-        Test SSO provider connection and configuration.
-
-        Args:
-            name: Provider name.
-
-        Returns:
-            Dict: Test results with detailed information.
-        """
-        result: Dict[str, Any] = {
-            "success": False,
-            "tests": {},
-            "warnings": [],
-            "errors": [],
-        }
-
-        # Get provider info
-        provider_info = self.get_provider_info(name)
-        if not provider_info:
-            result["errors"].append("Provider not found")
-            return result
-
-        result["tests"]["provider_exists"] = True
-
-        # Test authorization_url reachability
-        auth_url = provider_info.get("authorization_url", "")
-        if auth_url:
-            test_result = self._test_url_reachability(auth_url)
-            result["tests"]["authorization_url"] = test_result
-            if not test_result.get("reachable"):
-                result["errors"].append(f"Authorization URL not reachable: {auth_url}")
-        else:
-            result["warnings"].append("Authorization URL is empty")
-
-        # Test token_url reachability
-        token_url = provider_info.get("token_url", "")
-        if token_url:
-            test_result = self._test_url_reachability(token_url)
-            result["tests"]["token_url"] = test_result
-            if not test_result.get("reachable"):
-                result["errors"].append(f"Token URL not reachable: {token_url}")
-        else:
-            result["warnings"].append("Token URL is empty")
-
-        # Test userinfo_url reachability (optional)
-        userinfo_url = provider_info.get("userinfo_url")
-        if userinfo_url:
-            test_result = self._test_url_reachability(userinfo_url)
-            result["tests"]["userinfo_url"] = test_result
-        else:
-            # userinfo_url is optional for some providers
-            result["warnings"].append("Userinfo URL is empty (optional)")
-
-        # Try OIDC discovery for OIDC providers
-        if provider_info.get("provider_type") == "oidc":
-            discovery_result = self._test_oidc_discovery(name, provider_info)
-            result["tests"]["discovery_doc"] = discovery_result
-            if discovery_result.get("available"):
-                # Add recommended endpoints from discovery
-                if discovery_result.get("endpoints"):
-                    result["discovered_endpoints"] = discovery_result["endpoints"]
-
-        # Test SSL certificate validity
-        test_urls = [auth_url, token_url, userinfo_url]
-        for url in test_urls:
-            if url and url.startswith("https://"):
-                ssl_result = self._test_ssl_certificate(url)
-                result["tests"]["ssl"] = ssl_result
-                if not ssl_result.get("valid"):
-                    result["warnings"].append(f"SSL certificate issue: {url}")
-                break  # Only test one SSL URL
-
-        # Validate client_id format (basic check)
-        client_id = provider_info.get("client_id", "")
-        if client_id:
-            result["tests"]["client_id_format"] = {"valid": True}
-        else:
-            result["errors"].append("client_id is empty")
-
-        # Determine overall success
-        critical_tests_passed = (
-            result["tests"].get("provider_exists", False)
-            and (
-                not auth_url or result["tests"].get("authorization_url", {}).get("reachable", False)
-            )
-            and (not token_url or result["tests"].get("token_url", {}).get("reachable", False))
-        )
-        result["success"] = critical_tests_passed and len(result["errors"]) == 0
-
-        return result
-
-    def _test_url_reachability(self, url: str, timeout: int = 10) -> dict[str, Any]:
-        """
-        Test if a URL is reachable.
-
-        Args:
-            url: URL to test.
-            timeout: Timeout in seconds.
-
-        Returns:
-            Dict: Test result with reachable status and latency.
-        """
-        result: Dict[str, Any] = {"reachable": False, "latency_ms": None, "error": None}
-
-        try:
-            start_time = time.time()
-            request = urllib.request.Request(url, method="HEAD")
-            request.add_header("User-Agent", "Open-ACE-SSO-Test/1.0")
-
-            response = urllib.request.urlopen(request, timeout=timeout)
-            end_time = time.time()
-
-            result["reachable"] = True
-            result["latency_ms"] = int((end_time - start_time) * 1000)
-            result["status_code"] = response.getcode()
-
-        except urllib.error.HTTPError as e:
-            # HTTP errors (4xx, 5xx) - endpoint exists but returned error
-            result["reachable"] = True  # URL is reachable
-            result["status_code"] = e.code
-            result["latency_ms"] = int((time.time() - start_time) * 1000)
-            result["warning"] = f"HTTP {e.code}"
-
-        except urllib.error.URLError as e:
-            result["reachable"] = False
-            result["error"] = str(e.reason)
-
-        except Exception:
-            result["reachable"] = False
-            result["error"] = str(e)
-
-        return result
-
-    def _test_oidc_discovery(
-        self, provider_name: str, provider_info: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Test OIDC discovery document availability.
-
-        Args:
-            provider_name: Provider name.
-            provider_info: Provider configuration.
-
-        Returns:
-            Dict: Discovery test result.
-        """
-        result: Dict[str, Any] = {"available": False, "endpoints": None, "error": None}
-
-        # Try to get issuer URL
-        issuer_url = provider_info.get("issuer_url", "")
-
-        # For predefined providers, use known discovery URL
-        predefined_config = get_provider_config(provider_name)
-        if predefined_config and predefined_config.get("issuer_url"):
-            issuer_url = predefined_config["issuer_url"]
-
-        if not issuer_url:
-            result["error"] = "No issuer URL available for discovery"
-            return result
-
-        discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
-
-        try:
-            request = urllib.request.Request(discovery_url)
-            request.add_header("User-Agent", "Open-ACE-SSO-Test/1.0")
-            request.add_header("Accept", "application/json")
-
-            response = urllib.request.urlopen(request, timeout=10)
-            data = json.loads(response.read().decode("utf-8"))
-
-            result["available"] = True
-            result["endpoints"] = {
-                "authorization_endpoint": data.get("authorization_endpoint"),
-                "token_endpoint": data.get("token_endpoint"),
-                "userinfo_endpoint": data.get("userinfo_endpoint"),
-                "jwks_uri": data.get("jwks_uri"),
-                "issuer": data.get("issuer"),
-            }
-
-        except urllib.error.URLError as e:
-            result["error"] = str(e.reason)
-
-        except Exception:
-            result["error"] = str(e)
-
-        return result
-
-    def _test_ssl_certificate(self, url: str) -> dict[str, Any]:
-        """
-        Test SSL certificate validity for a URL.
-
-        Args:
-            url: URL to test.
-
-        Returns:
-            Dict: SSL test result.
-        """
-        result: Dict[str, Any] = {"valid": True, "error": None}
-
-        try:
-            import ssl
-
-            context = ssl.create_default_context()
-            request = urllib.request.Request(url, method="HEAD")
-            urllib.request.urlopen(request, timeout=10, context=context)
-
-        except ssl.SSLError as e:
-            result["valid"] = False
-            result["error"] = str(e)
-
-        except Exception:
-            # Non-SSL errors don't affect SSL validity
-            pass
-
-        return result
 
     def start_authentication(
         self, provider_name: str, redirect_uri: str
@@ -961,7 +505,7 @@ class SSOManager:
             )
             return True
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to link SSO identity: {e}")
             return False
 
@@ -1029,7 +573,7 @@ class SSOManager:
 
             return session_token
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to create SSO session: {e}")
             return None
 
@@ -1062,7 +606,7 @@ class SSOManager:
             self.db.execute("DELETE FROM sso_sessions WHERE session_token = ?", (session_token,))
             return True
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to delete SSO session: {e}")
             return False
 
@@ -1075,7 +619,7 @@ class SSOManager:
             )
             return cast("int", cursor.rowcount)
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to cleanup sessions: {e}")
             return 0
 
@@ -1102,7 +646,7 @@ class SSOManager:
                 (state, code_verifier, provider_name, nonce),
             )
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to store auth state: {e}")
 
     def _get_auth_state(self, state: str) -> Optional[dict[str, Any]]:
@@ -1111,7 +655,7 @@ class SSOManager:
             row = self.db.fetch_one("SELECT * FROM sso_auth_states WHERE state = ?", (state,))
             return dict(row) if row else None
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to get auth state: {e}")
             return None
 
@@ -1120,7 +664,7 @@ class SSOManager:
         try:
             self.db.execute("DELETE FROM sso_auth_states WHERE state = ?", (state,))
 
-        except Exception:
+        except Exception as e:
             logger.error(f"Failed to delete auth state: {e}")
 
 
