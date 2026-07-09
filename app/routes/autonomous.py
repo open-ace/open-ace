@@ -671,6 +671,30 @@ def create_workflow():
             batch_id = str(uuid.uuid4()) if is_multi_issue else None
             created_workflows = []
 
+            # Lock base commit SHA for batch workflows to prevent race condition (Issue #1552)
+            base_commit_sha = None
+            if is_multi_issue:
+                project_path = data.get("project_path", "")
+                system_account = user_system_account
+                if project_path:
+                    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+                    try:
+                        gh = GitHubOps(project_path, system_account=system_account)
+                        base_commit_sha = gh._run_git(["rev-parse", "origin/main"]).stdout.strip()
+                        if base_commit_sha:
+                            logger.info(
+                                "Locked base_commit_sha %s for batch %s",
+                                base_commit_sha[:8],
+                                batch_id[:8] if batch_id else "unknown",
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to lock base_commit_sha for batch %s: %s. Will use dynamic origin/main.",
+                            batch_id[:8] if batch_id else "unknown",
+                            e,
+                        )
+
             for index, selector in enumerate(issue_selectors, start=1):
                 workflow_data = dict(base_workflow_data)
                 definition_snapshot = _build_definition_snapshot(
@@ -699,6 +723,7 @@ def create_workflow():
                         "batch_id": batch_id,
                         "batch_order": index if is_multi_issue else None,
                         "batch_total": len(issue_selectors) if is_multi_issue else None,
+                        "base_commit_sha": base_commit_sha,  # Locked SHA for batch (Issue #1552)
                         "status": "pending" if index == 1 else "queued",
                         "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
                     }

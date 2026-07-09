@@ -2107,10 +2107,14 @@ class AutonomousOrchestrator:
                     if branch_exists or remote_exists:
                         wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
                     else:
+                        # Use locked base_commit_sha for batch workflows (Issue #1552)
+                        wf = self.workflow
+                        base_commit_sha = wf.get("base_commit_sha")
+                        base_ref = base_commit_sha if base_commit_sha else "origin/main"
                         wt_data = gh.create_worktree(
                             path=worktree_path,
                             branch=branch_name,
-                            base="origin/main",
+                            base=base_ref,  # Locked SHA or dynamic origin/main
                         )
                     self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                     # The worktree now exists; drop the cached gh (bound to the
@@ -2118,7 +2122,11 @@ class AutonomousOrchestrator:
                     # to the worktree path — the agent's actual working repo.
                     self._gh = None
                 else:
-                    gh.create_branch(branch_name, base="origin/main")
+                    # Use locked base_commit_sha for batch workflows (Issue #1552)
+                    wf = self.workflow
+                    base_commit_sha = wf.get("base_commit_sha")
+                    base_ref = base_commit_sha if base_commit_sha else "origin/main"
+                    gh.create_branch(branch_name, base=base_ref)
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -3435,30 +3443,74 @@ class AutonomousOrchestrator:
         approval_phrase = _review_approval_phrase(wf.get("content_language"))
 
         # Check if branch has any changes vs main
+        # Distinguish "branch behind main (timing issue)" from "no actual changes" (Issue #1552)
         has_changes = False
+        is_timing_issue = False
         try:
-            diff_stats = gh.get_diff_stats("main", branch_name)
-            has_changes = diff_stats.get("commits", 0) > 0
-        except Exception:
+            branch_sha = gh._run_git(["rev-parse", branch_name]).stdout.strip()
+            main_sha = gh._run_git(["rev-parse", "main"]).stdout.strip()
+
+            # Check if branch is an ancestor of main (behind main)
+            is_ancestor = (
+                gh._run_git(
+                    ["merge-base", "--is-ancestor", branch_sha, main_sha], check=False
+                ).returncode
+                == 0
+            )
+
+            if is_ancestor:
+                # Branch is behind main → timing issue
+                is_timing_issue = True
+                has_changes = False
+                logger.warning(
+                    "Branch %s is behind main (timing issue). base_commit_sha=%s",
+                    branch_name,
+                    wf.get("base_commit_sha", "none"),
+                )
+            else:
+                # Branch is ahead or parallel → normal diff check
+                diff_stats = gh.get_diff_stats("main", branch_name)
+                has_changes = diff_stats.get("commits", 0) > 0
+        except Exception as e:
+            logger.warning("Failed to check branch status: %s", e)
             pass
 
         if not has_changes:
             # No code changes produced — skip PR, post to issue, and mark completed
             issue_number = wf.get("github_issue_number")
-            no_change_msg = (
-                f"## ℹ️ No Changes Detected\n\n"
-                f"Agent completed dev round {dev_round} without producing code changes. "
-                f"Skipping PR creation."
-            )
+
+            # Distinguish timing issue from no changes (Issue #1552)
+            if is_timing_issue:
+                no_change_msg = (
+                    f"## ⚠️ Timing Issue Detected\n\n"
+                    f"Branch `{branch_name}` is behind main (created from an older commit that was merged).\n"
+                    f"This indicates a race condition during workflow creation.\n\n"
+                    f"**Recommendation**: This issue should be fixed by locking base commit during batch creation.\n"
+                )
+            else:
+                no_change_msg = (
+                    f"## ℹ️ No Changes Detected\n\n"
+                    f"Agent completed dev round {dev_round} without producing code changes.\n"
+                    f"Skipping PR creation."
+                )
+
             if issue_number:
                 self._post_github_comment(gh, issue_number, no_change_msg, context="no-changes")
             self._create_milestone(
                 phase="pr_review",
                 dev_round=dev_round,
-                milestone_type="no_changes",
+                milestone_type="timing_issue" if is_timing_issue else "no_changes",
                 status="completed",
-                title="No code changes produced",
-                result_summary="Agent did not produce any code changes. Skipping PR creation.",
+                title=(
+                    "Branch behind main (timing issue)"
+                    if is_timing_issue
+                    else "No code changes produced"
+                ),
+                result_summary=(
+                    "Branch behind main: possible timing issue during workflow creation"
+                    if is_timing_issue
+                    else "Agent did not produce any code changes. Skipping PR creation."
+                ),
             )
             self._update_workflow(
                 {
