@@ -366,7 +366,8 @@ CREATE TABLE autonomous_workflows (
     test_retries integer DEFAULT 0,
     skip_retries integer DEFAULT 0,
     dev_retries_on_test_fail integer DEFAULT 0,
-    system_account text DEFAULT ''::text
+    system_account text DEFAULT ''::text,
+    base_commit_sha character varying(40)
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
