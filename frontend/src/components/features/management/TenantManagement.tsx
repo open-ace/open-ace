@@ -32,7 +32,7 @@ import { usePageRefresh } from '@/hooks';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
 
-// Tenant i18n fixes (Issue #1547)
+// Tenant i18n fixes (Issue #1500)
 // Type-safe label mappings for plan and status
 const PLAN_LABELS: Record<string, string> = {
   standard: 'tenantPlanStandard',
@@ -148,7 +148,7 @@ export const TenantManagement: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
 
-  // Dynamic options with useMemo for performance (Issue #1547)
+  // Dynamic options with useMemo for performance (Issue #1500)
   const statusOptions = useMemo(() => getTenantStatusOptions(language), [language]);
   const planOptions = useMemo(() => getTenantPlanOptions(language), [language]);
   const modalPlanOptions = useMemo(() => getTenantPlanOptions(language, false), [language]);
@@ -285,7 +285,7 @@ export const TenantManagement: React.FC = () => {
       return;
     }
 
-    // Validate trial days (Issue #1547)
+    // Validate trial days (Issue #1501)
     if (!editingTenant && formData.trial_days !== undefined) {
       const error = validateTrialDays(formData.trial_days, language);
       if (error) {
@@ -698,7 +698,7 @@ export const TenantManagement: React.FC = () => {
                 placeholder={t('enterContactName', language)}
               />
             </div>
-            {/* Trial Days - Only for new tenants (Issue #1547) */}
+            {/* Trial Days - Only for new tenants (Issue #1501) */}
             {!editingTenant && (
               <div className="col-md-6">
                 <label className="form-label">{t('tenantTrialDays', language)}</label>
