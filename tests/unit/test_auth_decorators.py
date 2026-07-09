@@ -252,3 +252,204 @@ class TestGUserAttributes:
                 data = resp.get_json()
                 assert data["user_id"] == 42
                 assert data["role"] == "user"
+
+
+# ---------------------------------------------------------------------------
+# WebUI token fallback tests
+# ---------------------------------------------------------------------------
+
+
+class TestAdminRequiredWebuiToken:
+    """Test @admin_required decorator with WebUI token fallback."""
+
+    def test_webui_token_admin_gets_access(self):
+        """Admin user with valid WebUI token should get access."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager
+            mock_manager = MagicMock()
+            mock_manager.validate_token.return_value = (True, 1, None)  # admin user_id=1
+
+            # Mock user repo to return admin user
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = MOCK_ADMIN.copy()
+
+            # Patch at the source module since imports are inside the function
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                with patch(
+                    "app.repositories.user_repo.UserRepository",
+                    return_value=mock_user_repo,
+                ):
+                    with app.test_client() as client:
+                        resp = client.get("/api/admin?token=webui-token")
+                        assert resp.status_code == 200
+                        data = resp.get_json()
+                        assert data["role"] == "admin"
+
+    def test_webui_token_non_admin_gets_403(self):
+        """Non-admin user with valid WebUI token should get 403."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager
+            mock_manager = MagicMock()
+            mock_manager.validate_token.return_value = (True, 42, None)  # non-admin user_id=42
+
+            # Mock user repo to return non-admin user
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = MOCK_USER.copy()
+
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                with patch(
+                    "app.repositories.user_repo.UserRepository",
+                    return_value=mock_user_repo,
+                ):
+                    with app.test_client() as client:
+                        resp = client.get("/api/admin?token=webui-token")
+                        assert resp.status_code == 403
+                        data = resp.get_json()
+                        assert data["error"] == "Admin access required"
+
+    def test_webui_token_invalid_returns_401(self):
+        """Invalid WebUI token should return 401."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager with invalid token
+            mock_manager = MagicMock()
+            mock_manager.validate_token.return_value = (False, None, "Invalid signature")
+
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                with app.test_client() as client:
+                    resp = client.get("/api/admin?token=invalid-webui-token")
+                    assert resp.status_code == 401
+
+    def test_webui_token_no_manager_returns_401(self):
+        """When WebUI manager is not available, should return 401."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager to return None (not configured)
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=None,
+            ):
+                with app.test_client() as client:
+                    resp = client.get("/api/admin?token=some-token")
+                    assert resp.status_code == 401
+
+    def test_webui_token_user_not_found_returns_401(self):
+        """When user is not found in database, should return 401."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager
+            mock_manager = MagicMock()
+            mock_manager.validate_token.return_value = (True, 999, None)  # unknown user_id
+
+            # Mock user repo to return None (user not found)
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = None
+
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                with patch(
+                    "app.repositories.user_repo.UserRepository",
+                    return_value=mock_user_repo,
+                ):
+                    with app.test_client() as client:
+                        resp = client.get("/api/admin?token=webui-token")
+                        assert resp.status_code == 401
+
+    def test_session_token_preferred_over_webui_token(self):
+        """Session token should be preferred when both are valid."""
+        app = _make_app()
+
+        # Mock session token authentication to succeed
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(True, MOCK_ADMIN_SESSION),
+        ):
+            # WebUI manager should NOT be called when session token is valid
+            mock_manager = MagicMock()
+
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                # Use both session token (in header) and WebUI token (in query)
+                with app.test_client() as client:
+                    resp = client.get(
+                        "/api/admin?token=webui-token",
+                        headers={"Authorization": "Bearer session-token"},
+                    )
+                    assert resp.status_code == 200
+                    # WebUI manager should not have been called since session token succeeded
+                    mock_manager.validate_token.assert_not_called()
+
+    def test_webui_token_fallback_when_session_invalid(self):
+        """WebUI token should be used when session token is invalid."""
+        app = _make_app()
+
+        # Mock session token authentication to fail
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(False, {"error": "Invalid"}),
+        ):
+            # Mock WebUI manager
+            mock_manager = MagicMock()
+            mock_manager.validate_token.return_value = (True, 1, None)
+
+            # Mock user repo
+            mock_user_repo = MagicMock()
+            mock_user_repo.get_user_by_id.return_value = MOCK_ADMIN.copy()
+
+            with patch(
+                "app.services.webui_manager.get_webui_manager",
+                return_value=mock_manager,
+            ):
+                with patch(
+                    "app.repositories.user_repo.UserRepository",
+                    return_value=mock_user_repo,
+                ):
+                    with app.test_client() as client:
+                        # Provide both invalid session token and valid WebUI token
+                        resp = client.get(
+                            "/api/admin?token=webui-token",
+                            headers={"Authorization": "Bearer invalid-session"},
+                        )
+                        assert resp.status_code == 200
+                        data = resp.get_json()
+                        assert data["role"] == "admin"
