@@ -79,6 +79,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [rotateTarget, setRotateTarget] = useState<RemoteMachine | null>(null);
   const [rotatedToken, setRotatedToken] = useState<string>('');
+  const [rotatedMessage, setRotatedMessage] = useState<string>('');
   const [copiedRotated, setCopiedRotated] = useState(false);
 
   const [showRevokeDialog, setShowRevokeDialog] = useState(false);
@@ -180,6 +181,7 @@ export const RemoteMachineManagement: React.FC = () => {
   const handleOpenRotate = (machine: RemoteMachine) => {
     setRotateTarget(machine);
     setRotatedToken('');
+    setRotatedMessage('');
     setCopiedRotated(false);
     setShowRotateDialog(true);
   };
@@ -189,9 +191,11 @@ export const RemoteMachineManagement: React.FC = () => {
     try {
       const result = await rotateMachineToken.mutateAsync(rotateTarget.machine_id);
       setRotatedToken(result.agent_token);
+      setRotatedMessage(result.message || t('tokenRotatedMessage', language));
       toast.success(t('rotateTokenSuccess', language) || 'Token rotated');
     } catch (err) {
       console.error('Failed to rotate token:', err);
+      setRotatedMessage('');
       toast.error(t('rotateTokenFailed', language) || 'Failed to rotate token');
     }
   };
@@ -725,7 +729,18 @@ export const RemoteMachineManagement: React.FC = () => {
               <i className="bi bi-check-circle me-1" />
               {t('rotateTokenSuccess', language)}
             </p>
-            <p className="text-muted small">{t('tokenRotatedMessage', language)}</p>
+            <p
+              className={
+                rotateTarget && (!rotateTarget.connected || rotateTarget.status === 'offline')
+                  ? 'text-warning small'
+                  : 'text-muted small'
+              }
+            >
+              {rotateTarget && (!rotateTarget.connected || rotateTarget.status === 'offline') && (
+                <i className="bi bi-exclamation-triangle me-1" />
+              )}
+              {rotatedMessage}
+            </p>
             <div className="mb-2">
               <label className="form-label fw-bold">{t('newAgentToken', language)}</label>
               <p className="text-muted small">{t('newTokenDesc', language)}</p>
