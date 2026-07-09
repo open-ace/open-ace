@@ -2,7 +2,7 @@
  * Tests for Error Utilities
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mapApiError, getErrorMessage, isApiErrorCode } from './error';
 import type { Language } from '@/i18n';
 

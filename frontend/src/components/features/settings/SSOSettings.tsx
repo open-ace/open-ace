@@ -612,7 +612,7 @@ export const SSOSettings: React.FC = () => {
                       <span
                         className="text-truncate d-inline-block"
                         style={{ maxWidth: '150px' }}
-                        title={provider.client_id || '-'}
+                        title={provider.client_id ?? '-'}
                       >
                         {provider.client_id
                           ? `${provider.client_id.slice(0, 8)}${provider.client_id.length > 8 ? '...' : ''}`

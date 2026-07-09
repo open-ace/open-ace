@@ -3675,7 +3675,8 @@ export const translations: Record<Language, Translations> = {
     confirmEnableProvider: 'このプロバイダーを有効化しますか？',
     providerEnabled: 'プロバイダーが正常に有効化されました',
     providerDisabled: 'プロバイダーが正常に無効化されました',
-    noProvidersDescription: 'SSOログインを有効化するにはOAuthまたはOIDCプロバイダーを登録してください',
+    noProvidersDescription:
+      'SSOログインを有効化するにはOAuthまたはOIDCプロバイダーを登録してください',
     addFirstProvider: '最初のプロバイダーを追加',
     invalidUrlFormat: '有効なURLを入力してください（例：https://example.com）',
     discardChanges: '変更を破棄',

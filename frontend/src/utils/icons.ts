@@ -42,7 +42,7 @@ export function getProviderIcon(name: string): string {
  * @returns true if provider has a predefined icon
  */
 export function hasProviderIcon(name: string): boolean {
-  return PROVIDER_ICONS.hasOwnProperty(name.toLowerCase());
+  return Object.prototype.hasOwnProperty.call(PROVIDER_ICONS, name.toLowerCase());
 }
 
 /**

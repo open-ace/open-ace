@@ -54,18 +54,10 @@ export { TOOL_DISPLAY_NAMES };
 export { copyToClipboard } from './clipboard';
 
 // Icon utilities
-export {
-  getProviderIcon,
-  hasProviderIcon,
-  getSupportedProviders,
-} from './icons';
+export { getProviderIcon, hasProviderIcon, getSupportedProviders } from './icons';
 
 // Error utilities
-export {
-  mapApiError,
-  getErrorMessage,
-  isApiErrorCode,
-} from './error';
+export { mapApiError, getErrorMessage, isApiErrorCode } from './error';
 
 // Query key utilities
 export {
