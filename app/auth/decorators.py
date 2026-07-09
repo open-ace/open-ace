@@ -180,28 +180,55 @@ def admin_required(f=None):
     """
     Decorator: require admin role.
 
+    Supports two authentication methods:
+    1. Session token (from cookie, header, or query param)
+    2. WebUI token (fallback from query param for iframe requests)
+
     Sets g.user, g.user_id, g.user_role on success.
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # First try session token authentication
             token = _extract_token()
-            if not token:
-                return jsonify({"error": "Authentication required"}), 401
+            if token:
+                user = _load_user_from_token(token)
+                if user:
+                    if user.get("role") != "admin":
+                        return jsonify({"error": "Admin access required"}), 403
 
-            user = _load_user_from_token(token)
-            if not user:
-                return jsonify({"error": "Invalid or expired session"}), 401
+                    g.user = user
+                    g.user_id = user.get("id")
+                    g.user_role = user.get("role")
+                    return func(*args, **kwargs)
 
-            if user.get("role") != "admin":
-                return jsonify({"error": "Admin access required"}), 403
+            # Fallback: try WebUI token from query param
+            # This supports iframe requests from WebUI where session token is not available
+            url_token = request.args.get("token")
+            if url_token:
+                from app.services.webui_manager import get_webui_manager
 
-            g.user = user
-            g.user_id = user.get("id")
-            g.user_role = user.get("role")
+                manager = get_webui_manager()
+                if manager:
+                    valid, user_id, error = manager.validate_token(url_token)
+                    if valid and user_id:
+                        # Load user from database to check role
+                        from app.repositories.user_repo import UserRepository
 
-            return func(*args, **kwargs)
+                        user_repo = UserRepository()
+                        user = user_repo.get_user_by_id(user_id)
+                        if user:
+                            if user.get("role") != "admin":
+                                return jsonify({"error": "Admin access required"}), 403
+
+                            g.user = user
+                            g.user_id = user_id
+                            g.user_role = user.get("role")
+                            return func(*args, **kwargs)
+
+            # No valid authentication found
+            return jsonify({"error": "Authentication required"}), 401
 
         return wrapper
 
