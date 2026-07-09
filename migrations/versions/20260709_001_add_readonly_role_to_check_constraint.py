@@ -73,6 +73,7 @@ def upgrade() -> None:
         op.execute("DROP INDEX IF EXISTS idx_users_email")
         op.execute("DROP INDEX IF EXISTS idx_users_active")
         op.execute("DROP INDEX IF EXISTS idx_users_tenant")
+        op.execute("DROP INDEX IF EXISTS idx_users_deleted")
 
         # Get current columns to handle any schema evolution
         inspector = sa.inspect(connection)
@@ -132,6 +133,7 @@ def upgrade() -> None:
         op.execute("CREATE INDEX idx_users_email ON users_new(email)")
         op.execute("CREATE INDEX idx_users_active ON users_new(is_active)")
         op.execute("CREATE INDEX idx_users_tenant ON users_new(tenant_id)")
+        op.execute("CREATE INDEX idx_users_deleted ON users_new(deleted_at)")
 
         # Drop old table and rename
         op.drop_table("users")
@@ -172,6 +174,7 @@ def downgrade() -> None:
         op.execute("DROP INDEX IF EXISTS idx_users_email")
         op.execute("DROP INDEX IF EXISTS idx_users_active")
         op.execute("DROP INDEX IF EXISTS idx_users_tenant")
+        op.execute("DROP INDEX IF EXISTS idx_users_deleted")
 
         inspector = sa.inspect(connection)
         columns_info = inspector.get_columns("users")
@@ -237,6 +240,7 @@ def downgrade() -> None:
         op.execute("CREATE INDEX idx_users_email ON users_new(email)")
         op.execute("CREATE INDEX idx_users_active ON users_new(is_active)")
         op.execute("CREATE INDEX idx_users_tenant ON users_new(tenant_id)")
+        op.execute("CREATE INDEX idx_users_deleted ON users_new(deleted_at)")
 
         op.drop_table("users")
         op.rename_table("users_new", "users")
