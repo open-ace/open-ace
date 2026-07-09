@@ -349,12 +349,16 @@ export const SSOSettings: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   id="ssoEnabled"
+                  aria-describedby="ssoEnabledDesc"
                   checked={ssoEnabled}
                   onChange={(e) => setSsoEnabled(e.target.checked)}
                 />
                 <label className="form-check-label" htmlFor="ssoEnabled">
                   {t('enableSSO', language)}
                 </label>
+                <span id="ssoEnabledDesc" className="visually-hidden">
+                  {t('ssoEnabledDesc', language)}
+                </span>
               </div>
             </div>
             <div className="col-md-6">
@@ -363,12 +367,16 @@ export const SSOSettings: React.FC = () => {
                   className="form-check-input"
                   type="checkbox"
                   id="autoProvision"
+                  aria-describedby="autoProvisionDesc"
                   checked={autoProvision}
                   onChange={(e) => setAutoProvision(e.target.checked)}
                 />
                 <label className="form-check-label" htmlFor="autoProvision">
                   {t('autoProvisionUsers', language)}
                 </label>
+                <span id="autoProvisionDesc" className="visually-hidden">
+                  {t('autoProvisionDesc', language)}
+                </span>
               </div>
             </div>
           </div>
