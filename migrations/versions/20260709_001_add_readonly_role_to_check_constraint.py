@@ -80,66 +80,46 @@ def upgrade() -> None:
         column_names = {col["name"] for col in columns_info}
 
         # Build column list dynamically based on current schema
-        # Core columns that should always exist
-        core_columns = [
-            "id",
-            "username",
-            "password_hash",
-            "email",
-            "is_admin",
-            "is_active",
-            "created_at",
-            "last_login",
-            "role",
-            "daily_token_quota",
-            "monthly_token_quota",
-            "daily_request_quota",
-            "monthly_request_quota",
-            "deleted_at",
-            "system_account",
-            "tenant_id",
-        ]
+        # Use all columns from the actual table to ensure consistency
+        all_columns = sorted(column_names)
 
-        # Additional columns that may exist (added after initial schema)
-        optional_columns = ["must_change_password", "avatar_url", "auto_mapping_enabled"]
-        for col in optional_columns:
-            if col in column_names:
-                core_columns.append(col)
+        # Column definitions for CREATE TABLE
+        col_defs = {
+            "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+            "username": "TEXT NOT NULL UNIQUE",
+            "password_hash": "TEXT NOT NULL",
+            "email": "TEXT",
+            "is_admin": "INTEGER DEFAULT 0",
+            "is_active": "INTEGER DEFAULT 1",
+            "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "last_login": "TIMESTAMP",
+            "role": "TEXT DEFAULT 'user'",
+            "daily_token_quota": "INTEGER",
+            "monthly_token_quota": "INTEGER",
+            "daily_request_quota": "INTEGER",
+            "monthly_request_quota": "INTEGER",
+            "deleted_at": "TIMESTAMP",
+            "system_account": "TEXT",
+            "tenant_id": "INTEGER REFERENCES tenants(id) ON DELETE SET NULL",
+            "must_change_password": "INTEGER DEFAULT 0",
+            "avatar_url": "TEXT",
+            "auto_mapping_enabled": "INTEGER DEFAULT 1",
+        }
 
-        # Create new table with updated CHECK constraint
-        # Build CREATE TABLE statement dynamically based on existing columns
-        create_sql = """
-            CREATE TABLE users_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                email TEXT,
-                is_admin INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP,
-                role TEXT DEFAULT 'user',
-                daily_token_quota INTEGER,
-                monthly_token_quota INTEGER,
-                daily_request_quota INTEGER,
-                monthly_request_quota INTEGER,
-                deleted_at TIMESTAMP,
-                system_account TEXT,
-                tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
-        """
-        # Add optional columns if they exist in current schema
-        if "must_change_password" in column_names:
-            create_sql += ",\n                must_change_password INTEGER DEFAULT 0"
-        if "avatar_url" in column_names:
-            create_sql += ",\n                avatar_url TEXT"
-        if "auto_mapping_enabled" in column_names:
-            create_sql += ",\n                auto_mapping_enabled INTEGER DEFAULT 1"
-        create_sql += ",\n                CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user', 'readonly'))"
-        create_sql += "\n            )\n        "
+        # Build CREATE TABLE statement dynamically
+        create_parts = []
+        for col_name in all_columns:
+            if col_name in col_defs:
+                create_parts.append(f"{col_name} {col_defs[col_name]}")
+        # Add CHECK constraint with readonly role
+        create_parts.append(
+            "CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user', 'readonly'))"
+        )
+        create_sql = "CREATE TABLE users_new (\n    " + ",\n    ".join(create_parts) + "\n)"
         op.execute(create_sql)
 
-        # Copy data from old table to new table
-        columns_str = ", ".join(core_columns)
+        # Copy data from old table to new table using matching columns
+        columns_str = ", ".join(all_columns)
         op.execute(
             f"""
             INSERT INTO users_new ({columns_str})
@@ -197,29 +177,6 @@ def downgrade() -> None:
         columns_info = inspector.get_columns("users")
         column_names = {col["name"] for col in columns_info}
 
-        core_columns = [
-            "id",
-            "username",
-            "password_hash",
-            "email",
-            "is_admin",
-            "is_active",
-            "created_at",
-            "last_login",
-            "role",
-            "daily_token_quota",
-            "monthly_token_quota",
-            "daily_request_quota",
-            "monthly_request_quota",
-            "deleted_at",
-            "system_account",
-            "tenant_id",
-        ]
-        optional_columns = ["must_change_password", "avatar_url", "auto_mapping_enabled"]
-        for col in optional_columns:
-            if col in column_names:
-                core_columns.append(col)
-
         # Migrate 'readonly' to 'viewer' first (before table recreation)
         op.execute(
             """
@@ -229,38 +186,46 @@ def downgrade() -> None:
             """
         )
 
-        # Build CREATE TABLE statement dynamically based on existing columns
-        create_sql = """
-            CREATE TABLE users_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                email TEXT,
-                is_admin INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP,
-                role TEXT DEFAULT 'user',
-                daily_token_quota INTEGER,
-                monthly_token_quota INTEGER,
-                daily_request_quota INTEGER,
-                monthly_request_quota INTEGER,
-                deleted_at TIMESTAMP,
-                system_account TEXT,
-                tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
-        """
-        # Add optional columns if they exist in current schema
-        if "must_change_password" in column_names:
-            create_sql += ",\n                must_change_password INTEGER DEFAULT 0"
-        if "avatar_url" in column_names:
-            create_sql += ",\n                avatar_url TEXT"
-        if "auto_mapping_enabled" in column_names:
-            create_sql += ",\n                auto_mapping_enabled INTEGER DEFAULT 1"
-        create_sql += ",\n                CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user'))"
-        create_sql += "\n            )\n        "
+        # Build column list dynamically based on current schema
+        # Use all columns from the actual table to ensure consistency
+        all_columns = sorted(column_names)
+
+        # Column definitions for CREATE TABLE
+        col_defs = {
+            "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+            "username": "TEXT NOT NULL UNIQUE",
+            "password_hash": "TEXT NOT NULL",
+            "email": "TEXT",
+            "is_admin": "INTEGER DEFAULT 0",
+            "is_active": "INTEGER DEFAULT 1",
+            "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "last_login": "TIMESTAMP",
+            "role": "TEXT DEFAULT 'user'",
+            "daily_token_quota": "INTEGER",
+            "monthly_token_quota": "INTEGER",
+            "daily_request_quota": "INTEGER",
+            "monthly_request_quota": "INTEGER",
+            "deleted_at": "TIMESTAMP",
+            "system_account": "TEXT",
+            "tenant_id": "INTEGER REFERENCES tenants(id) ON DELETE SET NULL",
+            "must_change_password": "INTEGER DEFAULT 0",
+            "avatar_url": "TEXT",
+            "auto_mapping_enabled": "INTEGER DEFAULT 1",
+        }
+
+        # Build CREATE TABLE statement dynamically
+        create_parts = []
+        for col_name in all_columns:
+            if col_name in col_defs:
+                create_parts.append(f"{col_name} {col_defs[col_name]}")
+        # Add CHECK constraint without readonly role
+        create_parts.append(
+            "CONSTRAINT chk_users_role CHECK (role IN ('admin', 'manager', 'user'))"
+        )
+        create_sql = "CREATE TABLE users_new (\n    " + ",\n    ".join(create_parts) + "\n)"
         op.execute(create_sql)
 
-        columns_str = ", ".join(core_columns)
+        columns_str = ", ".join(all_columns)
         op.execute(
             f"""
             INSERT INTO users_new ({columns_str})
