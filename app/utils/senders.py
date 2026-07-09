@@ -7,9 +7,9 @@ that appear when Feishu username resolution fails, as well as placeholder values
 like 'null', 'None', 'undefined', 'N/A', 'Unknown', etc.
 
 SQL-layer equivalent condition (keep in sync with get_sender_filter_sql()):
-    NOT (sender_name LIKE 'ou_%' AND LENGTH(sender_name) > 10)
+    NOT (sender_name LIKE 'ou_%%' AND LENGTH(sender_name) > 10)
     AND sender_name NOT IN ('null', 'None', 'undefined', 'N/A', 'Unknown', 'unknown')
-    AND sender_name NOT LIKE '<%>'
+    AND sender_name NOT LIKE '<%%>'
 """
 
 # Invalid sender patterns - placeholder values that should be filtered out
@@ -46,10 +46,13 @@ def get_sender_filter_sql(column_name: str = "sender_name") -> str:
     # Build placeholder values IN clause
     placeholder_values = "', '".join(sorted(_INVALID_SENDER_PATTERNS))
 
+    # Use %% for LIKE patterns to work with both PostgreSQL (psycopg2) and SQLite:
+    # - PostgreSQL: %% is escaped to % by psycopg2 (which uses %s as placeholder)
+    # - SQLite: %% is interpreted as literal % (safe since SQLite uses ? placeholder)
     return (
-        f"NOT ({column_name} LIKE 'ou_%' AND LENGTH({column_name}) > 10) "
+        f"NOT ({column_name} LIKE 'ou_%%' AND LENGTH({column_name}) > 10) "
         f"AND {column_name} NOT IN ('{placeholder_values}') "
-        f"AND {column_name} NOT LIKE '<%>'"
+        f"AND {column_name} NOT LIKE '<%%>'"
     )
 
 
