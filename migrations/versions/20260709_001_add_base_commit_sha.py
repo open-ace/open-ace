@@ -1,7 +1,7 @@
 """Add base_commit_sha column to autonomous_workflows
 
 Revision ID: 20260709_001_add_base_commit_sha
-Revises: 20260707_001_add_system_account_to_workflows
+Revises: 20260709_001_add_readonly_role_to_check_constraint
 Create Date: 2026-07-09
 
 Issue: #1552
@@ -25,7 +25,7 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260709_001_add_base_commit_sha"
-down_revision: Union[str, None] = "20260707_001_add_system_account_to_workflows"
+down_revision: Union[str, None] = "20260709_001_add_readonly_role_to_check_constraint"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
