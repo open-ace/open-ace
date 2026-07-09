@@ -349,6 +349,17 @@ export const translations: Record<Language, Translations> = {
     blockActionHelp: 'Block: Prevent the message from being sent',
     redactActionHelp: 'Redact: Replace sensitive content with placeholder',
 
+    // Filter type/severity/action values
+    typeKeyword: 'Keyword',
+    typeRegex: 'Regex',
+    typePii: 'PII',
+    severityLow: 'Low',
+    severityMedium: 'Medium',
+    severityHigh: 'High',
+    actionWarn: 'Warn',
+    actionBlock: 'Block',
+    actionRedact: 'Redact',
+
     // Security Settings
     settingsSaved: 'Settings saved successfully',
     sessionSettings: 'Session Settings',
@@ -1908,6 +1919,17 @@ export const translations: Record<Language, Translations> = {
     warnActionHelp: '警告：记录警告但允许消息发送',
     blockActionHelp: '阻止：禁止消息发送',
     redactActionHelp: '替换：将敏感内容替换为占位符',
+
+    // Filter type/severity/action values
+    typeKeyword: '关键词',
+    typeRegex: '正则表达式',
+    typePii: 'PII',
+    severityLow: '低',
+    severityMedium: '中',
+    severityHigh: '高',
+    actionWarn: '警告',
+    actionBlock: '阻止',
+    actionRedact: '替换',
 
     // Security Settings
     settingsSaved: '设置已保存',
@@ -3617,6 +3639,17 @@ export const translations: Record<Language, Translations> = {
     blockActionHelp: 'ブロック：メッセージの送信を阻止',
     redactActionHelp: '秘匿：機密内容をプレースホルダーで置換',
 
+    // Filter type/severity/action values
+    typeKeyword: 'キーワード',
+    typeRegex: '正規表現',
+    typePii: 'PII（個人識別情報）',
+    severityLow: '低',
+    severityMedium: '中',
+    severityHigh: '高',
+    actionWarn: '警告',
+    actionBlock: 'ブロック',
+    actionRedact: '秘匿',
+
     // Security Settings
     settingsSaved: '設定を保存しました',
     sessionSettings: 'セッション設定',
@@ -4941,6 +4974,17 @@ export const translations: Record<Language, Translations> = {
     warnActionHelp: '경고: 경고를 로그하고 메시지 허용',
     blockActionHelp: '차단: 메시지 전송 방지',
     redactActionHelp: '수정: 민감한 내용을 플레이스홀더로 교체',
+
+    // Filter type/severity/action values
+    typeKeyword: '키워드',
+    typeRegex: '정규식',
+    typePii: 'PII',
+    severityLow: '낮음',
+    severityMedium: '중간',
+    severityHigh: '높음',
+    actionWarn: '경고',
+    actionBlock: '차단',
+    actionRedact: '수정',
 
     // Security Settings
     settingsSaved: '설정이 저장되었습니다',
