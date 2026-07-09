@@ -32,19 +32,48 @@ import { usePageRefresh } from '@/hooks';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'All Statuses' },
-  { value: 'active', label: 'Active' },
-  { value: 'suspended', label: 'Suspended' },
-  { value: 'trial', label: 'Trial' },
+// Tenant i18n fixes (Issue #1500)
+// Type-safe label mappings for plan and status
+const PLAN_LABELS: Record<string, string> = {
+  standard: 'tenantPlanStandard',
+  premium: 'tenantPlanPremium',
+  enterprise: 'tenantPlanEnterprise',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  active: 'tenantStatusActive',
+  suspended: 'tenantStatusSuspended',
+  trial: 'tenantStatusTrial',
+};
+
+// Helper functions for translation with fallback
+const getPlanLabel = (plan: string, language: Language): string => {
+  const key = PLAN_LABELS[plan];
+  return key ? t(key, language) : plan;
+};
+
+const getStatusLabel = (status: string, language: Language): string => {
+  const key = STATUS_LABELS[status];
+  return key ? t(key, language) : status;
+};
+
+// Dynamic options generators
+const getTenantStatusOptions = (language: Language) => [
+  { value: '', label: t('tenantAllStatuses', language) },
+  { value: 'active', label: t('tenantStatusActive', language) },
+  { value: 'suspended', label: t('tenantStatusSuspended', language) },
+  { value: 'trial', label: t('tenantStatusTrial', language) },
 ];
 
-const PLAN_OPTIONS = [
-  { value: '', label: 'All Plans' },
-  { value: 'standard', label: 'Standard' },
-  { value: 'premium', label: 'Premium' },
-  { value: 'enterprise', label: 'Enterprise' },
-];
+const getTenantPlanOptions = (language: Language, includeAll: boolean = true) => {
+  const options = includeAll ? [{ value: '', label: t('tenantAllPlans', language) }] : [];
+  return [
+    ...options,
+    { value: 'standard', label: t('tenantPlanStandard', language) },
+    { value: 'premium', label: t('tenantPlanPremium', language) },
+    { value: 'enterprise', label: t('tenantPlanEnterprise', language) },
+  ];
+};
 
 // Tenant API error translation map (moved outside component to avoid recreation)
 const TENANT_ERROR_MAP: Record<string, string> = {
@@ -98,6 +127,11 @@ export const TenantManagement: React.FC = () => {
     max_sessions_per_user: 5,
   });
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Dynamic options with useMemo for performance (Issue #1500)
+  const statusOptions = useMemo(() => getTenantStatusOptions(language), [language]);
+  const planOptions = useMemo(() => getTenantPlanOptions(language), [language]);
+  const modalPlanOptions = useMemo(() => getTenantPlanOptions(language, false), [language]);
 
   // Page refresh control - manual refresh for tenant management
   const pageRefresh = usePageRefresh({
@@ -421,11 +455,11 @@ export const TenantManagement: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-3">
             <label className="form-label">{t('status', language)}</label>
-            <Select options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
+            <Select options={statusOptions} value={statusFilter} onChange={setStatusFilter} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('plan', language)}</label>
-            <Select options={PLAN_OPTIONS} value={planFilter} onChange={setPlanFilter} />
+            <Select options={planOptions} value={planFilter} onChange={setPlanFilter} />
           </div>
         </div>
       </Card>
@@ -461,10 +495,14 @@ export const TenantManagement: React.FC = () => {
                       <code>{tenant.slug}</code>
                     </td>
                     <td>
-                      <Badge variant={getPlanVariant(tenant.plan)}>{tenant.plan}</Badge>
+                      <Badge variant={getPlanVariant(tenant.plan)}>
+                        {getPlanLabel(tenant.plan, language)}
+                      </Badge>
                     </td>
                     <td>
-                      <Badge variant={getStatusVariant(tenant.status)}>{tenant.status}</Badge>
+                      <Badge variant={getStatusVariant(tenant.status)}>
+                        {getStatusLabel(tenant.status, language)}
+                      </Badge>
                     </td>
                     <td>
                       {tenant.quota && tenant.total_tokens_used !== undefined ? (
@@ -605,11 +643,7 @@ export const TenantManagement: React.FC = () => {
             <div className="col-md-6">
               <label className="form-label">{t('plan', language)}</label>
               <Select
-                options={[
-                  { value: 'standard', label: 'Standard' },
-                  { value: 'premium', label: 'Premium' },
-                  { value: 'enterprise', label: 'Enterprise' },
-                ]}
+                options={modalPlanOptions}
                 value={formData.plan ?? 'standard'}
                 onChange={(value) =>
                   setFormData({ ...formData, plan: value as 'standard' | 'premium' | 'enterprise' })
