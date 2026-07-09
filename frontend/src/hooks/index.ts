@@ -121,3 +121,12 @@ export {
   type UsePageRefreshReturn,
 } from './usePageRefresh';
 export { useGlobalRefreshPause } from './useGlobalRefreshPause';
+
+// Form validation hooks
+export {
+  useProviderFormValidation,
+  validateUrlFormat,
+  maskClientId,
+  type ValidationErrors,
+  type FormData as ValidationFormData,
+} from './useProviderFormValidation';

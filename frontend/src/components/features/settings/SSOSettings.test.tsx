@@ -46,6 +46,7 @@ vi.mock('@/i18n', () => ({
       settingsSaved: 'Settings saved successfully',
       registeredProviders: 'Registered Providers',
       noProvidersRegistered: 'No SSO providers registered',
+      noProvidersDescription: 'Register an SSO provider to enable single sign-on.',
       availableProviders: 'Available Providers',
       providerName: 'Provider Name',
       type: 'Type',
@@ -53,6 +54,13 @@ vi.mock('@/i18n', () => ({
       tableActions: 'Actions',
       enabled: 'Enabled',
       disabled: 'Disabled',
+      view: 'View',
+      test: 'Test',
+      clickToViewDetails: 'Click to view details',
+      confirmClientSecret: 'Confirm Client Secret',
+      confirmClientSecretPlaceholder: 'Re-enter client secret',
+      secretMismatch: 'Client secrets do not match',
+      urlFormatError: 'URL must start with http:// or https://',
     };
     return translations[key] || key;
   },
