@@ -255,7 +255,8 @@ CREATE TABLE autonomous_workflows (
  test_retries integer DEFAULT 0,
  skip_retries integer DEFAULT 0,
  dev_retries_on_test_fail integer DEFAULT 0,
- system_account text DEFAULT ''
+ system_account text DEFAULT '',
+ base_commit_sha TEXT
 );
 
 CREATE TABLE compliance_reports (

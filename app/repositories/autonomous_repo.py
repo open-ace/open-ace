@@ -48,6 +48,7 @@ class AutonomousWorkflowRepository:
         "batch_id",
         "batch_order",
         "batch_total",
+        "base_commit_sha",
         "auto_merge",
         "definition_snapshot",
         "current_phase",

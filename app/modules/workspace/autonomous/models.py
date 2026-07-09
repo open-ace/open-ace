@@ -47,6 +47,7 @@ class AutonomousWorkflow:
     batch_id: Optional[str] = None
     batch_order: Optional[int] = None
     batch_total: Optional[int] = None
+    base_commit_sha: Optional[str] = None  # Locked SHA for batch workflows (Issue #1552)
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: Optional[dict] = None
     current_phase: str = (
@@ -117,6 +118,7 @@ class AutonomousWorkflow:
             "batch_id": self.batch_id,
             "batch_order": self.batch_order,
             "batch_total": self.batch_total,
+            "base_commit_sha": self.base_commit_sha,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -167,6 +169,7 @@ class AutonomousWorkflow:
             batch_id=data.get("batch_id"),
             batch_order=data.get("batch_order"),
             batch_total=data.get("batch_total"),
+            base_commit_sha=data.get("base_commit_sha"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
