@@ -261,6 +261,47 @@ class TestPostgresPlaceholderAdaptation:
         assert "%s" in delete_sqls[0]
         assert "?" not in delete_sqls[0]
 
+    def test_anonymize_old_data_adapts_placeholders_for_postgres(self, monkeypatch):
+        """Anonymize UPDATE must use %s (not ?) under PostgreSQL (issue #1491)."""
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: True)
+
+        manager, mock_db, captured = self._make_manager_with_spy()
+        mock_db.fetch_one.return_value = {"count": 5}  # Mock COUNT(*) result
+
+        manager._anonymize_old_data("messages", datetime(2020, 1, 1), dry_run=False)
+
+        update_sqls = [
+            q for q in captured if "UPDATE" in q.upper() and "daily_messages" in q.lower()
+        ]
+        assert len(update_sqls) == 1
+
+        # Verify WHERE clause uses %s placeholder (not ?)
+        sql = update_sqls[0]
+        assert "WHERE" in sql.upper()
+        assert "%s" in sql  # PostgreSQL placeholder
+        assert "?" not in sql  # SQLite placeholder should not appear
+
+    def test_anonymize_old_data_uses_correct_field_names(self, monkeypatch):
+        """Anonymize UPDATE must use sender_id/sender_name (not sender/recipient)."""
+        monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
+
+        manager, mock_db, captured = self._make_manager_with_spy()
+        mock_db.fetch_one.return_value = {"count": 5}
+
+        manager._anonymize_old_data("messages", datetime(2020, 1, 1), dry_run=False)
+
+        update_sqls = [
+            q for q in captured if "UPDATE" in q.upper() and "daily_messages" in q.lower()
+        ]
+        assert len(update_sqls) == 1
+
+        # Verify correct field names
+        sql = update_sqls[0]
+        assert "sender_id" in sql.lower()
+        assert "sender_name" in sql.lower()
+        assert "sender" not in sql.lower().replace("sender_id", "").replace("sender_name", "")
+        assert "recipient" not in sql.lower()
+
     def test_run_cleanup_surfaces_save_report_failure(self, monkeypatch):
         """A _save_report failure must surface into report.errors, not be silent.
 
