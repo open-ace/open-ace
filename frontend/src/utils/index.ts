@@ -73,3 +73,15 @@ export {
   type RefreshScope,
   type QueryKeyRegistration,
 } from './queryKeyRegistry';
+
+// Error handling utilities
+export {
+  getErrorMessage,
+  parseApiError,
+  isConflictError,
+  isNotFoundError,
+  isUnauthorizedError,
+  isForbiddenError,
+  isValidationError,
+  type ApiErrorDetail,
+} from './error';

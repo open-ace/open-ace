@@ -18,6 +18,13 @@ import { useLanguage } from '@/store';
 import { useAuth } from '@/hooks';
 import { t, type Language } from '@/i18n';
 import { canManageAllTenants } from '@/utils/permissions';
+import { getErrorMessage, isConflictError } from '@/utils/error';
+import {
+  FALLBACK_PREDEFINED_PROVIDERS,
+  getProviderIcon,
+  validatePredefinedProviders,
+  sortProvidersByName,
+} from '@/constants/ssoFallback';
 import {
   Card,
   Button,
@@ -60,15 +67,6 @@ interface ModalState {
   } | null;
 }
 
-const PREDEFINED_PROVIDERS = [
-  { value: '', label: 'Custom Provider' },
-  { value: 'google', label: 'Google' },
-  { value: 'microsoft', label: 'Microsoft' },
-  { value: 'github', label: 'GitHub' },
-  { value: 'okta', label: 'Okta' },
-  { value: 'auth0', label: 'Auth0' },
-];
-
 export const SSOSettings: React.FC = () => {
   const language = useLanguage();
   const { user } = useAuth();
@@ -78,6 +76,12 @@ export const SSOSettings: React.FC = () => {
   const isAdmin = canManageAllTenants(user);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+
+  // Ref-State synchronization pattern:
+  // selectedTenantIdRef is used to avoid stale state in async callbacks and
+  // to prevent infinite effect loops when setting the default tenant after
+  // the tenant list loads. This is a common React pattern for handling
+  // asynchronous initialization that depends on the latest state value.
   const selectedTenantIdRef = useRef<number | null>(null);
   const [isLoadingTenants, setIsLoadingTenants] = useState(false);
 
@@ -85,7 +89,10 @@ export const SSOSettings: React.FC = () => {
   const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
 
   const [registeredProviders, setRegisteredProviders] = useState<SSOProvider[]>([]);
-  const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>([]);
+  // Initialize with fallback to avoid blank UI during initial load
+  const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>(
+    FALLBACK_PREDEFINED_PROVIDERS
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -182,11 +189,14 @@ export const SSOSettings: React.FC = () => {
     try {
       const result = await ssoApi.getProviders(effectiveTenantId);
       setRegisteredProviders(result.registered);
-      setPredefinedProviders(result.predefined as PredefinedProvider[]);
+      // Validate and sort predefined providers from API
+      const validatedProviders = validatePredefinedProviders(result.predefined as unknown[]);
+      const sortedProviders = sortProvidersByName(validatedProviders);
+      setPredefinedProviders(sortedProviders);
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? (err as Error).message : 'Failed to fetch providers';
+      const errorMessage = getErrorMessage(err, 'Failed to fetch providers');
       setError(errorMessage);
+      // Keep fallback providers on error
     } finally {
       setIsLoading(false);
     }
@@ -261,7 +271,7 @@ export const SSOSettings: React.FC = () => {
       setModalState((prev) => ({
         ...prev,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to load provider details',
+        error: getErrorMessage(err, 'Failed to load provider details'),
       }));
     }
   };
@@ -294,7 +304,7 @@ export const SSOSettings: React.FC = () => {
       setModalState((prev) => ({
         ...prev,
         modeLoading: false,
-        error: err instanceof Error ? err.message : 'Failed to load latest data',
+        error: getErrorMessage(err, 'Failed to load latest data'),
       }));
     }
   };
@@ -409,7 +419,7 @@ export const SSOSettings: React.FC = () => {
       // Validate URL format
       const urlFields = ['authorization_url', 'token_url', 'userinfo_url', 'redirect_uri'] as const;
       for (const field of urlFields) {
-        const value = registerData[field] || '';
+        const value = registerData[field] ?? '';
         if (value.trim() !== '' && !validateUrlFormat(value)) {
           setModalState((prev) => ({ ...prev, error: t('urlFormatError', language) }));
           return;
@@ -428,7 +438,7 @@ export const SSOSettings: React.FC = () => {
       fetchProviders();
       success(t('providerRegistered', language));
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : t('registerFailed', language);
+      const errorMsg = getErrorMessage(err, t('registerFailed', language));
       setModalState((prev) => ({ ...prev, error: errorMsg }));
     } finally {
       setIsSubmitting(false);
@@ -458,8 +468,7 @@ export const SSOSettings: React.FC = () => {
       handleCloseModal();
       fetchProviders();
     } catch (err: unknown) {
-      const errorObj = err as { message?: string; status?: number };
-      if (errorObj.status === 409) {
+      if (isConflictError(err)) {
         setModalState((prev) => ({
           ...prev,
           error: t('updatedConflict', language),
@@ -467,7 +476,7 @@ export const SSOSettings: React.FC = () => {
       } else {
         setModalState((prev) => ({
           ...prev,
-          error: errorObj.message || t('saveFailed', language),
+          error: getErrorMessage(err, t('saveFailed', language)),
         }));
       }
     } finally {
@@ -506,7 +515,7 @@ export const SSOSettings: React.FC = () => {
       fetchProviders();
       success(t('providerRegistered', language));
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : t('registerFailed', language);
+      const errorMsg = getErrorMessage(err, t('registerFailed', language));
       setModalState((prev) => ({ ...prev, error: errorMsg }));
     } finally {
       setIsSubmitting(false);
@@ -545,8 +554,7 @@ export const SSOSettings: React.FC = () => {
         success(t('testConnectionSuccess', language));
       }
     } catch (err: unknown) {
-      const errorObj = err as { message?: string };
-      toastError(errorObj.message || t('testConnectionFailed', language));
+      toastError(getErrorMessage(err, t('testConnectionFailed', language)));
     } finally {
       setTestingProvider(null);
     }
@@ -579,7 +587,8 @@ export const SSOSettings: React.FC = () => {
     if (!modalState.quickRegisterProvider) return;
 
     const provider = modalState.quickRegisterProvider;
-    let preview: { authorization_url: string; token_url: string; userinfo_url: string } | null = null;
+    let preview: { authorization_url: string; token_url: string; userinfo_url: string } | null =
+      null;
 
     // Validate Okta domain
     if (provider === 'okta') {
@@ -612,17 +621,23 @@ export const SSOSettings: React.FC = () => {
     }));
   };
 
-  // Render helpers
-  const getProviderIcon = (name: string): string => {
-    const icons: Record<string, string> = {
-      google: 'bi-google',
-      microsoft: 'bi-microsoft',
-      github: 'bi-github',
-      okta: 'bi-shield-lock',
-      auth0: 'bi-shield-lock',
-    };
-    return icons[name.toLowerCase()] || 'bi-key';
+  // Helper to get provider icon with API data fallback
+  const getProviderIconWithFallback = (provider: PredefinedProvider): string => {
+    // Priority: API icon > fallback mapping > type-based default
+    if (provider.icon) {
+      return provider.icon;
+    }
+    return getProviderIcon(provider.name, provider.type);
   };
+
+  // Generate select options from predefined providers (with Custom Provider option)
+  const providerSelectOptions = [
+    { value: '', label: t('customProvider', language) ?? 'Custom Provider' },
+    ...sortProvidersByName(predefinedProviders).map((p) => ({
+      value: p.name,
+      label: p.display_name,
+    })),
+  ];
 
   // Loading state for tenant list (admin only)
   if (isAdmin && isLoadingTenants) {
@@ -804,7 +819,10 @@ export const SSOSettings: React.FC = () => {
                       >
                         {provider.name}
                       </strong>
-                      <i className="bi bi-info-circle text-muted ms-1" style={{ fontSize: '0.75rem' }} />
+                      <i
+                        className="bi bi-info-circle text-muted ms-1"
+                        style={{ fontSize: '0.75rem' }}
+                      />
                     </td>
                     <td>
                       <Badge variant="secondary">{provider.type.toUpperCase()}</Badge>
@@ -863,7 +881,7 @@ export const SSOSettings: React.FC = () => {
             <div key={provider.name} className="col-md-4">
               <div className="border rounded p-3 h-100">
                 <div className="d-flex align-items-center mb-2">
-                  <i className={cn('bi me-2 fs-4', getProviderIcon(provider.name))} />
+                  <i className={cn('bi me-2 fs-4', getProviderIconWithFallback(provider))} />
                   <div>
                     <strong>{provider.display_name}</strong>
                     <small className="d-block text-muted">{provider.type.toUpperCase()}</small>
@@ -904,7 +922,11 @@ export const SSOSettings: React.FC = () => {
               <Button variant="secondary" onClick={handleCloseModal}>
                 {t('close', language)}
               </Button>
-              <Button variant="primary" onClick={switchToEditMode} disabled={modalState.modeLoading}>
+              <Button
+                variant="primary"
+                onClick={switchToEditMode}
+                disabled={modalState.modeLoading}
+              >
                 {modalState.modeLoading ? (
                   <span className="spinner-border spinner-border-sm me-1" />
                 ) : (
@@ -915,7 +937,10 @@ export const SSOSettings: React.FC = () => {
             </>
           ) : modalState.mode === 'edit' ? (
             <>
-              <Button variant="secondary" onClick={() => setModalState((prev) => ({ ...prev, mode: 'detail' }))}>
+              <Button
+                variant="secondary"
+                onClick={() => setModalState((prev) => ({ ...prev, mode: 'detail' }))}
+              >
                 {t('cancel', language)}
               </Button>
               <Button variant="primary" onClick={handleEditSubmit} loading={isSubmitting}>
@@ -932,7 +957,8 @@ export const SSOSettings: React.FC = () => {
                 onClick={handleQuickRegisterSubmit}
                 loading={isSubmitting}
                 disabled={
-                  (modalState.quickRegisterProvider === 'okta' || modalState.quickRegisterProvider === 'auth0') &&
+                  (modalState.quickRegisterProvider === 'okta' ||
+                    modalState.quickRegisterProvider === 'auth0') &&
                   !modalState.domainPreview
                 }
               >
@@ -991,6 +1017,8 @@ export const SSOSettings: React.FC = () => {
                 language={language}
                 validationErrors={validationErrors}
                 onValidateUrl={handleValidateUrl}
+                providerOptions={providerSelectOptions}
+                predefinedProviders={predefinedProviders}
               />
             )}
 
@@ -1071,11 +1099,11 @@ const ProviderDetailView: React.FC<ProviderDetailViewProps> = ({
         )}
         <div className="col-md-6">
           <label className="form-label text-muted">{t('redirectUri', language)}</label>
-          <p className="text-break">{data.redirect_uri || '-'}</p>
+          <p className="text-break">{data.redirect_uri ?? '-'}</p>
         </div>
         <div className="col-md-6">
           <label className="form-label text-muted">{t('scope', language)}</label>
-          <p>{data.scope?.join(', ') || '-'}</p>
+          <p>{data.scope?.join(', ') ?? '-'}</p>
         </div>
       </div>
 
@@ -1093,7 +1121,10 @@ const ProviderDetailView: React.FC<ProviderDetailViewProps> = ({
           <h6>{t('testResults', language)}</h6>
           <ul className="list-group">
             {testResults.map((result, index) => (
-              <li key={index} className="list-group-item d-flex justify-content-between align-items-center">
+              <li
+                key={index}
+                className="list-group-item d-flex justify-content-between align-items-center"
+              >
                 <span>
                   <i
                     className={cn(
@@ -1104,7 +1135,7 @@ const ProviderDetailView: React.FC<ProviderDetailViewProps> = ({
                   {result.check}
                 </span>
                 <Badge variant={result.success ? 'success' : 'danger'}>
-                  {result.success ? t('passed', language) : result.error || t('failed', language)}
+                  {result.success ? t('passed', language) : (result.error ?? t('failed', language))}
                 </Badge>
               </li>
             ))}
@@ -1122,7 +1153,12 @@ interface ProviderEditFormProps {
   language: Language;
 }
 
-const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onChange, language }) => {
+const ProviderEditForm: React.FC<ProviderEditFormProps> = ({
+  data,
+  formData,
+  onChange,
+  language,
+}) => {
   const [showSecretInput, setShowSecretInput] = useState(false);
 
   return (
@@ -1130,7 +1166,7 @@ const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onC
       <div className="col-md-6">
         <label className="form-label">{t('clientId', language)}</label>
         <TextInput
-          value={formData.client_id || data.client_id}
+          value={formData.client_id ?? data.client_id}
           onChange={(value) => onChange({ ...formData, client_id: value })}
           placeholder={t('enterClientId', language)}
         />
@@ -1140,7 +1176,7 @@ const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onC
         {showSecretInput ? (
           <TextInput
             type="password"
-            value={formData.client_secret || ''}
+            value={formData.client_secret ?? ''}
             onChange={(value) => onChange({ ...formData, client_secret: value })}
             placeholder={t('enterClientSecret', language)}
           />
@@ -1154,7 +1190,7 @@ const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onC
       <div className="col-md-6">
         <label className="form-label">{t('redirectUri', language)}</label>
         <TextInput
-          value={formData.redirect_uri || data.redirect_uri || ''}
+          value={formData.redirect_uri ?? data.redirect_uri ?? ''}
           onChange={(value) => onChange({ ...formData, redirect_uri: value })}
           placeholder={t('enterRedirectUri', language)}
         />
@@ -1162,7 +1198,7 @@ const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onC
       <div className="col-md-6">
         <label className="form-label">{t('scope', language)}</label>
         <TextInput
-          value={(formData.scope || data.scope || []).join(' ')}
+          value={(formData.scope ?? data.scope ?? []).join(' ')}
           onChange={(value) =>
             onChange({
               ...formData,
@@ -1175,14 +1211,14 @@ const ProviderEditForm: React.FC<ProviderEditFormProps> = ({ data, formData, onC
       <div className="col-md-6">
         <label className="form-label">{t('authorizationUrl', language)}</label>
         <TextInput
-          value={formData.authorization_url || data.authorization_url}
+          value={formData.authorization_url ?? data.authorization_url}
           onChange={(value) => onChange({ ...formData, authorization_url: value })}
         />
       </div>
       <div className="col-md-6">
         <label className="form-label">{t('tokenUrl', language)}</label>
         <TextInput
-          value={formData.token_url || data.token_url}
+          value={formData.token_url ?? data.token_url}
           onChange={(value) => onChange({ ...formData, token_url: value })}
         />
       </div>
@@ -1196,6 +1232,8 @@ interface ProviderRegisterFormProps {
   language: Language;
   validationErrors?: Record<string, string>;
   onValidateUrl?: (field: string, value: string) => void;
+  providerOptions: Array<{ value: string; label: string }>;
+  predefinedProviders: PredefinedProvider[];
 }
 
 const ProviderRegisterForm: React.FC<ProviderRegisterFormProps> = ({
@@ -1204,6 +1242,8 @@ const ProviderRegisterForm: React.FC<ProviderRegisterFormProps> = ({
   language,
   validationErrors = {},
   onValidateUrl,
+  providerOptions,
+  predefinedProviders,
 }) => {
   // Local state for client secret confirmation
   const [clientSecretConfirm, setClientSecretConfirm] = useState('');
@@ -1215,12 +1255,18 @@ const ProviderRegisterForm: React.FC<ProviderRegisterFormProps> = ({
     setSecretMismatch(formData.client_secret !== value);
   };
 
+  // Get provider type from predefined providers
+  const getProviderType = (providerName: string): 'oauth2' | 'oidc' => {
+    const provider = predefinedProviders.find((p) => p.name === providerName);
+    return provider?.type ?? 'oauth2';
+  };
+
   return (
     <div className="row g-3">
       <div className="col-12">
         <label className="form-label">{t('selectProvider', language)}</label>
         <Select
-          options={PREDEFINED_PROVIDERS}
+          options={providerOptions}
           value={formData.predefined ? formData.name : ''}
           onChange={(value) => {
             const isPredefined = value !== '';
@@ -1228,7 +1274,7 @@ const ProviderRegisterForm: React.FC<ProviderRegisterFormProps> = ({
               ...formData,
               name: value,
               predefined: isPredefined,
-              provider_type: value === 'okta' || value === 'auth0' ? 'oidc' : 'oauth2',
+              provider_type: isPredefined ? getProviderType(value) : 'oauth2',
             });
           }}
         />
@@ -1307,7 +1353,7 @@ const ProviderRegisterForm: React.FC<ProviderRegisterFormProps> = ({
       <div className="col-md-6">
         <label className="form-label">{t('scope', language)}</label>
         <TextInput
-          value={(formData.scope || []).join(' ')}
+          value={(formData.scope ?? []).join(' ')}
           onChange={(value) =>
             onChange({
               ...formData,
@@ -1422,9 +1468,7 @@ const QuickRegisterForm: React.FC<QuickRegisterFormProps> = ({
               value={domainUrl}
               onChange={onDomainChange}
               placeholder={
-                provider === 'okta'
-                  ? 'https://example.okta.com'
-                  : 'https://example.auth0.com'
+                provider === 'okta' ? 'https://example.okta.com' : 'https://example.auth0.com'
               }
             />
             <small className="text-muted">{t('useStandardDomainHint', language)}</small>
