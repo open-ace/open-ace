@@ -1074,6 +1074,20 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: 'Max Sessions/User',
     quota: 'Quota',
 
+    // Tenant i18n fixes (Issue #1547)
+    tenantAllStatuses: 'All Statuses',
+    tenantAllPlans: 'All Plans',
+    tenantPlanStandard: 'Standard',
+    tenantPlanPremium: 'Premium',
+    tenantPlanEnterprise: 'Enterprise',
+    tenantStatusActive: 'Active',
+    tenantStatusSuspended: 'Suspended',
+    tenantStatusTrial: 'Trial',
+    tenantTrialDays: 'Trial Days',
+    tenantTrialDaysHelp: 'Number of days for trial period. Leave empty for active tenant.',
+    validationTrialDaysPositive: 'Trial days must be a positive integer',
+    validationTrialDaysMax: 'Trial days cannot exceed 365',
+
     // SSO Settings
     registeredProviders: 'Registered Providers',
     noProvidersRegistered: 'No SSO providers registered',
@@ -2592,6 +2606,20 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: '每用户最大会话数',
     quota: '配额',
 
+    // Tenant i18n fixes (Issue #1547)
+    tenantAllStatuses: '所有状态',
+    tenantAllPlans: '所有计划',
+    tenantPlanStandard: '标准',
+    tenantPlanPremium: '高级',
+    tenantPlanEnterprise: '企业',
+    tenantStatusActive: '活跃',
+    tenantStatusSuspended: '已暂停',
+    tenantStatusTrial: '试用',
+    tenantTrialDays: '试用期天数',
+    tenantTrialDaysHelp: '试用期天数。留空则创建活跃租户。',
+    validationTrialDaysPositive: '试用期天数必须为正整数',
+    validationTrialDaysMax: '试用期天数不能超过365天',
+
     // SSO Settings
     registeredProviders: '已注册提供者',
     noProvidersRegistered: '暂无已注册的 SSO 提供者',
@@ -3998,6 +4026,20 @@ export const translations: Record<Language, Translations> = {
     maxUsers: '最大ユーザー数',
     maxSessionsPerUser: 'ユーザー最大セッション数',
 
+    // Tenant i18n fixes (Issue #1547)
+    tenantAllStatuses: 'すべてのステータス',
+    tenantAllPlans: 'すべてのプラン',
+    tenantPlanStandard: 'スタンダード',
+    tenantPlanPremium: 'プレミアム',
+    tenantPlanEnterprise: 'エンタープライズ',
+    tenantStatusActive: 'アクティブ',
+    tenantStatusSuspended: '停止',
+    tenantStatusTrial: 'トライアル',
+    tenantTrialDays: 'トライアル期間(日)',
+    tenantTrialDaysHelp: 'トライアル期間の日数。空の場合はアクティブテナントになります。',
+    validationTrialDaysPositive: 'トライアル期間は正の整数で入力してください',
+    validationTrialDaysMax: 'トライアル期間は365日以内で入力してください',
+
     // Insights
     insights: 'AI インサイト',
     insightsTitle: 'AI 会話インサイトレポート',
@@ -5304,6 +5346,20 @@ export const translations: Record<Language, Translations> = {
     dailyRequestLimit: '일간 요청 제한',
     maxUsers: '최대 사용자',
     maxSessionsPerUser: '사용자 최대 세션',
+
+    // Tenant i18n fixes (Issue #1547)
+    tenantAllStatuses: '모든 상태',
+    tenantAllPlans: '모든 플랜',
+    tenantPlanStandard: '스탠다드',
+    tenantPlanPremium: '프리미엄',
+    tenantPlanEnterprise: '엔터프라이즈',
+    tenantStatusActive: '활성',
+    tenantStatusSuspended: '일시 중단',
+    tenantStatusTrial: '체험',
+    tenantTrialDays: '체험 기간(일)',
+    tenantTrialDaysHelp: '체험 기간 일수. 비워두면 활성 테넌트가 생성됩니다.',
+    validationTrialDaysPositive: '체험 기간은 양의 정수여야 합니다',
+    validationTrialDaysMax: '체험 기간은 365일 이하로 입력하세요',
 
     // Insights
     insights: 'AI 인사이트',
