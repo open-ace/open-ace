@@ -225,7 +225,7 @@ def downgrade() -> None:
                 daily_token_quota INTEGER,
                 monthly_token_quota INTEGER,
                 daily_request_quota INTEGER,
-                monthly_token_quota INTEGER,
+                monthly_request_quota INTEGER,
                 tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL
             )
         """
