@@ -54,6 +54,10 @@ export const translations: Record<Language, Translations> = {
     date: 'Date',
     role: 'Role',
     selectRole: 'Select Role',
+    roleAdmin: 'Admin',
+    roleManager: 'Manager',
+    roleUser: 'User',
+    roleReadonly: 'Readonly',
     searchMessages: 'Search messages...',
     // Message role labels
     messageRoleUser: 'User',
@@ -1612,6 +1616,10 @@ export const translations: Record<Language, Translations> = {
     date: '日期',
     role: '角色',
     selectRole: '选择角色',
+    roleAdmin: '管理员',
+    roleManager: '经理',
+    roleUser: '用户',
+    roleReadonly: '只读',
     searchMessages: '搜索消息...',
     // Message role labels
     messageRoleUser: '用户',
@@ -3143,6 +3151,10 @@ export const translations: Record<Language, Translations> = {
     date: '日付',
     role: '役割',
     selectRole: '役割を選択',
+    roleAdmin: '管理者',
+    roleManager: 'マネージャー',
+    roleUser: 'ユーザー',
+    roleReadonly: '読み取り専用',
     searchMessages: 'メッセージを検索...',
     // Message role labels
     messageRoleUser: 'ユーザー',
@@ -4466,6 +4478,10 @@ export const translations: Record<Language, Translations> = {
     date: '날짜',
     role: '역할',
     selectRole: '역할 선택',
+    roleAdmin: '관리자',
+    roleManager: '매니저',
+    roleUser: '사용자',
+    roleReadonly: '읽기 전용',
     searchMessages: '메시지 검색...',
     // Message role labels
     messageRoleUser: '사용자',

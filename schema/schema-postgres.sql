@@ -1414,7 +1414,7 @@ CREATE TABLE users (
     must_change_password boolean DEFAULT false,
     avatar_url character varying(500),
     auto_mapping_enabled boolean DEFAULT true,
-    CONSTRAINT chk_users_role CHECK (((role)::text = ANY (ARRAY[('admin'::character varying)::text, ('manager'::character varying)::text, ('user'::character varying)::text])))
+    CONSTRAINT chk_users_role CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
 CREATE SEQUENCE users_id_seq

@@ -915,7 +915,7 @@ CREATE TABLE users (
  must_change_password INTEGER DEFAULT 0,
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
-    CONSTRAINT chk_users_role CHECK ((role IN (('admin'), ('manager'), ('user'))))
+    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (

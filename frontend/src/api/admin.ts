@@ -9,7 +9,7 @@ export interface AdminUser {
   id: number;
   username: string;
   email: string;
-  role: 'admin' | 'user' | 'viewer';
+  role: 'admin' | 'manager' | 'user' | 'readonly';
   is_active: boolean;
   created_at: string;
   last_login?: string;
@@ -26,7 +26,7 @@ export interface CreateUserRequest {
   username: string;
   email: string;
   password: string;
-  role?: 'admin' | 'user' | 'viewer';
+  role?: 'admin' | 'manager' | 'user' | 'readonly';
   system_account?: string;
   tenant_id?: number;
 }
@@ -34,7 +34,7 @@ export interface CreateUserRequest {
 export interface UpdateUserRequest {
   username?: string;
   email?: string;
-  role?: 'admin' | 'user' | 'viewer';
+  role?: 'admin' | 'manager' | 'user' | 'readonly';
   is_active?: boolean;
   system_account?: string;
   password?: string;
