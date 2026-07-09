@@ -51,7 +51,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   className,
 }) => {
   return (
-    <div className={cn('text-center py-5', className)}>
+    <div className={cn('empty-state text-center py-5', className)}>
       <i className={cn('bi', icon, 'fs-1 text-muted d-block mb-3')} />
       <h5 className="text-muted">{title}</h5>
       {description && <p className="text-muted">{description}</p>}
