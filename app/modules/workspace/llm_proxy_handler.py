@@ -16,6 +16,21 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 
 logger = logging.getLogger(__name__)
 
+# Shared ContentFilter instance for performance (uses cached rules)
+_content_filter_instance = None
+
+
+def _get_content_filter():
+    """Get or create shared ContentFilter instance."""
+    global _content_filter_instance
+    if _content_filter_instance is None:
+        from app.modules.governance.content_filter import ContentFilter
+        from app.repositories.governance_repo import GovernanceRepository
+
+        governance_repo = GovernanceRepository()
+        _content_filter_instance = ContentFilter(governance_repo=governance_repo)
+    return _content_filter_instance
+
 
 def _extract_requested_model() -> str | None:
     """Best-effort extraction of the requested model from the proxied request body."""
@@ -561,11 +576,8 @@ def _check_content_filter(
         combined_content = " ".join(user_contents)
 
         from app.modules.governance.audit_logger import AuditAction, AuditLogger
-        from app.modules.governance.content_filter import ContentFilter
-        from app.repositories.governance_repo import GovernanceRepository
 
-        governance_repo = GovernanceRepository()
-        content_filter = ContentFilter(governance_repo=governance_repo)
+        content_filter = _get_content_filter()
         audit_logger = AuditLogger()
 
         result = content_filter.check_content(combined_content)
