@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from flask import Response, jsonify, request, stream_with_context
+from flask import Response, g, jsonify, request, stream_with_context
 
 # ── Model-gateway seam (removable) ────────────────────────────────────────
 # When the LiteLLM-compatible model gateway is enabled, ``get_gateway_planner()``
@@ -511,6 +511,138 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
         )
 
 
+def _check_content_filter(
+    user_id: int,
+    username: str | None,
+    request_body: bytes | None,
+) -> tuple[Response, int] | str | None:
+    """Check user input content for sensitive information.
+
+    Args:
+        user_id: User ID for audit logging.
+        username: Username for audit logging.
+        request_body: Raw request body bytes.
+
+    Returns:
+        - tuple(Response, int): Error response if blocked (403)
+        - str: Redacted content if action=redact (caller should modify request)
+        - None: If passed or action=warn (caller should continue normally)
+    """
+    if not request_body:
+        return None
+
+    try:
+        req_data = json.loads(request_body)
+        messages = req_data.get("messages", [])
+        if not isinstance(messages, list) or not messages:
+            return None
+
+        # Extract user messages for content filter check
+        user_contents = []
+        for msg in reversed(messages):
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    # Handle multi-part content
+                    text_parts = []
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            text_parts.append(part.get("text", ""))
+                    user_contents.append(" ".join(text_parts))
+                elif isinstance(content, str):
+                    user_contents.append(content)
+
+        if not user_contents:
+            return None
+
+        # Join all user messages for filtering check
+        combined_content = " ".join(user_contents)
+
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+        from app.modules.governance.content_filter import ContentFilter
+        from app.repositories.governance_repo import GovernanceRepository
+
+        governance_repo = GovernanceRepository()
+        content_filter = ContentFilter(governance_repo=governance_repo)
+        audit_logger = AuditLogger()
+
+        result = content_filter.check_content(combined_content)
+
+        if result.action == "block":
+            # Log the block action
+            audit_logger.log_action(
+                action=AuditAction.CONTENT_BLOCKED,
+                user_id=user_id,
+                username=username,
+                resource_type="content",
+                severity="high",
+                details={
+                    "risk_level": result.risk_level,
+                    "matched_rules": result.matched_rules,
+                    "message": result.message,
+                },
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": result.message or "Content blocked by content filter",
+                            "type": "content_blocked",
+                            "matched_rules": result.matched_rules,
+                            "suggestion": result.suggestion,
+                        }
+                    }
+                ),
+                403,
+            )
+
+        if result.action == "warn":
+            # Log the warn action
+            audit_logger.log_action(
+                action=AuditAction.CONTENT_WARNED,
+                user_id=user_id,
+                username=username,
+                resource_type="content",
+                severity="medium",
+                details={
+                    "risk_level": result.risk_level,
+                    "matched_rules": result.matched_rules,
+                    "message": result.message,
+                },
+            )
+            # Warn: continue normally, the warning is logged but not returned to user
+            # (Frontend will show toast based on response headers or separate API)
+            return None
+
+        if result.action == "redact":
+            # Log the redact action
+            audit_logger.log_action(
+                action=AuditAction.CONTENT_REDACTED,
+                user_id=user_id,
+                username=username,
+                resource_type="content",
+                severity="medium",
+                details={
+                    "risk_level": result.risk_level,
+                    "matched_rules": result.matched_rules,
+                    "original_content": result.original_content,
+                    "redacted_content": result.redacted_content,
+                },
+            )
+            # Redact: return redacted content for caller to modify request
+            return result.redacted_content or combined_content
+
+        return None
+
+    except json.JSONDecodeError:
+        return None
+    except Exception as exc:
+        logger.warning("Content filter check failed, allowing request: %s", exc)
+        return None
+
+
 def _forward_via_gateway(
     plan: Any,
     *,
@@ -660,6 +792,22 @@ def handle_llm_proxy_request(
             ),
             429,
         )
+
+    # ── Content filter check for user input ──────────────────────────────
+    # Check user messages for sensitive content before forwarding to LLM.
+    # Block: return 403, Warn: log and continue, Redact: modify content.
+    username = g.user.get("username") if hasattr(g, "user") else None
+    content_filter_result = _check_content_filter(
+        user_id=user_id,
+        username=username,
+        request_body=request.get_data(),
+    )
+    if isinstance(content_filter_result, tuple):
+        # Block: return error response
+        return content_filter_result
+    # Note: redact handling would require modifying request body, which is
+    # complex for streaming. For now, we just log and continue for warn/redact.
+    # ── end content filter check ─────────────────────────────────────────
 
     requested_model = _extract_requested_model()
 
