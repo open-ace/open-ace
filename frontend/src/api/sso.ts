@@ -42,6 +42,25 @@ export interface RegisterProviderRequest {
   extra_params?: Record<string, unknown>;
 }
 
+export interface SSOProviderDetail extends SSOProvider {
+  tenant_id?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UpdateProviderRequest {
+  client_id?: string;
+  client_secret?: string;
+  redirect_uri?: string;
+  scope?: string;
+  authorization_url?: string;
+  token_url?: string;
+  userinfo_url?: string;
+  issuer_url?: string;
+  extra_params?: Record<string, unknown>;
+  updated_at?: string;
+}
+
 export interface SSOIdentity {
   provider_name: string;
   provider_user_id: string;
@@ -76,6 +95,14 @@ export const ssoApi = {
 
   async disableProvider(providerName: string): Promise<void> {
     await apiClient.delete<{ message: string }>(`/api/sso/providers/${providerName}`);
+  },
+
+  async getProviderDetail(providerName: string): Promise<SSOProviderDetail> {
+    return apiClient.get<SSOProviderDetail>(`/api/sso/providers/${providerName}`);
+  },
+
+  async updateProvider(providerName: string, data: UpdateProviderRequest): Promise<void> {
+    await apiClient.put<{ message: string }>(`/api/sso/providers/${providerName}`, data);
   },
 
   async startLogin(
