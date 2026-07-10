@@ -992,3 +992,382 @@ def create_security_alert(
         username=username,
         language=language,
     )
+
+
+# =============================================================================
+# Scene-Specific Alert Functions (Issue #1489)
+# =============================================================================
+# These functions encapsulate severity judgment logic for common scenarios,
+# providing developers with easy-to-use APIs without needing to understand
+# severity determination details.
+
+
+def create_service_down_alert(
+    service_name: str,
+    details: str,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create a service down alert with critical severity.
+
+    Used when a critical service becomes unavailable or crashes.
+
+    Args:
+        service_name: Name of the service that is down.
+        details: Details about the failure (error message, cause, etc.).
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with severity=critical.
+    """
+    notifier = get_alert_notifier()
+    title = f"Service Down: {service_name}"
+    message = f"The service '{service_name}' is unavailable. Details: {details}"
+
+    return notifier.create_alert(
+        alert_type=AlertType.SYSTEM.value,
+        severity=AlertSeverity.CRITICAL.value,
+        title=title,
+        message=message,
+        user_id=user_id,
+        metadata={
+            "service_name": service_name,
+            "details": details,
+        },
+        action_url="/admin/services",
+        action_text="View Services",
+        language=language,
+    )
+
+
+def create_resource_alert(
+    resource_type: str,
+    current: float,
+    limit: float,
+    threshold_warning: float = 0.8,
+    threshold_critical: float = 0.95,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create a resource shortage alert with automatic severity determination.
+
+    Severity is automatically determined based on usage percentage:
+    - usage >= threshold_critical (95%): critical
+    - usage >= threshold_warning (80%): warning
+    - usage < threshold_warning: info
+
+    Args:
+        resource_type: Type of resource (e.g., "memory", "cpu", "disk", "connections").
+        current: Current usage value.
+        limit: Maximum limit value.
+        threshold_warning: Warning threshold as ratio (default 0.8 = 80%).
+        threshold_critical: Critical threshold as ratio (default 0.95 = 95%).
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with automatically determined severity.
+    """
+    notifier = get_alert_notifier()
+    usage_percent = (current / limit) * 100 if limit > 0 else 0
+    usage_ratio = current / limit if limit > 0 else 0
+
+    if usage_ratio >= threshold_critical:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Resource Critical: {resource_type.title()}"
+        message = (
+            f"Resource '{resource_type}' is critically low. "
+            f"Current usage: {usage_percent:.1f}% ({current:.2f}/{limit:.2f}). "
+            f"Immediate action required."
+        )
+    elif usage_ratio >= threshold_warning:
+        severity = AlertSeverity.WARNING.value
+        title = f"Resource Warning: {resource_type.title()}"
+        message = (
+            f"Resource '{resource_type}' is approaching limit. "
+            f"Current usage: {usage_percent:.1f}% ({current:.2f}/{limit:.2f})."
+        )
+    else:
+        severity = AlertSeverity.INFO.value
+        title = f"Resource Notice: {resource_type.title()}"
+        message = (
+            f"Resource '{resource_type}' usage is normal. "
+            f"Current usage: {usage_percent:.1f}% ({current:.2f}/{limit:.2f})."
+        )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SYSTEM.value,
+        severity=severity,
+        title=title,
+        message=message,
+        user_id=user_id,
+        metadata={
+            "resource_type": resource_type,
+            "usage_percent": usage_percent,
+            "current": current,
+            "limit": limit,
+            "threshold_warning": threshold_warning,
+            "threshold_critical": threshold_critical,
+        },
+        action_url="/admin/resources",
+        action_text="View Resources",
+        language=language,
+    )
+
+
+def create_config_error_alert(
+    config_key: str,
+    error_details: str,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create a configuration error alert with warning severity.
+
+    Used when a configuration setting is invalid, missing, or causes issues.
+
+    Args:
+        config_key: The configuration key that has the error.
+        error_details: Details about the configuration error.
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with severity=warning.
+    """
+    notifier = get_alert_notifier()
+    title = f"Configuration Error: {config_key}"
+    message = (
+        f"Configuration '{config_key}' has an error. "
+        f"Details: {error_details}. Please review and fix the configuration."
+    )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SYSTEM.value,
+        severity=AlertSeverity.WARNING.value,
+        title=title,
+        message=message,
+        user_id=user_id,
+        metadata={
+            "config_key": config_key,
+            "error_type": "config_error",
+            "error_details": error_details,
+        },
+        action_url="/admin/config",
+        action_text="View Config",
+        language=language,
+    )
+
+
+def create_api_error_alert(
+    api_name: str,
+    error_code: int,
+    error_message: str,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create an API error alert with warning severity.
+
+    Used when an external API call fails with an error.
+
+    Args:
+        api_name: Name of the API that failed.
+        error_code: HTTP error code or API-specific error code.
+        error_message: Error message from the API.
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with severity=warning.
+    """
+    notifier = get_alert_notifier()
+    title = f"API Error: {api_name}"
+    message = (
+        f"API '{api_name}' returned an error. "
+        f"Error code: {error_code}. Message: {error_message}."
+    )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SYSTEM.value,
+        severity=AlertSeverity.WARNING.value,
+        title=title,
+        message=message,
+        user_id=user_id,
+        metadata={
+            "api_name": api_name,
+            "error_code": error_code,
+            "error_message": error_message,
+        },
+        action_url="/admin/api-status",
+        action_text="View API Status",
+        language=language,
+    )
+
+
+def create_auth_failure_alert(
+    username: str,
+    failure_count: int,
+    threshold: int = 5,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create an authentication failure alert with automatic severity determination.
+
+    Severity is automatically determined based on failure count:
+    - failure_count < threshold: warning (single or few failures)
+    - failure_count >= threshold: critical (repeated failures, potential attack)
+
+    Args:
+        username: Username that failed authentication.
+        failure_count: Number of consecutive failed attempts.
+        threshold: Threshold for upgrading to critical (default 5).
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with automatically determined severity.
+    """
+    notifier = get_alert_notifier()
+
+    if failure_count >= threshold:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Repeated Authentication Failures: {username}"
+        message = (
+            f"User '{username}' has {failure_count} consecutive authentication failures. "
+            f"This exceeds the threshold of {threshold} and may indicate a security threat."
+        )
+    else:
+        severity = AlertSeverity.WARNING.value
+        title = f"Authentication Failure: {username}"
+        message = (
+            f"User '{username}' failed authentication. "
+            f"Failure count: {failure_count} (threshold: {threshold})."
+        )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SECURITY.value,
+        severity=severity,
+        title=title,
+        message=message,
+        user_id=user_id,
+        username=username,
+        metadata={
+            "failure_count": failure_count,
+            "threshold": threshold,
+        },
+        action_url="/settings/security",
+        action_text="View Security",
+        language=language,
+    )
+
+
+def create_permission_violation_alert(
+    username: str,
+    resource: str,
+    action: str,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create a permission violation alert with critical severity.
+
+    Used when a user attempts to access a resource or perform an action
+    without proper permissions.
+
+    Args:
+        username: Username that attempted the unauthorized action.
+        resource: Resource that was accessed.
+        action: Action that was attempted (e.g., "read", "write", "delete").
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with severity=critical.
+    """
+    notifier = get_alert_notifier()
+    title = f"Permission Violation: {username}"
+    message = (
+        f"User '{username}' attempted unauthorized action '{action}' "
+        f"on resource '{resource}'. This is a security violation."
+    )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SECURITY.value,
+        severity=AlertSeverity.CRITICAL.value,
+        title=title,
+        message=message,
+        user_id=user_id,
+        username=username,
+        metadata={
+            "resource": resource,
+            "action": action,
+        },
+        action_url="/audit",
+        action_text="View Audit Log",
+        language=language,
+    )
+
+
+def create_suspicious_activity_alert(
+    username: str,
+    activity_type: str,
+    risk_score: float,
+    language: str = "en",
+    user_id: Optional[int] = None,
+) -> Alert:
+    """
+    Create a suspicious activity alert with automatic severity determination.
+
+    Severity is automatically determined based on risk score (0-100):
+    - risk_score < 50: warning (moderate risk)
+    - risk_score >= 50: critical (high risk)
+
+    Args:
+        username: Username associated with the suspicious activity.
+        activity_type: Type of suspicious activity detected.
+        risk_score: Risk score from 0 to 100 (higher = more risky).
+        language: Language for email notification (en, zh, ja, ko).
+        user_id: Optional target user ID for the alert.
+
+    Returns:
+        Alert: The created alert with automatically determined severity.
+    """
+    notifier = get_alert_notifier()
+
+    # Risk score threshold: 50
+    if risk_score >= 50:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"High-Risk Suspicious Activity: {username}"
+        message = (
+            f"High-risk suspicious activity detected for user '{username}'. "
+            f"Activity type: {activity_type}. Risk score: {risk_score:.1f}/100. "
+            f"Immediate investigation recommended."
+        )
+    else:
+        severity = AlertSeverity.WARNING.value
+        title = f"Suspicious Activity Detected: {username}"
+        message = (
+            f"Suspicious activity detected for user '{username}'. "
+            f"Activity type: {activity_type}. Risk score: {risk_score:.1f}/100."
+        )
+
+    return notifier.create_alert(
+        alert_type=AlertType.SECURITY.value,
+        severity=severity,
+        title=title,
+        message=message,
+        user_id=user_id,
+        username=username,
+        metadata={
+            "activity_type": activity_type,
+            "risk_score": risk_score,
+        },
+        action_url="/audit",
+        action_text="View Audit Log",
+        language=language,
+    )
