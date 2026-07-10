@@ -40,8 +40,12 @@ def upgrade() -> None:
     op.create_table(
         "aggregation_locks",
         sa.Column("lock_key", sa.String(100), primary_key=True, comment="Lock key identifier"),
-        sa.Column("acquired_at", sa.DateTime(), nullable=False, comment="Lock acquisition timestamp"),
-        sa.Column("timeout_seconds", sa.Integer(), nullable=False, comment="Lock timeout in seconds"),
+        sa.Column(
+            "acquired_at", sa.DateTime(), nullable=False, comment="Lock acquisition timestamp"
+        ),
+        sa.Column(
+            "timeout_seconds", sa.Integer(), nullable=False, comment="Lock timeout in seconds"
+        ),
     )
 
     # 1. Create aggregation_history table
