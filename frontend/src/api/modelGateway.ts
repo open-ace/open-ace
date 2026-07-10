@@ -19,17 +19,48 @@ export interface ModelGatewayConfig {
   updated_at?: string;
 }
 
+export interface ModelGatewayStatus {
+  enabled: boolean;
+  env_override: boolean;
+  env_config_complete: boolean;
+  db_config_complete: boolean;
+  config_complete: boolean;
+  config_source: 'env' | 'database' | 'none';
+  missing_fields: string[];
+  version: number;
+  mode: string;
+  base_url: string | null;
+  api_key_masked: string | null;
+  model_prefix_mode: boolean;
+  model_prefix: string | null;
+}
+
 export interface ModelGatewayTestResult {
   ok: boolean;
   status: number | null;
   message: string;
 }
 
+export interface SetEnabledResponse {
+  success: boolean;
+  enabled: boolean;
+  version: number;
+  message: string;
+  effective_time: string;
+}
+
+export interface BackupVersion {
+  index: number;
+  path: string;
+  timestamp: string;
+  size: number;
+}
+
 export const modelGatewayApi = {
-  async getConfig(): Promise<ModelGatewayConfig | null> {
+  async getConfig(): Promise<ModelGatewayStatus | null> {
     const response = await apiClient.get<{
       success: boolean;
-      data: ModelGatewayConfig | null;
+      data: ModelGatewayStatus | null;
       message?: string;
     }>('/api/management/model-gateway-config');
     return response.data;
@@ -46,6 +77,34 @@ export const modelGatewayApi = {
       data: ModelGatewayConfig;
       message?: string;
     }>('/api/management/model-gateway-config', config);
+    return response.data;
+  },
+
+  async setEnabled(enabled: boolean, version: number): Promise<SetEnabledResponse> {
+    const response = await apiClient.put<{
+      success: boolean;
+      enabled: boolean;
+      version: number;
+      message: string;
+      effective_time: string;
+    }>('/api/management/model-gateway-config/enabled', { enabled, version });
+    return response;
+  },
+
+  async rollback(backupIndex: number): Promise<ModelGatewayConfig> {
+    const response = await apiClient.post<{
+      success: boolean;
+      data: ModelGatewayConfig;
+      message: string;
+    }>('/api/management/model-gateway-config/rollback', { backup_index: backupIndex });
+    return response.data;
+  },
+
+  async getBackups(): Promise<BackupVersion[]> {
+    const response = await apiClient.get<{
+      success: boolean;
+      data: BackupVersion[];
+    }>('/api/management/model-gateway-config/backups');
     return response.data;
   },
 

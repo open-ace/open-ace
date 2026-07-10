@@ -3,8 +3,11 @@ Configuration utility for reading values from ~/.open-ace/config.json.
 
 Configuration changes require a server restart to take full effect:
 the autonomous scheduler is started once at boot and cannot be toggled
-at runtime. The API guard reads the cached value (refreshed every 60 s)
+at runtime. The API guard reads the cached value (refreshed every 10 s)
 to allow near-immediate enforcement of a disable toggle without restart.
+
+Note: TTL was reduced from 60s to 10s to improve responsiveness for
+model_gateway configuration changes.
 """
 
 from __future__ import annotations
@@ -20,15 +23,15 @@ logger = logging.getLogger(__name__)
 
 # ── Simple TTL cache ──────────────────────────────────────────────────
 # Avoids reading config.json from disk on every HTTP request while still
-# allowing runtime config changes to propagate within ~60 seconds.
+# allowing runtime config changes to propagate within ~10 seconds.
 
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}
-_cache_ttl: float = 60.0  # seconds
+_cache_ttl: float = 10.0  # seconds (reduced from 60s for better responsiveness)
 
 
 def _read_config() -> dict[str, Any]:
-    """Return the parsed config.json, with a 60-second TTL in-memory cache."""
+    """Return the parsed config.json, with a 10-second TTL in-memory cache."""
     now = time.time()
     with _cache_lock:
         entry = _cache.get("_root")
@@ -57,7 +60,7 @@ def get_config_value(section: str, key: str, default=None):
 
     Returns the value at config[section][key], or ``default`` if the
     file, section, or key does not exist.  Results are cached for up
-    to 60 seconds.
+    to 10 seconds.
 
     Args:
         section: Top-level config section (e.g. "workspace", "autonomous").
@@ -80,7 +83,7 @@ def is_run_timeline_enabled() -> bool:
     """Check whether the persisted remote-session run timeline feature is enabled.
 
     Mirrors ``is_autonomous_enabled``: reads ``run_timeline.enabled`` from
-    config.json (60 s TTL cache). When disabled the recorder is a no-op and
+    config.json (10 s TTL cache). When disabled the recorder is a no-op and
     the timeline API returns ``{disabled: true}``. Strictly mirrors autonomous
     (no env bypass) so the whole feature is easy to remove later.
     """
@@ -91,7 +94,7 @@ def is_model_gateway_enabled() -> bool:
     """Check whether the optional LiteLLM-compatible model gateway is enabled.
 
     Mirrors ``is_run_timeline_enabled``: reads ``model_gateway.enabled`` from
-    config.json (60 s TTL cache). When disabled (the default) the LLM proxy uses
+    config.json (10 s TTL cache). When disabled (the default) the LLM proxy uses
     direct provider mode unchanged and the gateway module is inert. The whole
     feature is self-contained and easy to remove later; the env-override layer
     (``OPENACE_MODEL_GATEWAY_MODE``) lives in the gateway package itself.
@@ -102,7 +105,7 @@ def is_model_gateway_enabled() -> bool:
 def is_policy_enabled() -> bool:
     """Check whether the central policy & approval feature is enabled.
 
-    Reads ``policy.enabled`` from config.json (60 s TTL cache), mirroring
+    Reads ``policy.enabled`` from config.json (10 s TTL cache), mirroring
     ``is_run_timeline_enabled``. When disabled, ``get_evaluator`` returns a
     ``NullPolicyEvaluator`` (model → allow, tool → require_human) so the system
     behaves exactly as before — real-time manual approval, no auto allow/deny.
@@ -169,8 +172,24 @@ def invalidate_ai_github_env_cache():
 
     Call this after updating AI agent settings via the admin API
     so that new token values propagate immediately instead of
-    waiting for the 60-second TTL to expire.
+    waiting for the 10-second TTL to expire.
     """
     global _ai_github_env_data, _ai_github_env_ts
     with _cache_lock:
         _ai_github_env_ts = 0.0
+
+
+def invalidate_config_cache():
+    """Force the config cache to refresh on next read.
+
+    Call this after modifying config.json via the admin API
+    so that new config values propagate immediately instead of
+    waiting for the 10-second TTL to expire.
+
+    This is particularly important for model_gateway.enabled
+    changes that need to take effect quickly.
+    """
+    global _cache
+    with _cache_lock:
+        _cache.pop("_root", None)
+    logger.debug("Config cache invalidated")
