@@ -115,6 +115,8 @@ export type {
   SSOProvider,
   PredefinedProvider,
   RegisterProviderRequest,
+  SSOProviderDetail,
+  UpdateProviderRequest,
   SSOIdentity,
   SSOSession,
 } from './sso';

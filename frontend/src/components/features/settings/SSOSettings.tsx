@@ -36,6 +36,8 @@ import {
   type SSOProvider,
   type PredefinedProvider,
   type RegisterProviderRequest,
+  type SSOProviderDetail,
+  type UpdateProviderRequest,
   type Tenant,
 } from '@/api';
 
@@ -84,6 +86,27 @@ export const SSOSettings: React.FC = () => {
     redirect_uri: '',
     scope: '',
     predefined: false,
+    authorization_url: '',
+    token_url: '',
+    userinfo_url: '',
+    issuer_url: '',
+  });
+
+  // Provider detail modal state
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [providerDetail, setProviderDetail] = useState<SSOProviderDetail | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+
+  // Provider edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [editClientSecretConfirm, setEditClientSecretConfirm] = useState('');
+  const [editFormData, setEditFormData] = useState<UpdateProviderRequest>({
+    client_id: '',
+    client_secret: '',
+    redirect_uri: '',
+    scope: '',
     authorization_url: '',
     token_url: '',
     userinfo_url: '',
@@ -273,6 +296,92 @@ export const SSOSettings: React.FC = () => {
     }
   };
 
+  // Show provider detail
+  const handleShowDetail = async (providerName: string) => {
+    setIsLoadingDetail(true);
+    setShowDetailModal(true);
+    setProviderDetail(null);
+
+    try {
+      const detail = await ssoApi.getProviderDetail(providerName);
+      setProviderDetail(detail);
+    } catch (err) {
+      console.error('Failed to fetch provider detail:', err);
+      toastError(t('failedToLoadProviderDetail', language));
+      setShowDetailModal(false);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  // Show provider edit modal
+  const handleShowEdit = async (providerName: string) => {
+    setIsLoadingDetail(true);
+    setShowEditModal(true);
+    setEditError(null);
+
+    try {
+      const detail = await ssoApi.getProviderDetail(providerName);
+
+      // Initialize edit form with current values
+      setEditFormData({
+        client_id: detail.client_id || '',
+        client_secret: '',
+        redirect_uri: detail.redirect_uri || '',
+        scope: detail.scope || '',
+        authorization_url: detail.authorization_url || '',
+        token_url: detail.token_url || '',
+        userinfo_url: detail.userinfo_url || '',
+        issuer_url: detail.issuer_url || '',
+        updated_at: detail.updated_at,
+      });
+      setEditClientSecretConfirm('');
+      setProviderDetail(detail);
+    } catch (err) {
+      console.error('Failed to fetch provider detail for edit:', err);
+      toastError(t('failedToLoadProviderDetail', language));
+      setShowEditModal(false);
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  // Update provider
+  const handleUpdateProvider = async () => {
+    setEditError(null);
+
+    if (!providerDetail) {
+      setEditError(t('providerNotFound', language));
+      return;
+    }
+
+    // Validate required fields
+    if (!editFormData.client_id?.trim()) {
+      setEditError(t('clientIdRequired', language));
+      return;
+    }
+
+    // If client_secret is provided, validate confirmation
+    if (editFormData.client_secret && editFormData.client_secret !== editClientSecretConfirm) {
+      setEditError(t('clientSecretMismatch', language));
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      await ssoApi.updateProvider(providerDetail.name, editFormData);
+      setShowEditModal(false);
+      fetchProviders();
+      success(t('providerUpdated', language));
+    } catch (err) {
+      console.error('Failed to update provider:', err);
+      const errorMsg = err instanceof Error ? err.message : t('updateFailed', language);
+      setEditError(errorMsg);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   // Loading state for tenant list (admin only)
   if (isAdmin && isLoadingTenants) {
     return <Loading size="lg" text={t('loading', language)} />;
@@ -443,14 +552,32 @@ export const SSOSettings: React.FC = () => {
                       </Badge>
                     </td>
                     <td>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => handleDisable(provider.name)}
-                      >
-                        <i className="bi bi-x-lg me-1" />
-                        {t('disable', language)}
-                      </Button>
+                      <div className="d-flex gap-2">
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleShowDetail(provider.name)}
+                        >
+                          <i className="bi bi-eye me-1" />
+                          {t('view', language)}
+                        </Button>
+                        <Button
+                          variant="outline-secondary"
+                          size="sm"
+                          onClick={() => handleShowEdit(provider.name)}
+                        >
+                          <i className="bi bi-pencil me-1" />
+                          {t('edit', language)}
+                        </Button>
+                        <Button
+                          variant="outline-danger"
+                          size="sm"
+                          onClick={() => handleDisable(provider.name)}
+                        >
+                          <i className="bi bi-x-lg me-1" />
+                          {t('disable', language)}
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -637,6 +764,274 @@ export const SSOSettings: React.FC = () => {
             </>
           )}
         </div>
+      </Modal>
+
+      {/* Provider Detail Modal */}
+      <Modal
+        isOpen={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        title={t('providerDetail', language)}
+        size="lg"
+        footer={
+          <Button variant="secondary" onClick={() => setShowDetailModal(false)}>
+            {t('close', language)}
+          </Button>
+        }
+      >
+        {isLoadingDetail ? (
+          <Loading size="md" text={t('loading', language)} />
+        ) : providerDetail ? (
+          <div className="provider-detail">
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('providerName', language)}</label>
+                <p className="form-control-static text-capitalize">{providerDetail.name}</p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('type', language)}</label>
+                <p className="form-control-static">
+                  <Badge variant="secondary">{providerDetail.type.toUpperCase()}</Badge>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('status', language)}</label>
+                <p className="form-control-static">
+                  <Badge variant={providerDetail.is_enabled ? 'success' : 'danger'}>
+                    {providerDetail.is_enabled ? t('enabled', language) : t('disabled', language)}
+                  </Badge>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('predefined', language)}</label>
+                <p className="form-control-static">
+                  <Badge variant={providerDetail.is_predefined ? 'info' : 'secondary'}>
+                    {providerDetail.is_predefined ? t('yes', language) : t('no', language)}
+                  </Badge>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('clientId', language)}</label>
+                <p className="form-control-static">
+                  <code>{providerDetail.client_id || '-'}</code>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('redirectUri', language)}</label>
+                <p className="form-control-static">
+                  <code>{providerDetail.redirect_uri || '-'}</code>
+                </p>
+              </div>
+              <div className="col-md-12">
+                <label className="form-label fw-semibold">{t('scope', language)}</label>
+                <p className="form-control-static">
+                  <code>{providerDetail.scope || '-'}</code>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('authorizationUrl', language)}</label>
+                <p className="form-control-static">
+                  <small>{providerDetail.authorization_url || '-'}</small>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('tokenUrl', language)}</label>
+                <p className="form-control-static">
+                  <small>{providerDetail.token_url || '-'}</small>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('userinfoUrl', language)}</label>
+                <p className="form-control-static">
+                  <small>{providerDetail.userinfo_url || '-'}</small>
+                </p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label fw-semibold">{t('issuerUrl', language)}</label>
+                <p className="form-control-static">
+                  <small>{providerDetail.issuer_url || '-'}</small>
+                </p>
+              </div>
+              {providerDetail.created_at && (
+                <div className="col-md-6">
+                  <label className="form-label fw-semibold">{t('createdAt', language)}</label>
+                  <p className="form-control-static">
+                    <small className="text-muted">{providerDetail.created_at}</small>
+                  </p>
+                </div>
+              )}
+              {providerDetail.updated_at && (
+                <div className="col-md-6">
+                  <label className="form-label fw-semibold">{t('updatedAt', language)}</label>
+                  <p className="form-control-static">
+                    <small className="text-muted">{providerDetail.updated_at}</small>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            icon="bi-exclamation-circle"
+            title={t('providerNotFound', language)}
+            description={t('failedToLoadProviderDetail', language)}
+          />
+        )}
+      </Modal>
+
+      {/* Provider Edit Modal */}
+      <Modal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        title={t('editProvider', language)}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowEditModal(false)}>
+              {t('cancel', language)}
+            </Button>
+            <Button variant="primary" onClick={handleUpdateProvider} loading={isUpdating}>
+              {t('save', language)}
+            </Button>
+          </>
+        }
+      >
+        {isLoadingDetail ? (
+          <Loading size="md" text={t('loading', language)} />
+        ) : providerDetail ? (
+          <>
+            {editError && (
+              <div className="alert alert-danger mb-3">
+                <i className="bi bi-exclamation-circle me-2" />
+                {editError}
+              </div>
+            )}
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label">{t('providerName', language)}</label>
+                <p className="form-control-static text-capitalize">{providerDetail.name}</p>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">{t('type', language)}</label>
+                <p className="form-control-static">
+                  <Badge variant="secondary">{providerDetail.type.toUpperCase()}</Badge>
+                </p>
+              </div>
+
+              {/* Client ID */}
+              <div className="col-md-6">
+                <label className="form-label">{t('clientId', language)} *</label>
+                <TextInput
+                  value={editFormData.client_id || ''}
+                  onChange={(value: string) => setEditFormData({ ...editFormData, client_id: value })}
+                  placeholder={t('enterClientId', language)}
+                />
+              </div>
+
+              {/* Client Secret (optional for edit) */}
+              <div className="col-md-6">
+                <label className="form-label">{t('clientSecret', language)}</label>
+                <small className="text-muted d-block mb-1">
+                  {t('clientSecretEditHint', language)}
+                </small>
+                <TextInput
+                  type="password"
+                  value={editFormData.client_secret || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, client_secret: value })
+                  }
+                  placeholder={t('enterClientSecret', language)}
+                />
+              </div>
+
+              {/* Client Secret Confirm */}
+              {editFormData.client_secret && (
+                <div className="col-md-6">
+                  <label className="form-label">{t('clientSecretConfirm', language)} *</label>
+                  <TextInput
+                    type="password"
+                    value={editClientSecretConfirm}
+                    onChange={(value: string) => setEditClientSecretConfirm(value)}
+                    placeholder={t('enterClientSecretConfirm', language)}
+                  />
+                </div>
+              )}
+
+              {/* Redirect URI */}
+              <div className="col-md-6">
+                <label className="form-label">{t('redirectUri', language)}</label>
+                <TextInput
+                  value={editFormData.redirect_uri || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, redirect_uri: value })
+                  }
+                  placeholder={t('enterRedirectUri', language)}
+                />
+              </div>
+
+              {/* Scope */}
+              <div className="col-md-6">
+                <label className="form-label">{t('scope', language)}</label>
+                <TextInput
+                  value={editFormData.scope || ''}
+                  onChange={(value: string) => setEditFormData({ ...editFormData, scope: value })}
+                  placeholder="openid profile email"
+                />
+              </div>
+
+              {/* Provider URLs */}
+              <div className="col-12">
+                <hr />
+                <h6>{t('providerUrls', language)}</h6>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">{t('authorizationUrl', language)}</label>
+                <TextInput
+                  value={editFormData.authorization_url || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, authorization_url: value })
+                  }
+                  placeholder="https://provider.com/oauth/authorize"
+                />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">{t('tokenUrl', language)}</label>
+                <TextInput
+                  value={editFormData.token_url || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, token_url: value })
+                  }
+                  placeholder="https://provider.com/oauth/token"
+                />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">{t('userinfoUrl', language)}</label>
+                <TextInput
+                  value={editFormData.userinfo_url || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, userinfo_url: value })
+                  }
+                  placeholder="https://provider.com/oauth/userinfo"
+                />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">{t('issuerUrl', language)}</label>
+                <TextInput
+                  value={editFormData.issuer_url || ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, issuer_url: value })
+                  }
+                  placeholder="https://provider.com"
+                />
+              </div>
+            </div>
+          </>
+        ) : (
+          <EmptyState
+            icon="bi-exclamation-circle"
+            title={t('providerNotFound', language)}
+            description={t('failedToLoadProviderDetail', language)}
+          />
+        )}
       </Modal>
     </div>
   );
