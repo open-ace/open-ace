@@ -4,22 +4,23 @@ Tests for scene-specific alert functions.
 Tests severity determination logic for system and security alert scenarios.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.governance.alert_notifier import (
+    Alert,
     AlertSeverity,
     AlertType,
-    Alert,
-    create_service_down_alert,
-    create_service_startup_alert,
-    create_resource_alert,
-    create_config_error_alert,
     create_api_error_alert,
     create_auth_failure_alert,
+    create_config_error_alert,
     create_permission_violation_alert,
-    create_suspicious_activity_alert,
     create_quota_alert,
+    create_resource_alert,
+    create_service_down_alert,
+    create_service_startup_alert,
+    create_suspicious_activity_alert,
 )
 
 
@@ -32,7 +33,7 @@ class TestServiceDownAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_service_down_alert(
+        create_service_down_alert(
             service_name="API Gateway",
             details="Service crashed after memory exhaustion",
         )
@@ -50,7 +51,7 @@ class TestServiceDownAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_service_down_alert(
+        create_service_down_alert(
             service_name="Database",
             details="Connection refused",
             language="zh",
@@ -70,7 +71,7 @@ class TestServiceStartupAlert:
         mock_create_system.return_value = mock_alert
 
         # startup_time = 15s, threshold = 10s -> 1.5x threshold -> WARNING
-        result = create_service_startup_alert(
+        create_service_startup_alert(
             service_name="Web Server",
             startup_time=15.0,
             threshold=10.0,
@@ -87,7 +88,7 @@ class TestServiceStartupAlert:
         mock_create_system.return_value = mock_alert
 
         # startup_time = 25s, threshold = 10s -> 2.5x threshold -> CRITICAL
-        result = create_service_startup_alert(
+        create_service_startup_alert(
             service_name="Web Server",
             startup_time=25.0,
             threshold=10.0,
@@ -107,7 +108,7 @@ class TestResourceAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_resource_alert(
+        create_resource_alert(
             resource_type="memory",
             current=8192,
             limit=8192,
@@ -123,7 +124,7 @@ class TestResourceAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_resource_alert(
+        create_resource_alert(
             resource_type="cpu",
             current=95,
             limit=100,
@@ -139,7 +140,7 @@ class TestResourceAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_resource_alert(
+        create_resource_alert(
             resource_type="disk",
             current=85,
             limit=100,
@@ -155,7 +156,7 @@ class TestResourceAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_resource_alert(
+        create_resource_alert(
             resource_type="disk",
             current=50,
             limit=100,
@@ -175,7 +176,7 @@ class TestConfigErrorAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_config_error_alert(
+        create_config_error_alert(
             config_key="database_url",
             error_details="Invalid connection string format",
         )
@@ -194,7 +195,7 @@ class TestApiErrorAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_system.return_value = mock_alert
 
-        result = create_api_error_alert(
+        create_api_error_alert(
             api_name="External Service",
             error_code=500,
             error_message="Internal Server Error",
@@ -214,7 +215,7 @@ class TestAuthFailureAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_security.return_value = mock_alert
 
-        result = create_auth_failure_alert(
+        create_auth_failure_alert(
             username="testuser",
             failure_count=1,
             threshold=5,
@@ -231,7 +232,7 @@ class TestAuthFailureAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_security.return_value = mock_alert
 
-        result = create_auth_failure_alert(
+        create_auth_failure_alert(
             username="attacker",
             failure_count=7,
             threshold=5,
@@ -252,7 +253,7 @@ class TestPermissionViolationAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_security.return_value = mock_alert
 
-        result = create_permission_violation_alert(
+        create_permission_violation_alert(
             username="hacker",
             resource="/admin/users",
             action="delete",
@@ -272,7 +273,7 @@ class TestSuspiciousActivityAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_security.return_value = mock_alert
 
-        result = create_suspicious_activity_alert(
+        create_suspicious_activity_alert(
             username="normaluser",
             activity_type="unusual_login_time",
             risk_score=30.0,
@@ -288,7 +289,7 @@ class TestSuspiciousActivityAlert:
         mock_alert = MagicMock(spec=Alert)
         mock_create_security.return_value = mock_alert
 
-        result = create_suspicious_activity_alert(
+        create_suspicious_activity_alert(
             username="suspect",
             activity_type="mass_data_download",
             risk_score=75.0,
@@ -311,7 +312,7 @@ class TestRegressionQuotaAlert:
         mock_get_notifier.return_value = mock_notifier
 
         # Test quota alert at 95%
-        result = create_quota_alert(
+        create_quota_alert(
             user_id=1,
             username="testuser",
             usage_percent=95.0,
