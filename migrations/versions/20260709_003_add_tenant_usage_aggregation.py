@@ -198,7 +198,7 @@ def upgrade() -> None:
     # Create indexes for new tenants fields
     op.create_index('idx_tenants_billing_cycle', 'tenants', ['billing_cycle_end'])
 
-    print("Migration 20260709_002_add_tenant_usage_aggregation completed successfully")
+    print("Migration 20260709_003_add_tenant_usage_aggregation completed successfully")
 
 
 def downgrade() -> None:
@@ -246,4 +246,4 @@ def downgrade() -> None:
     op.drop_table('tenant_period_history')
     op.drop_table('aggregation_history')
 
-    print("Migration 20260709_002_add_tenant_usage_aggregation reverted successfully")
+    print("Migration 20260709_003_add_tenant_usage_aggregation reverted successfully")
