@@ -241,6 +241,7 @@ class TestPeriodReset(unittest.TestCase):
 
             # Verify reset was called for each tenant
             self.assertEqual(mock_reset.call_count, 2)
+            self.assertEqual(count, 2)
 
 
 class TestTenantUsageAggregation(unittest.TestCase):
