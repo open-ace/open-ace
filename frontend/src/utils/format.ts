@@ -60,37 +60,48 @@ export function formatPercentage(value: number, decimals: number = 1): string {
 }
 
 /**
- * Format a date string
+ * Format a date string.
+ *
+ * When `language` is provided, the date is rendered with the locale that
+ * matches the active UI language (e.g. zh → zh-CN). Otherwise the host
+ * browser locale is used, preserving backward compatibility.
  */
 export function formatDate(
   date: string | Date,
-  format: 'short' | 'long' | 'iso' = 'short'
+  format: 'short' | 'long' | 'iso' = 'short',
+  language?: Language
 ): string {
   const d = typeof date === 'string' ? new Date(date) : date;
+  const locale = language ? DATE_LOCALE[language] : undefined;
 
   switch (format) {
     case 'iso':
       return d.toISOString().split('T')[0];
     case 'long':
-      return d.toLocaleDateString(undefined, {
+      return d.toLocaleDateString(locale, {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
       });
     case 'short':
     default:
-      return d.toLocaleDateString();
+      return d.toLocaleDateString(locale);
   }
 }
 
 /**
- * Format a datetime string
+ * Format a datetime string.
+ *
+ * When `language` is provided, the value is rendered with the locale that
+ * matches the active UI language. Otherwise the host browser locale is used,
+ * preserving backward compatibility.
  */
-export function formatDateTime(date: string | Date | null): string {
+export function formatDateTime(date: string | Date | null, language?: Language): string {
   if (!date) return '-';
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return '-';
-  return d.toLocaleString();
+  const locale = language ? DATE_LOCALE[language] : undefined;
+  return d.toLocaleString(locale);
 }
 
 /**
@@ -193,8 +204,8 @@ export function formatDuration(seconds: number): string {
   }
 }
 
-// Locale tag per supported UI language, for chart date rendering.
-const CHART_DATE_LOCALE: Record<Language, string> = {
+// Locale tag per supported UI language, shared across date rendering helpers.
+const DATE_LOCALE: Record<Language, string> = {
   en: 'en-US',
   zh: 'zh-CN',
   ja: 'ja-JP',
@@ -247,7 +258,7 @@ export function formatChartDate(
   if (!parts) return '-';
   const d = new Date(parts.year, parts.month - 1, parts.day);
   if (isNaN(d.getTime())) return '-';
-  const locale = CHART_DATE_LOCALE[language] ?? 'en-US';
+  const locale = DATE_LOCALE[language] ?? 'en-US';
   return d.toLocaleDateString(locale, {
     day: 'numeric',
     ...(options.dayOnly ? {} : { month: 'short' }),
