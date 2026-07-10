@@ -197,6 +197,15 @@ CREATE SEQUENCE aggregation_history_id_seq
     CACHE 1;
 
 ALTER SEQUENCE aggregation_history_id_seq OWNED BY aggregation_history.id;
+CREATE TABLE aggregation_locks (
+    lock_key character varying(100) NOT NULL,
+    acquired_at timestamp without time zone NOT NULL,
+    timeout_seconds integer NOT NULL
+);
+
+COMMENT ON COLUMN aggregation_locks.lock_key IS 'Lock key identifier';
+COMMENT ON COLUMN aggregation_locks.acquired_at IS 'Lock acquisition timestamp';
+COMMENT ON COLUMN aggregation_locks.timeout_seconds IS 'Lock timeout in seconds';
 CREATE TABLE ai_agent_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -1834,6 +1843,9 @@ ALTER TABLE ONLY agent_tokens
 
 ALTER TABLE ONLY aggregation_history
     ADD CONSTRAINT aggregation_history_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY aggregation_locks
+    ADD CONSTRAINT aggregation_locks_pkey PRIMARY KEY (lock_key);
 
 ALTER TABLE ONLY ai_agent_settings
     ADD CONSTRAINT ai_agent_settings_pkey PRIMARY KEY (id);

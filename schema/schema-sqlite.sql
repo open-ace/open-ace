@@ -121,6 +121,12 @@ CREATE TABLE aggregation_history (
  created_at TIMESTAMP
 );
 
+CREATE TABLE aggregation_locks (
+ lock_key TEXT PRIMARY KEY NOT NULL,
+ acquired_at TIMESTAMP NOT NULL,
+ timeout_seconds integer NOT NULL
+);
+
 CREATE TABLE ai_agent_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
