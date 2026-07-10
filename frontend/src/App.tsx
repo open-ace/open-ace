@@ -322,39 +322,39 @@ const ManageRoutes: React.FC = () => {
       <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Overview */}
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="dashboard" element={<Dashboard />} />
 
           {/* Analysis */}
-          <Route path="/analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
-          <Route path="/analysis/trend" element={<TrendAnalysis />} />
-          <Route path="/analysis/request-dashboard" element={<RequestDashboard />} />
-          <Route path="/analysis/anomaly" element={<AnomalyDetection />} />
-          <Route path="/analysis/roi" element={<ROIAnalysis />} />
-          <Route path="/analysis/conversation-history" element={<ConversationHistory />} />
-          <Route path="/messages" element={<Messages />} />
+          <Route path="analysis" element={<Navigate to="/manage/analysis/trend" replace />} />
+          <Route path="analysis/trend" element={<TrendAnalysis />} />
+          <Route path="analysis/request-dashboard" element={<RequestDashboard />} />
+          <Route path="analysis/anomaly" element={<AnomalyDetection />} />
+          <Route path="analysis/roi" element={<ROIAnalysis />} />
+          <Route path="analysis/conversation-history" element={<ConversationHistory />} />
+          <Route path="messages" element={<Messages />} />
 
           {/* Governance - Merged Pages */}
-          <Route path="/audit" element={<AuditCenter />} />
-          <Route path="/quota" element={<QuotaAlerts />} />
-          <Route path="/compliance" element={<ComplianceMgmt />} />
-          <Route path="/security" element={<SecurityCenter />} />
+          <Route path="audit" element={<AuditCenter />} />
+          <Route path="quota" element={<QuotaAlerts />} />
+          <Route path="compliance" element={<ComplianceMgmt />} />
+          <Route path="security" element={<SecurityCenter />} />
 
           {/* Users */}
-          <Route path="/users" element={<UserManagement />} />
-          <Route path="/tenants" element={<TenantManagement />} />
+          <Route path="users" element={<UserManagement />} />
+          <Route path="tenants" element={<TenantManagement />} />
 
           {/* Projects */}
-          <Route path="/projects" element={<ProjectManagement />} />
+          <Route path="projects" element={<ProjectManagement />} />
 
           {/* Remote Workspace */}
-          <Route path="/remote/machines" element={<RemoteMachineManagement />} />
+          <Route path="remote/machines" element={<RemoteMachineManagement />} />
 
           {/* Settings */}
-          <Route path="/settings/sso" element={<SSOSettings />} />
-          <Route path="/settings/api-keys" element={<APIKeyManagement />} />
-          <Route path="/settings/ai-agent" element={<AiAgentSettings />} />
-          <Route path="/settings/smtp" element={<SmtpConfig />} />
-          <Route path="/settings/model-gateway" element={<ModelGatewayConfig />} />
+          <Route path="settings/sso" element={<SSOSettings />} />
+          <Route path="settings/api-keys" element={<APIKeyManagement />} />
+          <Route path="settings/ai-agent" element={<AiAgentSettings />} />
+          <Route path="settings/smtp" element={<SmtpConfig />} />
+          <Route path="settings/model-gateway" element={<ModelGatewayConfig />} />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
