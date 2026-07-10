@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, cast
 
+from app.repositories.governance_repo import GovernanceRepository
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,8 +47,11 @@ class FilterResult:
 
     passed: bool
     risk_level: str = "low"
+    action: str = "none"  # none, warn, block, redact
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
     redacted_content: Optional[str] = None
+    original_content: Optional[str] = None  # For audit logging with redact
+    message: Optional[str] = None
     suggestion: Optional[str] = None
     timestamp: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
@@ -57,8 +62,10 @@ class FilterResult:
         return {
             "passed": self.passed,
             "risk_level": self.risk_level,
+            "action": self.action,
             "matched_rules": self.matched_rules,
             "redacted_content": self.redacted_content,
+            "message": self.message,
             "suggestion": self.suggestion,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
@@ -122,6 +129,7 @@ class ContentFilter:
         config: Optional[dict[str, Any]] = None,
         custom_patterns: Optional[dict[str, str]] = None,
         custom_keywords: Optional[list[str]] = None,
+        governance_repo: Optional[GovernanceRepository] = None,
     ):
         """
         Initialize content filter.
@@ -134,12 +142,18 @@ class ContentFilter:
                 - log_matches: Log all matches (default: True)
             custom_patterns: Additional regex patterns to match.
             custom_keywords: Additional keywords to detect.
+            governance_repo: Optional GovernanceRepository for database rules.
         """
         self.config = config or {}
         self.enabled = self.config.get("enabled", True)
         self.redact_pii = self.config.get("redact_pii", True)
         self.block_high_risk = self.config.get("block_high_risk", True)
         self.log_matches = self.config.get("log_matches", True)
+
+        # Database rules integration
+        self.governance_repo = governance_repo
+        self._rules_cache: Optional[list[dict[str, Any]]] = None
+        self._cache_valid: bool = False
 
         # Compile patterns
         self.patterns = dict(self.DEFAULT_PII_PATTERNS)
@@ -169,6 +183,47 @@ class ContentFilter:
             "custom_pattern": "medium",
         }
 
+    def _load_rules_from_db(self) -> list[dict[str, Any]]:
+        """
+        Load filter rules from database.
+
+        Returns:
+            List of enabled filter rules.
+        """
+        if self.governance_repo is None:
+            return []
+
+        if self._cache_valid and self._rules_cache is not None:
+            return self._rules_cache
+
+        try:
+            rules = self.governance_repo.get_filter_rules()
+            # Filter only enabled rules
+            enabled_rules = [r for r in rules if r.get("is_enabled", True)]
+            self._rules_cache = enabled_rules
+            self._cache_valid = True
+            logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+            return enabled_rules
+        except Exception as e:
+            logger.error(f"Failed to load filter rules from database: {e}")
+            return []
+
+    def invalidate_cache(self) -> None:
+        """
+        Invalidate the rules cache.
+        Call this after CRUD operations on filter rules.
+        """
+        self._cache_valid = False
+        self._rules_cache = None
+        logger.debug("Content filter rules cache invalidated")
+
+    def refresh_rules(self) -> None:
+        """
+        Refresh the rules cache by invalidating and forcing reload on next check.
+        Alias for invalidate_cache() with clearer naming for API integration.
+        """
+        self.invalidate_cache()
+
     def check_content(self, content: str, context: Optional[dict[str, Any]] = None) -> FilterResult:
         """
         Check content for sensitive information.
@@ -181,16 +236,90 @@ class ContentFilter:
             FilterResult: Result of the filtering check.
         """
         if not self.enabled:
-            return FilterResult(passed=True, risk_level="low")
+            return FilterResult(passed=True, risk_level="low", action="none")
 
         if not content:
-            return FilterResult(passed=True, risk_level="low")
+            return FilterResult(passed=True, risk_level="low", action="none")
 
         matched_rules = []
         overall_risk = "low"
+        overall_action = "none"  # Track the most severe action
         redacted = content
 
-        # Check PII patterns
+        # First check database rules (user-configured rules)
+        db_rules = self._load_rules_from_db()
+        for rule in db_rules:
+            rule_pattern = rule.get("pattern", "")
+            rule_type = rule.get("type", "keyword")
+            rule_action = rule.get("action", "warn")
+            rule_severity = rule.get("severity", "medium")
+            rule_id = rule.get("id")
+            rule_description = rule.get("description", "")
+
+            if not rule_pattern:
+                continue
+
+            try:
+                if rule_type == "regex":
+                    # Compile regex pattern
+                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    matches = compiled.findall(content)
+                elif rule_type == "keyword":
+                    # Keyword matching (case-insensitive substring)
+                    matches = [rule_pattern] if rule_pattern.lower() in content.lower() else []
+                elif rule_type == "pii":
+                    # PII pattern matching
+                    compiled = re.compile(rule_pattern, re.IGNORECASE)
+                    matches = compiled.findall(content)
+                else:
+                    continue
+
+                if matches:
+                    matched_rules.append(
+                        {
+                            "id": rule_id,
+                            "type": rule_type,
+                            "pattern": rule_pattern,
+                            "action": rule_action,
+                            "severity": rule_severity,
+                            "count": len(matches),
+                            "description": rule_description,
+                            "source": "database",
+                        }
+                    )
+
+                    # Update overall risk
+                    if rule_severity == "critical":
+                        overall_risk = "critical"
+                    elif rule_severity == "high" and overall_risk not in ["critical"]:
+                        overall_risk = "high"
+                    elif rule_severity == "medium" and overall_risk not in ["critical", "high"]:
+                        overall_risk = "medium"
+
+                    # Update overall action (block takes precedence over warn/redact)
+                    if rule_action == "block":
+                        overall_action = "block"
+                    elif rule_action == "warn" and overall_action not in ["block"]:
+                        overall_action = "warn"
+                    elif rule_action == "redact" and overall_action not in ["block", "warn"]:
+                        overall_action = "redact"
+
+                    # Apply redaction if action is redact
+                    if rule_action == "redact":
+                        if rule_type == "regex" or rule_type == "pii":
+                            compiled = re.compile(rule_pattern, re.IGNORECASE)
+                            redacted = compiled.sub("***", redacted)
+                        elif rule_type == "keyword":
+                            # Redact keyword matches
+                            redacted = re.sub(
+                                re.compile(rule_pattern, re.IGNORECASE), "***", redacted
+                            )
+
+            except re.error as e:
+                logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
+                continue
+
+        # Then check built-in PII patterns
         for pattern_name, compiled_pattern in self.compiled_patterns.items():
             matches = compiled_pattern.findall(content)
             if matches:
@@ -201,6 +330,7 @@ class ContentFilter:
                         "count": len(matches),
                         "risk": risk,
                         "sample": matches[0] if matches else None,
+                        "source": "builtin",
                     }
                 )
 
@@ -212,11 +342,19 @@ class ContentFilter:
                 elif risk == "medium" and overall_risk not in ["critical", "high"]:
                     overall_risk = "medium"
 
+                # For built-in PII, use block_high_risk config for action
+                if self.block_high_risk and risk in ["high", "critical"]:
+                    if overall_action not in ["block"]:
+                        overall_action = "block"
+                elif self.redact_pii:
+                    if overall_action not in ["block", "warn"]:
+                        overall_action = "redact"
+
                 # Redact if enabled
                 if self.redact_pii:
                     redacted = self._redact_matches(redacted, compiled_pattern, pattern_name)
 
-        # Check sensitive keywords
+        # Check built-in sensitive keywords
         keyword_matches = self._check_keywords(content)
         if keyword_matches:
             matched_rules.append(
@@ -225,34 +363,47 @@ class ContentFilter:
                     "count": len(keyword_matches),
                     "risk": "high",
                     "keywords": list(keyword_matches),
+                    "source": "builtin",
                 }
             )
 
             if overall_risk not in ["critical"]:
                 overall_risk = "high"
 
-        # Determine if passed
-        passed = True
-        if self.block_high_risk and overall_risk in ["high", "critical"]:
-            passed = False
+            # For keywords, use block_high_risk config for action
+            if self.block_high_risk and overall_action not in ["block"]:
+                overall_action = "block"
+
+        # Determine passed based on action
+        passed = overall_action != "block"
 
         # Log if enabled
         if self.log_matches and matched_rules:
             logger.warning(
                 f"Content filter matched: {len(matched_rules)} rules, "
-                f"risk={overall_risk}, passed={passed}"
+                f"risk={overall_risk}, action={overall_action}, passed={passed}"
             )
 
-        # Generate suggestion
+        # Generate message and suggestion
+        message = None
         suggestion = None
-        if not passed:
+        if matched_rules:
+            if overall_action == "block":
+                message = f"Content blocked: matched {len(matched_rules)} filter rule(s)"
+            elif overall_action == "warn":
+                message = f"Content warning: matched {len(matched_rules)} filter rule(s)"
+            elif overall_action == "redact":
+                message = f"Content redacted: matched {len(matched_rules)} filter rule(s)"
             suggestion = self._generate_suggestion(matched_rules)
 
         return FilterResult(
             passed=passed,
             risk_level=overall_risk,
+            action=overall_action,
             matched_rules=matched_rules,
-            redacted_content=redacted if self.redact_pii else None,
+            redacted_content=redacted if overall_action == "redact" else None,
+            original_content=content if overall_action == "redact" else None,
+            message=message,
             suggestion=suggestion,
         )
 

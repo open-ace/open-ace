@@ -72,6 +72,8 @@ class AuditAction(Enum):
     # Content filter actions
     CONTENT_BLOCKED = "content_blocked"
     CONTENT_FLAGGED = "content_flagged"
+    CONTENT_WARNED = "content_warned"
+    CONTENT_REDACTED = "content_redacted"
 
     # Remote agent actions
     AGENT_REGISTER = "agent_register"

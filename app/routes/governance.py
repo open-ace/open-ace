@@ -16,11 +16,13 @@ from app.auth.decorators import admin_required, auth_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
+from app.repositories.governance_repo import GovernanceRepository
 
 governance_bp = Blueprint("governance", __name__)
 audit_logger = AuditLogger()
 quota_manager = QuotaManager()
-content_filter = ContentFilter()
+governance_repo = GovernanceRepository()
+content_filter = ContentFilter(governance_repo=governance_repo)
 logger = logging.getLogger(__name__)
 
 
@@ -356,10 +358,6 @@ def api_add_keyword():
 # Content Filter Rules Management
 # ============================================================================
 
-from app.repositories.governance_repo import GovernanceRepository
-
-governance_repo = GovernanceRepository()
-
 
 @governance_bp.route("/filter-rules", methods=["GET"])
 @admin_required
@@ -397,6 +395,9 @@ def api_create_filter_rule():
     )
 
     if rule_id:
+        # Invalidate content filter cache
+        content_filter.invalidate_cache()
+
         # Log the action
         client_info = get_client_info()
         audit_logger.log_action(
@@ -433,6 +434,9 @@ def api_update_filter_rule(rule_id):
     )
 
     if success:
+        # Invalidate content filter cache
+        content_filter.invalidate_cache()
+
         # Log the action
         client_info = get_client_info()
         audit_logger.log_action(
@@ -459,6 +463,9 @@ def api_delete_filter_rule(rule_id):
     success = governance_repo.delete_filter_rule(rule_id)
 
     if success:
+        # Invalidate content filter cache
+        content_filter.invalidate_cache()
+
         # Log the action
         client_info = get_client_info()
         audit_logger.log_action(

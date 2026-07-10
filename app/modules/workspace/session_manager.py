@@ -20,6 +20,21 @@ from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
+# Shared ContentFilter instance for performance (uses cached rules)
+_content_filter_instance = None
+
+
+def _get_content_filter():
+    """Get or create shared ContentFilter instance."""
+    global _content_filter_instance
+    if _content_filter_instance is None:
+        from app.modules.governance.content_filter import ContentFilter
+        from app.repositories.governance_repo import GovernanceRepository
+
+        governance_repo = GovernanceRepository()
+        _content_filter_instance = ContentFilter(governance_repo=governance_repo)
+    return _content_filter_instance
+
 
 def _sanitize_text_value(text: Optional[str]) -> Optional[str]:
     """Remove NUL / invalid UTF-8 surrogate data before persistence."""
@@ -1154,6 +1169,56 @@ class SessionManager:
         if not cursor.fetchone():
             conn.close()
             return None
+
+        # ── Content filter check for AI output ──────────────────────────────
+        # For assistant messages, check for sensitive content and apply redaction.
+        # We don't block AI output (already generated), but we log and redact.
+        if role == "assistant" and content:
+            try:
+                from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+                content_filter = _get_content_filter()
+
+                # Get user_id from session for audit logging
+                cursor.execute(
+                    f"SELECT user_id FROM agent_sessions WHERE session_id = {_param()}",
+                    (session_id,),
+                )
+                session_row = cursor.fetchone()
+                filter_user_id = session_row["user_id"] if session_row else None
+
+                result = content_filter.check_content(content)
+
+                if result.action in ("block", "warn", "redact"):
+                    audit_logger = AuditLogger()
+                    # For AI output, we use CONTENT_WARNED even if rule says block
+                    # (cannot block already-generated content, just log the detection)
+                    audit_action = AuditAction.CONTENT_WARNED
+                    audit_logger.log_action(
+                        action=audit_action,
+                        user_id=filter_user_id,
+                        resource_type="ai_output",
+                        severity="medium",
+                        details={
+                            "risk_level": result.risk_level,
+                            "matched_rules": result.matched_rules,
+                            "session_id": session_id,
+                            "role": role,
+                            "original_action": result.action,  # Log the intended action
+                        },
+                    )
+
+                    # Apply redaction if action is redact
+                    if result.action == "redact" and result.redacted_content:
+                        content = result.redacted_content
+                        logger.info(
+                            f"AI output redacted for session {session_id}: "
+                            f"{len(result.matched_rules)} rule(s) matched"
+                        )
+            except Exception as exc:
+                # Content filter failure should not block message storage
+                logger.warning(f"Content filter check failed for AI output: {exc}")
+        # ── end content filter check ────────────────────────────────────────
 
         now = self._normalize_message_timestamp(timestamp) or datetime.now(timezone.utc).replace(
             tzinfo=None
