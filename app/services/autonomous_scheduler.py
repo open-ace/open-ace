@@ -126,9 +126,22 @@ class AutonomousScheduler:
         main repo dir, shared). Two workflows conflict if they share a
         workspace OR a non-empty branch (git forbids the same branch in two
         worktrees, and batch workflows can be assigned the same branch). #1002.
+
+        Issue #1573: For workflows in preparation phase without a branch_name,
+        use a temporary key based on workflow_id to ensure conflict checking works
+        even before preparation creates the branch.
         """
         workspace = wf.get("worktree_path") or wf.get("project_path") or ""
         branch = wf.get("branch_name") or ""
+
+        # Fallback: if branch is empty and workflow is in preparation phase,
+        # use workflow_id as temporary key to ensure conflict checking works.
+        # This prevents multiple preparation-phase workflows from running concurrently.
+        if not branch and wf.get("current_phase") == "preparation":
+            wf_id = wf.get("workflow_id", "")
+            if wf_id:
+                branch = f"preparation-{wf_id[:8]}"
+
         return workspace, branch
 
     def _reclaim_paused_slots(self, repo) -> None:

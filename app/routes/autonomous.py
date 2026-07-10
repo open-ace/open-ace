@@ -625,20 +625,25 @@ def create_workflow():
     user = user_repo.get_user_by_id(user_id)
     user_system_account = user.get("system_account", "") if user else ""
 
+    # Pre-generate branch_name and worktree_path for batch workflows (Issue #1573)
+    # This ensures scheduler can perform conflict checks even before preparation phase.
+    project_path = data.get("project_path", "")
+    branch_strategy = data.get("branch_strategy", "new-branch")
+    user_branch_name = data.get("branch_name", "")  # User's original input (if any)
+
     base_workflow_data = {
         "user_id": user_id,
         "title": data.get("title", ""),
         "requirements_text": requirements_text,
         "requirements_issue_url": requirements_issue_url,
-        "project_path": data.get("project_path", ""),
+        "project_path": project_path,
         "project_repo_url": data.get("project_repo_url", ""),
         "is_new_project": data.get("is_new_project", False),
         "is_private": data.get("is_private", True),
         "cli_tool": data.get("cli_tool", ""),
         "model": data.get("model", ""),
         "permission_mode": data.get("permission_mode", "auto-edit"),
-        "branch_name": data.get("branch_name", ""),
-        "branch_strategy": data.get("branch_strategy", "new-branch"),
+        "branch_strategy": branch_strategy,
         "workspace_type": data.get("workspace_type", "local"),
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
@@ -697,6 +702,14 @@ def create_workflow():
 
             for index, selector in enumerate(issue_selectors, start=1):
                 workflow_data = dict(base_workflow_data)
+
+                # Pre-generate workflow_id, branch_name and worktree_path (Issue #1573)
+                # This ensures scheduler can perform conflict checks before preparation phase.
+                workflow_id = str(uuid.uuid4())
+                branch_name = f"auto-dev/{workflow_id[:8]}"
+                # Use .worktrees directory for worktree strategy, with full workflow_id for uniqueness
+                worktree_path = os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+
                 definition_snapshot = _build_definition_snapshot(
                     data,
                     requirements_text,
@@ -712,6 +725,7 @@ def create_workflow():
                 )
                 workflow_data.update(
                     {
+                        "workflow_id": workflow_id,  # Pre-generated for branch_name/worktree_path
                         "title": _format_issue_title(
                             base_workflow_data.get("title", ""),
                             selector["issue_number"],
@@ -726,6 +740,11 @@ def create_workflow():
                         "base_commit_sha": base_commit_sha,  # Locked SHA for batch (Issue #1552)
                         "status": "pending" if index == 1 else "queued",
                         "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
+                        # Pre-generated values for scheduler conflict checks (Issue #1573)
+                        "branch_name": branch_name,
+                        "worktree_path": worktree_path,
+                        "branch_strategy": "worktree",  # Force worktree for batch workflows
+                        "original_branch_name": user_branch_name,  # Preserve user's original input
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)
@@ -758,6 +777,34 @@ def create_workflow():
                 requirements_issue_url,
             )
         )
+
+        # Pre-generate workflow_id, branch_name and worktree_path for worktree strategy (Issue #1573)
+        # For worktree strategy, always use pre-generated values to ensure scheduler conflict checks work.
+        # For new-branch/same-branch strategy, preserve user's original branch_name input.
+        workflow_id = str(uuid.uuid4())
+        base_workflow_data["workflow_id"] = workflow_id
+
+        if branch_strategy == "worktree":
+            # Force pre-generated branch_name for worktree strategy
+            branch_name = f"auto-dev/{workflow_id[:8]}"
+            worktree_path = os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+            base_workflow_data["branch_name"] = branch_name
+            base_workflow_data["worktree_path"] = worktree_path
+            base_workflow_data["original_branch_name"] = user_branch_name  # Preserve user's input
+            logger.info(
+                "Pre-generated branch_name=%s, worktree_path=%s for workflow %s",
+                branch_name,
+                worktree_path,
+                workflow_id[:8],
+            )
+        else:
+            # For new-branch/same-branch, use user's input if provided, otherwise pre-generate
+            if user_branch_name:
+                base_workflow_data["branch_name"] = user_branch_name
+            else:
+                branch_name = f"auto-dev/{workflow_id[:8]}"
+                base_workflow_data["branch_name"] = branch_name
+
         workflow = repo.create_workflow(base_workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
