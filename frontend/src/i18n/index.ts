@@ -933,6 +933,7 @@ export const translations: Record<Language, Translations> = {
     dataTypeSsoSessions: 'SSO Sessions',
     dataTypeUsageData: 'Usage Data',
     dataTypeUserActivity: 'User Activity',
+    dataTypeUsers: 'Users',
     dataTypeUnknown: 'Unknown Type',
 
     // Data Retention - Action Labels
@@ -2486,6 +2487,7 @@ export const translations: Record<Language, Translations> = {
     dataTypeSsoSessions: 'SSO会话',
     dataTypeUsageData: '使用数据',
     dataTypeUserActivity: '用户活动',
+    dataTypeUsers: '用户',
     dataTypeUnknown: '未知类型',
 
     // Data Retention - Action Labels
@@ -3467,6 +3469,7 @@ export const translations: Record<Language, Translations> = {
     dataTypeSsoSessions: 'SSOセッション',
     dataTypeUsageData: '使用データ',
     dataTypeUserActivity: 'ユーザー活動',
+    dataTypeUsers: 'ユーザー',
     dataTypeUnknown: '未知タイプ',
 
     // Data Retention - Action Labels
@@ -4804,6 +4807,7 @@ export const translations: Record<Language, Translations> = {
     dataTypeSsoSessions: 'SSO 세션',
     dataTypeUsageData: '사용 데이터',
     dataTypeUserActivity: '사용자 활동',
+    dataTypeUsers: '사용자',
     dataTypeUnknown: '알 수 없는 유형',
 
     // Data Retention - Action Labels
