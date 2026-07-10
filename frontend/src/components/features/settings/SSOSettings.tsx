@@ -75,6 +75,7 @@ export const SSOSettings: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [clientSecretConfirm, setClientSecretConfirm] = useState('');
   const [formData, setFormData] = useState<RegisterProviderRequest>({
     name: '',
     provider_type: 'oauth2',
@@ -175,11 +176,13 @@ export const SSOSettings: React.FC = () => {
       userinfo_url: '',
       issuer_url: '',
     });
+    setClientSecretConfirm('');
     setShowModal(true);
   };
 
   const handleCloseModal = () => {
     setShowModal(false);
+    setClientSecretConfirm('');
   };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
@@ -225,6 +228,12 @@ export const SSOSettings: React.FC = () => {
 
     if (!formData.client_secret.trim()) {
       setRegisterError(t('clientSecretRequired', language));
+      return;
+    }
+
+    // Validate client_secret confirmation
+    if (formData.client_secret !== clientSecretConfirm) {
+      setRegisterError(t('clientSecretMismatch', language));
       return;
     }
 
@@ -397,7 +406,17 @@ export const SSOSettings: React.FC = () => {
       {/* Registered Providers */}
       <Card title={t('registeredProviders', language)} className="mb-4">
         {registeredProviders.length === 0 ? (
-          <EmptyState icon="bi-key" title={t('noProvidersRegistered', language)} />
+          <EmptyState
+            icon="bi-key"
+            title={t('noProvidersRegistered', language)}
+            description={t('noProvidersHint', language)}
+            action={
+              <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+                <i className="bi bi-plus-lg me-1" />
+                {t('addProvider', language)}
+              </Button>
+            }
+          />
         ) : (
           <div className="table-responsive">
             <table className="table table-hover">
@@ -429,7 +448,8 @@ export const SSOSettings: React.FC = () => {
                         size="sm"
                         onClick={() => handleDisable(provider.name)}
                       >
-                        <i className="bi bi-x-lg" />
+                        <i className="bi bi-x-lg me-1" />
+                        {t('disable', language)}
                       </Button>
                     </td>
                   </tr>
@@ -539,6 +559,17 @@ export const SSOSettings: React.FC = () => {
               value={formData.client_secret}
               onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
               placeholder={t('enterClientSecret', language)}
+            />
+          </div>
+
+          {/* Client Secret Confirm */}
+          <div className="col-md-6">
+            <label className="form-label">{t('clientSecretConfirm', language)} *</label>
+            <TextInput
+              type="password"
+              value={clientSecretConfirm}
+              onChange={(value: string) => setClientSecretConfirm(value)}
+              placeholder={t('enterClientSecretConfirm', language)}
             />
           </div>
 
