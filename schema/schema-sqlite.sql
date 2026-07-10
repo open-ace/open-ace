@@ -107,6 +107,26 @@ CREATE TABLE agent_tokens (
  rotated_at TIMESTAMP
 );
 
+CREATE TABLE aggregation_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ type TEXT NOT NULL,
+ start_date TEXT NOT NULL,
+ end_date TEXT NOT NULL,
+ status TEXT NOT NULL,
+ records_count integer,
+ quality_report text,
+ error_message text,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ created_at TIMESTAMP
+);
+
+CREATE TABLE aggregation_locks (
+ lock_key TEXT PRIMARY KEY NOT NULL,
+ acquired_at TIMESTAMP NOT NULL,
+ timeout_seconds integer NOT NULL
+);
+
 CREATE TABLE ai_agent_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -131,6 +151,20 @@ CREATE TABLE alerts (
  read INTEGER DEFAULT 0,
  action_url text,
  action_text text
+);
+
+CREATE TABLE alerts_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ alert_type TEXT NOT NULL,
+ tenant_id integer,
+ severity TEXT,
+ message text NOT NULL,
+ details TEXT,
+ recipients text,
+ channels TEXT,
+ status TEXT,
+ sent_at TIMESTAMP,
+ created_at TIMESTAMP
 );
 
 CREATE TABLE annotations (
@@ -270,6 +304,20 @@ CREATE TABLE compliance_reports (
  tenant_id integer,
  report_data text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE consistency_violations (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer,
+ violation_type TEXT NOT NULL,
+ expected_value INTEGER,
+ actual_value INTEGER,
+ difference INTEGER,
+ details text,
+ status TEXT,
+ detected_at TIMESTAMP,
+ repaired_at TIMESTAMP,
+ created_at TIMESTAMP
 );
 
 CREATE TABLE content_filter_rules (
@@ -761,6 +809,32 @@ CREATE TABLE teams (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_period_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ period_start TEXT NOT NULL,
+ period_end TEXT NOT NULL,
+ tokens_used INTEGER,
+ requests_made INTEGER,
+ reset_at TIMESTAMP NOT NULL,
+ reset_by TEXT,
+ created_at TIMESTAMP
+);
+
+CREATE TABLE tenant_plans (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ name TEXT NOT NULL,
+ slug TEXT NOT NULL,
+ quota_defaults TEXT,
+ price_monthly REAL,
+ price_quarterly REAL,
+ price_yearly REAL,
+ features TEXT,
+ is_active INTEGER,
+ created_at TIMESTAMP,
+ updated_at TIMESTAMP
+);
+
 CREATE TABLE tenant_quotas (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -821,6 +895,16 @@ CREATE TABLE tenants (
  total_tokens_used integer DEFAULT 0,
  total_requests_made integer DEFAULT 0,
  deleted_at TIMESTAMP,
+ billing_day integer,
+ billing_cycle_type TEXT,
+ billing_cycle_start TEXT,
+ billing_cycle_end TEXT,
+ current_cycle_tokens INTEGER,
+ over_limit_strategy TEXT,
+ over_limit_price_per_token REAL,
+ usage_alert_threshold integer,
+ usage_critical_threshold integer,
+ alert_silence_hours integer,
     CONSTRAINT chk_tenants_plan CHECK (plan IN ('free', 'standard', 'premium', 'enterprise')),
     CONSTRAINT chk_tenants_status CHECK (status IN ('active', 'suspended', 'trial', 'inactive'))
 );
@@ -1021,6 +1105,10 @@ CREATE UNIQUE INDEX team_members_team_id_user_id_key ON team_members (team_id, u
 
 CREATE UNIQUE INDEX teams_team_id_key ON teams (team_id);
 
+CREATE UNIQUE INDEX tenant_plans_name_key ON tenant_plans (name);
+
+CREATE UNIQUE INDEX tenant_plans_slug_key ON tenant_plans (slug);
+
 CREATE UNIQUE INDEX tenant_quotas_tenant_id_key ON tenant_quotas (tenant_id);
 
 CREATE UNIQUE INDEX tenant_settings_tenant_id_key ON tenant_settings (tenant_id);
@@ -1083,9 +1171,19 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
+CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
+
+CREATE INDEX idx_aggregation_history_type_date ON aggregation_history (type, start_date, end_date);
+
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings (setting_key);
 
 CREATE INDEX idx_alerts_created_at ON alerts (created_at);
+
+CREATE INDEX idx_alerts_history_sent_at ON alerts_history (sent_at);
+
+CREATE INDEX idx_alerts_history_tenant ON alerts_history (tenant_id);
+
+CREATE INDEX idx_alerts_history_type ON alerts_history (alert_type);
 
 CREATE INDEX idx_alerts_read ON alerts (read);
 
@@ -1104,6 +1202,12 @@ CREATE INDEX idx_audit_severity ON audit_logs (severity);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
+
+CREATE INDEX idx_consistency_violations_detected ON consistency_violations (detected_at);
+
+CREATE INDEX idx_consistency_violations_status ON consistency_violations (status);
+
+CREATE INDEX idx_consistency_violations_tenant ON consistency_violations (tenant_id);
 
 CREATE INDEX idx_daily_stats_date ON daily_stats (date);
 
@@ -1289,6 +1393,14 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
+CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history (period_start, period_end);
+
+CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history (tenant_id);
+
+CREATE INDEX idx_tenant_plans_active ON tenant_plans (is_active);
+
+CREATE INDEX idx_tenant_plans_slug ON tenant_plans (slug);
+
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas (tenant_id);
 
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings (tenant_id);
@@ -1296,6 +1408,8 @@ CREATE INDEX idx_tenant_settings_tenant ON tenant_settings (tenant_id);
 CREATE INDEX idx_tenant_usage_date ON tenant_usage (date);
 
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage (tenant_id);
+
+CREATE INDEX idx_tenants_billing_cycle ON tenants (billing_cycle_end);
 
 CREATE INDEX idx_tenants_deleted ON tenants (deleted_at);
 

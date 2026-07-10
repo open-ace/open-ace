@@ -283,8 +283,10 @@ def cmd_summary(host: Optional[str] = None) -> None:
 
 
 def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
-    """Aggregate quota usage from daily_messages table."""
-    print("Aggregating quota usage from daily_messages...")
+    """Aggregate quota usage from daily_messages table and tenant usage from quota_usage."""
+    print("=" * 60)
+    print("STEP 1: Aggregating quota usage from daily_messages...")
+    print("=" * 60)
 
     records_created = db.aggregate_quota_usage_from_messages(start_date, end_date)
 
@@ -294,6 +296,130 @@ def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str
         print(f"Start date: {start_date}")
     if end_date:
         print(f"End date: {end_date}")
+
+    # Step 2: Aggregate tenant usage from quota_usage
+    print("\n" + "=" * 60)
+    print("STEP 2: Aggregating tenant usage from quota_usage...")
+    print("=" * 60)
+
+    try:
+        # Import tenant aggregation module
+        from scripts.shared import tenant_aggregation
+
+        result = tenant_aggregation.run_tenant_aggregation(start_date, end_date)
+
+        print("\nTenant Aggregation Results:")
+        print(f"  Status: {result['status']}")
+        print(f"  Periods Reset: {result['periods_reset']}")
+        print(f"  Records Aggregated: {result['records_aggregated']}")
+        print(f"  Tenants Updated: {result['tenants_updated']}")
+
+        if result.get("quality_report"):
+            print(f"  Data Quality Score: {result['quality_report']['quality_score']}%")
+
+        if result["status"] == "failed":
+            print(f"\nError: {result.get('error', 'Unknown error')}")
+            sys.exit(1)
+
+    except ImportError as e:
+        print(f"\nWarning: Tenant aggregation module not found: {e}")
+        print("Skipping tenant aggregation.")
+    except Exception as e:
+        print(f"\nError during tenant aggregation: {e}")
+        sys.exit(1)
+
+    print("\n" + "=" * 60)
+    print("AGGREGATION COMPLETED SUCCESSFULLY")
+    print("=" * 60)
+
+
+def cmd_reset_tenant_period(tenant_id: int) -> None:
+    """Manually reset billing period for a tenant."""
+    print(f"Resetting billing period for tenant {tenant_id}...")
+
+    try:
+        from scripts.shared import tenant_aggregation
+
+        success = tenant_aggregation.reset_tenant_period(tenant_id)
+
+        if success:
+            print(f"Successfully reset billing period for tenant {tenant_id}")
+        else:
+            print(f"Failed to reset billing period for tenant {tenant_id}")
+            sys.exit(1)
+
+    except ImportError:
+        print("Error: Tenant aggregation module not found")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def cmd_repair_consistency(tenant_id: Optional[int] = None) -> None:
+    """Repair data consistency issues."""
+    print("Repairing data consistency...")
+
+    try:
+        from app.repositories.database import Database
+        from scripts.shared import tenant_aggregation
+
+        db = Database()
+
+        with db.connection() as conn:
+            cursor = conn.cursor()
+
+            if tenant_id:
+                # Repair specific tenant
+                print(f"Repairing tenant {tenant_id}...")
+                tenant_aggregation._execute(
+                    cursor,
+                    """
+                    UPDATE tenants
+                    SET total_tokens_used = (
+                        SELECT COALESCE(SUM(tokens_used), 0)
+                        FROM tenant_usage
+                        WHERE tenant_id = ?
+                    ),
+                    total_requests_made = (
+                        SELECT COALESCE(SUM(requests_made), 0)
+                        FROM tenant_usage
+                        WHERE tenant_id = ?
+                    )
+                    WHERE id = ?
+                """,
+                    (tenant_id, tenant_id, tenant_id),
+                )
+                conn.commit()
+                print(f"Successfully repaired tenant {tenant_id}")
+            else:
+                # Repair all tenants
+                print("Repairing all tenants...")
+                tenant_aggregation._execute(
+                    cursor,
+                    """
+                    UPDATE tenants
+                    SET total_tokens_used = (
+                        SELECT COALESCE(SUM(tu.tokens_used), 0)
+                        FROM tenant_usage tu
+                        WHERE tu.tenant_id = tenants.id
+                    ),
+                    total_requests_made = (
+                        SELECT COALESCE(SUM(tu.requests_made), 0)
+                        FROM tenant_usage tu
+                        WHERE tu.tenant_id = tenants.id
+                    )
+                """,
+                )
+                conn.commit()
+                print("Successfully repaired all tenants")
+
+    except ImportError:
+        print("Error: Tenant aggregation module not found")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 def main():
@@ -343,6 +469,20 @@ def main():
     aggregate_parser.add_argument("--start", help="Start date in YYYY-MM-DD format")
     aggregate_parser.add_argument("--end", help="End date in YYYY-MM-DD format")
 
+    # reset-tenant-period command
+    reset_parser = subparsers.add_parser(
+        "reset-tenant-period", help="Manually reset billing period for a tenant"
+    )
+    reset_parser.add_argument("--tenant-id", type=int, required=True, help="Tenant ID to reset")
+
+    # repair-consistency command
+    repair_parser = subparsers.add_parser(
+        "repair-consistency", help="Repair data consistency issues"
+    )
+    repair_parser.add_argument(
+        "--tenant-id", type=int, help="Specific tenant ID to repair (optional)"
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -366,6 +506,10 @@ def main():
         cmd_config(args.action)
     elif args.command == "aggregate-quota":
         cmd_aggregate_quota(args.start, args.end)
+    elif args.command == "reset-tenant-period":
+        cmd_reset_tenant_period(args.tenant_id)
+    elif args.command == "repair-consistency":
+        cmd_repair_consistency(args.tenant_id)
 
 
 if __name__ == "__main__":

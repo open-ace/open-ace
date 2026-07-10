@@ -164,6 +164,48 @@ CREATE SEQUENCE agent_tokens_id_seq
     CACHE 1;
 
 ALTER SEQUENCE agent_tokens_id_seq OWNED BY agent_tokens.id;
+CREATE TABLE aggregation_history (
+    id integer NOT NULL,
+    type character varying(50) NOT NULL,
+    start_date date NOT NULL,
+    end_date date NOT NULL,
+    status character varying(20) NOT NULL,
+    records_count integer,
+    quality_report text,
+    error_message text,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    created_at timestamp without time zone
+);
+
+COMMENT ON COLUMN aggregation_history.type IS 'Aggregation type';
+COMMENT ON COLUMN aggregation_history.start_date IS 'Start date of aggregation';
+COMMENT ON COLUMN aggregation_history.end_date IS 'End date of aggregation';
+COMMENT ON COLUMN aggregation_history.status IS 'Status: pending, running, completed, failed';
+COMMENT ON COLUMN aggregation_history.records_count IS 'Number of records processed';
+COMMENT ON COLUMN aggregation_history.quality_report IS 'Data quality report in JSON';
+COMMENT ON COLUMN aggregation_history.error_message IS 'Error message if failed';
+COMMENT ON COLUMN aggregation_history.started_at IS 'Start timestamp';
+COMMENT ON COLUMN aggregation_history.completed_at IS 'Completion timestamp';
+COMMENT ON COLUMN aggregation_history.created_at IS 'Creation timestamp';
+CREATE SEQUENCE aggregation_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE aggregation_history_id_seq OWNED BY aggregation_history.id;
+CREATE TABLE aggregation_locks (
+    lock_key character varying(100) NOT NULL,
+    acquired_at timestamp without time zone NOT NULL,
+    timeout_seconds integer NOT NULL
+);
+
+COMMENT ON COLUMN aggregation_locks.lock_key IS 'Lock key identifier';
+COMMENT ON COLUMN aggregation_locks.acquired_at IS 'Lock acquisition timestamp';
+COMMENT ON COLUMN aggregation_locks.timeout_seconds IS 'Lock timeout in seconds';
 CREATE TABLE ai_agent_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -199,6 +241,38 @@ CREATE TABLE alerts (
     action_text text
 );
 
+CREATE TABLE alerts_history (
+    id integer NOT NULL,
+    alert_type character varying(50) NOT NULL,
+    tenant_id integer,
+    severity character varying(20),
+    message text NOT NULL,
+    details jsonb,
+    recipients text,
+    channels character varying(100),
+    status character varying(20),
+    sent_at timestamp without time zone,
+    created_at timestamp without time zone
+);
+
+COMMENT ON COLUMN alerts_history.alert_type IS 'Alert type';
+COMMENT ON COLUMN alerts_history.tenant_id IS 'Tenant ID if tenant-specific';
+COMMENT ON COLUMN alerts_history.severity IS 'Alert severity: info, warning, critical';
+COMMENT ON COLUMN alerts_history.message IS 'Alert message';
+COMMENT ON COLUMN alerts_history.details IS 'Additional details (JSON)';
+COMMENT ON COLUMN alerts_history.recipients IS 'Alert recipients';
+COMMENT ON COLUMN alerts_history.channels IS 'Notification channels used';
+COMMENT ON COLUMN alerts_history.status IS 'Alert status: sent, failed';
+COMMENT ON COLUMN alerts_history.sent_at IS 'Sent timestamp';
+CREATE SEQUENCE alerts_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE alerts_history_id_seq OWNED BY alerts_history.id;
 CREATE SEQUENCE alerts_id_seq
     AS integer
     START WITH 1
@@ -401,6 +475,38 @@ CREATE SEQUENCE compliance_reports_id_seq
     CACHE 1;
 
 ALTER SEQUENCE compliance_reports_id_seq OWNED BY compliance_reports.id;
+CREATE TABLE consistency_violations (
+    id integer NOT NULL,
+    tenant_id integer,
+    violation_type character varying(50) NOT NULL,
+    expected_value bigint,
+    actual_value bigint,
+    difference bigint,
+    details text,
+    status character varying(20),
+    detected_at timestamp without time zone,
+    repaired_at timestamp without time zone,
+    created_at timestamp without time zone
+);
+
+COMMENT ON COLUMN consistency_violations.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN consistency_violations.violation_type IS 'Violation type';
+COMMENT ON COLUMN consistency_violations.expected_value IS 'Expected value';
+COMMENT ON COLUMN consistency_violations.actual_value IS 'Actual value';
+COMMENT ON COLUMN consistency_violations.difference IS 'Difference';
+COMMENT ON COLUMN consistency_violations.details IS 'Additional details';
+COMMENT ON COLUMN consistency_violations.status IS 'Status: detected, repaired, ignored';
+COMMENT ON COLUMN consistency_violations.detected_at IS 'Detection timestamp';
+COMMENT ON COLUMN consistency_violations.repaired_at IS 'Repair timestamp';
+CREATE SEQUENCE consistency_violations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE consistency_violations_id_seq OWNED BY consistency_violations.id;
 CREATE TABLE content_filter_rules (
     id integer NOT NULL,
     pattern text NOT NULL,
@@ -1179,6 +1285,64 @@ CREATE SEQUENCE teams_id_seq
     CACHE 1;
 
 ALTER SEQUENCE teams_id_seq OWNED BY teams.id;
+CREATE TABLE tenant_period_history (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    period_start date NOT NULL,
+    period_end date NOT NULL,
+    tokens_used bigint,
+    requests_made bigint,
+    reset_at timestamp without time zone NOT NULL,
+    reset_by character varying(100),
+    created_at timestamp without time zone
+);
+
+COMMENT ON COLUMN tenant_period_history.period_start IS 'Period start date';
+COMMENT ON COLUMN tenant_period_history.period_end IS 'Period end date';
+COMMENT ON COLUMN tenant_period_history.tokens_used IS 'Total tokens used in period';
+COMMENT ON COLUMN tenant_period_history.requests_made IS 'Total requests made in period';
+COMMENT ON COLUMN tenant_period_history.reset_at IS 'Reset timestamp';
+COMMENT ON COLUMN tenant_period_history.reset_by IS 'User who triggered reset';
+CREATE SEQUENCE tenant_period_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_period_history_id_seq OWNED BY tenant_period_history.id;
+CREATE TABLE tenant_plans (
+    id integer NOT NULL,
+    name character varying(100) NOT NULL,
+    slug character varying(50) NOT NULL,
+    quota_defaults jsonb,
+    price_monthly numeric(10,2),
+    price_quarterly numeric(10,2),
+    price_yearly numeric(10,2),
+    features jsonb,
+    is_active boolean,
+    created_at timestamp without time zone,
+    updated_at timestamp without time zone
+);
+
+COMMENT ON COLUMN tenant_plans.name IS 'Plan name';
+COMMENT ON COLUMN tenant_plans.slug IS 'Plan slug';
+COMMENT ON COLUMN tenant_plans.quota_defaults IS 'Default quota configuration (JSON)';
+COMMENT ON COLUMN tenant_plans.price_monthly IS 'Monthly price';
+COMMENT ON COLUMN tenant_plans.price_quarterly IS 'Quarterly price';
+COMMENT ON COLUMN tenant_plans.price_yearly IS 'Yearly price';
+COMMENT ON COLUMN tenant_plans.features IS 'Plan features (JSON)';
+COMMENT ON COLUMN tenant_plans.is_active IS 'Whether plan is active';
+CREATE SEQUENCE tenant_plans_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_plans_id_seq OWNED BY tenant_plans.id;
 CREATE TABLE tenant_quotas (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -1266,10 +1430,30 @@ CREATE TABLE tenants (
     total_tokens_used integer DEFAULT 0,
     total_requests_made integer DEFAULT 0,
     deleted_at timestamp without time zone,
+    billing_day integer,
+    billing_cycle_type character varying(20),
+    billing_cycle_start date,
+    billing_cycle_end date,
+    current_cycle_tokens bigint,
+    over_limit_strategy character varying(20),
+    over_limit_price_per_token numeric(10,6),
+    usage_alert_threshold integer,
+    usage_critical_threshold integer,
+    alert_silence_hours integer,
     CONSTRAINT chk_tenants_plan CHECK ((plan = ANY (ARRAY['free'::text, 'standard'::text, 'premium'::text, 'enterprise'::text]))),
     CONSTRAINT chk_tenants_status CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text, 'trial'::text, 'inactive'::text])))
 );
 
+COMMENT ON COLUMN tenants.billing_day IS 'Billing day of month (1-31)';
+COMMENT ON COLUMN tenants.billing_cycle_type IS 'Billing cycle type';
+COMMENT ON COLUMN tenants.billing_cycle_start IS 'Current billing cycle start date';
+COMMENT ON COLUMN tenants.billing_cycle_end IS 'Current billing cycle end date';
+COMMENT ON COLUMN tenants.current_cycle_tokens IS 'Tokens used in current billing cycle';
+COMMENT ON COLUMN tenants.over_limit_strategy IS 'Over limit strategy: soft, hard, billable';
+COMMENT ON COLUMN tenants.over_limit_price_per_token IS 'Price per token when over limit';
+COMMENT ON COLUMN tenants.usage_alert_threshold IS 'Usage alert threshold percentage';
+COMMENT ON COLUMN tenants.usage_critical_threshold IS 'Usage critical threshold percentage';
+COMMENT ON COLUMN tenants.alert_silence_hours IS 'Alert silence period in hours';
 CREATE SEQUENCE tenants_id_seq
     AS integer
     START WITH 1
@@ -1518,9 +1702,13 @@ ALTER TABLE ONLY agent_sessions ALTER COLUMN id SET DEFAULT nextval('agent_sessi
 
 ALTER TABLE ONLY agent_tokens ALTER COLUMN id SET DEFAULT nextval('agent_tokens_id_seq'::regclass);
 
+ALTER TABLE ONLY aggregation_history ALTER COLUMN id SET DEFAULT nextval('aggregation_history_id_seq'::regclass);
+
 ALTER TABLE ONLY ai_agent_settings ALTER COLUMN id SET DEFAULT nextval('ai_agent_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::regclass);
+
+ALTER TABLE ONLY alerts_history ALTER COLUMN id SET DEFAULT nextval('alerts_history_id_seq'::regclass);
 
 ALTER TABLE ONLY annotations ALTER COLUMN id SET DEFAULT nextval('annotations_id_seq'::regclass);
 
@@ -1533,6 +1721,8 @@ ALTER TABLE ONLY audit_logs ALTER COLUMN id SET DEFAULT nextval('audit_logs_id_s
 ALTER TABLE ONLY autonomous_workflows ALTER COLUMN id SET DEFAULT nextval('autonomous_workflows_id_seq'::regclass);
 
 ALTER TABLE ONLY compliance_reports ALTER COLUMN id SET DEFAULT nextval('compliance_reports_id_seq'::regclass);
+
+ALTER TABLE ONLY consistency_violations ALTER COLUMN id SET DEFAULT nextval('consistency_violations_id_seq'::regclass);
 
 ALTER TABLE ONLY content_filter_rules ALTER COLUMN id SET DEFAULT nextval('content_filter_rules_id_seq'::regclass);
 
@@ -1594,6 +1784,10 @@ ALTER TABLE ONLY team_members ALTER COLUMN id SET DEFAULT nextval('team_members_
 
 ALTER TABLE ONLY teams ALTER COLUMN id SET DEFAULT nextval('teams_id_seq'::regclass);
 
+ALTER TABLE ONLY tenant_period_history ALTER COLUMN id SET DEFAULT nextval('tenant_period_history_id_seq'::regclass);
+
+ALTER TABLE ONLY tenant_plans ALTER COLUMN id SET DEFAULT nextval('tenant_plans_id_seq'::regclass);
+
 ALTER TABLE ONLY tenant_quotas ALTER COLUMN id SET DEFAULT nextval('tenant_quotas_id_seq'::regclass);
 
 ALTER TABLE ONLY tenant_settings ALTER COLUMN id SET DEFAULT nextval('tenant_settings_id_seq'::regclass);
@@ -1647,6 +1841,12 @@ ALTER TABLE ONLY agent_tokens
 ALTER TABLE ONLY agent_tokens
     ADD CONSTRAINT agent_tokens_token_hash_key UNIQUE (token_hash);
 
+ALTER TABLE ONLY aggregation_history
+    ADD CONSTRAINT aggregation_history_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY aggregation_locks
+    ADD CONSTRAINT aggregation_locks_pkey PRIMARY KEY (lock_key);
+
 ALTER TABLE ONLY ai_agent_settings
     ADD CONSTRAINT ai_agent_settings_pkey PRIMARY KEY (id);
 
@@ -1655,6 +1855,9 @@ ALTER TABLE ONLY ai_agent_settings
 
 ALTER TABLE ONLY alerts
     ADD CONSTRAINT alerts_alert_id_key UNIQUE (alert_id);
+
+ALTER TABLE ONLY alerts_history
+    ADD CONSTRAINT alerts_history_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY alerts
     ADD CONSTRAINT alerts_pkey PRIMARY KEY (id);
@@ -1688,6 +1891,9 @@ ALTER TABLE ONLY compliance_reports
 
 ALTER TABLE ONLY compliance_reports
     ADD CONSTRAINT compliance_reports_report_id_key UNIQUE (report_id);
+
+ALTER TABLE ONLY consistency_violations
+    ADD CONSTRAINT consistency_violations_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY content_filter_rules
     ADD CONSTRAINT content_filter_rules_pkey PRIMARY KEY (id);
@@ -1826,6 +2032,18 @@ ALTER TABLE ONLY teams
 
 ALTER TABLE ONLY teams
     ADD CONSTRAINT teams_team_id_key UNIQUE (team_id);
+
+ALTER TABLE ONLY tenant_period_history
+    ADD CONSTRAINT tenant_period_history_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY tenant_plans
+    ADD CONSTRAINT tenant_plans_name_key UNIQUE (name);
+
+ALTER TABLE ONLY tenant_plans
+    ADD CONSTRAINT tenant_plans_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY tenant_plans
+    ADD CONSTRAINT tenant_plans_slug_key UNIQUE (slug);
 
 ALTER TABLE ONLY tenant_quotas
     ADD CONSTRAINT tenant_quotas_pkey PRIMARY KEY (id);
@@ -1976,6 +2194,14 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
+CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
+
+
+--
+--
+
+CREATE INDEX idx_aggregation_history_type_date ON aggregation_history USING btree (type, start_date, end_date);
+
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
 
@@ -1984,39 +2210,63 @@ CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting
 
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
 
+CREATE INDEX idx_alerts_history_sent_at ON alerts_history USING btree (sent_at);
+
+
+--
+--
+
+CREATE INDEX idx_alerts_history_tenant ON alerts_history USING btree (tenant_id);
+
+CREATE INDEX idx_alerts_history_type ON alerts_history USING btree (alert_type);
+
+
+--
+--
+
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
-
-
---
---
 
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
 
+
+--
+--
+
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
-
-
---
---
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
-
-
---
---
 
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
+
+CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
+
+
+--
+--
+
+CREATE INDEX idx_consistency_violations_status ON consistency_violations USING btree (status);
+
+CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
 
 
 --
@@ -2400,6 +2650,22 @@ CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
+CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
+
+
+--
+--
+
+CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btree (tenant_id);
+
+CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
+
+
+--
+--
+
+CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
+
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
 
@@ -2416,125 +2682,134 @@ CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
 
+CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
+
+
+--
+--
+
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
-
-
---
---
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
+
+--
+--
+
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
+
+--
+--
+
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary USING btree (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name)::text <> ''::text) AND ((host_name)::text !~~ '<%>'::text) AND ((length((host_name)::text) >= 1) AND (length((host_name)::text) <= 253)));
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
-
-
---
---
 
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
 
+
+--
+--
+
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
-
-
---
---
 
 CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_users_active ON users USING btree (is_active);
-
-
---
---
 
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
 
+
+--
+--
+
 CREATE INDEX idx_users_email ON users USING btree (email);
-
-
---
---
 
 CREATE INDEX idx_users_role ON users USING btree (role);
 
+
+--
+--
+
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_workflow_id);
-
-
---
---
 
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
 
+
+--
+--
+
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
-
-
---
---
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
+
+--
+--
+
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (path) WHERE (is_active IS TRUE);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
+
+
+--
+--
+
+ALTER TABLE ONLY alerts_history
+    ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY anomaly_status
     ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
@@ -2547,6 +2822,9 @@ ALTER TABLE ONLY api_key_store
 
 ALTER TABLE ONLY autonomous_workflows
     ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY consistency_violations
+    ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY user_daily_stats
     ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
@@ -2592,6 +2870,9 @@ ALTER TABLE ONLY sso_providers
 
 ALTER TABLE ONLY sso_sessions
     ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_period_history
+    ADD CONSTRAINT tenant_period_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY tenant_quotas
     ADD CONSTRAINT tenant_quotas_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
