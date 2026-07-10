@@ -13,7 +13,7 @@ It includes:
 import calendar
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # Import database utilities
@@ -255,7 +255,7 @@ def check_quota_usage_quality(
         abnormal_tokens = cursor.fetchone()["count"]
 
         # Calculate quality score
-        good_records = total_records - null_user_id - negative_tokens
+        good_records = total_records - null_user_id - negative_tokens - abnormal_tokens
         quality_score = (good_records / total_records * 100) if total_records > 0 else 100
 
         return {
@@ -399,12 +399,20 @@ def reset_tenant_period(tenant_id: int) -> bool:
         cycle_type = tenant["billing_cycle_type"] or "monthly"
 
         if current_period_end:
+            # Handle both date and datetime objects from database
+            if isinstance(current_period_end, datetime):
+                period_end_date = current_period_end.date()
+            elif isinstance(current_period_end, date):
+                period_end_date = current_period_end
+            else:
+                period_end_date = datetime.strptime(str(current_period_end), "%Y-%m-%d").date()
+
             new_cycle_end = calculate_next_billing_cycle_end(
-                datetime.strptime(str(current_period_end), "%Y-%m-%d"),
+                period_end_date,
                 billing_day,
                 cycle_type,
             )
-            new_cycle_start = current_period_end + timedelta(days=1)
+            new_cycle_start = period_end_date + timedelta(days=1)
         else:
             # Initialize from today
             today = datetime.now().date()
