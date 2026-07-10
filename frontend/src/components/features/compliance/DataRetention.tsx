@@ -52,16 +52,19 @@ export const DATA_TYPE_META: Record<
     i18nKey: 'dataTypeAuditLogs',
     icon: 'bi-journal-text',
     fallbackLabel: 'Audit Logs',
+    storageEstimateKey: 'audit_logs',
   },
   quota_alerts: {
     i18nKey: 'dataTypeQuotaAlerts',
     icon: 'bi-bell',
     fallbackLabel: 'Quota Alerts',
+    storageEstimateKey: 'quota_alerts',
   },
   sessions: {
     i18nKey: 'dataTypeSessions',
     icon: 'bi-chat-square',
     fallbackLabel: 'Sessions',
+    storageEstimateKey: 'sessions',
   },
   sso_sessions: {
     i18nKey: 'dataTypeSsoSessions',
@@ -84,6 +87,12 @@ export const DATA_TYPE_META: Record<
     i18nKey: 'dataTypeUserActivity',
     icon: 'bi-person-activity',
     fallbackLabel: 'User Activity',
+  },
+  users: {
+    i18nKey: 'dataTypeUsers',
+    icon: 'bi-person',
+    fallbackLabel: 'Users',
+    storageEstimateKey: 'users',
   },
 };
 
