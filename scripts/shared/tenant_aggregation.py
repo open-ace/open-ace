@@ -17,11 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 # Import database utilities
-from scripts.shared.db import (
-    _execute,
-    get_connection,
-    is_postgresql,
-)
+from scripts.shared.db import _execute, get_connection, is_postgresql
 
 logger = logging.getLogger(__name__)
 
