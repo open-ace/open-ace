@@ -874,7 +874,12 @@ class AutonomousOrchestrator:
                             check=False,
                         )
                         remote_check = main_gh._run_git(
-                            ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{expected_branch}"],
+                            [
+                                "show-ref",
+                                "--verify",
+                                "--quiet",
+                                f"refs/remotes/origin/{expected_branch}",
+                            ],
                             check=False,
                         )
                         if branch_check.returncode == 0 or remote_check.returncode == 0:
@@ -2154,7 +2159,9 @@ class AutonomousOrchestrator:
                     # Format: {project_path}/.worktrees/{workflow_id}
                     # Fallback to legacy format for backwards compatibility
                     pre_generated_worktree_path = wf.get("worktree_path", "")
-                    if pre_generated_worktree_path and pre_generated_worktree_path.startswith(project_path):
+                    if pre_generated_worktree_path and pre_generated_worktree_path.startswith(
+                        project_path
+                    ):
                         worktree_path = pre_generated_worktree_path
                     else:
                         # Legacy format for backwards compatibility
@@ -2262,10 +2269,12 @@ class AutonomousOrchestrator:
                             logger.warning("Failed to verify worktree branch: %s", e)
 
                     # Update workflow with worktree_path and branch_name in single transaction
-                    self._update_workflow({
-                        "worktree_path": actual_worktree_path,
-                        "branch_name": branch_name,
-                    })
+                    self._update_workflow(
+                        {
+                            "worktree_path": actual_worktree_path,
+                            "branch_name": branch_name,
+                        }
+                    )
                     # The worktree now exists; drop the cached gh (bound to the
                     # main repo during preparation) so the next _get_gh() rebinds
                     # to the worktree path — the agent's actual working repo.
@@ -2763,10 +2772,12 @@ class AutonomousOrchestrator:
                             title=f"Branch mismatch: expected {expected_branch}, actual {actual_branch}",
                             error_message=f"Cannot checkout to expected branch: {e}",
                         )
-                        self._update_workflow({
-                            "status": "failed",
-                            "error_message": f"Branch mismatch: cannot checkout to {expected_branch}",
-                        })
+                        self._update_workflow(
+                            {
+                                "status": "failed",
+                                "error_message": f"Branch mismatch: cannot checkout to {expected_branch}",
+                            }
+                        )
                         return
                 else:
                     # No auto-dev prefix, check if we're at least on workflow-specific branch
@@ -2784,10 +2795,12 @@ class AutonomousOrchestrator:
                             title=f"Not on workflow-specific branch: {actual_branch}",
                             error_message=f"Expected branch starting with {workflow_prefix}",
                         )
-                        self._update_workflow({
-                            "status": "failed",
-                            "error_message": f"Not on workflow-specific branch: {actual_branch}",
-                        })
+                        self._update_workflow(
+                            {
+                                "status": "failed",
+                                "error_message": f"Not on workflow-specific branch: {actual_branch}",
+                            }
+                        )
                         return
         except GitHubOpsError as e:
             logger.warning("Branch verification failed: %s", e)

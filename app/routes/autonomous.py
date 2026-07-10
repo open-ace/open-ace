@@ -708,7 +708,9 @@ def create_workflow():
                 workflow_id = str(uuid.uuid4())
                 branch_name = f"auto-dev/{workflow_id[:8]}"
                 # Use .worktrees directory for worktree strategy, with full workflow_id for uniqueness
-                worktree_path = os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+                worktree_path = (
+                    os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+                )
 
                 definition_snapshot = _build_definition_snapshot(
                     data,
@@ -787,7 +789,9 @@ def create_workflow():
         if branch_strategy == "worktree":
             # Force pre-generated branch_name for worktree strategy
             branch_name = f"auto-dev/{workflow_id[:8]}"
-            worktree_path = os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+            worktree_path = (
+                os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
+            )
             base_workflow_data["branch_name"] = branch_name
             base_workflow_data["worktree_path"] = worktree_path
             base_workflow_data["original_branch_name"] = user_branch_name  # Preserve user's input
