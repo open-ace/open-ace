@@ -1278,8 +1278,7 @@ export const translations: Record<Language, Translations> = {
     jsonInvalid: 'JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
 
-    // Scope options
-    scope: 'Scope',
+    // Scope options (scope key is defined in SSO section above)
     scopeShared: 'Shared (Local + Remote)',
     scopeLocal: 'Local Only',
     scopeRemote: 'Remote Only (LLM Proxy)',
@@ -2841,8 +2840,7 @@ export const translations: Record<Language, Translations> = {
     jsonInvalid: 'JSON 格式错误',
     providerCannotChange: '提供商不可更改',
 
-    // Scope 选项
-    scope: '作用域',
+    // Scope 选项 (scope key 定义在 SSO 部分)
     scopeShared: '共享（本地 + 远程）',
     scopeLocal: '仅本地',
     scopeRemote: '仅远程（LLM 代理）',
@@ -4245,14 +4243,6 @@ export const translations: Record<Language, Translations> = {
     compactMode: '簡潔モード',
     verbose: '詳細',
     compact: '簡潔',
-    codexSettings: 'Codex 設定 (TOML)',
-    codexSettingsHint:
-      '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
-    zcodeSettings: 'ZCode 設定 (JSON)',
-    zcodeSettingsHint:
-      '機密情報以外の設定のみを構成してください（provider、model など）。API キーや Base URL は含めないでください — プロキシ経由で自動的に注入されます。',
-    zcodeSettingsInvalid: 'ZCode 設定の JSON が無効です',
-    providerCannotChange: 'プロバイダーは変更できません',
 
     // Fullscreen
     enterFullscreen: '全画面表示',
@@ -4494,8 +4484,6 @@ export const translations: Record<Language, Translations> = {
     addToolAccountSuccess: 'ツールアカウントが正常に追加されました',
     addToolAccountFailed: 'ツールアカウントの追加に失敗しました',
     // Run Timeline（実行タイムライン）— リモートエージェントセッション
-    model: 'モデル',
-    provider: 'プロバイダー',
     runTimeline: '実行タイムライン',
     runTimelineLoading: 'タイムラインを読み込み中...',
     runTimelineError: 'タイムラインの読み込みに失敗しました',
@@ -4538,7 +4526,8 @@ export const translations: Record<Language, Translations> = {
     enterApiKey: 'API キーを入力',
     enterBaseUrl: 'ベース URL を入力',
     noApiKeys: 'API キーが設定されていません',
-    noApiKeysDescription: 'リモートエージェントの LLM プロキシを有効にするには API キーを追加してください。',
+    noApiKeysDescription:
+      'リモートエージェントの LLM プロキシを有効にするには API キーを追加してください。',
     keyStatus: 'ステータス',
     cliTools: 'CLI ツール',
     cliToolsDescription: 'この API キーが設定を行う CLI ツールを選択してください。',
@@ -4566,7 +4555,8 @@ export const translations: Record<Language, Translations> = {
     scopeShared: '共有（ローカル + リモート）',
     scopeLocal: 'ローカルのみ',
     scopeRemote: 'リモートのみ（LLM プロキシ）',
-    scopeHelp: 'どのワークスペースタイプがこのキーを使用できるかを決定します。「共有」を推奨します。',
+    scopeHelp:
+      'どのワークスペースタイプがこのキーを使用できるかを決定します。「共有」を推奨します。',
     scopeBadgeShared: '共有',
     scopeBadgeLocal: 'ローカル',
     scopeBadgeRemote: 'リモート',
@@ -5917,8 +5907,6 @@ export const translations: Record<Language, Translations> = {
     addToolAccountSuccess: '도구 계정이 성공적으로 추가되었습니다',
     addToolAccountFailed: '도구 계정 추가 실패',
     // Run Timeline(실행 타임라인) — 원격 에이전트 세션
-    model: '모델',
-    provider: '제공자',
     runTimeline: '실행 타임라인',
     runTimelineLoading: '타임라인 로드 중...',
     runTimelineError: '타임라인을 로드하지 못했습니다',
