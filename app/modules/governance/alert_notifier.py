@@ -992,3 +992,328 @@ def create_security_alert(
         username=username,
         language=language,
     )
+
+
+# =============================================================================
+# Scene-Specific Alert Functions
+# =============================================================================
+# These functions provide built-in severity determination for common scenarios.
+# Developers should prefer these functions over generic create_system_alert /
+# create_security_alert for better consistency and maintainability.
+
+
+def create_service_down_alert(
+    service_name: str,
+    details: str,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a service down alert (CRITICAL severity).
+
+    Used when a critical service becomes unavailable.
+
+    Severity: CRITICAL (service down is always critical)
+
+    Args:
+        service_name: Name of the affected service.
+        details: Additional details about the service failure.
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    return create_system_alert(
+        title=f"Service Down: {service_name}",
+        message=f"Service '{service_name}' is unavailable. Details: {details}",
+        severity=AlertSeverity.CRITICAL.value,
+        language=language,
+    )
+
+
+def create_service_startup_alert(
+    service_name: str,
+    startup_time: float,
+    threshold: float,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a service startup alert (WARNING or CRITICAL based on startup time).
+
+    Used when a service takes longer than expected to start.
+
+    Severity determination:
+    - startup_time > threshold * 2: CRITICAL
+    - startup_time > threshold: WARNING
+
+    Args:
+        service_name: Name of the service.
+        startup_time: Actual startup time in seconds.
+        threshold: Expected startup time threshold in seconds.
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    if startup_time > threshold * 2:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Service Startup Critical: {service_name}"
+        message = (
+            f"Service '{service_name}' startup took {startup_time:.1f}s, "
+            f"which is {startup_time / threshold:.1f}x the expected threshold ({threshold}s)."
+        )
+    else:
+        severity = AlertSeverity.WARNING.value
+        title = f"Service Startup Warning: {service_name}"
+        message = (
+            f"Service '{service_name}' startup took {startup_time:.1f}s, "
+            f"exceeding the expected threshold ({threshold}s)."
+        )
+
+    return create_system_alert(
+        title=title,
+        message=message,
+        severity=severity,
+        language=language,
+    )
+
+
+def create_resource_alert(
+    resource_type: str,
+    current: float,
+    limit: float,
+    threshold_warning: float = 0.8,
+    threshold_critical: float = 0.95,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a resource shortage alert (INFO, WARNING, or CRITICAL based on usage).
+
+    Used for memory, CPU, disk, or other resource shortage alerts.
+
+    Severity determination:
+    - usage >= 100%: CRITICAL (resource exhausted)
+    - usage >= threshold_critical: CRITICAL (approaching limit)
+    - usage >= threshold_warning: WARNING (moderate shortage)
+    - usage < threshold_warning: INFO (notification only)
+
+    Args:
+        resource_type: Type of resource (memory, cpu, disk, etc.).
+        current: Current resource usage.
+        limit: Resource limit.
+        threshold_warning: Warning threshold as percentage (default 80%).
+        threshold_critical: Critical threshold as percentage (default 95%).
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    usage_percent = (current / limit) * 100 if limit > 0 else 100
+
+    if usage_percent >= 100:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Resource Exhausted: {resource_type}"
+        message = f"{resource_type} is fully used ({current}/{limit})."
+    elif usage_percent >= threshold_critical * 100:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Resource Critical: {resource_type}"
+        message = f"{resource_type} usage at {usage_percent:.1f}% ({current}/{limit})."
+    elif usage_percent >= threshold_warning * 100:
+        severity = AlertSeverity.WARNING.value
+        title = f"Resource Warning: {resource_type}"
+        message = f"{resource_type} usage at {usage_percent:.1f}% ({current}/{limit})."
+    else:
+        severity = AlertSeverity.INFO.value
+        title = f"Resource Notice: {resource_type}"
+        message = f"{resource_type} usage at {usage_percent:.1f}% ({current}/{limit})."
+
+    return create_system_alert(
+        title=title,
+        message=message,
+        severity=severity,
+        language=language,
+    )
+
+
+def create_config_error_alert(
+    config_key: str,
+    error_details: str,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a configuration error alert (WARNING severity).
+
+    Used for configuration validation errors or invalid settings.
+
+    Severity: WARNING (configuration errors need attention but are not immediately critical)
+
+    Args:
+        config_key: The configuration key that has an error.
+        error_details: Details about the configuration error.
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    return create_system_alert(
+        title=f"Configuration Error: {config_key}",
+        message=f"Configuration key '{config_key}' has an error: {error_details}",
+        severity=AlertSeverity.WARNING.value,
+        language=language,
+    )
+
+
+def create_api_error_alert(
+    api_name: str,
+    error_code: int,
+    error_message: str,
+    language: str = "en",
+) -> Alert:
+    """
+    Create an API error alert (WARNING severity).
+
+    Used for API call failures or unexpected responses.
+
+    Severity: WARNING (API errors typically need investigation)
+
+    Args:
+        api_name: Name of the API or endpoint.
+        error_code: Error code returned by the API.
+        error_message: Error message from the API.
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    return create_system_alert(
+        title=f"API Error: {api_name}",
+        message=f"API '{api_name}' returned error {error_code}: {error_message}",
+        severity=AlertSeverity.WARNING.value,
+        language=language,
+    )
+
+
+def create_auth_failure_alert(
+    username: str,
+    failure_count: int,
+    threshold: int = 5,
+    language: str = "en",
+) -> Alert:
+    """
+    Create an authentication failure alert (WARNING or CRITICAL based on count).
+
+    Used for login failures, token validation failures, etc.
+
+    Severity determination:
+    - failure_count >= threshold: CRITICAL (repeated failures indicate potential attack)
+    - failure_count < threshold: WARNING (single failure needs monitoring)
+
+    Args:
+        username: Username that failed authentication.
+        failure_count: Number of consecutive failures for this user.
+        threshold: Threshold for upgrading to CRITICAL (default 5).
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    if failure_count >= threshold:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"Authentication Failure Alert: {username}"
+        message = (
+            f"User '{username}' has {failure_count} consecutive authentication failures. "
+            f"This may indicate a brute-force attack attempt."
+        )
+    else:
+        severity = AlertSeverity.WARNING.value
+        title = f"Authentication Failure: {username}"
+        message = (
+            f"User '{username}' authentication failed ({failure_count} failures). "
+            f"Monitoring suggested."
+        )
+
+    return create_security_alert(
+        title=title,
+        message=message,
+        username=username,
+        severity=severity,
+        language=language,
+    )
+
+
+def create_permission_violation_alert(
+    username: str,
+    resource: str,
+    action: str,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a permission violation alert (CRITICAL severity).
+
+    Used when a user attempts to access a resource without proper permissions.
+
+    Severity: CRITICAL (permission violations are security incidents)
+
+    Args:
+        username: Username that attempted the unauthorized action.
+        resource: Resource that was accessed.
+        action: Action that was attempted.
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    return create_security_alert(
+        title=f"Permission Violation: {username}",
+        message=f"User '{username}' attempted '{action}' on '{resource}' without authorization.",
+        username=username,
+        severity=AlertSeverity.CRITICAL.value,
+        language=language,
+    )
+
+
+def create_suspicious_activity_alert(
+    username: str,
+    activity_type: str,
+    risk_score: float,
+    language: str = "en",
+) -> Alert:
+    """
+    Create a suspicious activity alert (WARNING or CRITICAL based on risk score).
+
+    Used for detecting unusual user behavior patterns.
+
+    Severity determination:
+    - risk_score >= 50: CRITICAL (high-risk activity)
+    - risk_score < 50: WARNING (moderate-risk activity)
+
+    Args:
+        username: Username showing suspicious behavior.
+        activity_type: Type of suspicious activity detected.
+        risk_score: Risk score from 0-100 (higher = more suspicious).
+        language: Language for email notification.
+
+    Returns:
+        Created Alert.
+    """
+    if risk_score >= 50:
+        severity = AlertSeverity.CRITICAL.value
+        title = f"High-Risk Activity: {username}"
+        message = (
+            f"User '{username}' detected performing '{activity_type}' with risk score {risk_score:.1f}. "
+            f"Immediate investigation recommended."
+        )
+    else:
+        severity = AlertSeverity.WARNING.value
+        title = f"Suspicious Activity: {username}"
+        message = (
+            f"User '{username}' detected performing '{activity_type}' with risk score {risk_score:.1f}. "
+            f"Monitoring recommended."
+        )
+
+    return create_security_alert(
+        title=title,
+        message=message,
+        username=username,
+        severity=severity,
+        language=language,
+    )
