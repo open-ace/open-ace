@@ -231,7 +231,6 @@ export const ComplianceMgmt: React.FC = () => {
   const [previewReportType, setPreviewReportType] = useState<string>('');
   const [previewReportId, setPreviewReportId] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [previewLanguage] = useState<'en' | 'zh' | 'ja' | 'ko'>('en');
 
   // Initialize dates for reports
   useEffect(() => {
@@ -305,7 +304,7 @@ export const ComplianceMgmt: React.FC = () => {
         period_start: startDate,
         period_end: endDate,
         format: format as 'json' | 'csv' | 'html' | 'excel',
-        language: previewLanguage,
+        language: language as 'en' | 'zh' | 'ja' | 'ko',
       });
 
       // Handle different formats
@@ -356,7 +355,11 @@ export const ComplianceMgmt: React.FC = () => {
   const handlePreviewSavedReport = async (reportId: string, reportType: string) => {
     setIsPreviewLoading(true);
     try {
-      const htmlContent = await complianceApi.getSavedReport(reportId, 'html', previewLanguage);
+      const htmlContent = await complianceApi.getSavedReport(
+        reportId,
+        'html',
+        language as 'en' | 'zh' | 'ja' | 'ko'
+      );
       setPreviewHtmlContent(htmlContent as string);
       setPreviewReportType(reportType);
       setPreviewReportId(reportId);
@@ -375,7 +378,11 @@ export const ComplianceMgmt: React.FC = () => {
     downloadFormat: 'json' | 'csv' | 'html' | 'excel'
   ) => {
     try {
-      const report = await complianceApi.getSavedReport(reportId, downloadFormat, previewLanguage);
+      const report = await complianceApi.getSavedReport(
+        reportId,
+        downloadFormat,
+        language as 'en' | 'zh' | 'ja' | 'ko'
+      );
 
       if (downloadFormat === 'excel') {
         const blob = report as Blob;
