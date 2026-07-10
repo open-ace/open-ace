@@ -709,6 +709,10 @@ class AutonomousOrchestrator:
         the DB, so binding GitHubOps to it makes every ``git -C <worktree>``
         fail with ENOENT (Issue #1395 rerun regression). Preparation creates
         the worktree; until it does, the main repo is the only valid repo_path.
+
+        Issue #1573: Added branch verification after binding to worktree.
+        If the actual branch doesn't match expected branch_name, log warning
+        and attempt to checkout to the correct branch.
         """
         wf = self.workflow
         if not self._gh and wf:
@@ -732,6 +736,37 @@ class AutonomousOrchestrator:
                 if probe.path_exists_as_user(worktree_path, dir_only=True):
                     chosen = worktree_path
             self._gh = GitHubOps(chosen, system_account=system_account)
+
+            # Issue #1573: Verify branch consistency after binding to worktree
+            if chosen != project_path and worktree_path:  # Bound to worktree, not main repo
+                expected_branch = wf.get("branch_name", "")
+                if expected_branch:
+                    try:
+                        actual_branch = self._gh.get_current_branch()
+                        if actual_branch != expected_branch:
+                            logger.warning(
+                                "_get_gh: Branch mismatch for workflow %s: expected=%s, actual=%s",
+                                self._workflow_id[:8],
+                                expected_branch,
+                                actual_branch,
+                            )
+                            # Attempt to checkout to the correct branch
+                            try:
+                                self._gh.checkout(expected_branch)
+                                logger.info(
+                                    "_get_gh: Successfully checked out to branch %s",
+                                    expected_branch,
+                                )
+                            except GitHubOpsError as e:
+                                logger.error(
+                                    "_get_gh: Failed to checkout to branch %s: %s",
+                                    expected_branch,
+                                    e,
+                                )
+                                # Clear cache so next call re-evaluates
+                                self._gh = None
+                    except GitHubOpsError as e:
+                        logger.warning("_get_gh: Branch verification failed: %s", e)
         return self._gh
 
     def _ensure_worktree(self, wf: dict) -> str:
@@ -747,6 +782,10 @@ class AutonomousOrchestrator:
           DB and the on-disk dir agree;
         - recreates the worktree dir (reusing the branch if it still exists)
           when it is gone.
+
+        Issue #1573: Added branch consistency verification when worktree exists.
+        If the actual branch doesn't match expected branch_name, we attempt to
+        recreate the worktree (after safety check for uncommitted changes).
 
         Returns the canonical worktree path. For non-worktree strategies, or
         when ``worktree_path`` is intentionally empty (merge cleanup / conflict
@@ -789,6 +828,83 @@ class AutonomousOrchestrator:
         ):
             if canonical != worktree_path:
                 self._update_workflow({"worktree_path": canonical})
+
+            # Issue #1573: Verify branch consistency when worktree exists.
+            # Check that the worktree's actual branch matches the expected branch_name.
+            expected_branch = wf.get("branch_name", "")
+            if expected_branch:
+                try:
+                    wt_gh = GitHubOps(canonical, system_account=system_account)
+                    actual_branch = wt_gh.get_current_branch()
+                    if actual_branch != expected_branch:
+                        logger.error(
+                            "Branch mismatch detected for workflow %s: expected=%s, actual=%s, worktree_path=%s",
+                            self._workflow_id[:8],
+                            expected_branch,
+                            actual_branch,
+                            canonical,
+                        )
+                        # Safety check: refuse to delete worktree with uncommitted changes
+                        if wt_gh.has_uncommitted_changes():
+                            logger.error(
+                                "Worktree %s has uncommitted changes, refusing to delete",
+                                canonical,
+                            )
+                            self._create_milestone(
+                                phase=wf.get("current_phase", "preparation"),
+                                milestone_type="branch_mismatch",
+                                status="failed",
+                                title=f"Branch mismatch with uncommitted changes: expected {expected_branch}, actual {actual_branch}",
+                                error_message=f"Cannot recreate worktree: uncommitted changes detected on branch {actual_branch}",
+                            )
+                            raise GitHubOpsError(
+                                f"Worktree branch mismatch ({actual_branch} != {expected_branch}) "
+                                f"with uncommitted changes. Manual intervention required."
+                            )
+                        # Safe to delete - recreate worktree with correct branch
+                        logger.warning(
+                            "Attempting to recreate worktree %s on correct branch %s",
+                            canonical,
+                            expected_branch,
+                        )
+                        main_gh.remove_worktree(canonical)
+                        # Recreate with correct branch
+                        branch_check = main_gh._run_git(
+                            ["show-ref", "--verify", "--quiet", f"refs/heads/{expected_branch}"],
+                            check=False,
+                        )
+                        remote_check = main_gh._run_git(
+                            [
+                                "show-ref",
+                                "--verify",
+                                "--quiet",
+                                f"refs/remotes/origin/{expected_branch}",
+                            ],
+                            check=False,
+                        )
+                        if branch_check.returncode == 0 or remote_check.returncode == 0:
+                            main_gh._run_git(["worktree", "add", canonical, expected_branch])
+                        else:
+                            main_gh._run_git(
+                                ["worktree", "add", "-b", expected_branch, canonical, "origin/main"]
+                            )
+                        self._create_milestone(
+                            phase=wf.get("current_phase", "preparation"),
+                            milestone_type="worktree_restored",
+                            status="completed",
+                            title=f"Worktree recreated on correct branch {expected_branch}",
+                        )
+                        logger.info(
+                            "Worktree %s recreated on correct branch %s",
+                            canonical,
+                            expected_branch,
+                        )
+                        # Reset cached gh so it picks up the new worktree
+                        self._gh = None
+                except GitHubOpsError:
+                    raise
+                except Exception as e:
+                    logger.warning("Branch verification failed: %s", e)
             return canonical
 
         # Worktree missing — recreate from the main repo.
@@ -2028,21 +2144,30 @@ class AutonomousOrchestrator:
 
         # Create branch
         strategy = wf.get("branch_strategy", "new-branch")
+        # Use pre-generated branch_name if available (Issue #1573)
         branch_name = wf.get("branch_name", "")
+        if not branch_name:
+            branch_name = f"auto-dev/{self._workflow_id[:8]}"
 
         if strategy == "new-branch" or strategy == "worktree":
-            if not branch_name:
-                branch_name = f"auto-dev/{self._workflow_id[:8]}"
             try:
                 # Ensure we branch from latest origin/main
                 gh._run_git(["fetch", "origin", "main"])
 
                 if strategy == "worktree":
-                    # normpath collapses ".." so DB/JSONL encoding matches the
-                    # real worktree dir (#814).
-                    worktree_path = os.path.normpath(
-                        f"{project_path}/../{branch_name.replace('/', '-')}"
-                    )
+                    # Use pre-generated worktree_path if available (Issue #1573)
+                    # Format: {project_path}/.worktrees/{workflow_id}
+                    # Fallback to legacy format for backwards compatibility
+                    pre_generated_worktree_path = wf.get("worktree_path", "")
+                    if pre_generated_worktree_path and pre_generated_worktree_path.startswith(
+                        project_path
+                    ):
+                        worktree_path = pre_generated_worktree_path
+                    else:
+                        # Legacy format for backwards compatibility
+                        worktree_path = os.path.normpath(
+                            f"{project_path}/../{branch_name.replace('/', '-')}"
+                        )
 
                     # Clean up prunable worktrees (directory lost but registered)
                     # This happens when worktree dir was deleted externally (Issue #1442)
@@ -2116,7 +2241,40 @@ class AutonomousOrchestrator:
                             branch=branch_name,
                             base=base_ref,  # Locked SHA or dynamic origin/main
                         )
-                    self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
+
+                    # Issue #1573: Verify worktree was created on correct branch
+                    actual_worktree_path = wt_data.get("worktree_path", "")
+                    if actual_worktree_path:
+                        try:
+                            wt_gh = GitHubOps(actual_worktree_path, system_account=system_account)
+                            actual_branch = wt_gh.get_current_branch()
+                            if actual_branch != branch_name:
+                                logger.error(
+                                    "Worktree created on wrong branch for workflow %s: expected=%s, actual=%s",
+                                    self._workflow_id[:8],
+                                    branch_name,
+                                    actual_branch,
+                                )
+                                raise GitHubOpsError(
+                                    f"Worktree created on wrong branch: expected {branch_name}, actual {actual_branch}"
+                                )
+                            logger.info(
+                                "Verified worktree %s is on correct branch %s",
+                                actual_worktree_path,
+                                branch_name,
+                            )
+                        except GitHubOpsError:
+                            raise
+                        except Exception as e:
+                            logger.warning("Failed to verify worktree branch: %s", e)
+
+                    # Update workflow with worktree_path and branch_name in single transaction
+                    self._update_workflow(
+                        {
+                            "worktree_path": actual_worktree_path,
+                            "branch_name": branch_name,
+                        }
+                    )
                     # The worktree now exists; drop the cached gh (bound to the
                     # main repo during preparation) so the next _get_gh() rebinds
                     # to the worktree path — the agent's actual working repo.
@@ -2127,13 +2285,14 @@ class AutonomousOrchestrator:
                     base_commit_sha = wf.get("base_commit_sha")
                     base_ref = base_commit_sha if base_commit_sha else "origin/main"
                     gh.create_branch(branch_name, base=base_ref)
+                    self._update_workflow({"branch_name": branch_name})
+
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
                     status="completed",
                     title=f"Branch '{branch_name}' created",
                 )
-                self._update_workflow({"branch_name": branch_name})
             except GitHubOpsError as e:
                 self._create_milestone(
                     phase="preparation",
@@ -2575,7 +2734,77 @@ class AutonomousOrchestrator:
 
         On failure, updates workflow status to 'failed' and returns.
         Caller should check workflow status if needed.
+
+        Issue #1573: Added branch verification at the start of development phase.
         """
+        # Issue #1573: Verify we're on the correct branch before development
+        expected_branch = wf.get("branch_name", "")
+        workflow_prefix = f"auto-dev/{self._workflow_id[:8]}"
+        try:
+            actual_branch = gh.get_current_branch()
+            if expected_branch and actual_branch != expected_branch:
+                logger.warning(
+                    "Development phase branch mismatch for workflow %s: expected=%s, actual=%s",
+                    self._workflow_id[:8],
+                    expected_branch,
+                    actual_branch,
+                )
+                # If expected_branch starts with auto-dev/, try to switch
+                if expected_branch.startswith("auto-dev/"):
+                    try:
+                        gh.checkout(expected_branch)
+                        logger.info(
+                            "Successfully switched to expected branch %s",
+                            expected_branch,
+                        )
+                        actual_branch = gh.get_current_branch()
+                    except GitHubOpsError as e:
+                        logger.error(
+                            "Failed to checkout to expected branch %s: %s",
+                            expected_branch,
+                            e,
+                        )
+                        self._create_milestone(
+                            phase="development",
+                            dev_round=dev_round,
+                            milestone_type="branch_mismatch",
+                            status="failed",
+                            title=f"Branch mismatch: expected {expected_branch}, actual {actual_branch}",
+                            error_message=f"Cannot checkout to expected branch: {e}",
+                        )
+                        self._update_workflow(
+                            {
+                                "status": "failed",
+                                "error_message": f"Branch mismatch: cannot checkout to {expected_branch}",
+                            }
+                        )
+                        return
+                else:
+                    # No auto-dev prefix, check if we're at least on workflow-specific branch
+                    if not actual_branch.startswith(workflow_prefix):
+                        logger.error(
+                            "Not on workflow-specific branch for workflow %s: %s",
+                            self._workflow_id[:8],
+                            actual_branch,
+                        )
+                        self._create_milestone(
+                            phase="development",
+                            dev_round=dev_round,
+                            milestone_type="branch_mismatch",
+                            status="failed",
+                            title=f"Not on workflow-specific branch: {actual_branch}",
+                            error_message=f"Expected branch starting with {workflow_prefix}",
+                        )
+                        self._update_workflow(
+                            {
+                                "status": "failed",
+                                "error_message": f"Not on workflow-specific branch: {actual_branch}",
+                            }
+                        )
+                        return
+        except GitHubOpsError as e:
+            logger.warning("Branch verification failed: %s", e)
+
         # Get the finalized plan — prefer the explicit plan_finalized milestone
         # (authoritative final plan), then fall back to the latest plan_content.
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
