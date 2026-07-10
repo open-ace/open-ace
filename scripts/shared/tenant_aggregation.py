@@ -123,7 +123,7 @@ def acquire_aggregation_lock(timeout_seconds: int = 300):
             except Exception as e:
                 conn.close()
                 if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
-                    raise AggregationLockError(f"Aggregation lock already held by another process")
+                    raise AggregationLockError("Aggregation lock already held by another process")
                 raise
 
         return conn
