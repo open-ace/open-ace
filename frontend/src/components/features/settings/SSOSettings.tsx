@@ -325,14 +325,14 @@ export const SSOSettings: React.FC = () => {
 
       // Initialize edit form with current values
       setEditFormData({
-        client_id: detail.client_id || '',
+        client_id: detail.client_id ?? '',
         client_secret: '',
-        redirect_uri: detail.redirect_uri || '',
-        scope: detail.scope || '',
-        authorization_url: detail.authorization_url || '',
-        token_url: detail.token_url || '',
-        userinfo_url: detail.userinfo_url || '',
-        issuer_url: detail.issuer_url || '',
+        redirect_uri: detail.redirect_uri ?? '',
+        scope: detail.scope ?? '',
+        authorization_url: detail.authorization_url ?? '',
+        token_url: detail.token_url ?? '',
+        userinfo_url: detail.userinfo_url ?? '',
+        issuer_url: detail.issuer_url ?? '',
         updated_at: detail.updated_at,
       });
       setEditClientSecretConfirm('');
@@ -812,43 +812,43 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('clientId', language)}</label>
                 <p className="form-control-static">
-                  <code>{providerDetail.client_id || '-'}</code>
+                  <code>{providerDetail.client_id ?? '-'}</code>
                 </p>
               </div>
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('redirectUri', language)}</label>
                 <p className="form-control-static">
-                  <code>{providerDetail.redirect_uri || '-'}</code>
+                  <code>{providerDetail.redirect_uri ?? '-'}</code>
                 </p>
               </div>
               <div className="col-md-12">
                 <label className="form-label fw-semibold">{t('scope', language)}</label>
                 <p className="form-control-static">
-                  <code>{providerDetail.scope || '-'}</code>
+                  <code>{providerDetail.scope ?? '-'}</code>
                 </p>
               </div>
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('authorizationUrl', language)}</label>
                 <p className="form-control-static">
-                  <small>{providerDetail.authorization_url || '-'}</small>
+                  <small>{providerDetail.authorization_url ?? '-'}</small>
                 </p>
               </div>
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('tokenUrl', language)}</label>
                 <p className="form-control-static">
-                  <small>{providerDetail.token_url || '-'}</small>
+                  <small>{providerDetail.token_url ?? '-'}</small>
                 </p>
               </div>
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('userinfoUrl', language)}</label>
                 <p className="form-control-static">
-                  <small>{providerDetail.userinfo_url || '-'}</small>
+                  <small>{providerDetail.userinfo_url ?? '-'}</small>
                 </p>
               </div>
               <div className="col-md-6">
                 <label className="form-label fw-semibold">{t('issuerUrl', language)}</label>
                 <p className="form-control-static">
-                  <small>{providerDetail.issuer_url || '-'}</small>
+                  <small>{providerDetail.issuer_url ?? '-'}</small>
                 </p>
               </div>
               {providerDetail.created_at && (
@@ -921,8 +921,10 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('clientId', language)} *</label>
                 <TextInput
-                  value={editFormData.client_id || ''}
-                  onChange={(value: string) => setEditFormData({ ...editFormData, client_id: value })}
+                  value={editFormData.client_id ?? ''}
+                  onChange={(value: string) =>
+                    setEditFormData({ ...editFormData, client_id: value })
+                  }
                   placeholder={t('enterClientId', language)}
                 />
               </div>
@@ -935,7 +937,7 @@ export const SSOSettings: React.FC = () => {
                 </small>
                 <TextInput
                   type="password"
-                  value={editFormData.client_secret || ''}
+                  value={editFormData.client_secret ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, client_secret: value })
                   }
@@ -960,7 +962,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('redirectUri', language)}</label>
                 <TextInput
-                  value={editFormData.redirect_uri || ''}
+                  value={editFormData.redirect_uri ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, redirect_uri: value })
                   }
@@ -972,7 +974,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('scope', language)}</label>
                 <TextInput
-                  value={editFormData.scope || ''}
+                  value={editFormData.scope ?? ''}
                   onChange={(value: string) => setEditFormData({ ...editFormData, scope: value })}
                   placeholder="openid profile email"
                 />
@@ -986,7 +988,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('authorizationUrl', language)}</label>
                 <TextInput
-                  value={editFormData.authorization_url || ''}
+                  value={editFormData.authorization_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, authorization_url: value })
                   }
@@ -996,7 +998,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('tokenUrl', language)}</label>
                 <TextInput
-                  value={editFormData.token_url || ''}
+                  value={editFormData.token_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, token_url: value })
                   }
@@ -1006,7 +1008,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('userinfoUrl', language)}</label>
                 <TextInput
-                  value={editFormData.userinfo_url || ''}
+                  value={editFormData.userinfo_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, userinfo_url: value })
                   }
@@ -1016,7 +1018,7 @@ export const SSOSettings: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('issuerUrl', language)}</label>
                 <TextInput
-                  value={editFormData.issuer_url || ''}
+                  value={editFormData.issuer_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, issuer_url: value })
                   }
