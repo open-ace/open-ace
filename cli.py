@@ -314,10 +314,10 @@ def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str
         print(f"  Records Aggregated: {result['records_aggregated']}")
         print(f"  Tenants Updated: {result['tenants_updated']}")
 
-        if result.get('quality_report'):
+        if result.get("quality_report"):
             print(f"  Data Quality Score: {result['quality_report']['quality_score']}%")
 
-        if result['status'] == 'failed':
+        if result["status"] == "failed":
             print(f"\nError: {result.get('error', 'Unknown error')}")
             sys.exit(1)
 
@@ -479,7 +479,9 @@ def main():
     repair_parser = subparsers.add_parser(
         "repair-consistency", help="Repair data consistency issues"
     )
-    repair_parser.add_argument("--tenant-id", type=int, help="Specific tenant ID to repair (optional)")
+    repair_parser.add_argument(
+        "--tenant-id", type=int, help="Specific tenant ID to repair (optional)"
+    )
 
     args = parser.parse_args()
 
