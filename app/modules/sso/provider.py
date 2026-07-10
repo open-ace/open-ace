@@ -266,6 +266,8 @@ class SSOProvider(ABC):
 
 
 # Predefined provider configurations
+# NOTE: When modifying this configuration, ensure the frontend fallback constants
+# at frontend/src/constants/ssoFallback.ts are updated accordingly to maintain consistency.
 PROVIDER_CONFIGS = {
     "google": {
         "name": "Google",
@@ -276,6 +278,7 @@ PROVIDER_CONFIGS = {
         "issuer_url": "https://accounts.google.com",
         "jwks_url": "https://www.googleapis.com/oauth2/v3/certs",
         "scope": ["openid", "profile", "email"],
+        "icon": "bi-google",
     },
     "microsoft": {
         "name": "Microsoft",
@@ -286,6 +289,7 @@ PROVIDER_CONFIGS = {
         "issuer_url": "https://login.microsoftonline.com/common/v2.0",
         "jwks_url": "https://login.microsoftonline.com/common/discovery/v2.0/keys",
         "scope": ["openid", "profile", "email"],
+        "icon": "bi-microsoft",
     },
     "github": {
         "name": "GitHub",
@@ -294,6 +298,7 @@ PROVIDER_CONFIGS = {
         "token_url": "https://github.com/login/oauth/access_token",
         "userinfo_url": "https://api.github.com/user",
         "scope": ["user:email", "read:user"],
+        "icon": "bi-github",
     },
     "okta": {
         "name": "Okta",
@@ -304,6 +309,7 @@ PROVIDER_CONFIGS = {
         "userinfo_url": "",  # https://{domain}/oauth2/v1/userinfo
         "issuer_url": "",  # https://{domain}
         "scope": ["openid", "profile", "email"],
+        "icon": "bi-shield-lock",
     },
     "auth0": {
         "name": "Auth0",
@@ -314,6 +320,7 @@ PROVIDER_CONFIGS = {
         "userinfo_url": "",  # https://{domain}/userinfo
         "issuer_url": "",  # https://{domain}
         "scope": ["openid", "profile", "email"],
+        "icon": "bi-shield-lock",
     },
 }
 
