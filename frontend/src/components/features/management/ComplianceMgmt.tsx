@@ -28,7 +28,7 @@ import {
 import { useConfirm } from '@/components/common';
 import { ReportPreviewModal } from './ReportPreviewModal';
 import { CleanupPreviewContent } from '@/components/features/compliance/CleanupPreviewContent';
-import { formatDateTime, createMatcherConfig } from '@/utils';
+import { formatDate, formatDateTime, createMatcherConfig } from '@/utils';
 import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
 import {
   complianceApi,
@@ -588,11 +588,12 @@ export const ComplianceMgmt: React.FC = () => {
                         </Badge>
                       </td>
                       <td>
-                        <small>{formatDateTime(report.generated_at)}</small>
+                        <small>{formatDateTime(report.generated_at, language)}</small>
                       </td>
                       <td>
                         <small>
-                          {report.period_start} - {report.period_end}
+                          {formatDate(report.period_start, 'short', language)} -{' '}
+                          {formatDate(report.period_end, 'short', language)}
                         </small>
                       </td>
                       <td>
@@ -840,7 +841,7 @@ export const ComplianceMgmt: React.FC = () => {
                 <tbody>
                   {history.map((h, index) => (
                     <tr key={index}>
-                      <td>{formatDateTime(h.executed_at)}</td>
+                      <td>{formatDateTime(h.executed_at, language)}</td>
                       <td>{h.cleanup_type}</td>
                       <td>{h.records_deleted.toLocaleString()}</td>
                       <td>

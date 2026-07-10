@@ -122,6 +122,35 @@ describe('formatDate', () => {
   it('should handle string dates', () => {
     expect(formatDate('2024-03-15', 'iso')).toBe('2024-03-15');
   });
+
+  it('should localize per language when language is provided', () => {
+    const langs = ['en', 'zh', 'ja', 'ko'] as const;
+    for (const lang of langs) {
+      const result = formatDate('2024-03-15', 'short', lang);
+      // Day-of-month and year must always be present
+      expect(result).toMatch(/15/);
+      expect(result).toMatch(/2024/);
+    }
+  });
+
+  it('should render long format with the UI language locale', () => {
+    // zh-CN long format contains the CJK numeral for year, e.g. "2024年3月15日"
+    const result = formatDate('2024-03-15', 'long', 'zh');
+    expect(result).toMatch(/15/);
+    expect(result).toMatch(/2024/);
+    expect(result).toMatch(/年/);
+  });
+
+  it('should ignore language for ISO format (stable machine-readable output)', () => {
+    expect(formatDate('2024-03-15', 'iso', 'zh')).toBe('2024-03-15');
+  });
+
+  it('should fall back to browser locale when language is omitted', () => {
+    // No language argument — behaves exactly as before the i18n change.
+    const result = formatDate('2024-03-15');
+    expect(result).toMatch(/15/);
+    expect(result).toMatch(/2024/);
+  });
 });
 
 describe('formatDateTime', () => {
@@ -130,6 +159,30 @@ describe('formatDateTime', () => {
     const result = formatDateTime(date);
     expect(result).toMatch(/2024/);
     expect(result).toMatch(/15/);
+  });
+
+  it('should return "-" for null/empty values', () => {
+    expect(formatDateTime(null)).toBe('-');
+    expect(formatDateTime('')).toBe('-');
+  });
+
+  it('should return "-" for invalid dates', () => {
+    expect(formatDateTime('not-a-date')).toBe('-');
+  });
+
+  it('should localize per language when language is provided', () => {
+    const langs = ['en', 'zh', 'ja', 'ko'] as const;
+    for (const lang of langs) {
+      const result = formatDateTime('2024-03-15T14:30:00', lang);
+      expect(result).toMatch(/15/);
+      expect(result).toMatch(/2024/);
+    }
+  });
+
+  it('should fall back to browser locale when language is omitted', () => {
+    const result = formatDateTime('2024-03-15T14:30:00');
+    expect(result).toMatch(/15/);
+    expect(result).toMatch(/2024/);
   });
 });
 
