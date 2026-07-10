@@ -1061,8 +1061,8 @@ def create_resource_alert(
 
     Args:
         resource_type: Type of resource (e.g., "memory", "cpu", "disk", "connections").
-        current: Current usage value.
-        limit: Maximum limit value.
+        current: Current usage value (must be non-negative).
+        limit: Maximum limit value (must be positive).
         threshold_warning: Warning threshold as ratio (default 0.8 = 80%).
         threshold_critical: Critical threshold as ratio (default 0.95 = 95%).
         language: Language for email notification (en, zh, ja, ko).
@@ -1070,10 +1070,19 @@ def create_resource_alert(
 
     Returns:
         Alert: The created alert with automatically determined severity.
+
+    Raises:
+        ValueError: If limit is not positive or current is negative.
     """
+    # Validate parameters
+    if limit <= 0:
+        raise ValueError(f"limit must be positive, got {limit}")
+    if current < 0:
+        raise ValueError(f"current must be non-negative, got {current}")
+
     notifier = get_alert_notifier()
-    usage_percent = (current / limit) * 100 if limit > 0 else 0
-    usage_ratio = current / limit if limit > 0 else 0
+    usage_percent = (current / limit) * 100
+    usage_ratio = current / limit
 
     if usage_ratio >= threshold_critical:
         severity = AlertSeverity.CRITICAL.value
@@ -1336,7 +1345,14 @@ def create_suspicious_activity_alert(
 
     Returns:
         Alert: The created alert with automatically determined severity.
+
+    Raises:
+        ValueError: If risk_score is not in range [0, 100].
     """
+    # Validate risk_score range
+    if not (0 <= risk_score <= 100):
+        raise ValueError(f"risk_score must be between 0 and 100, got {risk_score}")
+
     notifier = get_alert_notifier()
 
     # Risk score threshold: 50

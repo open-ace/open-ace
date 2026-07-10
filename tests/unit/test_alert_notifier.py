@@ -330,3 +330,137 @@ class TestCreateSuspiciousActivityAlert:
         metadata = call_args.kwargs["metadata"]
         assert metadata["activity_type"] == "rate_limit_exceeded"
         assert metadata["risk_score"] == 45.0
+
+
+class TestBoundaryValidation:
+    """Test boundary validation for alert functions (Agent d review)."""
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_resource_alert_limit_zero_raises(self, mock_get_notifier):
+        """Test that limit=0 raises ValueError."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        with pytest.raises(ValueError, match="limit must be positive"):
+            create_resource_alert(
+                resource_type="memory",
+                current=5.0,
+                limit=0,
+            )
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_resource_alert_limit_negative_raises(self, mock_get_notifier):
+        """Test that negative limit raises ValueError."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        with pytest.raises(ValueError, match="limit must be positive"):
+            create_resource_alert(
+                resource_type="memory",
+                current=5.0,
+                limit=-10.0,
+            )
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_resource_alert_current_negative_raises(self, mock_get_notifier):
+        """Test that negative current raises ValueError."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        with pytest.raises(ValueError, match="current must be non-negative"):
+            create_resource_alert(
+                resource_type="memory",
+                current=-5.0,
+                limit=10.0,
+            )
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_resource_alert_current_zero_allowed(self, mock_get_notifier):
+        """Test that current=0 is allowed (valid boundary)."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        create_resource_alert(
+            resource_type="memory",
+            current=0.0,
+            limit=10.0,
+        )
+
+        call_args = mock_notifier.create_alert.call_args
+        # 0% usage -> info level
+        assert call_args.kwargs["severity"] == AlertSeverity.INFO.value
+        assert call_args.kwargs["metadata"]["usage_percent"] == 0
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_suspicious_activity_alert_risk_score_below_zero_raises(self, mock_get_notifier):
+        """Test that risk_score < 0 raises ValueError."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        with pytest.raises(ValueError, match="risk_score must be between 0 and 100"):
+            create_suspicious_activity_alert(
+                username="testuser",
+                activity_type="test",
+                risk_score=-1.0,
+            )
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_suspicious_activity_alert_risk_score_above_100_raises(self, mock_get_notifier):
+        """Test that risk_score > 100 raises ValueError."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        with pytest.raises(ValueError, match="risk_score must be between 0 and 100"):
+            create_suspicious_activity_alert(
+                username="testuser",
+                activity_type="test",
+                risk_score=101.0,
+            )
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_suspicious_activity_alert_risk_score_zero_allowed(self, mock_get_notifier):
+        """Test that risk_score=0 is allowed (valid boundary)."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        create_suspicious_activity_alert(
+            username="testuser",
+            activity_type="test",
+            risk_score=0.0,
+        )
+
+        call_args = mock_notifier.create_alert.call_args
+        # 0 < 50 -> warning
+        assert call_args.kwargs["severity"] == AlertSeverity.WARNING.value
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_suspicious_activity_alert_risk_score_100_allowed(self, mock_get_notifier):
+        """Test that risk_score=100 is allowed (valid boundary)."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        create_suspicious_activity_alert(
+            username="testuser",
+            activity_type="test",
+            risk_score=100.0,
+        )
+
+        call_args = mock_notifier.create_alert.call_args
+        # 100 >= 50 -> critical
+        assert call_args.kwargs["severity"] == AlertSeverity.CRITICAL.value
+
+    @patch("app.modules.governance.alert_notifier.get_alert_notifier")
+    def test_create_suspicious_activity_alert_risk_score_exactly_50(self, mock_get_notifier):
+        """Test that risk_score=50 (threshold boundary) triggers critical."""
+        mock_notifier = MagicMock()
+        mock_get_notifier.return_value = mock_notifier
+
+        create_suspicious_activity_alert(
+            username="testuser",
+            activity_type="test",
+            risk_score=50.0,
+        )
+
+        call_args = mock_notifier.create_alert.call_args
+        # 50 >= 50 -> critical (at threshold)
+        assert call_args.kwargs["severity"] == AlertSeverity.CRITICAL.value
