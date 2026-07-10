@@ -17,7 +17,7 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { login, waitForApp } from './helpers';
+import { ensureSidebarHidden, login, waitForApp } from './helpers';
 
 const RATIO_RE = /^\d+(\.\d+)?%$/;
 
@@ -70,6 +70,9 @@ test.describe('Session Statistics card', () => {
       page.getByTestId('session-multi-turn-ratio').locator('td.text-end');
     await expect(ratioCell()).toBeVisible({ timeout: 15000 });
 
+    // Mobile viewports: close sidebar to prevent it from intercepting button clicks
+    await ensureSidebarHidden(page);
+
     // Switch to the 7-day quick range, then back to 30 days. The card must keep
     // showing a valid percentage — confirming one consistent, date-scoped source.
     // Match the quick-range button whose label starts with "7" (e.g. "7 Days")
@@ -79,7 +82,7 @@ test.describe('Session Statistics card', () => {
     // absent (wrong selector / language / layout) rather than silently passing
     // without exercising the date-range switch.
     await expect(seven).toBeVisible({ timeout: 10000 });
-    await seven.click();
+    await seven.click({ force: true });
     await page.waitForLoadState('networkidle');
     await expect(ratioCell()).toHaveText(RATIO_RE);
   });

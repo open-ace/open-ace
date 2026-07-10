@@ -97,3 +97,20 @@ export async function ensureSidebarVisible(page: Page) {
     }
   }
 }
+
+/**
+ * Close the sidebar on mobile viewports by clicking the hamburger button.
+ * On desktop viewports, the sidebar is always visible so this is a no-op.
+ * Useful when the sidebar covers main content and intercepts pointer events.
+ */
+export async function ensureSidebarHidden(page: Page) {
+  const viewport = page.viewportSize();
+  if (viewport && viewport.width < 768) {
+    const sidebar = getSidebarLocator(page);
+    if (await sidebar.isVisible()) {
+      const hamburger = page.locator('.hamburger-btn');
+      await hamburger.click({ force: true });
+      await sidebar.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    }
+  }
+}
