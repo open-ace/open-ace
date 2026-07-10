@@ -70,6 +70,9 @@ interface AppState {
 
   // Feature flags
   autonomousEnabled: boolean;
+  modelGatewayEnabled: boolean;
+  runTimelineEnabled: boolean;
+  policyEnabled: boolean;
   configLoaded: boolean;
 
   // Actions
@@ -113,6 +116,9 @@ interface AppState {
 
   // Feature flag actions
   setAutonomousEnabled: (enabled: boolean) => void;
+  setModelGatewayEnabled: (enabled: boolean) => void;
+  setRunTimelineEnabled: (enabled: boolean) => void;
+  setPolicyEnabled: (enabled: boolean) => void;
   setConfigLoaded: (loaded: boolean) => void;
 }
 
@@ -149,6 +155,9 @@ export const useAppStore = create<AppState>()(
 
       // Feature flags
       autonomousEnabled: false,
+      modelGatewayEnabled: false,
+      runTimelineEnabled: false,
+      policyEnabled: false,
       configLoaded: false,
 
       // Actions
@@ -264,6 +273,9 @@ export const useAppStore = create<AppState>()(
 
       // Feature flag actions
       setAutonomousEnabled: (enabled) => set({ autonomousEnabled: enabled }),
+      setModelGatewayEnabled: (enabled) => set({ modelGatewayEnabled: enabled }),
+      setRunTimelineEnabled: (enabled) => set({ runTimelineEnabled: enabled }),
+      setPolicyEnabled: (enabled) => set({ policyEnabled: enabled }),
       setConfigLoaded: (loaded) => set({ configLoaded: loaded }),
     }),
     {
@@ -343,3 +355,10 @@ export {
   useRecordRefresh,
   type PageRefreshConfig,
 } from './pageRefreshStore';
+
+// Feature flags selectors
+export const useAutonomousEnabled = () => useAppStore((state) => state.autonomousEnabled);
+export const useModelGatewayEnabled = () => useAppStore((state) => state.modelGatewayEnabled);
+export const useRunTimelineEnabled = () => useAppStore((state) => state.runTimelineEnabled);
+export const usePolicyEnabled = () => useAppStore((state) => state.policyEnabled);
+export const useConfigLoaded = () => useAppStore((state) => state.configLoaded);

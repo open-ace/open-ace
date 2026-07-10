@@ -880,6 +880,11 @@ export const translations: Record<Language, Translations> = {
     gatewayConfigDeleted: 'Gateway Configuration Deleted',
     gatewayEnableHint:
       'Gateway routing activates when model_gateway.enabled=true in config.json (or OPENACE_MODEL_GATEWAY_MODE=gateway).',
+    gatewayEnabled: 'Gateway routing enabled',
+    gatewayDisabled: 'Gateway routing not enabled',
+    gatewayEnabledNoConfig: 'Gateway routing enabled but not configured',
+    gatewayEnableInstructions:
+      'Set model_gateway.enabled=true in config.json to activate gateway routing.',
     notVerified: 'Not Verified',
     emailStatistics: 'Email Statistics',
     totalEmails: 'Total Emails',
@@ -2434,6 +2439,10 @@ export const translations: Record<Language, Translations> = {
     gatewayConfigDeleted: '网关配置已删除',
     gatewayEnableHint:
       '当 config.json 中 model_gateway.enabled=true（或 OPENACE_MODEL_GATEWAY_MODE=gateway）时启用网关路由。',
+    gatewayEnabled: '网关路由已启用',
+    gatewayDisabled: '网关路由未启用',
+    gatewayEnabledNoConfig: '网关路由已启用但未配置地址',
+    gatewayEnableInstructions: '在 config.json 中设置 model_gateway.enabled=true 以激活网关路由。',
     notVerified: '未验证',
     emailStatistics: '邮件统计',
     totalEmails: '邮件总数',
@@ -3135,6 +3144,11 @@ export const translations: Record<Language, Translations> = {
     gatewayConfigDeleted: 'ゲートウェイ設定を削除しました',
     gatewayEnableHint:
       'config.json の model_gateway.enabled=true（または OPENACE_MODEL_GATEWAY_MODE=gateway）で有効化されます。',
+    gatewayEnabled: 'ゲートウェイルーティングが有効',
+    gatewayDisabled: 'ゲートウェイルーティングが無効',
+    gatewayEnabledNoConfig: 'ゲートウェイルーティングが有効ですが未設定',
+    gatewayEnableInstructions:
+      'ゲートウェイルーティングを有効化するには config.json で model_gateway.enabled=true を設定してください。',
     error: 'エラー',
     retry: '再試行',
     refresh: '更新',
@@ -4473,6 +4487,11 @@ export const translations: Record<Language, Translations> = {
     gatewayConfigDeleted: '게이트웨이 설정이 삭제되었습니다',
     gatewayEnableHint:
       'config.json의 model_gateway.enabled=true(또는 OPENACE_MODEL_GATEWAY_MODE=gateway) 시 활성화됩니다.',
+    gatewayEnabled: '게이트웨이 라우팅이 활성화됨',
+    gatewayDisabled: '게이트웨이 라우팅이 비활성화됨',
+    gatewayEnabledNoConfig: '게이트웨이 라우팅이 활성화되었지만 구성되지 않음',
+    gatewayEnableInstructions:
+      '게이트웨이 라우팅을 활성화하려면 config.json에서 model_gateway.enabled=true를 설정하세요.',
     error: '오류',
     retry: '재시도',
     refresh: '새로고침',

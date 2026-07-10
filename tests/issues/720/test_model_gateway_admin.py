@@ -60,6 +60,57 @@ class TestAdminSecurity:
         assert data["success"] is True
         assert data["data"]["base_url"] == "https://gw/v1"
 
+    @patch("app.utils.config.is_model_gateway_enabled")
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_admin_get_returns_enabled_field(
+        self, mock_load, mock_get_service, mock_enabled, gw_app
+    ):
+        """Test that admin GET returns enabled field."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+        mock_enabled.return_value = True  # Gateway enabled
+        svc = MagicMock()
+        svc.get_config.return_value = {
+            "mode": "gateway",
+            "base_url": "https://gw/v1",
+            "api_key_masked": "gw-s****",
+        }
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().get(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert "enabled" in data
+        assert data["enabled"] is True
+
+    @patch("app.utils.config.is_model_gateway_enabled")
+    @patch("app.routes.model_gateway.get_gateway_service")
+    @patch("app.auth.decorators._load_user_from_token")
+    def test_admin_get_returns_enabled_false_when_disabled(
+        self, mock_load, mock_get_service, mock_enabled, gw_app
+    ):
+        """Test that admin GET returns enabled=false when gateway is disabled."""
+        mock_load.return_value = {"id": 2, "role": "admin"}
+        mock_enabled.return_value = False  # Gateway disabled
+        svc = MagicMock()
+        svc.get_config.return_value = None  # Not configured
+        mock_get_service.return_value = svc
+
+        resp = gw_app.test_client().get(
+            "/api/management/model-gateway-config",
+            headers={"Authorization": "Bearer t"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert "enabled" in data
+        assert data["enabled"] is False
+        assert data["data"] is None
+
 
 # ── Repository encryption round-trip (SQLite temp DB) ──────────────────
 
