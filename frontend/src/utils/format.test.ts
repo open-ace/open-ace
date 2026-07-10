@@ -43,6 +43,40 @@ describe('formatTokens', () => {
     expect(formatTokens(1_000_000)).toBe('1.00M');
     expect(formatTokens(1_000_000_000)).toBe('1.00B');
   });
+
+  // Negative number tests (Issue #1487)
+  it('should format negative billions correctly', () => {
+    expect(formatTokens(-3_500_000_000)).toBe('-3.50B');
+    expect(formatTokens(-1_500_000_000)).toBe('-1.50B');
+  });
+
+  it('should format negative millions correctly', () => {
+    expect(formatTokens(-1_500_000)).toBe('-1.50M');
+    expect(formatTokens(-2_000_000)).toBe('-2.00M');
+  });
+
+  it('should format negative thousands correctly', () => {
+    expect(formatTokens(-5_000)).toBe('-5.00K');
+    expect(formatTokens(-1_000)).toBe('-1.00K');
+  });
+
+  it('should format small negative numbers without suffix', () => {
+    expect(formatTokens(-100)).toBe('-100');
+    expect(formatTokens(-999)).toBe('-999');
+    expect(formatTokens(-500)).toBe('-500');
+  });
+
+  it('should handle negative zero correctly', () => {
+    // In JavaScript, -0 === 0, so -0 < 0 is false, sign is empty
+    expect(formatTokens(-0)).toBe('0');
+  });
+
+  it('should handle negative edge cases', () => {
+    // Just below thresholds
+    expect(formatTokens(-999_999_999)).toBe('-1000.00M'); // Just below 1B
+    expect(formatTokens(-1_000)).toBe('-1.00K'); // Exact threshold
+    expect(formatTokens(-999)).toBe('-999'); // Just below 1K
+  });
 });
 
 describe('formatNumber', () => {
