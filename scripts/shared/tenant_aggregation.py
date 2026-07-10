@@ -40,6 +40,7 @@ DEFAULT_SILENCE_HOURS = 24
 
 class AggregationLockError(Exception):
     """Exception raised when aggregation lock cannot be acquired."""
+
     pass
 
 
@@ -122,9 +123,7 @@ def acquire_aggregation_lock(timeout_seconds: int = 300):
             except Exception as e:
                 conn.close()
                 if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
-                    raise AggregationLockError(
-                        f"Aggregation lock already held by another process"
-                    )
+                    raise AggregationLockError(f"Aggregation lock already held by another process")
                 raise
 
         return conn
@@ -308,9 +307,7 @@ def calculate_next_billing_cycle_end(
         next_month = next_month.replace(day=1)
     elif cycle_type == "yearly":
         # 1 year later
-        next_month = current_end_date.replace(
-            year=current_end_date.year + 1, day=1
-        )
+        next_month = current_end_date.replace(year=current_end_date.year + 1, day=1)
     else:
         # Default to monthly
         next_month = current_end_date.replace(day=1) + timedelta(days=32)
@@ -438,8 +435,7 @@ def reset_tenant_period(tenant_id: int) -> bool:
 
         conn.commit()
         logger.info(
-            f"Reset billing period for tenant {tenant_id}: "
-            f"{new_cycle_start} to {new_cycle_end}"
+            f"Reset billing period for tenant {tenant_id}: " f"{new_cycle_start} to {new_cycle_end}"
         )
         return True
 
@@ -768,7 +764,15 @@ def record_aggregation_history(
             (type, start_date, end_date, status, records_count, quality_report, error_message, started_at, completed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
         """,
-            (aggregation_type, start_date, end_date, status, records_count, quality_json, error_message),
+            (
+                aggregation_type,
+                start_date,
+                end_date,
+                status,
+                records_count,
+                quality_json,
+                error_message,
+            ),
         )
 
         conn.commit()
@@ -786,7 +790,9 @@ def record_aggregation_history(
 # ============================================================================
 
 
-def run_tenant_aggregation(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+def run_tenant_aggregation(
+    start_date: Optional[str] = None, end_date: Optional[str] = None
+) -> Dict:
     """
     Run complete tenant aggregation process.
 
