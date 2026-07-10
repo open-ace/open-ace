@@ -151,9 +151,10 @@ def sanitize_config_for_audit(config: dict[str, Any]) -> dict[str, Any]:
 
 def _get_client_ip() -> Optional[str]:
     """Get client IP address from request."""
-    if request.headers.get("X-Forwarded-For"):
-        return request.headers.get("X-Forwarded-For").split(",")[0].strip()
-    return request.remote_addr
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return str(forwarded_for.split(",")[0].strip())
+    return str(request.remote_addr) if request.remote_addr else None
 
 
 # ============================================================================
@@ -271,12 +272,6 @@ def register_provider():
     if not allowed:
         return jsonify({"error": error}), 403
 
-    # Check if provider exists and is disabled
-    existing = get_sso_manager().db.fetch_one(
-        "SELECT name, is_active FROM sso_providers WHERE name = ?",
-        (provider_name,),
-    )
-
     success = False
     if data.get("predefined"):
         # Get override URLs for Okta/Auth0
@@ -379,10 +374,15 @@ def update_provider(provider_name: str):
             else:
                 current_str = str(current_updated_at)
             if current_str != expected_updated_at:
-                return jsonify({
-                    "error": "配置已被他人修改，请刷新后重新编辑",
-                    "current_updated_at": current_str,
-                }), 409
+                return (
+                    jsonify(
+                        {
+                            "error": "配置已被他人修改，请刷新后重新编辑",
+                            "current_updated_at": current_str,
+                        }
+                    ),
+                    409,
+                )
     else:
         logger.warning(f"Update provider {provider_name} without updated_at (old client)")
 
@@ -444,11 +444,13 @@ def update_provider(provider_name: str):
         ip_address=_get_client_ip(),
     )
 
-    return jsonify({
-        "message": f"Provider {provider_name} updated successfully",
-        "updated_at": now.isoformat(),
-        "auto_enabled": was_disabled,
-    })
+    return jsonify(
+        {
+            "message": f"Provider {provider_name} updated successfully",
+            "updated_at": now.isoformat(),
+            "auto_enabled": was_disabled,
+        }
+    )
 
 
 @sso_bp.route("/providers/<provider_name>/enable", methods=["PATCH"])
@@ -636,10 +638,15 @@ def test_provider_connection(provider_name: str):
     # Concurrency limit
     with _test_connection_lock:
         if _test_connection_counter >= MAX_CONCURRENT_TESTS:
-            return jsonify({
-                "success": False,
-                "error": "测试连接繁忙，请稍后再试",
-            }), 429
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "测试连接繁忙，请稍后再试",
+                    }
+                ),
+                429,
+            )
         _test_connection_counter += 1
 
     try:
@@ -664,71 +671,87 @@ def test_provider_connection(provider_name: str):
         auth_url = config.get("authorization_url", "")
         if auth_url:
             url_result = _test_url_accessible(auth_url)
-            results.append({
-                "check": "authorization_url",
-                "url": auth_url,
-                "success": url_result["success"],
-                "error": url_result.get("error"),
-            })
+            results.append(
+                {
+                    "check": "authorization_url",
+                    "url": auth_url,
+                    "success": url_result["success"],
+                    "error": url_result.get("error"),
+                }
+            )
             if not url_result["success"]:
                 all_passed = False
         else:
-            results.append({
-                "check": "authorization_url",
-                "success": False,
-                "error": "Authorization URL not configured",
-            })
+            results.append(
+                {
+                    "check": "authorization_url",
+                    "success": False,
+                    "error": "Authorization URL not configured",
+                }
+            )
             all_passed = False
 
         # Test token_url
         token_url = config.get("token_url", "")
         if token_url:
             url_result = _test_url_accessible(token_url)
-            results.append({
-                "check": "token_url",
-                "url": token_url,
-                "success": url_result["success"],
-                "error": url_result.get("error"),
-            })
+            results.append(
+                {
+                    "check": "token_url",
+                    "url": token_url,
+                    "success": url_result["success"],
+                    "error": url_result.get("error"),
+                }
+            )
             if not url_result["success"]:
                 all_passed = False
         else:
-            results.append({
-                "check": "token_url",
-                "success": False,
-                "error": "Token URL not configured",
-            })
+            results.append(
+                {
+                    "check": "token_url",
+                    "success": False,
+                    "error": "Token URL not configured",
+                }
+            )
             all_passed = False
 
         # Validate client_id format
         client_id = config.get("client_id", "")
         if not client_id or len(client_id) < 10:
-            results.append({
-                "check": "client_id",
-                "success": False,
-                "error": "Client ID 格式无效（长度不足）",
-            })
+            results.append(
+                {
+                    "check": "client_id",
+                    "success": False,
+                    "error": "Client ID 格式无效（长度不足）",
+                }
+            )
             all_passed = False
         else:
-            results.append({
-                "check": "client_id",
-                "success": True,
-            })
+            results.append(
+                {
+                    "check": "client_id",
+                    "success": True,
+                }
+            )
 
         # Validate scope
         scope = config.get("scope", [])
         if not scope or not isinstance(scope, list) or len(scope) == 0:
-            results.append({
-                "check": "scope",
-                "success": False,
-                "error": "Scope 配置无效",
-            })
+            results.append(
+                {
+                    "check": "scope",
+                    "success": False,
+                    "error": "Scope 配置无效",
+                }
+            )
             all_passed = False
         else:
-            results.append({
-                "check": "scope",
-                "success": True,
-            })
+            results.append(
+                {
+                    "check": "scope",
+                    "success": True,
+                }
+            )
 
         # Audit log
         get_audit_logger().log(
@@ -745,10 +768,12 @@ def test_provider_connection(provider_name: str):
             ip_address=_get_client_ip(),
         )
 
-        return jsonify({
-            "success": all_passed,
-            "results": results,
-        })
+        return jsonify(
+            {
+                "success": all_passed,
+                "results": results,
+            }
+        )
 
     finally:
         with _test_connection_lock:
@@ -830,22 +855,24 @@ def export_providers():
             predefined_config = get_provider_config(row["name"])
             is_predefined = predefined_config is not None
 
-            providers.append({
-                "name": row["name"],
-                "type": row["provider_type"],
-                "is_enabled": bool(row.get("is_active", True)),
-                "is_predefined": is_predefined,
-                "tenant_id": row.get("tenant_id"),
-                "client_id": config.get("client_id", ""),
-                "redirect_uri": config.get("redirect_uri"),
-                "scope": config.get("scope", []),
-                "authorization_url": config.get("authorization_url", ""),
-                "token_url": config.get("token_url", ""),
-                "userinfo_url": config.get("userinfo_url"),
-                "issuer_url": config.get("issuer_url"),
-                "created_at": row.get("created_at"),
-                "updated_at": row.get("updated_at"),
-            })
+            providers.append(
+                {
+                    "name": row["name"],
+                    "type": row["provider_type"],
+                    "is_enabled": bool(row.get("is_active", True)),
+                    "is_predefined": is_predefined,
+                    "tenant_id": row.get("tenant_id"),
+                    "client_id": config.get("client_id", ""),
+                    "redirect_uri": config.get("redirect_uri"),
+                    "scope": config.get("scope", []),
+                    "authorization_url": config.get("authorization_url", ""),
+                    "token_url": config.get("token_url", ""),
+                    "userinfo_url": config.get("userinfo_url"),
+                    "issuer_url": config.get("issuer_url"),
+                    "created_at": row.get("created_at"),
+                    "updated_at": row.get("updated_at"),
+                }
+            )
         except Exception as e:
             logger.error(f"Failed to export provider {row.get('name')}: {e}")
 
@@ -865,11 +892,13 @@ def export_providers():
         ip_address=_get_client_ip(),
     )
 
-    return jsonify({
-        "providers": providers,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "count": len(providers),
-    })
+    return jsonify(
+        {
+            "providers": providers,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "count": len(providers),
+        }
+    )
 
 
 # ============================================================================
