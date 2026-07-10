@@ -35,6 +35,15 @@ def upgrade() -> None:
     # Check if we're using PostgreSQL
     is_postgres = bool(conn.dialect.name == "postgresql")
 
+    # 0. Create aggregation_locks table for SQLite locking mechanism
+    # This table is used by tenant_aggregation.py to implement distributed locking
+    op.create_table(
+        "aggregation_locks",
+        sa.Column("lock_key", sa.String(100), primary_key=True, comment="Lock key identifier"),
+        sa.Column("acquired_at", sa.DateTime(), nullable=False, comment="Lock acquisition timestamp"),
+        sa.Column("timeout_seconds", sa.Integer(), nullable=False, comment="Lock timeout in seconds"),
+    )
+
     # 1. Create aggregation_history table
     op.create_table(
         "aggregation_history",
@@ -370,5 +379,6 @@ def downgrade() -> None:
     op.drop_table("tenant_plans")
     op.drop_table("tenant_period_history")
     op.drop_table("aggregation_history")
+    op.drop_table("aggregation_locks")
 
     print("Migration 20260709_003_add_tenant_usage_aggregation reverted successfully")
