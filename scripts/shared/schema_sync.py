@@ -153,8 +153,21 @@ def _normalize_column_type(column_name: str, type_name: str, default: str) -> st
     """Normalize temporal/text affinity noise for SQLite snapshots."""
     if type_name == "TEXT":
         lowered = column_name.lower()
-        if lowered == "timestamp" or lowered.endswith("_at") or lowered in {"last_login"}:
+        # Column names that indicate temporal/date types
+        if (
+            lowered == "timestamp"
+            or lowered.endswith("_at")
+            or lowered.endswith("_date")
+            or lowered in {"last_login"}
+        ):
             return "TEMPORAL"
+        # Date/time range boundaries (period_start, billing_cycle_end, etc.)
+        if lowered.endswith("_start") or lowered.endswith("_end"):
+            # Only if preceded by period/cycle/date related prefixes
+            prefix_patterns = ("period", "cycle", "billing", "trial", "subscription")
+            for pattern in prefix_patterns:
+                if pattern in lowered:
+                    return "TEMPORAL"
         if default in {"CURRENT_TIMESTAMP", "'(CURRENT_TIMESTAMP)'"}:
             return "TEMPORAL"
     return type_name
@@ -214,7 +227,7 @@ def _normalize_sqlite_type(type_name: str | None) -> str:
         return "INTEGER"
     if any(token in raw for token in ("CHAR", "CLOB", "TEXT", "VARCHAR")):
         return "TEXT"
-    if any(token in raw for token in ("REAL", "FLOA", "DOUB")):
+    if any(token in raw for token in ("REAL", "FLOA", "DOUB", "NUMERIC", "DECIMAL")):
         return "REAL"
     if "BLOB" in raw:
         return "BLOB"
