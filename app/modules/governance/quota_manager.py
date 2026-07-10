@@ -339,47 +339,56 @@ class QuotaManager:
         }
 
     def _check_and_create_alerts(self, user_id: int, date: str) -> None:
-        """Check usage and create alerts if thresholds crossed."""
+        """Check usage and create alerts if thresholds crossed using transactional dual-write."""
         status = self.get_user_quota_status(user_id)
+        user = self.user_repo.get_user_by_id(user_id)
+        username = user.get("username", "") if user else ""
 
-        # Check token percentage
-        self._create_alert_if_needed(
-            user_id=user_id,
-            quota_type="tokens",
-            current_usage=status.tokens_used,
-            quota_limit=status.token_limit,
-            percentage=status.token_percentage / 100,
-        )
+        # Determine which quota type has higher usage percentage
+        max_pct = max(status.token_percentage, status.request_percentage)
+        max_quota_type = "tokens" if status.token_percentage >= status.request_percentage else "requests"
 
-        # Check request percentage
-        self._create_alert_if_needed(
-            user_id=user_id,
-            quota_type="requests",
-            current_usage=status.requests_used,
-            quota_limit=status.request_limit,
-            percentage=status.request_percentage / 100,
-        )
+        if max_quota_type == "tokens":
+            current_usage = status.tokens_used
+            quota_limit = status.token_limit
+        else:
+            current_usage = status.requests_used
+            quota_limit = status.request_limit
 
-        # Also push to the main alerts table (supports WebSocket notifications)
-        try:
-            user = self.user_repo.get_user_by_id(user_id)
-            username = user.get("username", "") if user else ""
-            max_pct = max(status.token_percentage, status.request_percentage)
-            if max_pct >= 80:
-                from app.modules.governance.alert_notifier import create_quota_alert
+        # Only create alert if usage >= 80%
+        if max_pct >= 80:
+            try:
+                # Use transactional dual-write for consistency
+                from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
 
-                create_quota_alert(
+                success, alert_id = create_quota_alert_transactional(
                     user_id=user_id,
                     username=username,
                     usage_percent=max_pct,
-                    quota_type=(
-                        "tokens"
-                        if status.token_percentage >= status.request_percentage
-                        else "requests"
-                    ),
+                    quota_type=max_quota_type,
+                    current_usage=current_usage,
+                    quota_limit=quota_limit,
+                    threshold=max_pct / 100,
                 )
-        except Exception as e:
-            logger.warning(f"Failed to push quota alert to notifier: {e}")
+
+                if success:
+                    logger.info(
+                        f"Created quota alert for user {user_id}: "
+                        f"{max_quota_type}={max_pct:.1f}%, alert_id={alert_id}"
+                    )
+                else:
+                    logger.warning(f"Failed to create quota alert for user {user_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to create quota alert: {e}")
+                # Fallback: still write to quota_alerts table
+                self._create_alert_if_needed(
+                    user_id=user_id,
+                    quota_type=max_quota_type,
+                    current_usage=current_usage,
+                    quota_limit=quota_limit,
+                    percentage=max_pct / 100,
+                )
 
     def _create_alert_if_needed(
         self, user_id: int, quota_type: str, current_usage: int, quota_limit: int, percentage: float

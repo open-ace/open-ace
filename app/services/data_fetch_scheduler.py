@@ -7,10 +7,26 @@ Background scheduler for automatic data fetching at configurable intervals.
 from __future__ import annotations
 
 import logging
+import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# Configuration - can be overridden via environment variables
+SCHEDULER_IMPLEMENTATION = os.environ.get(
+    "SCHEDULER_IMPLEMENTATION", "threading"
+).lower()  # threading, gevent, apscheduler
+
+# Try to import APScheduler
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    APSCHEDULER_AVAILABLE = True
+except ImportError:
+    APSCHEDULER_AVAILABLE = False
+    logger.warning("APScheduler not available, falling back to threading")
 
 
 class DataFetchScheduler:
@@ -43,8 +59,11 @@ class DataFetchScheduler:
         self._running = False
         self._last_run = None
         self._next_run = None
+        self._heartbeat = None
         self._initialized = True
-        logger.info("DataFetchScheduler initialized")
+        self._implementation = SCHEDULER_IMPLEMENTATION
+        self._scheduler = None  # APScheduler instance
+        logger.info(f"DataFetchScheduler initialized (implementation: {self._implementation})")
 
     def configure(self, interval: int | None = None, enabled: bool | None = None):
         """
@@ -94,26 +113,42 @@ class DataFetchScheduler:
 
     def get_status(self) -> dict:
         """Get scheduler status."""
-        from datetime import datetime
+        from datetime import datetime as dt
+        from datetime import timezone as tz
 
         next_run_str = None
         if self._next_run:
             try:
-                next_run_dt = datetime.fromtimestamp(self._next_run)
+                next_run_dt = dt.fromtimestamp(self._next_run)
                 next_run_str = next_run_dt.isoformat()
             except (TypeError, ValueError):
                 pass
 
+        # Check heartbeat freshness
+        heartbeat_age = None
+        if self._heartbeat:
+            heartbeat_age = (
+                dt.now(tz.utc).replace(tzinfo=None) - self._heartbeat
+            ).total_seconds()
+
+        heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
+
         return {
-            "running": self._running,
+            "running": self.is_running(),
             "enabled": self._enabled,
             "interval": self._interval,
+            "implementation": self._implementation,
             "last_run": self._last_run.isoformat() if self._last_run else None,
             "next_run": next_run_str,
+            "heartbeat": self._heartbeat.isoformat() if self._heartbeat else None,
+            "heartbeat_age_seconds": heartbeat_age,
+            "heartbeat_ok": heartbeat_ok,
         }
 
     def _run_loop(self):
         """Main scheduler loop."""
+        from datetime import timezone as tz
+
         # Calculate next run time
         self._next_run = datetime.now().timestamp() + self._interval
 
@@ -125,15 +160,20 @@ class DataFetchScheduler:
             # Run fetch
             self._run_fetch()
 
+            # Update heartbeat
+            self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
+
             # Update next run time
             self._next_run = datetime.now().timestamp() + self._interval
 
     def _run_fetch(self):
         """Run the data fetch scripts."""
+        from datetime import timezone as tz
+
         from app.routes.fetch import run_fetch_scripts
 
         logger.info("Starting scheduled data fetch...")
-        self._last_run = datetime.now()
+        self._last_run = datetime.now(tz.utc).replace(tzinfo=None)
 
         try:
             run_fetch_scripts()
@@ -274,7 +314,7 @@ class DataFetchScheduler:
         if action_key in self._enforced_users:
             return
 
-        # Create alert
+        # Create alert using transactional dual-write
         try:
             req_key = f"{month_prefix}requests" if month_prefix else "today_requests"
             tok_key = f"{month_prefix}tokens" if month_prefix else "today_tokens"
@@ -290,9 +330,11 @@ class DataFetchScheduler:
             )
             requests_pct = row[req_key] / row[req_quota_key] * 100 if row.get(req_quota_key) else 0
             max_pct = max(tokens_pct, requests_pct)
-            from app.modules.governance.alert_notifier import create_quota_alert
 
-            create_quota_alert(
+            # Use transactional alert creation
+            from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
+
+            success, alert_id = create_quota_alert_transactional(
                 user_id=user_id,
                 username=username,
                 usage_percent=max_pct,
@@ -300,6 +342,15 @@ class DataFetchScheduler:
                     f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens"
                 ),
             )
+
+            if success:
+                logger.info(
+                    f"Created quota alert for user {user_id} "
+                    f"({period}, {max_pct:.1f}%, alert_id={alert_id})"
+                )
+            else:
+                logger.warning(f"Failed to create quota alert for user {user_id}")
+
         except Exception as e:
             logger.warning(f"Failed to create quota alert for user {user_id}: {e}")
 

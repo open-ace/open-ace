@@ -3,15 +3,37 @@ Open ACE - Quota Enforcement Scheduler
 
 Background scheduler that periodically checks all users' quotas
 and enforces limits (terminates sessions, generates alerts).
+
+Supports multiple implementation backends:
+- threading: Default Python threading (may not work with gevent)
+- gevent: Greenlet-based scheduling for gevent environments
+- apscheduler: APScheduler-based scheduling (recommended for stability)
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime, timezone
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# Configuration - can be overridden via environment variables
+SCHEDULER_IMPLEMENTATION = os.environ.get(
+    "SCHEDULER_IMPLEMENTATION", "threading"
+).lower()  # threading, gevent, apscheduler
+
+# Try to import APScheduler
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    APSCHEDULER_AVAILABLE = True
+except ImportError:
+    APSCHEDULER_AVAILABLE = False
+    logger.warning("APScheduler not available, falling back to threading")
 
 
 class QuotaEnforcementScheduler:
@@ -42,9 +64,25 @@ class QuotaEnforcementScheduler:
         self._next_run = None
         self._initialized = True
         self._enforced_users = set()
-        logger.info("QuotaEnforcementScheduler initialized")
+        self._implementation = SCHEDULER_IMPLEMENTATION
+        self._scheduler = None  # APScheduler instance
+        self._job = None  # APScheduler job
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
+        logger.info(f"QuotaEnforcementScheduler initialized (implementation: {self._implementation})")
 
-    def configure(self, interval: int | None = None, enabled: bool | None = None):
+    def configure(
+        self,
+        interval: int | None = None,
+        enabled: bool | None = None,
+        implementation: str | None = None,
+    ):
+        """Configure the scheduler.
+
+        Args:
+            interval: Check interval in seconds.
+            enabled: Whether the scheduler is enabled.
+            implementation: Implementation backend ('threading', 'gevent', 'apscheduler').
+        """
         if interval is not None:
             self._interval = max(30, interval)
             logger.info(f"Quota enforcement interval set to {self._interval} seconds")
@@ -52,8 +90,13 @@ class QuotaEnforcementScheduler:
         if enabled is not None:
             self._enabled = enabled
 
+        if implementation is not None:
+            self._implementation = implementation.lower()
+            logger.info(f"Scheduler implementation set to {self._implementation}")
+
     def start(self):
-        if self._thread is not None and self._thread.is_alive():
+        """Start the scheduler."""
+        if self._running:
             logger.warning("QuotaEnforcementScheduler is already running")
             return
 
@@ -62,24 +105,100 @@ class QuotaEnforcementScheduler:
             return
 
         self._stop_event.clear()
+
+        # Choose implementation
+        if self._implementation == "apscheduler" and APSCHEDULER_AVAILABLE:
+            self._start_apscheduler()
+        elif self._implementation == "gevent":
+            self._start_gevent()
+        else:
+            self._start_threading()
+
+        self._running = True
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
+        logger.info(
+            f"QuotaEnforcementScheduler started with interval {self._interval} seconds "
+            f"(implementation: {self._implementation})"
+        )
+
+    def _start_threading(self):
+        """Start using standard threading."""
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self._running = True
-        logger.info(f"QuotaEnforcementScheduler started with interval {self._interval} seconds")
 
-    def stop(self):
-        if self._thread is None:
+    def _start_gevent(self):
+        """Start using gevent greenlets."""
+        try:
+            import gevent
+            import gevent.event
+
+            self._gevent_stop_event = gevent.event.Event()
+
+            def gevent_loop():
+                while not self._gevent_stop_event.is_set():
+                    self._run_enforcement()
+                    self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
+                    gevent.sleep(self._interval)
+
+            self._greenlet = gevent.spawn(gevent_loop)
+            logger.info("Started gevent-based scheduler")
+
+        except ImportError:
+            logger.warning("gevent not available, falling back to threading")
+            self._start_threading()
+
+    def _start_apscheduler(self):
+        """Start using APScheduler."""
+        if not APSCHEDULER_AVAILABLE:
+            logger.warning("APScheduler not available, falling back to threading")
+            self._start_threading()
             return
 
-        self._stop_event.set()
-        self._thread.join(timeout=5)
+        self._scheduler = BackgroundScheduler()
+        self._job = self._scheduler.add_job(
+            self._run_enforcement_with_heartbeat,
+            IntervalTrigger(seconds=self._interval),
+            id="quota_enforcement",
+            name="Quota Enforcement Check",
+            replace_existing=True,
+        )
+        self._scheduler.start()
+
+    def _run_enforcement_with_heartbeat(self):
+        """Run enforcement and update heartbeat."""
+        self._run_enforcement()
+        self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def stop(self):
+        """Stop the scheduler."""
+        if not self._running:
+            return
+
+        if self._implementation == "apscheduler" and self._scheduler:
+            self._scheduler.shutdown(wait=False)
+            self._scheduler = None
+            self._job = None
+        elif self._implementation == "gevent" and hasattr(self, "_greenlet"):
+            self._gevent_stop_event.set()
+            self._greenlet.kill()
+        elif self._thread is not None:
+            self._stop_event.set()
+            self._thread.join(timeout=5)
+
         self._running = False
         logger.info("QuotaEnforcementScheduler stopped")
 
     def is_running(self) -> bool:
-        return self._running and self._thread is not None and self._thread.is_alive()
+        """Check if the scheduler is running."""
+        if self._implementation == "apscheduler" and self._scheduler:
+            return self._scheduler.running
+        elif self._implementation == "gevent" and hasattr(self, "_greenlet"):
+            return not self._greenlet.dead
+        else:
+            return self._running and self._thread is not None and self._thread.is_alive()
 
     def get_status(self) -> dict:
+        """Get scheduler status."""
         next_run_str = None
         if self._next_run:
             try:
@@ -88,15 +207,29 @@ class QuotaEnforcementScheduler:
             except (TypeError, ValueError):
                 pass
 
+        # Check heartbeat freshness (should be within interval + 60 seconds)
+        heartbeat_age = None
+        if self._heartbeat:
+            heartbeat_age = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - self._heartbeat
+            ).total_seconds()
+
+        heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
+
         return {
-            "running": self._running,
+            "running": self.is_running(),
             "enabled": self._enabled,
             "interval": self._interval,
+            "implementation": self._implementation,
             "last_run": self._last_run.isoformat() if self._last_run else None,
             "next_run": next_run_str,
+            "heartbeat": self._heartbeat.isoformat() if self._heartbeat else None,
+            "heartbeat_age_seconds": heartbeat_age,
+            "heartbeat_ok": heartbeat_ok,
         }
 
     def _run_loop(self):
+        """Main run loop for threading implementation."""
         self._next_run = datetime.now().timestamp() + self._interval
 
         while not self._stop_event.is_set():
@@ -104,6 +237,7 @@ class QuotaEnforcementScheduler:
                 break
 
             self._run_enforcement()
+            self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
             self._next_run = datetime.now().timestamp() + self._interval
 
     def _run_enforcement(self):
@@ -186,7 +320,7 @@ class QuotaEnforcementScheduler:
         if action_key in self._enforced_users:
             return
 
-        # Create alert
+        # Create alert using transactional dual-write
         try:
             req_key = f"{month_prefix}requests" if month_prefix else "today_requests"
             tok_key = f"{month_prefix}tokens" if month_prefix else "today_tokens"
@@ -202,9 +336,11 @@ class QuotaEnforcementScheduler:
             )
             requests_pct = row[req_key] / row[req_quota_key] * 100 if row.get(req_quota_key) else 0
             max_pct = max(tokens_pct, requests_pct)
-            from app.modules.governance.alert_notifier import create_quota_alert
 
-            create_quota_alert(
+            # Use transactional alert creation
+            from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
+
+            success, alert_id = create_quota_alert_transactional(
                 user_id=user_id,
                 username=username,
                 usage_percent=max_pct,
@@ -212,6 +348,15 @@ class QuotaEnforcementScheduler:
                     f"{period}_requests" if requests_pct >= tokens_pct else f"{period}_tokens"
                 ),
             )
+
+            if success:
+                logger.info(
+                    f"Created quota alert for user {user_id} "
+                    f"({period}, {max_pct:.1f}%, alert_id={alert_id})"
+                )
+            else:
+                logger.warning(f"Failed to create quota alert for user {user_id}")
+
         except Exception as e:
             logger.warning(f"Failed to create quota alert for user {user_id}: {e}")
 
@@ -242,7 +387,6 @@ enforcement_scheduler = QuotaEnforcementScheduler()
 
 def init_quota_enforcement():
     """Initialize and start the quota enforcement scheduler."""
-    import os
     import sys
 
     scripts_path = os.path.join(
@@ -251,19 +395,29 @@ def init_quota_enforcement():
     if scripts_path not in sys.path:
         sys.path.insert(0, scripts_path)
 
+    # Get configuration from environment or config file
+    implementation = os.environ.get("SCHEDULER_IMPLEMENTATION", "threading")
+    interval = int(os.environ.get("QUOTA_ENFORCEMENT_INTERVAL", "60"))
+    enabled = os.environ.get("QUOTA_ENFORCEMENT_ENABLED", "true").lower() == "true"
+
     try:
         from config import get_quota_enforcement_config  # type: ignore[attr-defined]
 
         config = get_quota_enforcement_config()
-        enforcement_scheduler.configure(
-            interval=config.get("interval", 60),
-            enabled=config.get("enabled", True),
-        )
+        interval = config.get("interval", interval)
+        enabled = config.get("enabled", enabled)
+        implementation = config.get("implementation", implementation)
     except Exception:
-        enforcement_scheduler.configure(interval=60, enabled=True)
+        pass
+
+    enforcement_scheduler.configure(
+        interval=interval,
+        enabled=enabled,
+        implementation=implementation,
+    )
 
     if enforcement_scheduler._enabled:
         enforcement_scheduler.start()
-        logger.info("Quota enforcement scheduler started")
+        logger.info(f"Quota enforcement scheduler started (implementation: {implementation})")
     else:
         logger.info("Quota enforcement scheduler is disabled")

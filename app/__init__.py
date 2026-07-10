@@ -253,6 +253,7 @@ def register_blueprints(app):
     from app.routes.roi import roi_bp
     from app.routes.smtp_config import smtp_config_bp
     from app.routes.sso import sso_bp
+    from app.routes.system import system_bp
     from app.routes.tenant import tenant_bp
     from app.routes.tool_accounts import tool_accounts_bp
     from app.routes.upload import upload_bp
@@ -277,6 +278,7 @@ def register_blueprints(app):
     app.register_blueprint(alerts_bp, url_prefix="/api")
     app.register_blueprint(roi_bp, url_prefix="/api")
     app.register_blueprint(quota_bp, url_prefix="/api")
+    app.register_blueprint(system_bp, url_prefix="/api")
     app.register_blueprint(tool_accounts_bp, url_prefix="/api")
     app.register_blueprint(mapping_rules_bp)
     app.register_blueprint(projects_bp, url_prefix="/api")
@@ -332,5 +334,21 @@ def start_background_services():
             )
     except Exception as e:
         logger.warning(f"Failed to start autonomous scheduler: {e}")
+
+    # Start alert compensation worker
+    try:
+        from app.services.alert_compensation_worker import init_alert_compensation
+
+        init_alert_compensation()
+    except Exception as e:
+        logger.warning(f"Failed to start alert compensation worker: {e}")
+
+    # Start scheduler health monitor
+    try:
+        from app.services.scheduler_health_monitor import init_scheduler_health_monitor
+
+        init_scheduler_health_monitor()
+    except Exception as e:
+        logger.warning(f"Failed to start scheduler health monitor: {e}")
 
     logger.info("Background services started")
