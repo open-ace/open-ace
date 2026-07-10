@@ -14,6 +14,7 @@ const MAX_CACHE_SIZE = 1000; // Limit cache size to prevent memory issues
 /**
  * Format a number of tokens with K/M/B suffixes
  * Cached for performance - same values return cached results
+ * Supports negative numbers by using absolute value for formatting
  */
 export function formatTokens(tokens: number): string {
   // Ensure numeric type - API may return strings in some cases
@@ -25,14 +26,18 @@ export function formatTokens(tokens: number): string {
     return cached;
   }
 
+  // Handle negative numbers by using absolute value
+  const absValue = Math.abs(numTokens);
+  const sign = numTokens < 0 ? '-' : '';
+
   // Calculate result
   let result: string;
-  if (numTokens >= 1_000_000_000) {
-    result = (numTokens / 1_000_000_000).toFixed(2) + 'B';
-  } else if (numTokens >= 1_000_000) {
-    result = (numTokens / 1_000_000).toFixed(2) + 'M';
-  } else if (numTokens >= 1_000) {
-    result = (numTokens / 1_000).toFixed(2) + 'K';
+  if (absValue >= 1_000_000_000) {
+    result = sign + (absValue / 1_000_000_000).toFixed(2) + 'B';
+  } else if (absValue >= 1_000_000) {
+    result = sign + (absValue / 1_000_000).toFixed(2) + 'M';
+  } else if (absValue >= 1_000) {
+    result = sign + (absValue / 1_000).toFixed(2) + 'K';
   } else {
     result = numTokens.toString();
   }
