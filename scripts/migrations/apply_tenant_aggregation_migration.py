@@ -5,15 +5,16 @@ Manual migration script to add tenant usage aggregation infrastructure.
 This script bypasses Alembic version conflicts and directly applies the schema changes.
 """
 
-import sys
 import os
+import sys
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-from app.repositories.database import Database
 from datetime import datetime
+
+from app.repositories.database import Database
 
 
 def apply_migration():

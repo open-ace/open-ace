@@ -361,8 +361,8 @@ def cmd_repair_consistency(tenant_id: Optional[int] = None) -> None:
     print("Repairing data consistency...")
 
     try:
-        from scripts.shared import tenant_aggregation
         from app.repositories.database import Database
+        from scripts.shared import tenant_aggregation
 
         db = Database()
 

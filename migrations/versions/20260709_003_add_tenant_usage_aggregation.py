@@ -14,10 +14,11 @@ This migration adds the infrastructure for tenant usage aggregation including:
 - New fields on tenants table for billing cycle management
 """
 
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = "20260709_003_add_tenant_usage_aggregation"
