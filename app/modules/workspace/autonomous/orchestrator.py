@@ -1773,8 +1773,14 @@ class AutonomousOrchestrator:
                         if system_account:
                             # Use sudo to check .git file
                             result = subprocess.run(
-                                ["sudo", "-u", system_account, "test", "-f",
-                                 os.path.join(worktree_path, ".git")],
+                                [
+                                    "sudo",
+                                    "-u",
+                                    system_account,
+                                    "test",
+                                    "-f",
+                                    os.path.join(worktree_path, ".git"),
+                                ],
                                 capture_output=True,
                             )
                             git_file_exists = result.returncode == 0
