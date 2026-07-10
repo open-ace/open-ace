@@ -308,7 +308,7 @@ def cmd_aggregate_quota(start_date: Optional[str] = None, end_date: Optional[str
 
         result = tenant_aggregation.run_tenant_aggregation(start_date, end_date)
 
-        print(f"\nTenant Aggregation Results:")
+        print("\nTenant Aggregation Results:")
         print(f"  Status: {result['status']}")
         print(f"  Periods Reset: {result['periods_reset']}")
         print(f"  Records Aggregated: {result['records_aggregated']}")
