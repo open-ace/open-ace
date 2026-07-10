@@ -4550,8 +4550,7 @@ export const translations: Record<Language, Translations> = {
     jsonInvalid: 'JSON は無効です',
     providerCannotChange: 'プロバイダーは変更できません',
 
-    // Scope options
-    scope: 'スコープ',
+    // Scope options (scope key is defined in SSO section above)
     scopeShared: '共有（ローカル + リモート）',
     scopeLocal: 'ローカルのみ',
     scopeRemote: 'リモートのみ（LLM プロキシ）',
@@ -5941,6 +5940,7 @@ export const translations: Record<Language, Translations> = {
     editApiKey: 'API 키 편집',
     deleteApiKey: 'API 키 삭제',
     deleteApiKeyConfirm: '이 API 키를 삭제하시겠습니까?',
+    provider: '제공자',
     keyName: '키 이름',
     apiKey: 'API 키',
     baseUrl: '베이스 URL',
@@ -5963,8 +5963,7 @@ export const translations: Record<Language, Translations> = {
     jsonValid: 'JSON이 유효합니다',
     jsonInvalid: 'JSON이 유효하지 않습니다',
 
-    // Scope options
-    scope: '범위',
+    // Scope options (scope key is defined in SSO section above)
     scopeShared: '공유(로컬 + 원격)',
     scopeLocal: '로컬 전용',
     scopeRemote: '원격 전용(LLM 프록시)',
