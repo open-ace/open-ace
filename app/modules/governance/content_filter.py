@@ -170,6 +170,9 @@ class ContentFilter:
             self.keywords.update(custom_keywords)
 
         # Risk level mapping
+        # Note: sensitive_keyword changed from "high" to "medium" to avoid blocking
+        # legitimate messages that contain words like "credential", "secret", "password"
+        # while still logging warnings for security awareness.
         self.risk_mapping = {
             "pii_ssn": "critical",
             "pii_credit_card": "critical",
@@ -179,7 +182,7 @@ class ContentFilter:
             "pii_email": "medium",
             "pii_phone_us": "medium",
             "pii_phone_intl": "medium",
-            "sensitive_keyword": "high",
+            "sensitive_keyword": "medium",  # Changed from "high" to prevent false blocks
             "custom_pattern": "medium",
         }
 
@@ -357,21 +360,28 @@ class ContentFilter:
         # Check built-in sensitive keywords
         keyword_matches = self._check_keywords(content)
         if keyword_matches:
+            # Use risk_mapping for consistent risk level management
+            keyword_risk = self.risk_mapping.get("sensitive_keyword", "medium")
             matched_rules.append(
                 {
                     "type": "sensitive_keyword",
                     "count": len(keyword_matches),
-                    "risk": "high",
+                    "risk": keyword_risk,
                     "keywords": list(keyword_matches),
                     "source": "builtin",
                 }
             )
 
-            if overall_risk not in ["critical"]:
+            # Update overall risk based on keyword risk level
+            if keyword_risk == "critical" and overall_risk not in ["critical"]:
+                overall_risk = "critical"
+            elif keyword_risk == "high" and overall_risk not in ["critical", "high"]:
                 overall_risk = "high"
+            elif keyword_risk == "medium" and overall_risk not in ["critical", "high", "medium"]:
+                overall_risk = "medium"
 
-            # For keywords, use block_high_risk config for action
-            if self.block_high_risk and overall_action not in ["block"]:
+            # For keywords, use block_high_risk config for action (only block if risk is high/critical)
+            if self.block_high_risk and keyword_risk in ["high", "critical"] and overall_action not in ["block"]:
                 overall_action = "block"
 
         # Determine passed based on action
