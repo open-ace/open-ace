@@ -1283,6 +1283,22 @@ export const translations: Record<Language, Translations> = {
     jsonInvalid: 'JSON is invalid',
     providerCannotChange: 'Provider cannot be changed',
 
+    // Scope options (scope key is defined in SSO section above)
+    scopeShared: 'Shared (Local + Remote)',
+    scopeLocal: 'Local Only',
+    scopeRemote: 'Remote Only (LLM Proxy)',
+    scopeHelp: 'Determines which workspace types can use this key. "Shared" is recommended.',
+    scopeBadgeShared: 'Shared',
+    scopeBadgeLocal: 'Local',
+    scopeBadgeRemote: 'Remote',
+
+    // Advanced Settings
+    advancedSettings: 'Advanced Settings',
+    priority: 'Priority',
+    priorityHelp: 'Higher = preferred. Default: 0',
+    weight: 'Weight',
+    weightHelp: 'For weighted random within same priority. Default: 100',
+
     // Help Documents
     gettingStarted: 'Getting Started',
     promptsGuide: 'Prompts Guide',
@@ -2834,6 +2850,22 @@ export const translations: Record<Language, Translations> = {
     jsonInvalid: 'JSON 格式错误',
     providerCannotChange: '提供商不可更改',
 
+    // Scope 选项 (scope key 定义在 SSO 部分)
+    scopeShared: '共享（本地 + 远程）',
+    scopeLocal: '仅本地',
+    scopeRemote: '仅远程（LLM 代理）',
+    scopeHelp: '决定哪些工作区类型可以使用此密钥。推荐使用"共享"。',
+    scopeBadgeShared: '共享',
+    scopeBadgeLocal: '本地',
+    scopeBadgeRemote: '远程',
+
+    // 高级设置
+    advancedSettings: '高级设置',
+    priority: '优先级',
+    priorityHelp: '数值越高优先级越高。默认：0',
+    weight: '权重',
+    weightHelp: '用于同优先级内的加权随机。默认：100',
+
     // 帮助文档
     gettingStarted: '快速上手',
     promptsGuide: '提示词指南',
@@ -4224,14 +4256,6 @@ export const translations: Record<Language, Translations> = {
     compactMode: '簡潔モード',
     verbose: '詳細',
     compact: '簡潔',
-    codexSettings: 'Codex 設定 (TOML)',
-    codexSettingsHint:
-      '機密情報以外の Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
-    zcodeSettings: 'ZCode 設定 (JSON)',
-    zcodeSettingsHint:
-      '機密情報以外の設定のみを構成してください（provider、model など）。API キーや Base URL は含めないでください — プロキシ経由で自動的に注入されます。',
-    zcodeSettingsInvalid: 'ZCode 設定の JSON が無効です',
-    providerCannotChange: 'プロバイダーは変更できません',
 
     // Fullscreen
     enterFullscreen: '全画面表示',
@@ -4473,8 +4497,6 @@ export const translations: Record<Language, Translations> = {
     addToolAccountSuccess: 'ツールアカウントが正常に追加されました',
     addToolAccountFailed: 'ツールアカウントの追加に失敗しました',
     // Run Timeline（実行タイムライン）— リモートエージェントセッション
-    model: 'モデル',
-    provider: 'プロバイダー',
     runTimeline: '実行タイムライン',
     runTimelineLoading: 'タイムラインを読み込み中...',
     runTimelineError: 'タイムラインの読み込みに失敗しました',
@@ -4502,6 +4524,61 @@ export const translations: Record<Language, Translations> = {
     machine: 'マシン',
     started: '開始',
     cliImported: 'ローカル CLI 履歴',
+
+    // API Key Management
+    apiKeys: 'API キー',
+    addApiKey: 'API キーを追加',
+    editApiKey: 'API キーを編集',
+    deleteApiKey: 'API キーを削除',
+    deleteApiKeyConfirm: 'この API キーを削除しますか？',
+    provider: 'プロバイダー',
+    keyName: 'キー名',
+    apiKey: 'API キー',
+    baseUrl: 'ベース URL',
+    enterKeyName: 'キー名を入力',
+    enterApiKey: 'API キーを入力',
+    enterBaseUrl: 'ベース URL を入力',
+    noApiKeys: 'API キーが設定されていません',
+    noApiKeysDescription:
+      'リモートエージェントの LLM プロキシを有効にするには API キーを追加してください。',
+    keyStatus: 'ステータス',
+    cliTools: 'CLI ツール',
+    cliToolsDescription: 'この API キーが設定を行う CLI ツールを選択してください。',
+    claudeCodeSettings: 'Claude Code 設定 (JSON)',
+    claudeCodeSettingsHint:
+      '機密ではない設定のみを構成してください（モデルマッピング、テーマなど）。API キーやベース URL は含めないでください — 環境変数経由で自動的に挿入されます。',
+    qwenCodeSettings: 'Qwen Code 設定 (JSON)',
+    qwenCodeSettingsHint:
+      '機密ではない設定のみを構成してください（modelProviders、model など）。API キーやベース URL は含めないでください — 環境変数経由で自動的に挿入されます。',
+    codexSettings: 'Codex 設定 (TOML)',
+    codexSettingsHint:
+      '機密ではない Codex 設定のみを構成してください（model、sandbox など）。API キーは含めないでください — 環境変数経由で自動的に挿入されます。',
+    claudeSettingsInvalid: 'Claude Code 設定 JSON が無効です',
+    qwenSettingsInvalid: 'Qwen Code 設定 JSON が無効です',
+    zcodeSettings: 'ZCode 設定 (JSON)',
+    zcodeSettingsHint:
+      '機密ではない設定のみを構成してください（provider、model など）。API キーやベース URL は含めないでください — プロキシ経由で自動的に挿入されます。',
+    zcodeSettingsInvalid: 'ZCode 設定 JSON が無効です',
+    jsonValid: 'JSON は有効です',
+    jsonInvalid: 'JSON は無効です',
+    providerCannotChange: 'プロバイダーは変更できません',
+
+    // Scope options (scope key is defined in SSO section above)
+    scopeShared: '共有（ローカル + リモート）',
+    scopeLocal: 'ローカルのみ',
+    scopeRemote: 'リモートのみ（LLM プロキシ）',
+    scopeHelp:
+      'どのワークスペースタイプがこのキーを使用できるかを決定します。「共有」を推奨します。',
+    scopeBadgeShared: '共有',
+    scopeBadgeLocal: 'ローカル',
+    scopeBadgeRemote: 'リモート',
+
+    // Advanced Settings
+    advancedSettings: '詳細設定',
+    priority: '優先度',
+    priorityHelp: '高いほど優先されます。デフォルト：0',
+    weight: '重み',
+    weightHelp: '同じ優先度内での加重ランダム用。デフォルト：100',
   },
   ko: {
     // Common
@@ -5846,8 +5923,6 @@ export const translations: Record<Language, Translations> = {
     addToolAccountSuccess: '도구 계정이 성공적으로 추가되었습니다',
     addToolAccountFailed: '도구 계정 추가 실패',
     // Run Timeline(실행 타임라인) — 원격 에이전트 세션
-    model: '모델',
-    provider: '제공자',
     runTimeline: '실행 타임라인',
     runTimelineLoading: '타임라인 로드 중...',
     runTimelineError: '타임라인을 로드하지 못했습니다',
@@ -5875,6 +5950,51 @@ export const translations: Record<Language, Translations> = {
     machine: '머신',
     started: '시작',
     cliImported: '로컬 CLI 기록',
+
+    // API Key Management
+    apiKeys: 'API 키',
+    addApiKey: 'API 키 추가',
+    editApiKey: 'API 키 편집',
+    deleteApiKey: 'API 키 삭제',
+    deleteApiKeyConfirm: '이 API 키를 삭제하시겠습니까?',
+    provider: '제공자',
+    keyName: '키 이름',
+    apiKey: 'API 키',
+    baseUrl: '베이스 URL',
+    enterKeyName: '키 이름 입력',
+    enterApiKey: 'API 키 입력',
+    enterBaseUrl: '베이스 URL 입력',
+    noApiKeys: '구성된 API 키가 없습니다',
+    noApiKeysDescription: '원격 에이전트의 LLM 프록시를 활성화하려면 API 키를 추가하세요.',
+    keyStatus: '상태',
+    cliTools: 'CLI 도구',
+    cliToolsDescription: '이 API 키가 설정을 구성할 CLI 도구를 선택하세요.',
+    claudeCodeSettings: 'Claude Code 설정 (JSON)',
+    claudeCodeSettingsHint:
+      '민감하지 않은 설정만 구성하세요(모델 매핑, 테마 등). API 키나 베이스 URL은 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
+    qwenCodeSettings: 'Qwen Code 설정 (JSON)',
+    qwenCodeSettingsHint:
+      '민감하지 않은 설정만 구성하세요(modelProviders, model 등). API 키나 베이스 URL은 포함하지 마세요 — 환경 변수를 통해 자동으로 주입됩니다.',
+    claudeSettingsInvalid: 'Claude Code 설정 JSON이 유효하지 않습니다',
+    qwenSettingsInvalid: 'Qwen Code 설정 JSON이 유효하지 않습니다',
+    jsonValid: 'JSON이 유효합니다',
+    jsonInvalid: 'JSON이 유효하지 않습니다',
+
+    // Scope options (scope key is defined in SSO section above)
+    scopeShared: '공유(로컬 + 원격)',
+    scopeLocal: '로컬 전용',
+    scopeRemote: '원격 전용(LLM 프록시)',
+    scopeHelp: '어떤 워크스페이스 유형이 이 키를 사용할 수 있는지 결정합니다. "공유"를 권장합니다.',
+    scopeBadgeShared: '공유',
+    scopeBadgeLocal: '로컬',
+    scopeBadgeRemote: '원격',
+
+    // Advanced Settings
+    advancedSettings: '고급 설정',
+    priority: '우선순위',
+    priorityHelp: '높을수록 우선합니다. 기본값: 0',
+    weight: '가중치',
+    weightHelp: '동일 우선순위 내에서 가중 랜덤용. 기본값: 100',
   },
 };
 

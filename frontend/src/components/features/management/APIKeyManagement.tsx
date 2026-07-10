@@ -84,6 +84,17 @@ const cliToolOptions = [
   { value: 'zcode', label: 'ZCode (Anthropic)' },
 ];
 
+/**
+ * Get internationalized Scope options for Select component
+ * @param language - Current language
+ * @returns Array of Scope options with translated labels
+ */
+const getScopeOptions = (language: Language) => [
+  { value: 'shared', label: t('scopeShared', language) },
+  { value: 'local', label: t('scopeLocal', language) },
+  { value: 'remote', label: t('scopeRemote', language) },
+];
+
 // Default settings templates
 const defaultClaudeSettings = `{
   "env": {
@@ -631,7 +642,7 @@ export const APIKeyManagement: React.FC = () => {
               <tr>
                 <th>{t('provider', language)}</th>
                 <th>{t('keyName', language)}</th>
-                <th>Scope</th>
+                <th>{t('scope', language)}</th>
                 <th>{t('cliTools', language)}</th>
                 <th>{t('keyStatus', language)}</th>
                 <th>{t('tableCreatedAt', language)}</th>
@@ -642,7 +653,11 @@ export const APIKeyManagement: React.FC = () => {
               {keys.map((key) => {
                 const cliTools = parsedCliTools.get(key.id) ?? [];
                 const scopeLabel =
-                  key.scope === 'shared' ? 'Shared' : key.scope === 'local' ? 'Local' : 'Remote';
+                  key.scope === 'shared'
+                    ? t('scopeBadgeShared', language)
+                    : key.scope === 'local'
+                      ? t('scopeBadgeLocal', language)
+                      : t('scopeBadgeRemote', language);
                 const scopeVariant =
                   key.scope === 'shared' ? 'success' : key.scope === 'local' ? 'info' : 'warning';
                 return (
@@ -781,19 +796,13 @@ export const APIKeyManagement: React.FC = () => {
 
         {/* Scope Selection */}
         <div className="mb-3">
-          <label className="form-label">Scope</label>
+          <label className="form-label">{t('scope', language)}</label>
           <Select
-            options={[
-              { value: 'shared', label: 'Shared (Local + Remote)' },
-              { value: 'local', label: 'Local Only' },
-              { value: 'remote', label: 'Remote Only (LLM Proxy)' },
-            ]}
+            options={getScopeOptions(language)}
             value={formData.scope}
             onChange={(v) => setFormData({ ...formData, scope: v })}
           />
-          <small className="text-muted">
-            Determines which workspace types can use this key. "Shared" is recommended.
-          </small>
+          <small className="text-muted">{t('scopeHelp', language)}</small>
         </div>
 
         {/* Advanced Settings (collapsed by default) */}
@@ -804,32 +813,30 @@ export const APIKeyManagement: React.FC = () => {
             onClick={() => setFormData({ ...formData, showAdvanced: !formData.showAdvanced })}
           >
             <i className={`bi bi-chevron-${formData.showAdvanced ? 'up' : 'down'} me-1`} />
-            Advanced Settings
+            {t('advancedSettings', language)}
           </button>
           {formData.showAdvanced && (
             <div className="mt-2 p-3 border rounded bg-light">
               <div className="row">
                 <div className="col-6">
-                  <label className="form-label">Priority</label>
+                  <label className="form-label">{t('priority', language)}</label>
                   <TextInput
                     type="number"
                     value={String(formData.priority)}
                     onChange={(v) => setFormData({ ...formData, priority: parseInt(v) || 0 })}
                     placeholder="0"
                   />
-                  <small className="text-muted">Higher = preferred. Default: 0</small>
+                  <small className="text-muted">{t('priorityHelp', language)}</small>
                 </div>
                 <div className="col-6">
-                  <label className="form-label">Weight</label>
+                  <label className="form-label">{t('weight', language)}</label>
                   <TextInput
                     type="number"
                     value={String(formData.weight)}
                     onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
                     placeholder="100"
                   />
-                  <small className="text-muted">
-                    For weighted random within same priority. Default: 100
-                  </small>
+                  <small className="text-muted">{t('weightHelp', language)}</small>
                 </div>
               </div>
             </div>
@@ -940,7 +947,7 @@ export const APIKeyManagement: React.FC = () => {
       <Modal
         isOpen={showEditDialog}
         onClose={() => setShowEditDialog(false)}
-        title={t('editApiKey', language) || 'Edit API Key'}
+        title={t('editApiKey', language)}
         size="lg"
         footer={
           <>
@@ -986,19 +993,13 @@ export const APIKeyManagement: React.FC = () => {
 
         {/* Scope Selection */}
         <div className="mb-3">
-          <label className="form-label">Scope</label>
+          <label className="form-label">{t('scope', language)}</label>
           <Select
-            options={[
-              { value: 'shared', label: 'Shared (Local + Remote)' },
-              { value: 'local', label: 'Local Only' },
-              { value: 'remote', label: 'Remote Only (LLM Proxy)' },
-            ]}
+            options={getScopeOptions(language)}
             value={formData.scope}
             onChange={(v) => setFormData({ ...formData, scope: v })}
           />
-          <small className="text-muted">
-            Determines which workspace types can use this key. "Shared" is recommended.
-          </small>
+          <small className="text-muted">{t('scopeHelp', language)}</small>
         </div>
 
         {/* Advanced Settings (collapsed by default) */}
@@ -1009,32 +1010,30 @@ export const APIKeyManagement: React.FC = () => {
             onClick={() => setFormData({ ...formData, showAdvanced: !formData.showAdvanced })}
           >
             <i className={`bi bi-chevron-${formData.showAdvanced ? 'up' : 'down'} me-1`} />
-            Advanced Settings
+            {t('advancedSettings', language)}
           </button>
           {formData.showAdvanced && (
             <div className="mt-2 p-3 border rounded bg-light">
               <div className="row">
                 <div className="col-6">
-                  <label className="form-label">Priority</label>
+                  <label className="form-label">{t('priority', language)}</label>
                   <TextInput
                     type="number"
                     value={String(formData.priority)}
                     onChange={(v) => setFormData({ ...formData, priority: parseInt(v) || 0 })}
                     placeholder="0"
                   />
-                  <small className="text-muted">Higher = preferred. Default: 0</small>
+                  <small className="text-muted">{t('priorityHelp', language)}</small>
                 </div>
                 <div className="col-6">
-                  <label className="form-label">Weight</label>
+                  <label className="form-label">{t('weight', language)}</label>
                   <TextInput
                     type="number"
                     value={String(formData.weight)}
                     onChange={(v) => setFormData({ ...formData, weight: parseInt(v) || 100 })}
                     placeholder="100"
                   />
-                  <small className="text-muted">
-                    For weighted random within same priority. Default: 100
-                  </small>
+                  <small className="text-muted">{t('weightHelp', language)}</small>
                 </div>
               </div>
             </div>

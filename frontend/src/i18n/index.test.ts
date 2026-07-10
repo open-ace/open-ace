@@ -274,6 +274,64 @@ describe('i18n', () => {
       });
     });
 
+    // API Key Management translations (Issue #XXX)
+    // Ensure all API Key Management related keys exist in all four languages
+    const apiKeyManagementKeys = [
+      'apiKeys',
+      'addApiKey',
+      'editApiKey',
+      'deleteApiKey',
+      'deleteApiKeyConfirm',
+      'provider',
+      'keyName',
+      'apiKey',
+      'baseUrl',
+      'enterKeyName',
+      'enterApiKey',
+      'enterBaseUrl',
+      'noApiKeys',
+      'noApiKeysDescription',
+      'keyStatus',
+      'cliTools',
+      'cliToolsDescription',
+      'claudeCodeSettings',
+      'claudeCodeSettingsHint',
+      'qwenCodeSettings',
+      'qwenCodeSettingsHint',
+      'codexSettings',
+      'codexSettingsHint',
+      'claudeSettingsInvalid',
+      'qwenSettingsInvalid',
+      'zcodeSettings',
+      'zcodeSettingsHint',
+      'zcodeSettingsInvalid',
+      'jsonValid',
+      'jsonInvalid',
+      'providerCannotChange',
+      // Scope options
+      'scope',
+      'scopeShared',
+      'scopeLocal',
+      'scopeRemote',
+      'scopeHelp',
+      'scopeBadgeShared',
+      'scopeBadgeLocal',
+      'scopeBadgeRemote',
+      // Advanced Settings
+      'advancedSettings',
+      'priority',
+      'priorityHelp',
+      'weight',
+      'weightHelp',
+    ];
+
+    it.each(languages)('should have all API Key Management keys in %s', (lang) => {
+      apiKeyManagementKeys.forEach((key) => {
+        const translation = t(key, lang);
+        expect(translation, `missing API Key Management key "${key}" in ${lang}`).not.toBe(key);
+      });
+    });
+
     // ---- Four-language key-set symmetry (root-cause defense for #819/#820) ----
     // The leak bug class: a key exists in en/zh but is missing in ja/ko, so the
     // raw key string renders in the UI. The full dictionary is NOT yet symmetric
