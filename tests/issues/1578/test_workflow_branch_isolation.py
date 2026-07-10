@@ -9,12 +9,11 @@ Covers:
 """
 
 import os
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
 from app.services.autonomous_scheduler import AutonomousScheduler
-
 
 # ── Scheduler _conflict_keys Tests ─────────────────────────────────────────
 
@@ -137,8 +136,8 @@ class TestEnsureWorktreeBranchVerification:
 
     def test_branch_mismatch_raises_on_uncommitted_changes(self):
         """When branch mismatches and there are uncommitted changes, raise error."""
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
         from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         # Mock workflow
         wf = {
