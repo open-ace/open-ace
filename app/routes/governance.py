@@ -358,6 +358,7 @@ def api_add_keyword():
 # Content Filter Rules Management
 # ============================================================================
 
+
 @governance_bp.route("/filter-rules", methods=["GET"])
 @admin_required
 def api_get_filter_rules():
