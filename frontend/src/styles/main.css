@@ -1896,6 +1896,12 @@ table .latency-row:hover td {
   color: var(--text-primary) !important;
 }
 
+/* Issue #1484: Header dropdowns must have higher z-index than PageRefreshControl (320) */
+/* Header has backdrop-filter which creates stacking context, need explicit z-index */
+.header .dropdown-menu {
+  z-index: var(--z-popover); /* 600 */
+}
+
 /* Input Styles */
 .form-group {
   margin-bottom: var(--spacing-md);
