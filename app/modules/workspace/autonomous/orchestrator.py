@@ -2907,6 +2907,21 @@ class AutonomousOrchestrator:
             milestone_id=ms.get("milestone_id", ""),
         )
 
+        # P2 修复（Issue #1611）：开发完成后重置 gh 缓存，重新绑定到正确路径
+        self._gh = None
+        gh = self._get_gh()
+
+        # 同步分支名（如果 Agent 创建了新分支）
+        current_branch = gh.get_current_branch()
+        expected_branch = wf.get("branch_name", "")
+        if current_branch != expected_branch:
+            logger.info(
+                "Agent created/switched to branch %s (expected: %s)",
+                current_branch,
+                expected_branch,
+            )
+            self._update_workflow({"branch_name": current_branch})
+
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
             self._update_workflow({"user_feedback": ""})
@@ -3803,6 +3818,18 @@ class AutonomousOrchestrator:
 
         # Ensure branch is pushed to remote before PR creation
         try:
+            # P1 修复（Issue #1611）：检查当前分支是否与预期一致
+            current_branch = gh.get_current_branch()
+            if current_branch != branch_name:
+                logger.warning(
+                    "Branch mismatch before push: expected=%s, actual=%s",
+                    branch_name,
+                    current_branch,
+                )
+                # 同步 workflow 中的 branch_name（仅限自主开发分支）
+                if current_branch.startswith("auto-dev/") or current_branch.startswith("fix/"):
+                    self._update_workflow({"branch_name": current_branch})
+                    branch_name = current_branch
             gh.git_push(branch=branch_name)
         except Exception as e:
             logger.warning("Failed to push branch %s: %s", branch_name, e)
@@ -4773,6 +4800,15 @@ class AutonomousOrchestrator:
             # CI run, so we do NOT merge here — _do_merge will retry on the
             # next scheduler cycle once CI passes (it checks for pending CI
             # at the top and defers until checks are green).
+            # P1 修复（Issue #1611）：Conflict 解决后检查分支一致性
+            current_branch = wt_gh.get_current_branch()
+            if current_branch != branch_name:
+                logger.warning(
+                    "Conflict resolution branch mismatch: expected=%s, actual=%s",
+                    branch_name,
+                    current_branch,
+                )
+                branch_name = current_branch
             wt_gh.git_push(branch=branch_name)
             self._create_milestone(
                 phase="merge",
