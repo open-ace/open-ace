@@ -9,7 +9,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useAuditLogs, useUsers } from '@/hooks';
+import { useAuditLogs, useUsers, useAuditActions } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
@@ -144,6 +144,9 @@ export const AuditCenter: React.FC = () => {
   const [days] = useState(30);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
+  // --- Audit Actions Hook ---
+  const { actions: auditActions, categories: auditCategories } = useAuditActions();
+
   const handleAnomalyStatusUpdate = async (
     anomalyType: string,
     affectedUsers: number[],
@@ -212,18 +215,30 @@ export const AuditCenter: React.FC = () => {
   }, [activeTab, fetchAnalysisData]);
 
   // --- Audit Log Handlers ---
-  const actionOptions = useMemo(
-    () => [
-      { value: '', label: t('allActions', language) },
-      { value: 'login', label: 'Login' },
-      { value: 'logout', label: 'Logout' },
-      { value: 'create', label: 'Create' },
-      { value: 'update', label: 'Update' },
-      { value: 'delete', label: 'Delete' },
-      { value: 'view', label: 'View' },
-    ],
-    [language]
-  );
+  // Grouped action options for optgroup display
+  const groupedActionOptions = useMemo(() => {
+    const groups: Array<{
+      category: { key: string; label: string; i18n_key: string };
+      actions: Array<{ value: string; label: string }>;
+    }> = [];
+
+    for (const category of auditCategories) {
+      const categoryActions = auditActions
+        .filter((a) => a.category === category.key)
+        .map((a) => ({ value: a.value, label: t(a.i18n_key, language) }));
+
+      groups.push({
+        category: {
+          key: category.key,
+          label: t(category.i18n_key, language),
+          i18n_key: category.i18n_key,
+        },
+        actions: categoryActions,
+      });
+    }
+
+    return groups;
+  }, [auditActions, auditCategories, language]);
 
   const resourceTypeOptions = useMemo(
     () => [
@@ -343,7 +358,13 @@ export const AuditCenter: React.FC = () => {
             <div className="col-md-3">
               <label className="form-label">{t('tableAction', language)}</label>
               <Select
-                options={actionOptions}
+                groupedOptions={[
+                  { value: '', label: t('allActions', language) },
+                  ...groupedActionOptions.map((group) => ({
+                    label: group.category.label,
+                    options: group.actions,
+                  })),
+                ]}
                 value={filters.action ?? ''}
                 onChange={(value) => handleFilterChange('action', value)}
               />

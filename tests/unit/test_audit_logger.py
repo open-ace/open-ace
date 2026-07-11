@@ -487,3 +487,76 @@ class TestAuditLogger:
         data_line = output.strip().splitlines()[1]
         assert data_line.endswith(",")  # last column blank
         assert "Rule" not in data_line
+
+
+class TestGetActionCategories:
+    """Test get_action_categories function (Issue #1439)."""
+
+    def test_get_action_categories_returns_dict(self):
+        """Test that get_action_categories returns a dictionary."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        assert isinstance(categories, dict)
+
+    def test_get_action_categories_has_required_keys(self):
+        """Test that get_action_categories has all required category keys."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        required_keys = [
+            "auth",
+            "user_management",
+            "permission",
+            "quota",
+            "data",
+            "system",
+            "content",
+            "agent",
+        ]
+        for key in required_keys:
+            assert key in categories, f"Missing category: {key}"
+
+    def test_get_action_categories_actions_have_required_fields(self):
+        """Test that each action has required fields."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        for category_key, category_data in categories.items():
+            assert "label" in category_data
+            assert "i18n_key" in category_data
+            assert "actions" in category_data
+            for action in category_data["actions"]:
+                assert "value" in action
+                assert "label" in action
+                assert "i18n_key" in action
+
+    def test_get_action_categories_total_actions_is_31(self):
+        """Test that total number of actions is 31."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        total_actions = sum(len(cat["actions"]) for cat in categories.values())
+        assert total_actions == 31, f"Expected 31 actions, got {total_actions}"
+
+    def test_get_action_categories_matches_enum_values(self):
+        """Test that all action values match AuditAction enum values."""
+        from app.modules.governance.audit_logger import AuditAction, get_action_categories
+
+        categories = get_action_categories()
+        enum_values = {e.value for e in AuditAction}
+        action_values = set()
+        for category_data in categories.values():
+            for action in category_data["actions"]:
+                action_values.add(action["value"])
+        assert action_values == enum_values, f"Action values don't match enum: {action_values - enum_values} extra, {enum_values - action_values} missing"
+
+    def test_get_action_categories_includes_content_warned_and_redacted(self):
+        """Test that content_warned and content_redacted are included (Issue #1439)."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        content_actions = categories.get("content", {}).get("actions", [])
+        action_values = [a["value"] for a in content_actions]
+        assert "content_warned" in action_values
+        assert "content_redacted" in action_values
