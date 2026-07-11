@@ -2347,7 +2347,15 @@ class AutonomousOrchestrator:
                     break
 
             prompt = (
-                PLANNING_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
+                PLANNING_CONTEXT + "你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
+            )
+            if issue_number:
+                prompt += (
+                    f"## 关联 Issue\n"
+                    f"本任务关联 GitHub Issue #{issue_number}。\n"
+                    f"完善后的方案需满足 Issue #{issue_number} 的所有需求。\n\n"
+                )
+            prompt += (
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
@@ -2359,7 +2367,15 @@ class AutonomousOrchestrator:
             milestone_type = "plan_refined"
         else:
             prompt = (
-                PLANNING_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
+                PLANNING_CONTEXT + "你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
+            )
+            if issue_number:
+                prompt += (
+                    f"## 关联 Issue\n"
+                    f"本任务关联 GitHub Issue #{issue_number}。\n"
+                    f"方案中请明确引用此 Issue 编号 #{issue_number}。\n\n"
+                )
+            prompt += (
                 f"## 需求\n{requirements}\n\n"
                 f"## 项目路径\n{wf.get('project_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
@@ -2462,11 +2478,19 @@ class AutonomousOrchestrator:
 
         # Step 2: Review plan
         review_prompt = (
-            PLANNING_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
-            f"1. 遗漏的需求\n"
-            f"2. 架构风险\n"
-            f"3. 实现难度估计\n"
-            f"4. 改进建议\n\n"
+            PLANNING_CONTEXT + "你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
+            "1. 遗漏的需求\n"
+            "2. 架构风险\n"
+            "3. 实现难度估计\n"
+            "4. 改进建议\n\n"
+        )
+        if issue_number:
+            review_prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"审查时请确保方案满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+        review_prompt += (
             f"## 方案\n{plan_text}\n\n"
             f"## 需求\n{requirements}\n\n"
             f"如果方案没有重大问题，请明确说明'方案通过审查'。\n\n"
@@ -2585,6 +2609,14 @@ class AutonomousOrchestrator:
                 refine_prompt = (
                     PLANNING_CONTEXT + "请根据以下审查意见完善实现方案，输出最终的完整方案。"
                     "直接输出方案，不要输出思考过程或引导文字。\n\n"
+                )
+                if issue_number:
+                    refine_prompt += (
+                        f"## 关联 Issue\n"
+                        f"本任务关联 GitHub Issue #{issue_number}。\n"
+                        f"完善后的方案需满足 Issue #{issue_number} 的所有需求。\n\n"
+                    )
+                refine_prompt += (
                     f"## 当前方案\n{final_plan}\n\n"
                     f"## 审查意见\n{last_review}\n\n"
                     "重要约束：只输出高层设计方案和实现步骤描述，"
@@ -2737,6 +2769,8 @@ class AutonomousOrchestrator:
 
         Issue #1573: Added branch verification at the start of development phase.
         """
+        # Get Issue number for prompt context
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
         # Issue #1573: Verify we're on the correct branch before development
         expected_branch = wf.get("branch_name", "")
         workflow_prefix = f"auto-dev/{self._workflow_id[:8]}"
@@ -2839,7 +2873,15 @@ class AutonomousOrchestrator:
             pass
 
         dev_prompt = (
-            AUTONOMOUS_CONTEXT + f"根据以下已审定的实现方案进行完整开发。\n\n"
+            AUTONOMOUS_CONTEXT + "根据以下已审定的实现方案进行完整开发。\n\n"
+        )
+        if issue_number:
+            dev_prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"开发完成后的 commit message 必须包含 Issue #{issue_number} 的引用（如 'fix: ... (Issue #{issue_number})'）。\n\n"
+            )
+        dev_prompt += (
             f"## 实现方案\n{final_plan}\n\n"
             f"## 要求\n"
             f"1. 严格按照方案实现所有功能\n"
@@ -3172,6 +3214,8 @@ class AutonomousOrchestrator:
         On unrecoverable failure, updates workflow status to 'failed' and returns.
         On success, transitions workflow to pr_review phase.
         """
+        # Get Issue number for prompt context
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
         test_ms = self._create_milestone(
             phase="development",
             dev_round=dev_round,
@@ -3184,6 +3228,14 @@ class AutonomousOrchestrator:
             AUTONOMOUS_CONTEXT
             + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
             "确保所有测试通过后再结束。\n\n"
+        )
+        if issue_number:
+            test_prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"测试验证需确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+        test_prompt += (
             "## 重要：测试执行策略\n"
             "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
             "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
@@ -3856,6 +3908,14 @@ class AutonomousOrchestrator:
             f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
         )
 
+        # Add Issue reference
+        if issue_number:
+            review_prompt += (
+                f"## 关联 Issue\n"
+                f"本 PR 关联 GitHub Issue #{issue_number}。\n"
+                f"审查时请确保代码变更满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+
         # For rounds > 1, the previous round's review is already in this review
         # session's resumed history (--resume). Ask the reviewer to revisit it
         # and confirm whether each point was addressed.
@@ -3985,6 +4045,14 @@ class AutonomousOrchestrator:
                 "1. 最后一轮审查意见是否已全部落实\n"
                 "2. 是否还有遗留问题需要处理\n"
                 "3. 当前 PR 是否可以合并\n\n"
+            )
+            if issue_number:
+                summary_prompt += (
+                    f"## 关联 Issue\n"
+                    f"本 PR 关联 GitHub Issue #{issue_number}。\n"
+                    f"总结中请确认修改是否满足 Issue #{issue_number} 的所有需求。\n\n"
+                )
+            summary_prompt += (
                 f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
                 "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
                 "直接输出总结，不要添加引导文字。"
@@ -4066,6 +4134,16 @@ class AutonomousOrchestrator:
         fix_prompt = (
             AUTONOMOUS_CONTEXT
             + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
+        )
+        # Issue reference is available in this method's scope
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+        if issue_number:
+            fix_prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"修复时请确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+        fix_prompt += (
             "重要要求：\n"
             "1. 修改完成后，运行项目测试确保所有测试通过\n"
             "2. 如果测试失败，分析失败原因：\n"
@@ -4620,6 +4698,16 @@ class AutonomousOrchestrator:
                     AUTONOMOUS_CONTEXT
                     + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
                     "保留两边的有效修改。\n\n"
+                )
+                # Issue reference is available in this method's scope
+                issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+                if issue_number:
+                    conflict_prompt += (
+                        f"## 关联 Issue\n"
+                        f"本任务关联 GitHub Issue #{issue_number}。\n"
+                        f"冲突解决时请确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
+                    )
+                conflict_prompt += (
                     "步骤：\n"
                     "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
                     "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
