@@ -2872,9 +2872,7 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        dev_prompt = (
-            AUTONOMOUS_CONTEXT + "根据以下已审定的实现方案进行完整开发。\n\n"
-        )
+        dev_prompt = AUTONOMOUS_CONTEXT + "根据以下已审定的实现方案进行完整开发。\n\n"
         if issue_number:
             dev_prompt += (
                 f"## 关联 Issue\n"
@@ -4251,7 +4249,7 @@ class AutonomousOrchestrator:
             ).lower() == "pre-existing" or self._is_pre_existing_ci_failure(
                 self._artifact_visible_text(fix_result)
             ):
-                comment += "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
+                comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
             self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
 
     # ── Phase: Report ───────────────────────────────────────────────
@@ -4700,7 +4698,9 @@ class AutonomousOrchestrator:
                     "保留两边的有效修改。\n\n"
                 )
                 # Issue reference is available in this method's scope
-                issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+                issue_number = wf.get("github_issue_number") or self.workflow.get(
+                    "github_issue_number"
+                )
                 if issue_number:
                     conflict_prompt += (
                         f"## 关联 Issue\n"
