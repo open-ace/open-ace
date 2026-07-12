@@ -3643,3 +3643,153 @@ table .latency-row:hover td {
 [data-theme='dark'] .session-search .form-control::placeholder {
   color: var(--text-muted);
 }
+
+/* Session Detail Modal - Dark Theme (Issue #1621) */
+
+/* Override Bootstrap .bg-light for session meta area */
+[data-theme='dark'] .session-detail-content .session-meta.bg-light {
+  background-color: var(--bg-secondary) !important;
+}
+
+/* Override Bootstrap .bg-light / .bg-white for message items */
+[data-theme='dark'] .session-detail-content .message-item.bg-light,
+[data-theme='dark'] .session-detail-content .message-item.bg-white {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Text readability - override Bootstrap .text-muted for better contrast */
+[data-theme='dark'] .session-detail-content .text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Form control (search input) - dark theme */
+[data-theme='dark'] .session-detail-content .form-control {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .session-detail-content .form-control::placeholder {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .session-detail-content .form-control:focus {
+  background-color: var(--bg-tertiary);
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
+}
+
+/* Input group text (search icon) */
+[data-theme='dark'] .session-detail-content .input-group-text {
+  background-color: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+/* Badge text color fix for dark backgrounds - ensure readability on colored badges */
+[data-theme='dark'] .session-detail-content .badge.bg-secondary,
+[data-theme='dark'] .session-detail-content .badge.bg-success,
+[data-theme='dark'] .session-detail-content .badge.bg-primary,
+[data-theme='dark'] .session-detail-content .badge.bg-danger {
+  color: #fff !important;
+}
+
+/* Fix Bootstrap .text-dark on warning/info badges in dark theme */
+[data-theme='dark'] .session-detail-content .badge.bg-warning.text-dark,
+[data-theme='dark'] .session-detail-content .badge.bg-info.text-dark {
+  color: #000 !important;
+}
+
+/* Filter buttons - improve contrast for outline buttons in dark theme */
+[data-theme='dark'] .session-detail-content .btn-outline-primary {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+[data-theme='dark'] .session-detail-content .btn-outline-primary:hover {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+[data-theme='dark'] .session-detail-content .btn-outline-success {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+[data-theme='dark'] .session-detail-content .btn-outline-success:hover {
+  background-color: var(--color-success);
+  color: #fff;
+}
+
+[data-theme='dark'] .session-detail-content .btn-outline-secondary {
+  color: var(--text-secondary);
+  border-color: var(--border-color-dark);
+}
+
+[data-theme='dark'] .session-detail-content .btn-outline-secondary:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+/* Filter buttons - solid (active/selected) state in dark theme */
+[data-theme='dark'] .session-detail-content .btn-primary {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--color-primary);
+  --bs-btn-border-color: var(--color-primary);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--color-primary-hover);
+  --bs-btn-hover-border-color: var(--color-primary-hover);
+}
+
+[data-theme='dark'] .session-detail-content .btn-success {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: var(--color-success);
+  --bs-btn-border-color: var(--color-success);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: var(--color-success-hover);
+  --bs-btn-hover-border-color: var(--color-success-hover);
+}
+
+[data-theme='dark'] .session-detail-content .btn-secondary {
+  --bs-btn-color: #fff;
+  --bs-btn-bg: #495057;
+  --bs-btn-border-color: #495057;
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: #3d4349;
+  --bs-btn-hover-border-color: #373b3f;
+  color: #fff !important;
+  background-color: #495057 !important;
+  border-color: #495057 !important;
+}
+
+[data-theme='dark'] .session-detail-content .btn-secondary:hover {
+  color: #fff !important;
+  background-color: #3d4349 !important;
+  border-color: #373b3f !important;
+}
+
+/* JSON log / tool input area - adjust bg-dark to blend with dark theme */
+[data-theme='dark'] .session-detail-content .bg-dark {
+  background-color: var(--bg-tertiary) !important;
+  border: 1px solid var(--border-color);
+}
+
+/* Messages container scrollbar area */
+[data-theme='dark'] .session-detail-content .messages-container {
+  scrollbar-color: var(--border-color-dark) transparent;
+}
+
+/* Thinking / reasoning blocks - ensure muted text is readable */
+[data-theme='dark'] .session-detail-content details .text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Alert warning - adapt to dark theme */
+[data-theme='dark'] .session-detail-content .alert-warning {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--color-warning);
+}
