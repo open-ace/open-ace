@@ -385,7 +385,7 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
 
   return (
     <div className="session-group mb-3">
-      <div className="session-group-title text-muted small mb-1">{title}</div>
+      <div className="session-group-title small mb-1">{title}</div>
       <ul className="session-group-items list-unstyled">
         {sessions.map((session) => (
           <li key={session.id}>
@@ -421,8 +421,8 @@ const SessionGroup: React.FC<SessionGroupProps> = ({
                   return sessionIdShort;
                 })()}
               </span>
-              <span className="session-time text-muted">{session.time}</span>
-              <span className="session-requests text-muted">
+              <span className="session-time">{session.time}</span>
+              <span className="session-requests">
                 <i className="bi bi-arrow-up-circle" />
                 <span className="ms-1">
                   {session.requests} {t('request', language)}

@@ -1857,11 +1857,14 @@ export const Workspace: React.FC = () => {
         <div
           className={cn(
             'workspace-tabs d-flex align-items-center border-bottom',
-            workspaceFullscreen
-              ? 'bg-white dark:bg-slate-800 fullscreen-tabs'
-              : 'bg-light dark:bg-slate-900'
+            workspaceFullscreen && 'fullscreen-tabs'
           )}
-          style={{ minHeight: '40px' }}
+          style={{
+            minHeight: '40px',
+            backgroundColor: workspaceFullscreen
+              ? 'var(--bg-primary, #ffffff)'
+              : 'var(--bg-secondary, #f8f9fa)',
+          }}
         >
           {/* Tabs */}
           <div className="d-flex flex-grow-1" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
@@ -1880,7 +1883,7 @@ export const Workspace: React.FC = () => {
                   className={cn(
                     'workspace-tab d-flex align-items-center px-2 py-2 cursor-pointer',
                     'border-end position-relative',
-                    activeTabId === tab.id && 'active bg-white dark:bg-slate-800',
+                    activeTabId === tab.id && 'active',
                     draggedTabId === tab.id && 'dragging',
                     dragOverTabId === tab.id && 'drag-over'
                   )}
@@ -1978,7 +1981,7 @@ export const Workspace: React.FC = () => {
               title={t('newSession', language)}
               style={{
                 flexShrink: 0,
-                borderLeft: '1px solid rgba(0,0,0,0.1)',
+                borderLeft: '1px solid var(--border-color, rgba(0,0,0,0.1))',
               }}
             >
               <i className="bi bi-plus-lg" />
@@ -2012,8 +2015,8 @@ export const Workspace: React.FC = () => {
             {/* Loading overlay - only for workspace tabs */}
             {loadingTabs.has(tab.id) && tab.tabType !== 'terminal' && (
               <div
-                className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-light"
-                style={{ zIndex: 10 }}
+                className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+                style={{ zIndex: 10, backgroundColor: 'var(--bg-secondary, #f8f9fa)' }}
               >
                 <div className="text-center">
                   <div className="spinner-border text-primary mb-3" role="status">
@@ -2249,15 +2252,16 @@ export const Workspace: React.FC = () => {
       <style>{`
         .workspace-tab {
           transition: background-color 0.15s ease;
+          color: var(--text-secondary, #6c757d);
         }
         .workspace-tab:hover {
-          background-color: rgba(0, 0, 0, 0.05);
-        }
-        [data-theme='dark'] .workspace-tab:hover {
-          background-color: rgba(255, 255, 255, 0.05);
+          background-color: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+          color: var(--text-primary, #212529);
         }
         .workspace-tab.active {
-          border-bottom: 2px solid var(--primary, #0d6efd);
+          background-color: var(--bg-primary, #ffffff);
+          color: var(--text-primary, #212529);
+          border-bottom: 2px solid var(--color-primary, #0d6efd);
           margin-bottom: -1px;
         }
         .workspace-tab.active::after {
@@ -2267,13 +2271,13 @@ export const Workspace: React.FC = () => {
           left: 0;
           right: 0;
           height: 2px;
-          background: var(--primary, #0d6efd);
+          background: var(--color-primary, #0d6efd);
         }
         .workspace-tabs::-webkit-scrollbar {
           height: 4px;
         }
         .workspace-tabs::-webkit-scrollbar-thumb {
-          background: #ccc;
+          background: var(--border-color-dark, #ccc);
           border-radius: 2px;
         }
         .workspace-tabs::-webkit-scrollbar-track {
@@ -2325,7 +2329,7 @@ export const Workspace: React.FC = () => {
           transition: background-color 0.15s ease;
         }
         .workspace-new-tab-btn:hover {
-          background-color: rgba(0, 0, 0, 0.05) !important;
+          background-color: var(--bg-tertiary, rgba(0, 0, 0, 0.05)) !important;
         }
         .workspace-new-tab-btn i {
           font-size: 1rem;
@@ -2345,22 +2349,23 @@ export const Workspace: React.FC = () => {
           gap: 8px;
           padding: 8px 16px;
           border-radius: 8px;
-          background: rgba(0, 0, 0, 0.05);
+          background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+          color: var(--text-secondary, #6c757d);
           opacity: 0.5;
           transition: opacity 0.3s ease, background-color 0.3s ease;
         }
         .progress-step.active {
           opacity: 1;
-          background: rgba(13, 110, 253, 0.1);
+          background: var(--color-primary-light, rgba(13, 110, 253, 0.1));
         }
         .progress-step i {
           font-size: 1.2rem;
         }
         .progress-step.active i.bi-check-circle-fill {
-          color: #28a745;
+          color: var(--color-success, #28a745);
         }
         .progress-step.active i.bi-arrow-repeat {
-          color: #0d6efd;
+          color: var(--color-primary, #0d6efd);
         }
         .progress-step span {
           font-size: 0.85rem;

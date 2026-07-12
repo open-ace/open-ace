@@ -243,25 +243,82 @@
     border-color: var(--border-color);
   }
 
+  .prompt-search .input-group-text {
+    color: var(--text-muted);
+  }
+
+  .prompt-search .form-control {
+    color: var(--text-primary);
+  }
+
+  .prompt-search .form-control::placeholder {
+    color: var(--text-muted);
+  }
+
   .category-filter-btn {
     background: var(--bg-secondary);
     border-color: var(--border-color);
     color: var(--text-secondary);
 
     &:hover {
-      background: var(--bg-hover);
+      background: var(--bg-tertiary);
     }
 
     .category-count {
-      background: var(--bg-muted);
+      background: var(--bg-tertiary);
     }
   }
 
   .prompt-item {
     background: var(--bg-secondary);
+    border-color: transparent;
 
     &:hover {
-      background: var(--bg-hover);
+      background: var(--bg-tertiary);
+      border-color: var(--color-primary-light);
+    }
+  }
+
+  .prompt-item-name {
+    color: var(--text-primary);
+  }
+
+  .prompt-action-btn {
+    &.active {
+      color: var(--color-primary);
+
+      &:hover {
+        background: var(--color-primary-light);
+      }
+    }
+
+    &.disabled {
+      color: var(--text-muted);
+    }
+  }
+
+  /* Assist docs and clickable items */
+  .assist-item {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+  }
+
+  .assist-item-title {
+    color: var(--text-primary);
+  }
+
+  .assist-item-clickable {
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+
+    &:hover {
+      background: var(--bg-tertiary);
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+    }
+
+    &:active {
+      background: var(--color-primary-light);
     }
   }
 }
