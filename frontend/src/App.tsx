@@ -458,6 +458,8 @@ export const App: React.FC = () => {
   // Apply theme on mount and change
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // Bootstrap 5.3+ uses data-bs-theme for dark mode variables
+    document.documentElement.setAttribute('data-bs-theme', theme);
     document.body.classList.toggle('dark-theme', theme === 'dark');
   }, [theme]);
 

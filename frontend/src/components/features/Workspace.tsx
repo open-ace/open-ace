@@ -1857,9 +1857,7 @@ export const Workspace: React.FC = () => {
         <div
           className={cn(
             'workspace-tabs d-flex align-items-center border-bottom',
-            workspaceFullscreen
-              ? 'bg-white dark:bg-slate-800 fullscreen-tabs'
-              : 'bg-light dark:bg-slate-900'
+            workspaceFullscreen ? 'fullscreen-tabs' : ''
           )}
           style={{ minHeight: '40px' }}
         >
@@ -1880,7 +1878,7 @@ export const Workspace: React.FC = () => {
                   className={cn(
                     'workspace-tab d-flex align-items-center px-2 py-2 cursor-pointer',
                     'border-end position-relative',
-                    activeTabId === tab.id && 'active bg-white dark:bg-slate-800',
+                    activeTabId === tab.id && 'active',
                     draggedTabId === tab.id && 'dragging',
                     dragOverTabId === tab.id && 'drag-over'
                   )}
@@ -1978,7 +1976,7 @@ export const Workspace: React.FC = () => {
               title={t('newSession', language)}
               style={{
                 flexShrink: 0,
-                borderLeft: '1px solid rgba(0,0,0,0.1)',
+                borderLeft: '1px solid var(--border-color)',
               }}
             >
               <i className="bi bi-plus-lg" />
@@ -2247,17 +2245,29 @@ export const Workspace: React.FC = () => {
 
       {/* Styles */}
       <style>{`
+        .workspace-tabs {
+          background-color: var(--bg-secondary);
+          border-bottom-color: var(--border-color);
+        }
+        [data-theme='dark'] .workspace-tabs {
+          background-color: var(--bg-secondary);
+        }
+        .workspace-tabs.fullscreen-tabs {
+          background-color: var(--bg-primary);
+        }
+        [data-theme='dark'] .workspace-tabs.fullscreen-tabs {
+          background-color: var(--bg-primary);
+        }
         .workspace-tab {
           transition: background-color 0.15s ease;
+          background-color: transparent;
         }
         .workspace-tab:hover {
-          background-color: rgba(0, 0, 0, 0.05);
-        }
-        [data-theme='dark'] .workspace-tab:hover {
-          background-color: rgba(255, 255, 255, 0.05);
+          background-color: var(--bg-tertiary);
         }
         .workspace-tab.active {
-          border-bottom: 2px solid var(--primary, #0d6efd);
+          background-color: var(--bg-primary);
+          border-bottom: 2px solid var(--color-primary);
           margin-bottom: -1px;
         }
         .workspace-tab.active::after {
@@ -2267,13 +2277,13 @@ export const Workspace: React.FC = () => {
           left: 0;
           right: 0;
           height: 2px;
-          background: var(--primary, #0d6efd);
+          background: var(--color-primary);
         }
         .workspace-tabs::-webkit-scrollbar {
           height: 4px;
         }
         .workspace-tabs::-webkit-scrollbar-thumb {
-          background: #ccc;
+          background: var(--text-muted);
           border-radius: 2px;
         }
         .workspace-tabs::-webkit-scrollbar-track {
@@ -2318,17 +2328,24 @@ export const Workspace: React.FC = () => {
         }
         .tab-resize-handle:hover {
           opacity: 1;
-          border-right-color: var(--primary, #0d6efd);
+          border-right-color: var(--color-primary);
         }
         /* New tab button - matches tab style */
         .workspace-new-tab-btn {
           transition: background-color 0.15s ease;
         }
         .workspace-new-tab-btn:hover {
-          background-color: rgba(0, 0, 0, 0.05) !important;
+          background-color: var(--bg-tertiary) !important;
         }
         .workspace-new-tab-btn i {
           font-size: 1rem;
+        }
+        /* Loading overlay */
+        .workspace-loading-overlay {
+          background-color: var(--bg-secondary);
+        }
+        [data-theme='dark'] .workspace-loading-overlay {
+          background-color: var(--bg-secondary);
         }
         /* Loading progress steps */
         .workspace-loading {
@@ -2345,22 +2362,22 @@ export const Workspace: React.FC = () => {
           gap: 8px;
           padding: 8px 16px;
           border-radius: 8px;
-          background: rgba(0, 0, 0, 0.05);
+          background: var(--bg-tertiary);
           opacity: 0.5;
           transition: opacity 0.3s ease, background-color 0.3s ease;
         }
         .progress-step.active {
           opacity: 1;
-          background: rgba(13, 110, 253, 0.1);
+          background: var(--color-primary-light);
         }
         .progress-step i {
           font-size: 1.2rem;
         }
         .progress-step.active i.bi-check-circle-fill {
-          color: #28a745;
+          color: var(--color-success);
         }
         .progress-step.active i.bi-arrow-repeat {
-          color: #0d6efd;
+          color: var(--color-primary);
         }
         .progress-step span {
           font-size: 0.85rem;

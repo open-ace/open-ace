@@ -220,6 +220,7 @@
 
 /* Dark Theme */
 [data-theme='dark'],
+[data-bs-theme='dark'],
 .dark-theme {
   --bg-primary: #0f172a;
   --bg-secondary: #1e293b;
@@ -264,6 +265,10 @@
   --bs-modal-border-color: var(--border-color);
   --bs-modal-header-bg: var(--bg-secondary);
   --bs-modal-footer-bg: var(--bg-secondary);
+
+  /* Bootstrap text-muted override for dark theme */
+  --bs-secondary-color: #a1a1aa;
+  --bs-body-color: var(--text-primary);
 
   /* Date input calendar icon - invert for visibility */
   --date-input-calendar-icon-filter: invert(1);
@@ -2392,6 +2397,7 @@ table .latency-row:hover td {
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
+  color: var(--text-muted);
 }
 
 .session-group-items {
@@ -3407,4 +3413,217 @@ table .latency-row:hover td {
   .mode-switcher .mode-label {
     display: none;
   }
+}
+
+/* ===== Work Page Dark Theme Overrides - Issue #1619 ===== */
+
+/* Workspace Tabs - ensure consistent dark theme */
+[data-theme='dark'] .workspace-tabs {
+  background-color: var(--bg-secondary);
+  border-bottom-color: var(--border-color);
+}
+
+[data-theme='dark'] .workspace-tabs.fullscreen-tabs {
+  background-color: var(--bg-primary);
+}
+
+[data-theme='dark'] .workspace-tab {
+  background-color: transparent;
+}
+
+[data-theme='dark'] .workspace-tab:hover {
+  background-color: var(--bg-tertiary);
+}
+
+[data-theme='dark'] .workspace-tab.active {
+  background-color: var(--bg-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* Session List - ensure text visibility in dark theme */
+[data-theme='dark'] .session-list {
+  background-color: transparent;
+}
+
+[data-theme='dark'] .session-item {
+  background-color: transparent;
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .session-item:hover {
+  background-color: var(--bg-tertiary);
+}
+
+[data-theme='dark'] .session-item.selected {
+  background-color: var(--color-primary-light);
+  border-color: var(--color-primary);
+}
+
+[data-theme='dark'] .session-item .session-id,
+[data-theme='dark'] .session-item .session-title {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .session-item .session-time {
+  color: #f8fafc !important;
+  border-right-color: var(--border-color);
+}
+
+[data-theme='dark'] .session-item .session-requests,
+[data-theme='dark'] .session-item .session-messages {
+  color: #f8fafc !important;
+}
+
+[data-theme='dark'] .session-group-title {
+  color: #f8fafc !important;
+}
+
+[data-theme='dark'] .session-group-title.small {
+  color: #f8fafc !important;
+}
+
+/* System dark mode support (Issue #1619) */
+@media (prefers-color-scheme: dark) {
+  /* Override responsive.css CSS variables with better contrast */
+  :root {
+    --text-muted: #a1a1aa;
+    --text-secondary: #cbd5e1;
+    --text-primary: #f8fafc;
+  }
+
+  .session-item .session-time {
+    color: #f8fafc !important;
+    border-right-color: var(--border-color);
+  }
+
+  .session-item .session-requests,
+  .session-item .session-messages {
+    color: #f8fafc !important;
+  }
+
+  .session-group-title {
+    color: #f8fafc !important;
+  }
+
+  .session-group-title.small {
+    color: #f8fafc !important;
+  }
+
+  /* Force override Bootstrap .text-muted in dark mode */
+  .text-muted {
+    color: #a1a1aa !important;
+  }
+
+  .session-group-title.text-muted,
+  .session-group-title.small.text-muted {
+    color: #f8fafc !important;
+  }
+}
+
+[data-theme='dark'] .session-list-collapsed-item {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .session-list-collapsed-item:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--color-primary);
+}
+
+[data-theme='dark'] .session-list-collapsed-divider {
+  background-color: var(--border-color);
+}
+
+/* Session Tooltip - dark theme */
+[data-theme='dark'] .session-tooltip {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .session-tooltip-title {
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .session-tooltip-preview {
+  color: var(--text-secondary);
+}
+
+/* Work Status Bar - dark theme */
+[data-theme='dark'] .work-status-bar {
+  background-color: var(--bg-primary);
+  border-top-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .work-status-bar .status-label {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .work-status-bar .status-item {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .work-status-bar .status-progress {
+  background-color: var(--bg-tertiary);
+}
+
+/* Work Panels - ensure consistent dark theme */
+[data-theme='dark'] .work-left-panel {
+  background-color: var(--bg-primary);
+  border-right-color: var(--border-color);
+}
+
+[data-theme='dark'] .work-right-panel {
+  background-color: var(--bg-primary);
+  border-left-color: var(--border-color);
+}
+
+[data-theme='dark'] .panel-header {
+  border-bottom-color: var(--border-color);
+}
+
+[data-theme='dark'] .panel-title {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .panel-toggle {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .panel-toggle:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Work Navigation - dark theme */
+[data-theme='dark'] .work-nav-item {
+  color: var(--text-secondary);
+}
+
+[data-theme='dark'] .work-nav-item:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .work-nav-item.active {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+/* Session Search - dark theme */
+[data-theme='dark'] .session-search .input-group {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+[data-theme='dark'] .session-search .input-group-text {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .session-search .form-control {
+  background-color: transparent;
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .session-search .form-control::placeholder {
+  color: var(--text-muted);
 }
