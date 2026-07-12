@@ -259,6 +259,24 @@
   --terminal-status-bar-border: #313244;
   --terminal-status-bar-text: #a6adc8;
 
+  /* Bootstrap Dark Theme Variable Overrides (Issue #1619)
+     The app uses [data-theme='dark'] instead of Bootstrap's [data-bs-theme='dark'],
+     so Bootstrap's dark mode variables are never activated. We mirror the essential
+     dark-mode values here so that Bootstrap utility classes (.text-muted, .text-body,
+     etc.) that reference --bs-* variables render correctly on dark backgrounds. */
+  --bs-secondary-color: rgba(203, 213, 225, 0.75); /* matches --text-secondary with opacity */
+  --bs-secondary-color-rgb: 203, 213, 225;
+  --bs-tertiary-color: rgba(148, 163, 184, 0.5);
+  --bs-tertiary-color-rgb: 148, 163, 184;
+  --bs-emphasis-color: #f8fafc;
+  --bs-emphasis-color-rgb: 248, 250, 252;
+  --bs-body-color: #f8fafc;
+  --bs-body-color-rgb: 248, 250, 252;
+  --bs-body-bg: #0f172a;
+  --bs-body-bg-rgb: 15, 23, 42;
+  --bs-border-color: #334155;
+  --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
+
   /* Bootstrap Modal Dark Theme Variables */
   --bs-modal-bg: var(--bg-primary);
   --bs-modal-color: var(--text-primary);
@@ -425,7 +443,7 @@ pre code {
   text-align: center;
 }
 .text-muted {
-  color: var(--text-muted);
+  color: var(--text-muted) !important; /* Issue #1619: override Bootstrap's !important on .text-muted */
 }
 
 /* Card Component - Enhanced with modern design */

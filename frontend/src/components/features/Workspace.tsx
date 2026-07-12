@@ -1857,9 +1857,14 @@ export const Workspace: React.FC = () => {
         <div
           className={cn(
             'workspace-tabs d-flex align-items-center border-bottom',
-            workspaceFullscreen ? 'fullscreen-tabs' : ''
+            workspaceFullscreen && 'fullscreen-tabs'
           )}
-          style={{ minHeight: '40px' }}
+          style={{
+            minHeight: '40px',
+            backgroundColor: workspaceFullscreen
+              ? 'var(--bg-primary, #ffffff)'
+              : 'var(--bg-secondary, #f8f9fa)',
+          }}
         >
           {/* Tabs */}
           <div className="d-flex flex-grow-1" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
@@ -1976,7 +1981,7 @@ export const Workspace: React.FC = () => {
               title={t('newSession', language)}
               style={{
                 flexShrink: 0,
-                borderLeft: '1px solid var(--border-color)',
+                borderLeft: '1px solid var(--border-color, rgba(0,0,0,0.1))',
               }}
             >
               <i className="bi bi-plus-lg" />
@@ -2010,8 +2015,8 @@ export const Workspace: React.FC = () => {
             {/* Loading overlay - only for workspace tabs */}
             {loadingTabs.has(tab.id) && tab.tabType !== 'terminal' && (
               <div
-                className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-light"
-                style={{ zIndex: 10 }}
+                className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+                style={{ zIndex: 10, backgroundColor: 'var(--bg-secondary, #f8f9fa)' }}
               >
                 <div className="text-center">
                   <div className="spinner-border text-primary mb-3" role="status">
@@ -2245,29 +2250,18 @@ export const Workspace: React.FC = () => {
 
       {/* Styles */}
       <style>{`
-        .workspace-tabs {
-          background-color: var(--bg-secondary);
-          border-bottom-color: var(--border-color);
-        }
-        [data-theme='dark'] .workspace-tabs {
-          background-color: var(--bg-secondary);
-        }
-        .workspace-tabs.fullscreen-tabs {
-          background-color: var(--bg-primary);
-        }
-        [data-theme='dark'] .workspace-tabs.fullscreen-tabs {
-          background-color: var(--bg-primary);
-        }
         .workspace-tab {
           transition: background-color 0.15s ease;
-          background-color: transparent;
+          color: var(--text-secondary, #6c757d);
         }
         .workspace-tab:hover {
-          background-color: var(--bg-tertiary);
+          background-color: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+          color: var(--text-primary, #212529);
         }
         .workspace-tab.active {
-          background-color: var(--bg-primary);
-          border-bottom: 2px solid var(--color-primary);
+          background-color: var(--bg-primary, #ffffff);
+          color: var(--text-primary, #212529);
+          border-bottom: 2px solid var(--color-primary, #0d6efd);
           margin-bottom: -1px;
         }
         .workspace-tab.active::after {
@@ -2277,13 +2271,13 @@ export const Workspace: React.FC = () => {
           left: 0;
           right: 0;
           height: 2px;
-          background: var(--color-primary);
+          background: var(--color-primary, #0d6efd);
         }
         .workspace-tabs::-webkit-scrollbar {
           height: 4px;
         }
         .workspace-tabs::-webkit-scrollbar-thumb {
-          background: var(--text-muted);
+          background: var(--border-color-dark, #ccc);
           border-radius: 2px;
         }
         .workspace-tabs::-webkit-scrollbar-track {
@@ -2328,24 +2322,17 @@ export const Workspace: React.FC = () => {
         }
         .tab-resize-handle:hover {
           opacity: 1;
-          border-right-color: var(--color-primary);
+          border-right-color: var(--primary, #0d6efd);
         }
         /* New tab button - matches tab style */
         .workspace-new-tab-btn {
           transition: background-color 0.15s ease;
         }
         .workspace-new-tab-btn:hover {
-          background-color: var(--bg-tertiary) !important;
+          background-color: var(--bg-tertiary, rgba(0, 0, 0, 0.05)) !important;
         }
         .workspace-new-tab-btn i {
           font-size: 1rem;
-        }
-        /* Loading overlay */
-        .workspace-loading-overlay {
-          background-color: var(--bg-secondary);
-        }
-        [data-theme='dark'] .workspace-loading-overlay {
-          background-color: var(--bg-secondary);
         }
         /* Loading progress steps */
         .workspace-loading {
@@ -2362,22 +2349,23 @@ export const Workspace: React.FC = () => {
           gap: 8px;
           padding: 8px 16px;
           border-radius: 8px;
-          background: var(--bg-tertiary);
+          background: var(--bg-tertiary, rgba(0, 0, 0, 0.05));
+          color: var(--text-secondary, #6c757d);
           opacity: 0.5;
           transition: opacity 0.3s ease, background-color 0.3s ease;
         }
         .progress-step.active {
           opacity: 1;
-          background: var(--color-primary-light);
+          background: var(--color-primary-light, rgba(13, 110, 253, 0.1));
         }
         .progress-step i {
           font-size: 1.2rem;
         }
         .progress-step.active i.bi-check-circle-fill {
-          color: var(--color-success);
+          color: var(--color-success, #28a745);
         }
         .progress-step.active i.bi-arrow-repeat {
-          color: var(--color-primary);
+          color: var(--color-primary, #0d6efd);
         }
         .progress-step span {
           font-size: 0.85rem;
