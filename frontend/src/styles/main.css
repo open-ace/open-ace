@@ -264,13 +264,13 @@
      so Bootstrap's dark mode variables are never activated. We mirror the essential
      dark-mode values here so that Bootstrap utility classes (.text-muted, .text-body,
      etc.) that reference --bs-* variables render correctly on dark backgrounds. */
-  --bs-secondary-color: rgba(203, 213, 225, 0.75); /* matches --text-secondary with opacity */
-  --bs-secondary-color-rgb: 203, 213, 225;
+  --bs-secondary-color: #a1a1aa; /* muted text on dark backgrounds (matches --text-muted) */
+  --bs-secondary-color-rgb: 161, 161, 170;
   --bs-tertiary-color: rgba(148, 163, 184, 0.5);
   --bs-tertiary-color-rgb: 148, 163, 184;
   --bs-emphasis-color: #f8fafc;
   --bs-emphasis-color-rgb: 248, 250, 252;
-  --bs-body-color: #f8fafc;
+  --bs-body-color: var(--text-primary);
   --bs-body-color-rgb: 248, 250, 252;
   --bs-body-bg: #0f172a;
   --bs-body-bg-rgb: 15, 23, 42;
@@ -283,10 +283,6 @@
   --bs-modal-border-color: var(--border-color);
   --bs-modal-header-bg: var(--bg-secondary);
   --bs-modal-footer-bg: var(--bg-secondary);
-
-  /* Bootstrap text-muted override for dark theme */
-  --bs-secondary-color: #a1a1aa;
-  --bs-body-color: var(--text-primary);
 
   /* Date input calendar icon - invert for visibility */
   --date-input-calendar-icon-filter: invert(1);
