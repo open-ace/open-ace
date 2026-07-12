@@ -538,7 +538,6 @@ body.sidebar-mobile-open {
   }
 }
 
-
 /* ===== Landscape Orientation ===== */
 
 @media (orientation: landscape) and (max-height: 500px) {

@@ -3495,7 +3495,6 @@ table .latency-row:hover td {
   color: #f8fafc !important;
 }
 
-
 [data-theme='dark'] .session-list-collapsed-item {
   color: var(--text-secondary);
 }
