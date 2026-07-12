@@ -48,7 +48,7 @@
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-tertiary: #64748b;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b; /* Issue #1623: Improved from #94a3b8 (~2.8:1) to #64748b (~4.6:1) for WCAG AA on light backgrounds */
   --text-inverse: #ffffff;
 
   /* ===== Border Colors ===== */
@@ -2545,12 +2545,9 @@ table .latency-row:hover td {
 
 /* CLI-imported sessions (no cli_session_id + completed) — muted to distinguish
    from live WebUI/autonomous/remote sessions. */
-.session-item.session-imported {
-  opacity: 0.7;
-}
 .session-item.session-imported .session-id,
 .session-item.session-imported .session-title {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .session-item .session-title {
@@ -2581,7 +2578,7 @@ table .latency-row:hover td {
   white-space: nowrap;
   font-size: var(--font-size-xs);
   text-decoration: none;
-  color: var(--text-muted);
+  color: var(--text-primary);
   padding: 0 var(--spacing-sm);
   border-right: 1px solid var(--border-color);
   margin-right: var(--spacing-sm);
@@ -3496,44 +3493,6 @@ table .latency-row:hover td {
 
 [data-theme='dark'] .session-group-title.small {
   color: #f8fafc !important;
-}
-
-/* System dark mode support (Issue #1619) */
-@media (prefers-color-scheme: dark) {
-  /* Override responsive.css CSS variables with better contrast */
-  :root {
-    --text-muted: #a1a1aa;
-    --text-secondary: #cbd5e1;
-    --text-primary: #f8fafc;
-  }
-
-  .session-item .session-time {
-    color: #f8fafc !important;
-    border-right-color: var(--border-color);
-  }
-
-  .session-item .session-requests,
-  .session-item .session-messages {
-    color: #f8fafc !important;
-  }
-
-  .session-group-title {
-    color: #f8fafc !important;
-  }
-
-  .session-group-title.small {
-    color: #f8fafc !important;
-  }
-
-  /* Force override Bootstrap .text-muted in dark mode */
-  .text-muted {
-    color: #a1a1aa !important;
-  }
-
-  .session-group-title.text-muted,
-  .session-group-title.small.text-muted {
-    color: #f8fafc !important;
-  }
 }
 
 [data-theme='dark'] .session-list-collapsed-item {
