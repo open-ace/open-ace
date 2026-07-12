@@ -443,7 +443,9 @@ pre code {
   text-align: center;
 }
 .text-muted {
-  color: var(--text-muted) !important; /* Issue #1619: override Bootstrap's !important on .text-muted */
+  color: var(
+    --text-muted
+  ) !important; /* Issue #1619: override Bootstrap's !important on .text-muted */
 }
 
 /* Card Component - Enhanced with modern design */
