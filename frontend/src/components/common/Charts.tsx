@@ -21,6 +21,7 @@ import {
 import { Line, Bar, Pie, Doughnut } from 'react-chartjs-2';
 import { cn } from '@/utils';
 import { t, type Language } from '@/i18n';
+import { useTheme } from '@/store';
 
 // Register Chart.js components
 ChartJS.register(
@@ -36,15 +37,56 @@ ChartJS.register(
   Filler
 );
 
-// Default chart options
-const defaultOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: {
-      position: 'top' as const,
+// Theme-aware chart colors (Issue #1630)
+const getChartThemeColors = (theme: string) => {
+  const isDark = theme === 'dark';
+  return {
+    text: isDark ? '#cbd5e1' : '#475569', // --text-secondary equivalent
+    textMuted: isDark ? '#a1a1aa' : '#64748b', // --text-muted equivalent
+    grid: isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(15, 23, 42, 0.1)',
+    tooltipBg: isDark ? '#1e293b' : '#ffffff',
+    tooltipBorder: isDark ? '#334155' : '#e2e8f0',
+    tooltipText: isDark ? '#f8fafc' : '#0f172a',
+  };
+};
+
+// Default chart options factory (theme-aware)
+const getDefaultOptions = (theme: string) => {
+  const colors = getChartThemeColors(theme);
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+        labels: {
+          color: colors.text,
+        },
+      },
+      title: {
+        color: colors.text,
+      },
+      tooltip: {
+        backgroundColor: colors.tooltipBg,
+        titleColor: colors.tooltipText,
+        bodyColor: colors.tooltipText,
+        borderColor: colors.tooltipBorder,
+        borderWidth: 1,
+      },
     },
-  },
+    scales: {
+      x: {
+        ticks: { color: colors.textMuted },
+        grid: { color: colors.grid },
+        title: { color: colors.text },
+      },
+      y: {
+        ticks: { color: colors.textMuted },
+        grid: { color: colors.grid },
+        title: { color: colors.text },
+      },
+    },
+  };
 };
 
 // Color palette
@@ -101,6 +143,8 @@ export const LineChart: React.FC<LineChartProps> = ({
   className,
   unit = 'none',
 }) => {
+  const theme = useTheme();
+
   // Helper function to format values based on unit
   const formatValue = (value: number): number => {
     switch (unit) {
@@ -142,19 +186,23 @@ export const LineChart: React.FC<LineChartProps> = ({
   // Add 10% padding to y-axis max so the highest point doesn't go outside
   const yMax = unit !== 'none' ? Math.ceil(maxValue * 1.1) : undefined;
 
+  const themeDefaults = getDefaultOptions(theme);
   const options = {
-    ...defaultOptions,
+    ...themeDefaults,
     plugins: {
-      ...defaultOptions.plugins,
+      ...themeDefaults.plugins,
       legend: {
         display: showLegend,
         position: 'top' as const,
+        labels: { color: themeDefaults.plugins.legend.labels.color },
       },
       title: {
         display: !!title,
         text: title,
+        color: themeDefaults.plugins.title.color,
       },
       tooltip: {
+        ...themeDefaults.plugins.tooltip,
         callbacks: {
           label: (context: TooltipItem<'line'>) => {
             const label = context.dataset?.label ?? '';
@@ -169,28 +217,32 @@ export const LineChart: React.FC<LineChartProps> = ({
     },
     scales: {
       x: {
+        ...themeDefaults.scales.x,
         // Center the label when there's only one data point
         offset: hasSinglePoint,
         ticks: {
+          ...themeDefaults.scales.x.ticks,
           display: true,
         },
       },
       y: {
+        ...themeDefaults.scales.y,
         beginAtZero: true,
         max: yMax,
         ticks:
           unit !== 'none'
             ? {
+                ...themeDefaults.scales.y.ticks,
                 stepSize: 1,
-
                 callback: (value: string | number) => `${value}${unit}`,
               }
-            : undefined,
+            : themeDefaults.scales.y.ticks,
         title:
           unit !== 'none'
             ? {
                 display: true,
                 text: `Tokens (${unit})`,
+                color: themeDefaults.scales.y.title.color,
               }
             : undefined,
       },
@@ -249,6 +301,8 @@ export const BarChart: React.FC<BarChartProps> = ({
   tooltipLabels,
   language,
 }) => {
+  const theme = useTheme();
+
   // Helper function to format values based on unit
   const formatValue = (value: number): number => {
     switch (unit) {
@@ -280,20 +334,24 @@ export const BarChart: React.FC<BarChartProps> = ({
   const maxValue = Math.max(...allValues, 1);
   const yMax = unit !== 'none' ? Math.ceil(maxValue * 1.1) : undefined;
 
+  const themeDefaults = getDefaultOptions(theme);
   const options = {
-    ...defaultOptions,
+    ...themeDefaults,
     indexAxis: horizontal ? ('y' as const) : ('x' as const),
     plugins: {
-      ...defaultOptions.plugins,
+      ...themeDefaults.plugins,
       legend: {
         display: showLegend,
         position: 'top' as const,
+        labels: { color: themeDefaults.plugins.legend.labels.color },
       },
       title: {
         display: !!title,
         text: title,
+        color: themeDefaults.plugins.title.color,
       },
       tooltip: {
+        ...themeDefaults.plugins.tooltip,
         callbacks: {
           title: (context: TooltipItem<'bar'>[]) => {
             // For horizontal bar charts with usernames, show username as title
@@ -332,29 +390,33 @@ export const BarChart: React.FC<BarChartProps> = ({
       // For vertical bar charts: X is category axis, Y is value axis
       x: horizontal
         ? {
+            ...themeDefaults.scales.x,
             stacked,
             beginAtZero: true,
             max: yMax,
           }
-        : { stacked },
+        : { ...themeDefaults.scales.x, stacked },
       y: horizontal
-        ? { stacked }
+        ? { ...themeDefaults.scales.y, stacked }
         : {
+            ...themeDefaults.scales.y,
             stacked,
             beginAtZero: true,
             max: yMax,
             ticks:
               unit !== 'none'
                 ? {
+                    ...themeDefaults.scales.y.ticks,
                     stepSize: 1,
                     callback: (value: string | number) => `${value}${unit}`,
                   }
-                : undefined,
+                : themeDefaults.scales.y.ticks,
             title:
               unit !== 'none'
                 ? {
                     display: true,
                     text: `Tokens (${unit})`,
+                    color: themeDefaults.scales.y.title.color,
                   }
                 : undefined,
           },
@@ -390,6 +452,7 @@ export const PieChart: React.FC<PieChartProps> = ({
   showLegend = true,
   className,
 }) => {
+  const theme = useTheme();
   const chartData = {
     labels,
     datasets: [
@@ -402,17 +465,20 @@ export const PieChart: React.FC<PieChartProps> = ({
     ],
   };
 
+  const themeDefaults = getDefaultOptions(theme);
   const options = {
-    ...defaultOptions,
+    ...themeDefaults,
     plugins: {
-      ...defaultOptions.plugins,
+      ...themeDefaults.plugins,
       legend: {
         display: showLegend,
         position: 'right' as const,
+        labels: { color: themeDefaults.plugins.legend.labels.color },
       },
       title: {
         display: !!title,
         text: title,
+        color: themeDefaults.plugins.title.color,
       },
     },
   };
@@ -454,6 +520,8 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
   descriptions,
   showPercentage = false,
 }) => {
+  const theme = useTheme();
+
   // Calculate total for percentage
   const total = data.reduce((sum, val) => sum + val, 0);
 
@@ -469,20 +537,24 @@ export const DoughnutChart: React.FC<DoughnutChartProps> = ({
     ],
   };
 
+  const themeDefaults = getDefaultOptions(theme);
   const options = {
-    ...defaultOptions,
+    ...themeDefaults,
     cutout,
     plugins: {
-      ...defaultOptions.plugins,
+      ...themeDefaults.plugins,
       legend: {
         display: showLegend,
         position: 'right' as const,
+        labels: { color: themeDefaults.plugins.legend.labels.color },
       },
       title: {
         display: !!title,
         text: title,
+        color: themeDefaults.plugins.title.color,
       },
       tooltip: {
+        ...themeDefaults.plugins.tooltip,
         callbacks: {
           label: (context: TooltipItem<'doughnut'>) => {
             const label = context.label ?? '';
@@ -540,6 +612,8 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
   height = 300,
   className,
 }) => {
+  const theme = useTheme();
+
   // Generate complete date range if startDate and endDate are provided
   const dates = useMemo(() => {
     if (startDate && endDate) {
@@ -607,15 +681,18 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
   const maxTokens = Math.max(...data.map((d) => toMillions(d.tokens)));
   const yMax = Math.ceil(maxTokens) ?? 1;
 
+  const themeDefaults = getDefaultOptions(theme);
   const options = {
-    responsive: true,
-    maintainAspectRatio: false,
+    ...themeDefaults,
     plugins: {
+      ...themeDefaults.plugins,
       legend: {
         display: true,
         position: 'top' as const,
+        labels: { color: themeDefaults.plugins.legend.labels.color },
       },
       tooltip: {
+        ...themeDefaults.plugins.tooltip,
         callbacks: {
           label: (context: TooltipItem<'line'>) => {
             const label = context.dataset?.label ?? '';
@@ -627,20 +704,23 @@ export const TokenTrendChart: React.FC<TokenTrendChartProps> = ({
     },
     scales: {
       x: {
+        ...themeDefaults.scales.x,
         display: true,
       },
       y: {
+        ...themeDefaults.scales.y,
         display: true,
         beginAtZero: true,
         max: yMax,
         ticks: {
+          ...themeDefaults.scales.y.ticks,
           stepSize: 1,
-
           callback: (value: string | number) => `${value}M`,
         },
         title: {
           display: true,
           text: 'Tokens',
+          color: themeDefaults.scales.y.title.color,
         },
       },
     },
