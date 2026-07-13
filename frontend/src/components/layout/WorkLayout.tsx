@@ -84,7 +84,13 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
       }
     };
     loadConfig();
-  }, [setAutonomousEnabled, setModelGatewayEnabled, setRunTimelineEnabled, setPolicyEnabled, setConfigLoaded]);
+  }, [
+    setAutonomousEnabled,
+    setModelGatewayEnabled,
+    setRunTimelineEnabled,
+    setPolicyEnabled,
+    setConfigLoaded,
+  ]);
 
   // Filter nav items based on feature flags
   const visibleNavItems = autonomousEnabled

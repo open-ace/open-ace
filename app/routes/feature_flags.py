@@ -12,6 +12,7 @@ import logging
 
 from flask import Blueprint, jsonify
 
+from app.auth.decorators import auth_required
 from app.utils.config import (
     is_autonomous_enabled,
     is_model_gateway_enabled,
@@ -25,6 +26,7 @@ feature_flags_bp = Blueprint("feature_flags", __name__)
 
 
 @feature_flags_bp.route("/api/feature-flags", methods=["GET"])
+@auth_required
 def get_feature_flags():
     """Get current state of all feature flags.
 

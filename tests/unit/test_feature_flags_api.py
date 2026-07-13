@@ -6,6 +6,21 @@ from unittest.mock import patch
 import pytest
 from flask import Flask
 
+MOCK_SESSION = {
+    "user_id": 42,
+    "username": "testuser",
+    "email": "test@example.com",
+    "role": "user",
+}
+
+
+def _mock_auth():
+    """Return a patcher that mocks _authenticate for auth_required."""
+    return patch(
+        "app.auth.decorators._authenticate",
+        return_value=(True, MOCK_SESSION),
+    )
+
 
 @pytest.fixture
 def ff_app():
@@ -34,7 +49,11 @@ class TestFeatureFlagsAPI:
         mock_policy.return_value = False
         mock_autonomous.return_value = False
 
-        resp = ff_app.test_client().get("/api/feature-flags")
+        with _mock_auth():
+            resp = ff_app.test_client().get(
+                "/api/feature-flags",
+                headers={"Authorization": "Bearer test-token"},
+            )
         assert resp.status_code == 200
         data = resp.get_json()
 
@@ -61,7 +80,11 @@ class TestFeatureFlagsAPI:
         mock_policy.return_value = True
         mock_autonomous.return_value = True
 
-        resp = ff_app.test_client().get("/api/feature-flags")
+        with _mock_auth():
+            resp = ff_app.test_client().get(
+                "/api/feature-flags",
+                headers={"Authorization": "Bearer test-token"},
+            )
         assert resp.status_code == 200
         data = resp.get_json()
 
@@ -83,7 +106,11 @@ class TestFeatureFlagsAPI:
         mock_policy.return_value = False
         mock_autonomous.return_value = False
 
-        resp = ff_app.test_client().get("/api/feature-flags")
+        with _mock_auth():
+            resp = ff_app.test_client().get(
+                "/api/feature-flags",
+                headers={"Authorization": "Bearer test-token"},
+            )
         assert resp.status_code == 500
         data = resp.get_json()
         assert "error" in data
