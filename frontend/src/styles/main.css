@@ -3769,7 +3769,10 @@ table .latency-row:hover td {
   --bs-btn-hover-border-color: var(--color-success-hover);
 }
 
-[data-theme='dark'] .session-detail-content .btn-secondary {
+/* Dark mode: global btn-secondary override (Issue #1634)
+   Previously scoped to .session-detail-content only, leaving portal-rendered
+   modals (NewSessionModal, ConfirmModal, etc.) with white-on-white text. */
+[data-theme='dark'] .btn-secondary {
   --bs-btn-color: #fff;
   --bs-btn-bg: #495057;
   --bs-btn-border-color: #495057;
@@ -3781,7 +3784,7 @@ table .latency-row:hover td {
   border-color: #495057 !important;
 }
 
-[data-theme='dark'] .session-detail-content .btn-secondary:hover {
+[data-theme='dark'] .btn-secondary:hover {
   color: #fff !important;
   background-color: #3d4349 !important;
   border-color: #373b3f !important;
