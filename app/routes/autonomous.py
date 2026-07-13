@@ -10,11 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import pwd
 import queue
 import re
 import signal
-import subprocess
 import threading
 import time
 import uuid
@@ -28,12 +26,7 @@ from app.auth.decorators import (
     check_machine_admin_permission,
     validate_session_token,
 )
-from app.repositories.autonomous_repo import (
-    ALLOWED_CONTENT_LANGUAGES,
-    DEFAULT_CONTENT_LANGUAGE,
-    AutonomousWorkflowRepository,
-)
-from app.repositories.user_repo import UserRepository
+from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
 logger = logging.getLogger(__name__)
 
@@ -42,31 +35,6 @@ MAX_RETRY_COUNT = 5
 
 # Lazy repo — avoids creating DB connection at import time
 auto_repo: AutonomousWorkflowRepository | None = None
-user_repo = UserRepository()
-
-
-def _get_effective_system_account(system_account: str | None) -> str | None:
-    """Check if current user is already the target user.
-
-    When NoNewPrivileges=true is set in systemd, sudo is blocked.
-    If the process is already running as the target user, we can skip sudo.
-
-    Returns None if current user matches target user, otherwise returns system_account.
-    """
-    if not system_account:
-        return None
-
-    current_user = pwd.getpwuid(os.getuid()).pw_name
-    if current_user == system_account:
-        return None
-
-    return system_account
-
-
-def _run_as_user(system_account: str, command: list) -> subprocess.CompletedProcess:
-    """Run a command as a specific user using sudo."""
-    sudo_cmd = ["sudo", "-u", system_account] + command
-    return subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=10)
 
 
 def _get_repo() -> AutonomousWorkflowRepository:
@@ -151,100 +119,21 @@ def _resolve_milestone_session_id(milestone: dict[str, Any]) -> str:
     return milestone.get("review_session_id") or milestone.get("session_id") or ""
 
 
-def _extract_cli_session_id(session_row: Any) -> str:
-    """Return the mapped real CLI session id for a workflow-owned session row."""
-    if not session_row:
-        return ""
-
-    cli_session_id = getattr(session_row, "cli_session_id", "")
-    if not cli_session_id and isinstance(session_row, dict):
-        cli_session_id = session_row.get("cli_session_id", "")
-    if cli_session_id:
-        return str(cli_session_id).strip()
-
-    context = getattr(session_row, "context", None)
-    if context is None and isinstance(session_row, dict):
-        context = session_row.get("context", {})
-    if isinstance(context, dict):
-        return str(context.get("cli_session_id", "") or "").strip()
-    return ""
-
-
-def _resolve_actual_session_id(
-    session_id: str, session_manager: Any | None, cache: dict[str, str] | None = None
-) -> str:
-    """Resolve a workflow-owned tracking session id to the real CLI session id."""
-    if not session_id:
-        return ""
-    if cache is not None and session_id in cache:
-        return cache[session_id]
-    if session_manager is None:
-        if cache is not None:
-            cache[session_id] = session_id
-        return session_id
-
-    actual_session_id = session_id
-    try:
-        session_row = session_manager.get_session(session_id)
-        cli_session_id = _extract_cli_session_id(session_row)
-        if cli_session_id:
-            actual_session_id = cli_session_id
-    except Exception:
-        logger.warning("Failed to resolve actual milestone session id", exc_info=True)
-
-    if cache is not None:
-        cache[session_id] = actual_session_id
-    return actual_session_id
-
-
-def _enforce_quota_gate(user_id: int) -> Response | None:
-    """Fail-closed quota pre-check for workflow creation paths.
-
-    Autonomous dev consumes tokens that bypass the LLM proxy (local agents
-    connect to the model API directly), so the proxy's 429 can't bound them —
-    enforce here instead. Returns a 429 ``Response`` to short-circuit the
-    caller when the user is over quota *or* the quota check itself errors
-    (fail-closed); returns ``None`` to proceed. Shared by ``create_workflow``
-    and ``fork_milestone`` so the fork path can't bypass the gate.
-    """
-    try:
-        from app.modules.governance.quota_manager import QuotaManager
-
-        quota_result = QuotaManager().check_quota(user_id)
-        if not quota_result["allowed"]:
-            return jsonify({"error": quota_result["reason"] or "Quota exceeded"}), 429
-    except Exception as exc:
-        logger.error("Quota check failed, denying workflow creation for safety: %s", exc)
-        return jsonify({"error": "Quota check unavailable - request denied for safety"}), 429
-    return None
-
-
 def _enrich_milestones_with_usage(
     workflow_id: str, milestones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Attach per-milestone LLM usage/session metadata for the timeline UI."""
     repo = _get_repo()
     usage_by_milestone = repo.get_milestone_usage_summary(workflow_id, milestones)
-    session_manager = None
-    session_cache: dict[str, str] = {}
-    try:
-        from app.modules.workspace.session_manager import SessionManager
-
-        session_manager = SessionManager()
-    except Exception:
-        logger.warning("Failed to initialize SessionManager for milestone enrichment")
     enriched: list[dict[str, Any]] = []
     for milestone in milestones:
         milestone_id = milestone.get("milestone_id", "")
         usage = usage_by_milestone.get(milestone_id, {})
-        llm_session_id = usage.get("llm_session_id") or _resolve_milestone_session_id(milestone)
         enriched.append(
             {
                 **milestone,
-                "llm_session_id": llm_session_id,
-                "actual_llm_session_id": _resolve_actual_session_id(
-                    llm_session_id, session_manager, session_cache
-                ),
+                "llm_session_id": usage.get("llm_session_id")
+                or _resolve_milestone_session_id(milestone),
                 "llm_total_tokens": usage.get("llm_total_tokens", 0),
                 "llm_request_count": usage.get("llm_request_count", 0),
             }
@@ -285,15 +174,8 @@ def _enrich_milestones_with_diff_stats(
         return milestones
 
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import UserRepository
 
-    # Get system_account for sudo execution (Issue #1530)
-    system_account = workflow.get("system_account")
-    if not system_account:
-        user = UserRepository().get_user_by_id(workflow.get("user_id"))
-        system_account = user.get("system_account") if user else None
-
-    gh = GitHubOps(project_path, system_account=system_account)
+    gh = GitHubOps(project_path)
     by_id: dict[str, dict[str, Any]] = {}
     for milestone in targets:
         milestone_id = milestone.get("milestone_id", "")
@@ -461,7 +343,6 @@ def _build_definition_snapshot(
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": data.get("require_full_review_rounds", False),
         "auto_merge": data.get("auto_merge", True),
         "batch_id": batch_id,
         "batch_order": batch_order,
@@ -494,13 +375,6 @@ def _workflow_response(workflow: dict | None) -> dict | None:
     normalized["definition_snapshot"] = _parse_definition_snapshot(
         normalized.get("definition_snapshot")
     )
-    if normalized.get("require_full_review_rounds") is None:
-        normalized["require_full_review_rounds"] = False
-    # content_language fallback for legacy workflows created before the column
-    # existed (NULL/empty → default). Persisted AI content is unaffected; this
-    # only provides a sensible default for downstream consumers.
-    if normalized.get("content_language") not in ALLOWED_CONTENT_LANGUAGES:
-        normalized["content_language"] = DEFAULT_CONTENT_LANGUAGE
     return normalized
 
 
@@ -532,11 +406,6 @@ def create_workflow():
     if not _workflow_rate_limiter.is_allowed(user_id):
         return jsonify({"error": "Rate limit exceeded: max 10 workflows per hour"}), 429
 
-    # Quota gate (fail-closed): over-quota users may not create workflows.
-    quota_rejection = _enforce_quota_gate(user_id)
-    if quota_rejection is not None:
-        return quota_rejection
-
     # Validate remote machine admin permission
     workspace_type = data.get("workspace_type", "local")
     remote_machine_id = data.get("remote_machine_id", "")
@@ -547,53 +416,6 @@ def create_workflow():
                     jsonify({"error": "Machine admin permission required for remote workflows"}),
                     403,
                 )
-
-    # Validate local workspace permission
-    # Admin users bypass permission validation (they have full system access)
-    if workspace_type == "local" and g.user_role != "admin":
-        user = user_repo.get_user_by_id(user_id)
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-        system_account = user.get("system_account")
-        if not system_account:
-            return jsonify({"error": "User does not have a system account configured"}), 400
-
-        project_path = data.get("project_path", "")
-        if project_path:
-            effective_system_account = _get_effective_system_account(system_account)
-            if effective_system_account:
-                # Check if user can access the project path
-                result = _run_as_user(effective_system_account, ["test", "-e", project_path])
-                if result.returncode != 0:
-                    return jsonify({"error": f"Cannot access project path: {project_path}"}), 403
-                # Check if user has read permission
-                result = _run_as_user(effective_system_account, ["test", "-r", project_path])
-                if result.returncode != 0:
-                    return (
-                        jsonify({"error": f"No read permission for project path: {project_path}"}),
-                        403,
-                    )
-                # Check if user has write permission (required for autonomous development)
-                result = _run_as_user(effective_system_account, ["test", "-w", project_path])
-                if result.returncode != 0:
-                    return (
-                        jsonify({"error": f"No write permission for project path: {project_path}"}),
-                        403,
-                    )
-            else:
-                # Already running as target user, check directly
-                if not os.path.exists(project_path):
-                    return jsonify({"error": f"Cannot access project path: {project_path}"}), 403
-                if not os.access(project_path, os.R_OK):
-                    return (
-                        jsonify({"error": f"No read permission for project path: {project_path}"}),
-                        403,
-                    )
-                if not os.access(project_path, os.W_OK):
-                    return (
-                        jsonify({"error": f"No write permission for project path: {project_path}"}),
-                        403,
-                    )
 
     # Validate required fields
     if not requirements_text and not requirements_issue_input and not requirements_issue_url:
@@ -621,46 +443,25 @@ def create_workflow():
         if ".." in project_path.split(os.sep):
             return jsonify({"error": "project_path must not contain path traversal"}), 400
 
-    # Get user's system_account for workflow persistence (Issue #1530)
-    user = user_repo.get_user_by_id(user_id)
-    user_system_account = user.get("system_account", "") if user else ""
-
-    # Pre-generate branch_name and worktree_path for batch workflows (Issue #1573)
-    # This ensures scheduler can perform conflict checks even before preparation phase.
-    project_path = data.get("project_path", "")
-    branch_strategy = data.get("branch_strategy", "new-branch")
-    user_branch_name = data.get("branch_name", "")  # User's original input (if any)
-
     base_workflow_data = {
         "user_id": user_id,
         "title": data.get("title", ""),
         "requirements_text": requirements_text,
         "requirements_issue_url": requirements_issue_url,
-        "project_path": project_path,
+        "project_path": data.get("project_path", ""),
         "project_repo_url": data.get("project_repo_url", ""),
         "is_new_project": data.get("is_new_project", False),
         "is_private": data.get("is_private", True),
         "cli_tool": data.get("cli_tool", ""),
         "model": data.get("model", ""),
         "permission_mode": data.get("permission_mode", "auto-edit"),
-        "branch_strategy": branch_strategy,
+        "branch_name": data.get("branch_name", ""),
+        "branch_strategy": data.get("branch_strategy", "new-branch"),
         "workspace_type": data.get("workspace_type", "local"),
         "remote_machine_id": data.get("remote_machine_id", ""),
         "max_plan_rounds": data.get("max_plan_rounds", 3),
         "max_pr_review_rounds": data.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": data.get("require_full_review_rounds", False),
         "auto_merge": data.get("auto_merge", True),  # Auto merge PR for batch workflows
-        # Persist the workflow's content language at creation time. This is the
-        # source of truth for AI-authored content (plan/review/tldr) and does
-        # not change per viewer. Validate against the supported set; fall back
-        # to the default for anything missing/unknown.
-        "content_language": (
-            data.get("content_language")
-            if data.get("content_language") in ALLOWED_CONTENT_LANGUAGES
-            else DEFAULT_CONTENT_LANGUAGE
-        ),
-        # Persist system_account for sudo execution (Issue #1530)
-        "system_account": user_system_account,
     }
 
     try:
@@ -676,42 +477,8 @@ def create_workflow():
             batch_id = str(uuid.uuid4()) if is_multi_issue else None
             created_workflows = []
 
-            # Lock base commit SHA for batch workflows to prevent race condition (Issue #1552)
-            base_commit_sha = None
-            if is_multi_issue:
-                project_path = data.get("project_path", "")
-                system_account = user_system_account
-                if project_path:
-                    from app.modules.workspace.autonomous.github_ops import GitHubOps
-
-                    try:
-                        gh = GitHubOps(project_path, system_account=system_account)
-                        base_commit_sha = gh._run_git(["rev-parse", "origin/main"]).stdout.strip()
-                        if base_commit_sha:
-                            logger.info(
-                                "Locked base_commit_sha %s for batch %s",
-                                base_commit_sha[:8],
-                                batch_id[:8] if batch_id else "unknown",
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to lock base_commit_sha for batch %s: %s. Will use dynamic origin/main.",
-                            batch_id[:8] if batch_id else "unknown",
-                            e,
-                        )
-
             for index, selector in enumerate(issue_selectors, start=1):
                 workflow_data = dict(base_workflow_data)
-
-                # Pre-generate workflow_id, branch_name and worktree_path (Issue #1573)
-                # This ensures scheduler can perform conflict checks before preparation phase.
-                workflow_id = str(uuid.uuid4())
-                branch_name = f"auto-dev/{workflow_id[:8]}"
-                # Use .worktrees directory for worktree strategy, with full workflow_id for uniqueness
-                worktree_path = (
-                    os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
-                )
-
                 definition_snapshot = _build_definition_snapshot(
                     data,
                     requirements_text,
@@ -727,7 +494,6 @@ def create_workflow():
                 )
                 workflow_data.update(
                     {
-                        "workflow_id": workflow_id,  # Pre-generated for branch_name/worktree_path
                         "title": _format_issue_title(
                             base_workflow_data.get("title", ""),
                             selector["issue_number"],
@@ -739,17 +505,8 @@ def create_workflow():
                         "batch_id": batch_id,
                         "batch_order": index if is_multi_issue else None,
                         "batch_total": len(issue_selectors) if is_multi_issue else None,
-                        "base_commit_sha": base_commit_sha,  # Locked SHA for batch (Issue #1552)
                         "status": "pending" if index == 1 else "queued",
                         "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
-                        # Pre-generated values for scheduler conflict checks (Issue #1573)
-                        # Only set branch_name/worktree_path for worktree strategy (Issue #1627)
-                        "branch_name": (
-                            branch_name
-                            if branch_strategy == "worktree"
-                            else (user_branch_name or f"fix/issue-{selector['issue_number']}")
-                        ),
-                        "worktree_path": worktree_path if branch_strategy == "worktree" else "",
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)
@@ -782,36 +539,6 @@ def create_workflow():
                 requirements_issue_url,
             )
         )
-
-        # Pre-generate workflow_id, branch_name and worktree_path for worktree strategy (Issue #1573)
-        # For worktree strategy, always use pre-generated values to ensure scheduler conflict checks work.
-        # For new-branch/same-branch strategy, preserve user's original branch_name input.
-        workflow_id = str(uuid.uuid4())
-        base_workflow_data["workflow_id"] = workflow_id
-
-        if branch_strategy == "worktree":
-            # Force pre-generated branch_name for worktree strategy
-            branch_name = f"auto-dev/{workflow_id[:8]}"
-            worktree_path = (
-                os.path.join(project_path, ".worktrees", workflow_id) if project_path else ""
-            )
-            base_workflow_data["branch_name"] = branch_name
-            base_workflow_data["worktree_path"] = worktree_path
-            base_workflow_data["original_branch_name"] = user_branch_name  # Preserve user's input
-            logger.info(
-                "Pre-generated branch_name=%s, worktree_path=%s for workflow %s",
-                branch_name,
-                worktree_path,
-                workflow_id[:8],
-            )
-        else:
-            # For new-branch/same-branch, use user's input if provided, otherwise pre-generate
-            if user_branch_name:
-                base_workflow_data["branch_name"] = user_branch_name
-            else:
-                branch_name = f"auto-dev/{workflow_id[:8]}"
-                base_workflow_data["branch_name"] = branch_name
-
         workflow = repo.create_workflow(base_workflow_data)
         if not workflow:
             return jsonify({"error": "Failed to create workflow"}), 500
@@ -1231,16 +958,6 @@ def fork_milestone(workflow_id, milestone_id):
     if milestone.get("status") == "cancelled":
         return jsonify({"error": "Cannot fork from a cancelled milestone"}), 400
 
-    # Quota gate (fail-closed): forking creates a runnable workflow, so the
-    # owner must pass the same check as create_workflow. Forks call
-    # create_workflow() on the repo directly, bypassing the route handler,
-    # so the gate must be applied here explicitly.
-    owner_id = workflow.get("user_id")
-    if owner_id is not None:
-        quota_rejection = _enforce_quota_gate(int(owner_id))
-        if quota_rejection is not None:
-            return quota_rejection
-
     data = request.get_json(silent=True) or {}
     user_feedback = data.get("user_feedback", "").strip()
     if len(user_feedback) > 5000:
@@ -1265,23 +982,17 @@ def fork_milestone(workflow_id, milestone_id):
         "model": workflow.get("model", ""),
         "permission_mode": workflow.get("permission_mode", "auto-edit"),
         "branch_name": fork_branch,
-        # Preserve parent's branch_strategy for fork workflow (Issue #1627)
-        "branch_strategy": workflow.get("branch_strategy", "new-branch"),
+        "branch_strategy": "worktree",  # Force worktree for parallel execution
         "workspace_type": workflow.get("workspace_type", "local"),
         "remote_machine_id": workflow.get("remote_machine_id", ""),
         "max_plan_rounds": workflow.get("max_plan_rounds", 3),
         "max_pr_review_rounds": workflow.get("max_pr_review_rounds", 5),
-        "require_full_review_rounds": workflow.get("require_full_review_rounds", False),
         "github_issue_number": workflow.get("github_issue_number"),
         # Fork-specific fields
         "parent_workflow_id": workflow_id,
         "fork_milestone_id": milestone_id,
         "user_feedback": user_feedback,
-        # Inherit the parent's content language so forked AI content stays
-        # consistent with the original workflow.
-        "content_language": workflow.get("content_language", "en"),
-        # Inherit the parent's system_account for sudo execution (Issue #1530)
-        "system_account": workflow.get("system_account", ""),
+        "original_branch_name": workflow.get("branch_name", ""),
         # Start at the next phase (preparation handles worktree + phase jump)
         "status": "pending",
         "current_phase": "preparation",
@@ -1320,12 +1031,6 @@ def fork_milestone(workflow_id, milestone_id):
 
     # Optionally pause the original workflow
     if pause_original:
-        # Suspend the running agent subprocess (SIGSTOP) BEFORE flipping the
-        # DB status. Without this the orchestrator thread currently inside
-        # _run_agent() keeps running — advance() only checks status at entry,
-        # not mid-phase — so the "paused" workflow would continue dev→test→PR
-        # to completion despite being forked. Mirrors pause_workflow()'s order.
-        _pause_running_task(workflow_id)
         _get_repo().update_workflow(
             workflow_id,
             {
@@ -1431,25 +1136,16 @@ def get_milestone_session(workflow_id, milestone_id):
     from app.modules.workspace.session_manager import SessionManager
 
     sm = SessionManager()
-    actual_session_id = _resolve_actual_session_id(session_id, sm)
+    session_data = sm.get_session(session_id, include_messages=True)
 
-    if actual_session_id and actual_session_id != session_id:
-        # The resolved actual session is the real Claude transcript, shared
-        # across multiple milestones (e.g. plan_created + plan_refined resume
-        # the same CLI session). Its messages are not tagged per-milestone
-        # (milestone_id is typically NULL), so filtering by message_milestone_id
-        # would drop them all and leave the viewer showing only "Status".
-        # Return the full transcript for the actual session.
-        session_data = sm.get_session(
-            actual_session_id,
-            include_messages=True,
-        )
-        if session_data:
-            return jsonify({"success": True, "session": session_data})
-
-    session_data = sm.get_session(
-        session_id, include_messages=True, message_milestone_id=milestone_id
-    )
+    # Multiple milestones may share a session (main/review/test lines via
+    # --resume); surface only this milestone's own messages.
+    if session_data and getattr(session_data, "messages", None):
+        session_data.messages = [
+            m
+            for m in session_data.messages
+            if (getattr(m, "milestone_id", "") or "") == milestone_id
+        ]
 
     return jsonify({"success": True, "session": session_data})
 
@@ -1491,17 +1187,9 @@ def get_milestone_diff(workflow_id, milestone_id):
 
     # Get diff for each commit
     from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import UserRepository
 
     project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
-
-    # Get system_account for sudo execution (Issue #1530)
-    system_account = workflow.get("system_account")
-    if not system_account:
-        user = UserRepository().get_user_by_id(workflow.get("user_id"))
-        system_account = user.get("system_account") if user else None
-
-    gh = GitHubOps(project_path, system_account=system_account)
+    gh = GitHubOps(project_path)
     diff_parts = []
     for sha in shas:
         try:
@@ -1512,46 +1200,6 @@ def get_milestone_diff(workflow_id, milestone_id):
             logger.warning("Failed to get diff for %s: %s", sha[:8], e)
 
     return jsonify({"success": True, "diff": "\n\n".join(diff_parts)})
-
-
-@autonomous_bp.route("/workflows/<workflow_id>/pr-diff", methods=["GET"])
-@auth_required
-def get_workflow_pr_diff(workflow_id):
-    """Get the cumulative PR diff (head vs base) for a workflow.
-
-    Returns ``{success, diff, pr_number}``. When the workflow has no PR yet,
-    returns ``pr_number=null, diff=""`` (200) so the caller can render an empty
-    state instead of erroring. gh failures degrade to an empty diff + warning.
-    """
-    workflow = _get_repo().get_workflow(workflow_id)
-    if not workflow:
-        return jsonify({"error": "Workflow not found"}), 404
-    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
-        return jsonify({"error": "Access denied"}), 403
-
-    pr_number = workflow.get("github_pr_number")
-    if not pr_number:
-        return jsonify({"success": True, "diff": "", "pr_number": None})
-
-    from app.modules.workspace.autonomous.github_ops import GitHubOps
-    from app.repositories.user_repo import UserRepository
-
-    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
-
-    # Get system_account for sudo execution (Issue #1530)
-    system_account = workflow.get("system_account")
-    if not system_account:
-        user = UserRepository().get_user_by_id(workflow.get("user_id"))
-        system_account = user.get("system_account") if user else None
-
-    gh = GitHubOps(project_path, system_account=system_account)
-    try:
-        diff = gh.get_pr_diff(int(pr_number))
-    except Exception as e:
-        logger.warning("Failed to get PR diff for #%s: %s", pr_number, e)
-        diff = ""
-
-    return jsonify({"success": True, "diff": diff, "pr_number": int(pr_number)})
 
 
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
@@ -1617,7 +1265,6 @@ def get_available_tools():
         {"id": "qwen-code-cli", "name": "Qwen Code", "executable": "qwen"},
         {"id": "codex", "name": "Codex CLI", "executable": "codex"},
         {"id": "openclaw", "name": "OpenClaw", "executable": "openclaw"},
-        {"id": "zcode", "name": "ZCode", "executable": "zcode"},
     ]
     return jsonify({"success": True, "tools": tools})
 
@@ -1628,59 +1275,18 @@ def get_available_models():
     """Get available models for a given tool and workspace type."""
     tool = request.args.get("tool", "")
     workspace_type = request.args.get("workspace_type", "local")
-    machine_id = request.args.get("machine_id", "")
-
-    # Resolve tenant. Local is single-tenant (default 1); remote derives it from
-    # the machine. ``g.tenant_id`` is never set in the app, so the previous
-    # ``getattr`` here always returned None and short-circuited to []. The
-    # remote lookup is outside the try below on purpose: an infrastructure
-    # failure here should surface (mirrors workspace.py:241-251), not be masked
-    # as a "success, no models" response or silently fall back to tenant 1
-    # (which could surface another tenant's local-scope keys).
-    tenant_id = 1
-    if workspace_type == "remote" and machine_id:
-        from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-
-        agent_mgr = get_remote_agent_manager()
-        # Guard the machine before reading it — a caller must not read an
-        # arbitrary machine's tenant/model list. Mirrors workspace.py:244.
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
-            return (
-                jsonify({"success": False, "error": "Machine not found or access denied"}),
-                404,
-            )
-        machine = agent_mgr.get_machine(machine_id) or {}
-        tenant_id = machine.get("tenant_id", 1)
+    request.args.get("machine_id", "")
 
     try:
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
         api_proxy = APIKeyProxyService()
-        # ``scope`` is a query value: 'local'/'remote' match keys tagged with
-        # that scope *or* 'shared'; 'shared' itself would match only shared keys
-        # and silently miss every remote key. See _list_tool_key_rows
-        # (api_key_proxy.py:770-776) and migration 048.
-        scope = "remote" if workspace_type == "remote" else "local"
-        # Provider-agnostic: keys are matched by cli_tools membership and models
-        # are extracted from wherever the tool stores them (modelProviders for
-        # qwen/codex, env for claude, top-level `model` for zcode). The openai-only
-        # get_tool_model_pool is reserved for functional HA routing.
-        pool = api_proxy.get_tool_models(tenant_id=tenant_id, tool_name=tool, scope=scope)
-        # The frontend model dropdown renders ``model.name``; entries are keyed by
-        # ``id``. Normalize so a display name is always present (fall back to id),
-        # and surface ``empty_reason`` for future UX.
-        models = [
-            {"name": m.get("name") or m.get("id") or str(m), **m}
-            for m in pool.get("models", [])
-            if isinstance(m, dict)
-        ]
-        return jsonify(
-            {
-                "success": True,
-                "models": models,
-                "empty_reason": pool.get("empty_reason"),
-            }
-        )
+        tenant_id = getattr(g, "tenant_id", None)
+        scope = "shared" if workspace_type == "remote" else "local"
+        if tenant_id is None:
+            return jsonify({"success": True, "models": []})
+        models = api_proxy.get_tool_model_pool(tenant_id, tool, scope)
+        return jsonify({"success": True, "models": models})
     except Exception as e:
         logger.error("Failed to get models: %s", e)
         return jsonify({"success": True, "models": []})
@@ -1720,9 +1326,7 @@ def _pid_matches_expected(pid: int) -> bool:
         if result.returncode != 0:
             return False  # process doesn't exist
         comm = result.stdout.strip().lower()
-        return any(
-            name in comm for name in ("claude", "qwen", "codex", "openclaw", "zcode", "node")
-        )
+        return any(name in comm for name in ("claude", "qwen", "codex", "openclaw", "node"))
     except Exception:
         # If we can't check, assume it matches (conservative: try to stop it)
         return True
@@ -1797,49 +1401,6 @@ def _resume_pid(pid: int) -> bool:
         return True
 
 
-def _mark_sessions_paused(workflow_id: str, pids: set[int]) -> None:
-    """Flag the in-memory sessions owning ``pids`` as paused.
-
-    The pause fallback paths (``_pause_running_task`` Strategy 2/3) deliver
-    SIGSTOP directly to a PID without going through the runner's
-    ``pause_session``, so the session's ``_paused`` Event stays clear and
-    ``_wait_for_completion`` keeps draining the timeout budget — eventually
-    reaping the frozen process and making a paused workflow appear to
-    auto-resume. This syncs the flag for every PID we actually suspended so
-    the budget freezes correctly regardless of the delivery path.
-    """
-    if not pids:
-        return
-    try:
-        from app.services.autonomous_scheduler import AutonomousScheduler
-
-        orchestrator = AutonomousScheduler.instance().get_running_orchestrator(workflow_id)
-        if orchestrator:
-            for pid in pids:
-                orchestrator._runner.mark_session_paused_by_pid(pid)
-    except Exception as e:
-        logger.warning("Failed to mark sessions paused for %s: %s", workflow_id[:8], e)
-
-
-def _mark_sessions_resumed(workflow_id: str, pids: set[int]) -> None:
-    """Clear the paused flag on the in-memory sessions owning ``pids``.
-
-    Mirror of :func:`_mark_sessions_paused` for the resume fallback paths,
-    so ``_wait_for_completion`` unfreezes the deadline.
-    """
-    if not pids:
-        return
-    try:
-        from app.services.autonomous_scheduler import AutonomousScheduler
-
-        orchestrator = AutonomousScheduler.instance().get_running_orchestrator(workflow_id)
-        if orchestrator:
-            for pid in pids:
-                orchestrator._runner.mark_session_resumed_by_pid(pid)
-    except Exception as e:
-        logger.warning("Failed to mark sessions resumed for %s: %s", workflow_id[:8], e)
-
-
 def _pause_running_task(workflow_id: str):
     """Pause the running agent task using multiple strategies.
 
@@ -1893,13 +1454,6 @@ def _pause_running_task(workflow_id: str):
     except Exception as e:
         logger.warning("Pause strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
 
-    # The fallback strategies above sent SIGSTOP directly, bypassing
-    # pause_session(), so the matching in-memory sessions never had their
-    # _paused Event set. Without it, _wait_for_completion keeps counting the
-    # timeout budget and reaps the frozen process once it elapses — the
-    # workflow then "auto-resumes". Sync the flag for every PID we suspended.
-    _mark_sessions_paused(workflow_id, affected_pids)
-
     # Strategy 3: scan runner sessions (last resort)
     try:
         from app.services.autonomous_scheduler import AutonomousScheduler
@@ -1920,15 +1474,6 @@ def _pause_running_task(workflow_id: str):
                                 pass
     except Exception as e:
         logger.warning("Pause strategy 3 (session scan) failed for %s: %s", workflow_id[:8], e)
-
-    # The fallback strategies above sent SIGSTOP directly, bypassing
-    # pause_session(), so the matching in-memory sessions never had their
-    # _paused Event set. Without it, _wait_for_completion keeps counting the
-    # timeout budget and reaps the frozen process once it elapses — the
-    # workflow then "auto-resumes". Sync the flag for every PID we suspended
-    # across all strategies (including the session-scan last resort), so the
-    # budget freezes correctly regardless of which path delivered the signal.
-    _mark_sessions_paused(workflow_id, affected_pids)
 
 
 def _stop_running_task(workflow_id: str):
@@ -2058,9 +1603,3 @@ def _resume_running_task(workflow_id: str):
                 resumed_pids.add(pid)
     except Exception as e:
         logger.warning("Resume strategy 2 (DB PID) failed for %s: %s", workflow_id[:8], e)
-
-    # The fallback strategies above sent SIGCONT directly, bypassing
-    # resume_session(), so the matching in-memory sessions still have their
-    # _paused Event set. Without clearing it, _wait_for_completion keeps the
-    # deadline frozen and the task never times out. Sync the flag.
-    _mark_sessions_resumed(workflow_id, resumed_pids)

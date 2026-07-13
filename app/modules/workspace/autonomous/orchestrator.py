@@ -9,7 +9,6 @@ pr_review -> report -> wait -> (loop or merge).
 
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -17,25 +16,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.modules.workspace.autonomous.agent_runner import (
-    DEFAULT_TASK_TIMEOUT,
-    AutonomousAgentRunner,
-)
-from app.modules.workspace.autonomous.artifact_text import (
-    clean_agent_text,
-    pick_best_artifact_text,
-    sanitize_artifact_text,
-)
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
-from app.modules.workspace.autonomous.progress_report_i18n import (
-    build_progress_payload,
-    render_progress_report,
-)
-from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
+from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.repositories.database import Database
-from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -52,164 +38,6 @@ COMPLETION_KEYWORDS = [
     "workflow complete",
 ]
 
-# ── Framework inference for test detection (Phase 1, P0) ────────────────
-
-
-def _infer_test_framework(project_path: str, cli_tool: str) -> str:
-    """Infer test framework type from project structure and CLI tool.
-
-    Returns: "python", "javascript", "go", "mixed", or "unknown"
-    """
-    if not project_path:
-        return "unknown"
-
-    import os
-
-    # Check for JavaScript/Node project files
-    js_markers = ["package.json", "jest.config.js", "jest.config.ts", "vitest.config.ts"]
-    # Check for Python project files
-    py_markers = ["requirements.txt", "setup.py", "pyproject.toml", "pytest.ini", "tox.ini"]
-    # Check for Go project files
-    go_markers = ["go.mod", "go.sum"]
-    # Check for Rust project files
-    rust_markers = ["Cargo.toml"]
-    # Check for Java project files
-    java_markers = ["pom.xml", "build.gradle", "build.gradle.kts"]
-
-    detected_frameworks = []
-
-    # Scan for marker files (limit to 3 levels deep to avoid slow scans)
-    for root, dirs, files in os.walk(project_path):
-        # Limit depth
-        depth = root[len(project_path) :].count(os.sep)
-        if depth > 2:
-            dirs[:] = []  # Don't recurse further
-            continue
-
-        # Skip common non-source directories
-        dirs[:] = [
-            d
-            for d in dirs
-            if d not in ("node_modules", "venv", ".venv", "__pycache__", ".git", "dist", "build")
-        ]
-
-        for f in files:
-            if f in js_markers:
-                detected_frameworks.append("javascript")
-            elif f in py_markers:
-                detected_frameworks.append("python")
-            elif f in go_markers:
-                detected_frameworks.append("go")
-            elif f in rust_markers:
-                detected_frameworks.append("rust")
-            elif f in java_markers:
-                detected_frameworks.append("java")
-
-    # Deduplicate and determine result
-    unique_frameworks = list(set(detected_frameworks))
-
-    if len(unique_frameworks) == 1:
-        return unique_frameworks[0]
-    elif len(unique_frameworks) > 1:
-        return "mixed"
-    else:
-        # Fallback: cannot infer from files, use "unknown" (disable keyword fallback)
-        return "unknown"
-
-
-def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: bool) -> bool:
-    """Strict keyword detection with multiple conditions (Phase 1, P0).
-
-    Requires stronger evidence than single keyword match:
-    - Condition A: dual keywords (passed + PASSED, etc.)
-    - Condition B: keyword + timestamp ("in X.XXs")
-    - Condition C: keyword + file count ("X tests", "X files")
-    - Condition D: keyword + error details (AssertionError, expected)
-
-    Returns False if hallucination detected.
-    """
-    if has_hallucination_desc:
-        return False
-
-    import re
-
-    # Condition A: Dual keyword combination (Issue #1538: extended to multilingual)
-    dual_keywords = [
-        # English
-        ("passed", "PASSED"),
-        ("failed", "FAILED"),
-        ("passed", "failures"),
-        ("failed", "failures"),
-        # Chinese
-        ("通过", "成功"),
-        ("失败", "错误"),
-        # Japanese
-        ("通過", "成功"),
-        ("失敗", "エラー"),
-        # Korean
-        ("통과", "성공"),
-        ("실패", "오류"),
-    ]
-    has_dual = any(
-        kw1 in test_response_text.lower() and kw2 in test_response_text
-        for kw1, kw2 in dual_keywords
-    )
-
-    # Condition B: Keyword + timestamp pattern (Issue #1538: multilingual timestamps)
-    timestamp_patterns = [
-        r"in\s+[\d.]+s",  # English: "in 2.5s"
-        r"用时\s*[\d.]+\s*秒",  # Chinese: "用时2.5秒"
-        r"(所要時間|時間)\s*[\d.]+\s*秒",  # Japanese
-        r"소요\s*시간\s*[\d.]+\s*초",  # Korean
-    ]
-    has_timestamp_keyword = bool(
-        (
-            "passed" in test_response_text.lower()
-            or "通过" in test_response_text
-            or "通過" in test_response_text
-            or "통과" in test_response_text
-        )
-        and any(re.search(p, test_response_text) for p in timestamp_patterns)
-    ) or bool(
-        ("completed" in test_response_text.lower() or "完成" in test_response_text)
-        and any(re.search(p, test_response_text) for p in timestamp_patterns)
-    )
-
-    # Condition C: Keyword + file/test count
-    count_pattern = r"\d+\s+(tests?|files?|specs?|个|件|개)"
-    has_count_keyword = bool(
-        (
-            "passed" in test_response_text.lower()
-            or "通过" in test_response_text
-            or "通過" in test_response_text
-            or "통과" in test_response_text
-        )
-        and re.search(count_pattern, test_response_text)
-    ) or bool(
-        (
-            "failed" in test_response_text.lower()
-            or "失败" in test_response_text
-            or "失敗" in test_response_text
-            or "실패" in test_response_text
-        )
-        and re.search(count_pattern, test_response_text)
-    )
-
-    # Condition D: Keyword + error details
-    has_error_details = (
-        "failed" in test_response_text.lower()
-        or "失败" in test_response_text
-        or "失敗" in test_response_text
-        or "실패" in test_response_text
-    ) and (
-        "AssertionError" in test_response_text
-        or "expected" in test_response_text.lower()
-        or "Traceback" in test_response_text
-    )
-
-    return has_dual or has_timestamp_keyword or has_count_keyword or has_error_details
-
-
 # Pre-compiled patterns for completion keyword matching (avoids recompilation in loop)
 _COMPLETION_PATTERNS = [
     re.compile(
@@ -218,67 +46,6 @@ _COMPLETION_PATTERNS = [
     )
     for kw in COMPLETION_KEYWORDS
 ]
-
-# Substrings that identify a comment as authored by the automation itself.
-# Shared by preparation (issue ingestion) and wait (new-requirement polling)
-# so status reports / PR links the bot posts back to the issue are never
-# re-ingested as requirements (#1244).
-BOT_AUTHOR_KEYWORDS = ["open-ace-bot", "autonomous", "bot"]
-
-
-def _is_bot_comment(comment: dict) -> bool:
-    """Return True if a comment looks like it was authored by the automation."""
-    author = comment.get("author", {}) or {}
-    login = (author.get("login") if isinstance(author, dict) else author) or ""
-    return any(kw in login.lower() for kw in BOT_AUTHOR_KEYWORDS)
-
-
-def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
-    """Check if tool_calls contains a test framework execution command.
-
-    This detects actual test execution by examining tool call commands,
-    complementing pytest output detection. Used to prevent false-negative
-    "Tests were not actually run" judgments when agent runs tests but
-    output is not captured in visible text (Issue #1532).
-    """
-    if not tool_calls:
-        return False
-
-    test_commands = {
-        "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
-        "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
-        "go": ["go test", "gotestsum"],
-        "rust": ["cargo test", "cargo t"],
-        "java": ["mvn test", "gradle test", "./gradlew test"],
-    }
-    # P1: generic_patterns includes unittest for unknown frameworks
-    generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
-    patterns_to_check = test_commands.get(framework_type, generic_patterns)
-    # Note: -v (verbose) is NOT excluded, only --help/--version/-h
-    exclude_flags = ["--help", "--version", "-h"]
-
-    for tc in tool_calls:
-        tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
-        # P0: Ensure tool_input is dict (handle None case)
-        tool_input = (
-            (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
-        )
-
-        # P2: Check non-Bash test tools first (pytest, run_tests, test)
-        if tool_name in ("pytest", "run_tests", "test"):
-            return True
-
-        # Then check Bash/run_shell_command for test commands
-        if tool_name in ("Bash", "run_shell_command"):
-            cmd = tool_input.get("command", "")
-            if not cmd or any(flag in cmd for flag in exclude_flags):
-                continue
-            for pattern in patterns_to_check:
-                if pattern in cmd:
-                    return True
-
-    return False
-
 
 # Prefix added to all prompts to inform the agent it is running autonomously
 AUTONOMOUS_CONTEXT = (
@@ -330,70 +97,11 @@ PLANNING_ALLOWED_TOOLS: dict[str, list[str]] = {
     ],
     "codex": [],
     "openclaw": [],
-    # zcode uses its own built-in tool set (Read/Write/Edit/Bash/WebFetch/...),
-    # exposed via the ZCode Protocol; no MCP-subtool allowlist is needed.
-    "zcode": [],
-}
-
-# Development-phase tools: planning read-only set + Write/Edit/Bash so the agent
-# can implement, run tests, and commit. Bash is allowed wholesale (test / git /
-# build commands vary by language and can't be enumerated). This bounds where
-# commits land (worktree + feature branch); bash itself is NOT sandboxed —
-# cd /, rm -rf, sudo, network egress are all reachable from the worktree cwd,
-# same trust model as any dev agent. plan phases stay read-only via
-# PLANNING_ALLOWED_TOOLS above. See #996.
-AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
-    "claude-code": [
-        "Read",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "Agent",
-        "TaskRead",
-        "TaskGet",
-        "TaskList",
-        "Write",
-        "Edit",
-        "Bash",
-    ],
-    "qwen-code-cli": [
-        "read_file",
-        "list_files",
-        "search_files",
-        "code_search",
-        "web_search",
-        "web_fetch",
-        "write_file",
-        "edit_file",
-        "run_shell_command",
-    ],
-    "codex": [],
-    "openclaw": [],
-    "zcode": [],
 }
 
 # Maximum time (seconds) for a single planning agent call.
-# ZCode+GLM planning involves multiple model round-trips and subagent spawns
-# that can take 10-15 min for complex issues. 600s was too tight — planning
-# succeeded only ~30% of the time. 1800s gives the agent enough headroom
-# while still capping runaway agents.
-PLANNING_TIMEOUT = 1800
-
-
-def _zcode_planning_mode(wf: dict) -> str:
-    """Return the ZCode --mode for planning-phase calls.
-
-    ZCode planning must stay read-only (plan mode, #761). For all other CLI
-    tools, pass through the workflow's permission_mode unchanged. For ZCode,
-    force "plan" so the agent can't write files or run commands during
-    planning — allowed_tools is [] for both planning and dev (zcode uses its
-    own built-in toolset), so the mode is the only reliable read-only signal.
-    """
-    if wf.get("cli_tool") in ("zcode", "zcode-code"):
-        return "plan"
-    return wf.get("permission_mode", "auto-edit")
-
+# Normal planning should complete in a few minutes; this caps runaway agents.
+PLANNING_TIMEOUT = 600
 
 # Minimum review text length (chars) to be considered substantive feedback.
 # Below this threshold the review is treated as "no feedback" (e.g. empty
@@ -428,177 +136,10 @@ PHASE_STATUS_MAP = {
 CI_POLL_INTERVAL = 30  # seconds between polls
 CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 
-# Transient network error auto-retry (layer 2). When advance() catches a
-# GitHubOpsError that looks like a network issue (not a code/conflict error),
-# the workflow stays in its current active status and the scheduler retries
-# on the next cycle (~10s). After this many consecutive transient failures,
-# the workflow is marked failed for manual intervention.
-TRANSIENT_RETRY_MAX = 6
-
-# Keywords identifying transient network errors at the orchestrator level
-# (the error_message stored by advance's except block). Mirrors the
-# _TRANSIENT_ERROR_KEYWORDS in github_ops.py but checks the wrapped message.
-_TRANSIENT_ORCHESTRATOR_KEYWORDS = [
-    "libressl",
-    "openssl",
-    "ssl",
-    "tls",
-    "connection reset",
-    "connection refused",
-    "connection timed out",
-    "timed out",
-    "could not resolve host",
-    "network is unreachable",
-    "unable to access",
-    "rpc failed",
-    "early eof",
-]
-
-# GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
-# review / fix / test) can exceed that, so very long comments are capped with
-# a notice pointing to the timeline full-text view (#988).
-GITHUB_COMMENT_MAX_CHARS = 65000
-
-# Each phase agent appends a one-line `TL;DR: ...` summary to its output for the
-# timeline milestone card (#993). build_language_instruction() is appended to
-# every agent prompt; _extract_tldr pulls the line back out for the tldr column.
-#
-# AI-authored content (plan / review / tldr / PR-review summaries) is generated
-# in the workflow's ``content_language`` — the persisted source of truth that
-# does NOT switch per viewer. The language-neutral ``TL;DR:`` marker is kept in
-# every language so _extract_tldr (regex on ``TL;DR:``) works regardless of
-# content_language.
-_LANGUAGE_DIRECTIVES = {
-    "en": "\n\nWrite all content in English.",
-    "zh": "\n\n请用简体中文输出所有内容。",
-    "ja": "\n\nすべての内容を日本語で出力してください。",
-    "ko": "\n\n모든 내용을 한국어로 출력해 주세요.",
-}
-_TLDR_FORMAT_INSTRUCTIONS = {
-    "en": (
-        "\n\n## Output format\n"
-        "On the last line of your output, give a one-sentence summary of this "
-        "output in this format (shown on the timeline card; concise, plain "
-        "text, no markdown):\n"
-        "TL;DR: <summary of no more than 80 characters>\n"
-    ),
-    "zh": (
-        "\n\n## 输出格式要求\n"
-        "请在输出的最后单独一行，用以下格式给出本次输出的一句话总结"
-        "（将显示在 timeline 卡片上，务必简洁、纯文本、不要 markdown）：\n"
-        "TL;DR: <不超过 80 字的总结>\n"
-    ),
-    "ja": (
-        "\n\n## 出力形式\n"
-        "出力の最後の行に、以下の書式で今回の出力の一文要約を記述してください"
-        "（タイムラインカードに表示されます。簡潔に、プレーンテキストで、マークダウンなし）：\n"
-        "TL;DR: <80文字以内の要約>\n"
-    ),
-    "ko": (
-        "\n\n## 출력 형식\n"
-        "출력의 마지막 줄에 다음 형식으로 이번 출력의 한 문장 요약을 작성해 주세요"
-        "（타임라인 카드에 표시됩니다. 간결하게, 일반 텍스트로, 마크다운 없이):\n"
-        "TL;DR: <80자 이내의 요약>\n"
-    ),
-}
-
-# Backward-compatible alias: the Chinese TL;DR format instruction. Kept so
-# existing imports/tests continue to work; new code uses build_language_instruction.
-TLDR_INSTRUCTION = _TLDR_FORMAT_INSTRUCTIONS["zh"]
-
-
-def build_language_instruction(content_language: Optional[str]) -> str:
-    """Build the per-content_language directive + TL;DR format instruction.
-
-    Returned string is appended to every agent prompt so AI-authored content is
-    generated in the workflow's ``content_language``. Unknown/missing languages
-    fall back to English. The language-neutral ``TL;DR:`` marker is always
-    present so ``_extract_tldr`` works across all languages.
-    """
-    lang = content_language if content_language in _LANGUAGE_DIRECTIVES else "en"
-    return _LANGUAGE_DIRECTIVES[lang] + _TLDR_FORMAT_INSTRUCTIONS[lang]
-
-
-_TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
-
-# Approval marker the PR reviewer is asked to state when there are no major
-# issues, per content_language. Used in BOTH the review prompt and approval
-# detection — the agent writes its review in content_language, so a zh-only
-# marker would miss en/ja/ko approvals. The structured verdict written to
-# metadata.review_verdict removes progress_reported's dependency on this
-# substring entirely. (Plan-review approval "方案通过审查" is still zh-locked
-# and out of scope for the progress_reported i18n work.)
-_REVIEW_APPROVAL_PHRASES = {
-    "en": "Code review passed",
-    "zh": "代码审查通过",
-    "ja": "コードレビュー合格",
-    "ko": "코드 리뷰 통과",
-}
-
-
-def _review_approval_phrase(content_language: Optional[str]) -> str:
-    """Approval marker for PR review in the given content language."""
-    return _REVIEW_APPROVAL_PHRASES.get(
-        content_language, _REVIEW_APPROVAL_PHRASES[DEFAULT_CONTENT_LANGUAGE]
-    )
-
-
-def _parse_metadata(raw) -> dict:
-    """Parse a milestone metadata JSON string/dict into a dict (empty on failure)."""
-    if not raw:
-        return {}
-    if isinstance(raw, dict):
-        return dict(raw)
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return {}
-
-
-def _merge_milestone_metadata(milestone, updates: dict) -> str:
-    """Merge ``updates`` into a milestone's metadata, returning the JSON string.
-
-    ``milestone`` may be a milestone dict (read from the repo) or a raw metadata
-    JSON string. Existing keys are preserved; ``updates`` keys overwrite.
-    """
-    raw = milestone.get("metadata") if isinstance(milestone, dict) else milestone
-    merged = _parse_metadata(raw)
-    merged.update(updates)
-    return json.dumps(merged, ensure_ascii=False)
-
-
-# Localized "comment truncated" notice appended when a GitHub comment body
-# exceeds the length cap. Rendered in the workflow's content_language.
-_GITHUB_TRUNCATION_NOTICES = {
-    "en": (
-        "\n\n---\n\n"
-        "> ⚠️ Content exceeded the GitHub comment length limit and was truncated. "
-        "See the workflow timeline milestone card for the full text (plan/review/report).\n"
-    ),
-    "zh": (
-        "\n\n---\n\n"
-        "> ⚠️ 内容超出 GitHub 评论长度上限，已截断显示。"
-        "完整内容请查看 workflow timeline 的里程碑卡片（方案/评审/报告全文）。\n"
-    ),
-    "ja": (
-        "\n\n---\n\n"
-        "> ⚠️ GitHub コメントの文字数上限を超えたため切り詰めました。"
-        "全文はワークフロー タイムラインのマイルストーンカード（計画/レビュー/レポート）で確認してください。\n"
-    ),
-    "ko": (
-        "\n\n---\n\n"
-        "> ⚠️ GitHub 댓글 길이 제한을 초과하여 잘렸습니다. "
-        "전체 내용은 워크플로 타임라인의 마일스톤 카드(계획/리뷰/보고서)에서 확인하세요.\n"
-    ),
-}
-
-
-def _github_truncation_notice(content_language: Optional[str]) -> str:
-    return _GITHUB_TRUNCATION_NOTICES.get(
-        content_language, _GITHUB_TRUNCATION_NOTICES[DEFAULT_CONTENT_LANGUAGE]
-    )
-
-
+# Maximum character length for previous review feedback included in
+# the review prompt.  Reviews longer than this are truncated with a
+# notice so the reviewer knows content was omitted.
+PREV_REVIEW_MAX_LENGTH = 3000
 REVIEW_SESSION_MILESTONE_TYPES = {"plan_reviewed", "pr_reviewed"}
 
 # Session lines that span multiple milestones via --resume. Each maps to a
@@ -634,26 +175,11 @@ _AGENT_CLOSING_PATTERNS = [
     re.compile(r"建议[：:]\s*$"),
 ]
 
-# Transient API error retry configuration (429 rate limit, 5xx overload, etc.).
-# These typically resolve within 30 minutes.
+# 429 rate limit retry configuration.
+# Rate limit typically resolves within 30 minutes.
 API_RETRY_TOTAL_TIMEOUT = 1800  # max total retry duration (seconds)
 API_RETRY_INITIAL_DELAY = 30  # first retry delay (seconds)
 API_RETRY_MAX_DELAY = 300  # max single retry delay (seconds)
-
-# Transient API error signatures in an agent response/error body. Used to decide
-# retry (with backoff) and, after retries are exhausted, to flag the result as a
-# failure so the error text isn't stored as plan/review content (#1001).
-# Patterns are kept specific (status codes + unambiguous phrases) to avoid
-# false-positive retries on legitimate plans that merely discuss error handling.
-_TRANSIENT_API_ERROR_RE = re.compile(
-    # "API Error: 429" / "API Error: 5xx". Only 429 among 4xx is transient;
-    # 400/401/403/404/422 are permanent client errors and must NOT trigger retry.
-    r"api\s*error:?\s*(?:429|5\d{2})"
-    r"|(?:429|quota\s+exceeded|rate[\s-]?limit|too\s+many\s+requests)"
-    r"|overloaded"  # "The service may be temporarily overloaded"
-    r"|bad\s+gateway|service\s+unavailable|gateway\s+timeout|internal\s+server\s+error",
-    re.IGNORECASE,
-)
 
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
@@ -700,249 +226,12 @@ class AutonomousOrchestrator:
         return self.repo.get_workflow(self._workflow_id)
 
     def _get_gh(self) -> GitHubOps:
-        """Lazily initialize GitHubOps.
-
-        Prefers ``worktree_path`` (the agent's working repo once preparation
-        has run) but falls back to ``project_path`` when the worktree dir does
-        not yet exist. This matters on rerun: a previous failure may have
-        removed the worktree dir while the stale ``worktree_path`` is still in
-        the DB, so binding GitHubOps to it makes every ``git -C <worktree>``
-        fail with ENOENT (Issue #1395 rerun regression). Preparation creates
-        the worktree; until it does, the main repo is the only valid repo_path.
-
-        Issue #1573: Added branch verification after binding to worktree.
-        If the actual branch doesn't match expected branch_name, log warning
-        and attempt to checkout to the correct branch.
-        """
+        """Lazily initialize GitHubOps."""
         wf = self.workflow
         if not self._gh and wf:
-            worktree_path = wf.get("worktree_path", "")
-            project_path = wf.get("project_path", "")
-            # Resolve system_account for multi-user permission isolation (Issue #1395)
-            system_account = None
-            user_id = wf.get("user_id")
-            if user_id:
-                user_repo = UserRepository()
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    system_account = user.get("system_account")
-            # Prefer the worktree once it exists; otherwise the main repo.
-            # path_exists_as_user cross-user-checks under a 700 home (the
-            # service user can't stat it directly), so it's correct both for
-            # same-user dev runs and the multi-user deployment.
-            chosen = project_path
-            if worktree_path:
-                probe = GitHubOps(project_path, system_account=system_account)
-                if probe.path_exists_as_user(worktree_path, dir_only=True):
-                    chosen = worktree_path
-            self._gh = GitHubOps(chosen, system_account=system_account)
-
-            # Issue #1573: Verify branch consistency after binding to worktree
-            if chosen != project_path and worktree_path:  # Bound to worktree, not main repo
-                expected_branch = wf.get("branch_name", "")
-                if expected_branch:
-                    try:
-                        actual_branch = self._gh.get_current_branch()
-                        if actual_branch != expected_branch:
-                            logger.warning(
-                                "_get_gh: Branch mismatch for workflow %s: expected=%s, actual=%s",
-                                self._workflow_id[:8],
-                                expected_branch,
-                                actual_branch,
-                            )
-                            # Attempt to checkout to the correct branch
-                            try:
-                                self._gh.checkout(expected_branch)
-                                logger.info(
-                                    "_get_gh: Successfully checked out to branch %s",
-                                    expected_branch,
-                                )
-                            except GitHubOpsError as e:
-                                logger.error(
-                                    "_get_gh: Failed to checkout to branch %s: %s",
-                                    expected_branch,
-                                    e,
-                                )
-                                # Clear cache so next call re-evaluates
-                                self._gh = None
-                    except GitHubOpsError as e:
-                        logger.warning("_get_gh: Branch verification failed: %s", e)
+            project_path = wf.get("worktree_path") or wf.get("project_path", "")
+            self._gh = GitHubOps(project_path)
         return self._gh
-
-    def _ensure_worktree(self, wf: dict) -> str:
-        """Guarantee the worktree dir + branch exist before a phase runs.
-
-        Retrying/resuming a ``worktree``-strategy workflow after its dir was
-        cleaned up (e.g. a previous failure removed it, or the machine
-        rebooted) used to silently launch the agent against an empty path and
-        fail with a JSONL-detection error (#814). Every downstream phase now
-        calls this at entry so the environment self-heals:
-
-        - normalizes a stale ``worktree_path`` still containing ``..`` so the
-          DB and the on-disk dir agree;
-        - recreates the worktree dir (reusing the branch if it still exists)
-          when it is gone.
-
-        Issue #1573: Added branch consistency verification when worktree exists.
-        If the actual branch doesn't match expected branch_name, we attempt to
-        recreate the worktree (after safety check for uncommitted changes).
-
-        Returns the canonical worktree path. For non-worktree strategies, or
-        when ``worktree_path`` is intentionally empty (merge cleanup / conflict
-        resolution clears it), this is a no-op returning ``project_path``.
-        """
-        strategy = wf.get("branch_strategy", "new-branch")
-        project_path = wf.get("project_path", "")
-        worktree_path = wf.get("worktree_path", "")
-
-        # An empty worktree_path is NOT the "dir gone, recreate it" case — it
-        # is set deliberately by merge cleanup (_resolve_merge_conflicts /
-        # _do_merge) when the worktree is removed to free the main repo for
-        # conflict resolution. Treating it as missing would fall back to
-        # project_path as canonical and try `git worktree add <main_repo>`,
-        # which fails and turns a retried merge into a hard failure. Only a
-        # non-empty path whose dir is gone represents external loss (#814).
-        if strategy != "worktree" or not project_path or not worktree_path:
-            return worktree_path or project_path
-
-        canonical = os.path.realpath(worktree_path)
-        # Resolve system_account up front so the validity check below can use
-        # it: os.path.isfile() stats as the service user and raises
-        # PermissionError under a user-private parent (700 home, Issue #1395).
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-        main_gh = GitHubOps(project_path, system_account=system_account)
-        # Valid worktree: a .git FILE inside means git set it up (a plain
-        # clone has a .git directory instead). If the stored path was
-        # unnormalized (legacy ".."), persist the canonical form so JSONL
-        # session detection matches Claude's encoding. file_only keeps the
-        # original os.path.isfile() semantics (Issue #1395 review).
-        if worktree_path and main_gh.path_exists_as_user(
-            os.path.join(canonical, ".git"), file_only=True
-        ):
-            if canonical != worktree_path:
-                self._update_workflow({"worktree_path": canonical})
-
-            # Issue #1573: Verify branch consistency when worktree exists.
-            # Check that the worktree's actual branch matches the expected branch_name.
-            expected_branch = wf.get("branch_name", "")
-            if expected_branch:
-                try:
-                    wt_gh = GitHubOps(canonical, system_account=system_account)
-                    actual_branch = wt_gh.get_current_branch()
-                    if actual_branch != expected_branch:
-                        logger.error(
-                            "Branch mismatch detected for workflow %s: expected=%s, actual=%s, worktree_path=%s",
-                            self._workflow_id[:8],
-                            expected_branch,
-                            actual_branch,
-                            canonical,
-                        )
-                        # Safety check: refuse to delete worktree with uncommitted changes
-                        if wt_gh.has_uncommitted_changes():
-                            logger.error(
-                                "Worktree %s has uncommitted changes, refusing to delete",
-                                canonical,
-                            )
-                            self._create_milestone(
-                                phase=wf.get("current_phase", "preparation"),
-                                milestone_type="branch_mismatch",
-                                status="failed",
-                                title=f"Branch mismatch with uncommitted changes: expected {expected_branch}, actual {actual_branch}",
-                                error_message=f"Cannot recreate worktree: uncommitted changes detected on branch {actual_branch}",
-                            )
-                            raise GitHubOpsError(
-                                f"Worktree branch mismatch ({actual_branch} != {expected_branch}) "
-                                f"with uncommitted changes. Manual intervention required."
-                            )
-                        # Safe to delete - recreate worktree with correct branch
-                        logger.warning(
-                            "Attempting to recreate worktree %s on correct branch %s",
-                            canonical,
-                            expected_branch,
-                        )
-                        main_gh.remove_worktree(canonical)
-                        # Recreate with correct branch
-                        branch_check = main_gh._run_git(
-                            ["show-ref", "--verify", "--quiet", f"refs/heads/{expected_branch}"],
-                            check=False,
-                        )
-                        remote_check = main_gh._run_git(
-                            [
-                                "show-ref",
-                                "--verify",
-                                "--quiet",
-                                f"refs/remotes/origin/{expected_branch}",
-                            ],
-                            check=False,
-                        )
-                        if branch_check.returncode == 0 or remote_check.returncode == 0:
-                            main_gh._run_git(["worktree", "add", canonical, expected_branch])
-                        else:
-                            main_gh._run_git(
-                                ["worktree", "add", "-b", expected_branch, canonical, "origin/main"]
-                            )
-                        self._create_milestone(
-                            phase=wf.get("current_phase", "preparation"),
-                            milestone_type="worktree_restored",
-                            status="completed",
-                            title=f"Worktree recreated on correct branch {expected_branch}",
-                        )
-                        logger.info(
-                            "Worktree %s recreated on correct branch %s",
-                            canonical,
-                            expected_branch,
-                        )
-                        # Reset cached gh so it picks up the new worktree
-                        self._gh = None
-                except GitHubOpsError:
-                    raise
-                except Exception as e:
-                    logger.warning("Branch verification failed: %s", e)
-            return canonical
-
-        # Worktree missing — recreate from the main repo.
-        branch_name = wf.get("branch_name") or f"auto-dev/{self._workflow_id[:8]}"
-        try:
-            main_gh._run_git(["fetch", "origin", "main"])
-            # Does the branch still exist locally or on origin?
-            branch_check = main_gh._run_git(
-                ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
-                check=False,
-            )
-            remote_check = main_gh._run_git(
-                ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
-                check=False,
-            )
-            if branch_check.returncode == 0 or remote_check.returncode == 0:
-                # Branch survives (local or remote) — attach a worktree to it
-                # without recreating the branch. For a remote-only branch, git
-                # auto-creates a local tracking branch in this step.
-                main_gh._run_git(["worktree", "add", canonical, branch_name])
-            else:
-                # Neither worktree nor branch — start fresh from origin/main.
-                main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, "origin/main"])
-        except GitHubOpsError as e:
-            logger.error("Failed to recreate worktree at %s: %s", canonical, e)
-            raise
-
-        self._update_workflow({"worktree_path": canonical, "branch_name": branch_name})
-        self._create_milestone(
-            phase=wf.get("current_phase", "preparation"),
-            milestone_type="worktree_restored",
-            status="completed",
-            title=f"Worktree restored at {os.path.basename(canonical)}",
-        )
-        logger.info("Restored worktree at %s on branch %s", canonical, branch_name)
-        # Reset cached gh so it picks up the restored worktree path.
-        self._gh = None
-        return canonical
 
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
@@ -972,7 +261,70 @@ class AutonomousOrchestrator:
 
     @staticmethod
     def _clean_agent_text(text: str) -> str:
-        return clean_agent_text(text)
+        """Strip agent narration/intro/closing text, keep only structured content.
+
+        Performs three cleaning passes:
+        1. Strip everything before the first markdown heading (# Title).
+        2. Strip leading lines matching common agent intro patterns
+           (e.g. "我来为这个需求制定详细的实现方案。").
+        3. Strip trailing lines matching common agent closing patterns
+           (e.g. "下一步是否需要开始实施...").
+        """
+        if not text:
+            return text
+
+        # Pass 1: strip before first markdown heading
+        match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
+        if match:
+            text = text[match.start() :]
+
+        # Pass 2: strip leading agent intro lines, skipping headings/empty lines.
+        # Scan up to the first _INTRO_SCAN_LIMIT non-empty, non-heading lines.
+        # Only strip the FIRST contiguous intro block — once we see a heading
+        # after intro lines, stop so that legitimate sub-headings between
+        # intro lines are not deleted.
+        _INTRO_SCAN_LIMIT = 5
+        lines = text.split("\n")
+        intro_end = 0  # line index after the last contiguous intro line
+        non_heading_count = 0
+        seen_intro = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            is_heading = bool(re.match(r"^#{1,6}\s", stripped))
+            if is_heading:
+                if seen_intro:
+                    break  # stop — don't strip across sub-headings
+                continue  # skip initial headings before any intro
+            non_heading_count += 1
+            if non_heading_count > _INTRO_SCAN_LIMIT:
+                break  # past scan limit, stop
+            is_intro = any(p.search(stripped) for p in _AGENT_INTRO_PATTERNS)
+            if is_intro:
+                intro_end = i + 1
+                seen_intro = True
+            else:
+                break  # non-intro content found, stop
+        if intro_end > 0:
+            lines = lines[intro_end:]
+            text = "\n".join(lines)
+
+        # Pass 3: strip trailing agent closing text.
+        # Walk forward to find the first closing pattern match, then strip
+        # everything from that line to the end (including subsequent non-matching
+        # lines like numbered lists that are part of the closing block).
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and any(p.search(stripped) for p in _AGENT_CLOSING_PATTERNS):
+                # Strip empty lines before the closing text as well
+                while i > 0 and not lines[i - 1].strip():
+                    i -= 1
+                text = "\n".join(lines[:i])
+                break
+
+        return text.strip()
 
     # Backward-compatible alias for existing tests (Issue #906, #910)
     @staticmethod
@@ -987,14 +339,6 @@ class AutonomousOrchestrator:
         reviewer approving the plan (no "方案通过审查" in the last review).
         """
         return bool(last_review and round_num >= max_rounds and "方案通过审查" not in last_review)
-
-    @staticmethod
-    def _must_run_full_review_rounds(wf: dict) -> bool:
-        """Whether planning/PR review must consume the configured round cap."""
-        value = wf.get("require_full_review_rounds", False)
-        if isinstance(value, str):
-            return value.strip().lower() in ("1", "true", "yes", "on")
-        return bool(value)
 
     @staticmethod
     def _should_refine_plan(last_review: str) -> bool:
@@ -1065,119 +409,6 @@ class AutonomousOrchestrator:
             or "预先存在" in response
             or re.search(r"pre[\s-]?existing", response, re.IGNORECASE)
         )
-
-    @staticmethod
-    def _extract_tldr(response: str) -> str:
-        """Extract the ``TL;DR: ...`` one-liner the agent was asked to append.
-
-        Returns "" when absent so callers can fall back to ``result_summary``.
-        """
-        if not response:
-            return ""
-        match = _TLDR_RE.search(response)
-        return match.group(1).strip()[:200] if match else ""
-
-    @staticmethod
-    def _artifact_visible_text(result: Optional[AgentTaskResult]) -> str:
-        """Return all user-visible assistant turns for a task result."""
-        if not result:
-            return ""
-        return (getattr(result, "visible_response_text", "") or result.response_text or "").strip()
-
-    @classmethod
-    def _sanitize_artifact_text(cls, text: str) -> str:
-        return sanitize_artifact_text(text)
-
-    @classmethod
-    def _artifact_text(cls, result: Optional[AgentTaskResult]) -> str:
-        """Return the milestone/comment artifact text for a task result."""
-        if not result:
-            return ""
-        return pick_best_artifact_text(
-            (result.response_text or "").strip(),
-            cls._artifact_visible_text(result),
-        )
-
-    @classmethod
-    def _artifact_tldr(cls, result: Optional[AgentTaskResult]) -> str:
-        """Prefer structured/extracted TL;DR over raw string slicing."""
-        if not result:
-            return ""
-        structured = getattr(result, "structured_tags", {}) or {}
-        if structured.get("tldr"):
-            return structured["tldr"][:200]
-        return cls._extract_tldr(cls._artifact_visible_text(result) or result.response_text or "")
-
-    @staticmethod
-    def _artifact_status_tag(result: Optional[AgentTaskResult], key: str) -> str:
-        """Read structured status tags extracted by the runner."""
-        if not result:
-            return ""
-        structured = getattr(result, "structured_tags", {}) or {}
-        value = structured.get(key, "")
-        return value.strip() if isinstance(value, str) else ""
-
-    @staticmethod
-    def _build_dev_result_summary(
-        artifact_text: str, diff_stats: dict, commit_sha: str, success: bool
-    ) -> str:
-        """Prefer agent summary, but synthesize a concise fallback when it is noisy/empty."""
-        cleaned = artifact_text.strip()
-        if cleaned:
-            return cleaned[:300]
-
-        status = "Development completed" if success else "Development failed"
-        parts = [status]
-        if commit_sha:
-            parts.append(f"commit {commit_sha[:8]}")
-        if diff_stats:
-            parts.append(
-                f"{diff_stats.get('files', 0)} files changed "
-                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})"
-            )
-        return "; ".join(parts)
-
-    def _post_github_comment(
-        self,
-        gh: GitHubOps,
-        number: int,
-        body: str,
-        *,
-        is_pr: bool = False,
-        context: str = "",
-        content_language: Optional[str] = None,
-    ) -> None:
-        """Post a comment to a GitHub issue or PR.
-
-        Guards two failure modes the raw ``gh.add_*_comment`` calls used to
-        swallow silently:
-
-        - **Length**: GitHub rejects comment bodies longer than 65536 chars.
-          Verbose agent output (plan / review / fix / test) can exceed that, so
-          bodies over ``GITHUB_COMMENT_MAX_CHARS`` are capped with a notice
-          pointing readers to the timeline full-text view (#988) for the rest.
-        - **Errors**: a failed post is logged at WARNING (with ``context``) and
-          swallowed, so a missing comment is diagnosable without aborting the
-          workflow phase. The body survives in the DB / timeline regardless.
-        """
-        if len(body) > GITHUB_COMMENT_MAX_CHARS:
-            notice = _github_truncation_notice(
-                content_language or (self.workflow or {}).get("content_language")
-            )
-            body = body[: GITHUB_COMMENT_MAX_CHARS - len(notice)] + notice
-        try:
-            if is_pr:
-                gh.add_pr_comment(number, body)
-            else:
-                gh.add_issue_comment(number, body)
-        except Exception as e:  # log + continue; never abort the phase over a comment
-            logger.warning(
-                "Failed to post GitHub %s comment #%s%s: %s",
-                "PR" if is_pr else "issue",
-                number,
-                f" ({context})" if context else "",
-                e,
-            )
 
     def _find_existing_milestone(
         self, phase: str, milestone_type: str, dev_round: int = None, round_number: int = None
@@ -1332,12 +563,6 @@ class AutonomousOrchestrator:
                 logger.warning("Failed to resolve workflow session in real-time", exc_info=True)
         elif activity_type == "usage":
             try:
-                # Write the running cumulative usage to the in-progress milestone
-                # so the workflow total climbs during a long task instead of
-                # freezing until the call returns. phase_* is overwritten per
-                # event (session totals are cumulative within the call) and
-                # finalized by _write_phase_usage at _run_agent return.
-                self._write_realtime_phase_usage(activity)
                 self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
             except Exception:
                 logger.warning("Failed to refresh workflow tokens in real-time", exc_info=True)
@@ -1345,108 +570,17 @@ class AutonomousOrchestrator:
     def _resolve_session_line(self, wf: dict, session_line: str):
         """Resolve (tracking_session_id, resume_session_id, resume) for a line.
 
-        main/review/test: the workflow stores a stable tracking session id for
-        the line. For Claude, the actual CLI/sidebar resume id is read from the
-        tracking session row's authoritative ``cli_session_id`` column (with a
-        context-JSON fallback for rows written before the column existed). For
-        other tools, the tracking id itself is the resume target.
-
-        Strict 3-session topology: if a Claude line's mapping is missing (partial
-        write, old data, manual cleanup), we do NOT disguise the tracking id as a
-        resume id — that would resume a non-existent Claude session and pin the
-        bad id with no self-heal. Instead we return resume=False so ``_run_local``
-        re-probes the real CLI id and rebinds it to this same line (still exactly
-        3 sessions, never a 4th).
-
-        Reads from the wf dict first, then falls back to a fresh DB query.
-        The DB fallback is critical: _run_agent updates the session line in the
-        DB, but the in-memory wf dict may be stale if it was read before the
-        update (e.g. _do_planning reads wf once at entry, then planning's
-        _run_agent writes to DB; finalize needs the updated value).
+        main/review/test: if the workflow already stores that line's real CLI
+        session id, resume it (--resume); otherwise mint a fresh tracking id
+        (first call on that line). fresh/unknown: brand-new session, no resume.
         """
         field = SESSION_LINE_FIELDS.get(session_line)
         if not field:
             return str(uuid.uuid4()), None, False
         existing = ((wf or {}).get(field) or "").strip()
-        # Fallback to DB if the in-memory wf dict doesn't have the session id.
-        # This handles the case where a prior _run_agent in the same phase
-        # updated the DB but the in-memory wf dict wasn't refreshed.
-        if not existing:
-            fresh = self.workflow or {}
-            existing = (fresh.get(field) or "").strip()
         if existing:
-            resume_target = existing
-            if (wf or {}).get("cli_tool") == "claude-code" and getattr(
-                self._runner, "session_manager", None
-            ) is not None:
-                try:
-                    session_row = self._runner.session_manager.get_session(existing) or {}
-                    # get_session returns an AgentSession (column on the object)
-                    # or {} when absent; tests/legacy rows may supply a dict with
-                    # context.cli_session_id. Authoritative column first.
-                    cli_session_id = ""
-                    if session_row:
-                        cli_session_id = (getattr(session_row, "cli_session_id", "") or "").strip()
-                        if not cli_session_id:
-                            ctx = getattr(session_row, "context", None)
-                            if not isinstance(ctx, dict):
-                                ctx = (
-                                    session_row.get("context", {})
-                                    if isinstance(session_row, dict)
-                                    else {}
-                                )
-                            cli_session_id = (ctx.get("cli_session_id") or "").strip()
-                    if cli_session_id:
-                        resume_target = cli_session_id
-                    else:
-                        # Mapping lost: keep this SAME session line stable and
-                        # re-probe/rebind the real CLI id onto it on the next
-                        # run, rather than creating a new wrapper line or faking
-                        # a resume with the tracking id.
-                        logger.warning(
-                            "Claude session line %s has no cli_session_id mapping "
-                            "(tracking=%s); starting fresh on the same line",
-                            session_line,
-                            existing[:8],
-                        )
-                        return existing, None, False
-                except Exception:
-                    logger.warning("Failed to resolve Claude resume target", exc_info=True)
-                    return existing, None, False
-            return existing, resume_target, True
+            return str(uuid.uuid4()), existing, True
         return str(uuid.uuid4()), None, False
-
-    @staticmethod
-    def _review_is_approved(review_text: str, approval_text: str) -> bool:
-        """Whether the review text explicitly approves the artifact."""
-        return bool(review_text and approval_text in review_text)
-
-    @staticmethod
-    def _derive_review_passed(review_milestones: list, content_language) -> bool:
-        """Whether any PR review round approved the PR.
-
-        Prefers the structured ``metadata.review_verdict`` written at review time
-        (language-independent) so progress_reported no longer depends on a
-        Chinese substring. Falls back to scanning ``review_content`` for the
-        language-aware approval phrase (and the legacy zh marker) when none of
-        the milestones carry a structured verdict — i.e. for workflows whose
-        reviews predate this field.
-        """
-        phrase = _review_approval_phrase(content_language)
-        have_structured = False
-        for ms in review_milestones:
-            verdict = _parse_metadata(ms.get("metadata")).get("review_verdict") or {}
-            if isinstance(verdict, dict) and "passed" in verdict:
-                have_structured = True
-                if verdict.get("passed"):
-                    return True
-        if have_structured:
-            return False
-        for ms in review_milestones:
-            text = ms.get("review_content") or ""
-            if phrase in text or "代码审查通过" in text:
-                return True
-        return False
 
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
@@ -1469,19 +603,20 @@ class AutonomousOrchestrator:
             logger.warning("Failed to link session to milestone", exc_info=True)
 
     @staticmethod
-    def _is_transient_api_error(response: str) -> bool:
-        """Detect transient API errors (429 rate limit, 5xx/overload) in a
-        response or error body. Used to trigger retry with backoff and, after
-        retries are exhausted, to flag the result as a failure (#1001).
-        """
+    def _is_rate_limited(response: str) -> bool:
+        """Detect 429 rate limit errors in agent response or error text."""
         if not response:
             return False
-        return bool(_TRANSIENT_API_ERROR_RE.search(response))
+        response_lower = response.lower()
+        return any(
+            p in response_lower
+            for p in ["429", "quota exceeded", "rate limit", "too many requests"]
+        )
 
     def _run_agent(
         self, wf: dict = None, *, session_line: str = "fresh", milestone_id: str = "", **kwargs
     ) -> AgentTaskResult:
-        """Run an agent task with session-line tracking and transient-API-error retry.
+        """Run an agent task with session-line tracking and 429 retry support.
 
         Args:
             wf: Optional pre-fetched workflow dict to avoid extra DB queries.
@@ -1492,17 +627,6 @@ class AutonomousOrchestrator:
             milestone_id: Milestone to attribute this call's phase usage to.
         """
         workflow_data = wf or self.workflow
-
-        # Issue #1627: Log project path and strategy for debugging
-        strategy = workflow_data.get("branch_strategy", "new-branch")
-        project_path = kwargs.get("project_path", workflow_data.get("project_path", ""))
-        logger.info(
-            "Running agent for workflow %s with strategy=%s, project_path=%s",
-            self._workflow_id[:8],
-            strategy,
-            project_path,
-        )
-
         # Resolve the session line: resume an established session or start new.
         session_id, resume_session_id, resume = self._resolve_session_line(
             workflow_data, session_line
@@ -1515,16 +639,6 @@ class AutonomousOrchestrator:
         tracking_session_id = session_id
         if "user_id" not in kwargs and workflow_data:
             kwargs["user_id"] = workflow_data.get("user_id")
-
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        # When set, CLI tools will be run via `sudo -u <system_account>`
-        if "system_account" not in kwargs and workflow_data:
-            user_id = workflow_data.get("user_id")
-            if user_id:
-                user_repo = UserRepository()
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    kwargs["system_account"] = user.get("system_account")
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
@@ -1542,73 +656,35 @@ class AutonomousOrchestrator:
             if task_timeout:
                 kwargs["timeout"] = int(task_timeout)
 
-        # Append the per-content_language directive + TL;DR format instruction
-        # so every phase agent outputs a one-line summary (#993) AND authors its
-        # content in the workflow's content_language. AI content is generated in
-        # content_language (source of truth) and rendered verbatim per viewer.
-        if kwargs.get("prompt"):
-            content_language = (workflow_data or {}).get("content_language")
-            kwargs["prompt"] = kwargs["prompt"] + build_language_instruction(content_language)
-
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
-            # Link the milestone card to the REAL claude session id (not the
-            # per-call wrapper uuid), so all milestones sharing a session line
-            # (e.g. plan_created/plan_refined/dev on the "main" line) show the
-            # SAME id and the card's "view session" points to the right transcript.
-            # Falls back to the wrapper uuid when the real id isn't resolved yet.
-            link_session_id = result.source_session_id or result.session_id
-            self._link_session_to_current_milestone(link_session_id)
-            # Persist the stable tracking id for this line. Fresh lines write
-            # their first tracking id here; established lines keep reusing the
-            # same wrapper row across milestones so timeline/session identity
-            # does not drift with every resume attempt.
+            self._link_session_to_current_milestone(result.session_id)
+            # First successful call on a resume line establishes it for later milestones.
             field = SESSION_LINE_FIELDS.get(session_line)
-            if field:
+            if field and not resume and not (workflow_data or {}).get(field):
                 self._update_workflow({field: result.session_id})
-                # Keep the in-memory wf dict in sync so the next _resolve_session_line
-                # call in the same phase (e.g. planning → finalize) sees the updated
-                # line identity and resumes it instead of rotating wrappers.
-                wf[field] = result.session_id
 
-        # Transient API error retry (429 / 5xx / overload) — exponential
-        # backoff, max 30 minutes total. Interruptible sleep (cancel check
-        # every 5s) so the orchestrator can be paused/stopped during a wait.
+        # 429 rate limit retry — exponential backoff, max 30 minutes total.
+        # Use interruptible sleep (check cancel signal every 5s) so the
+        # orchestrator can be paused/stopped during a retry wait.
         _CANCEL_POLL_INTERVAL = 5  # seconds between cancel checks
         retry_start = time.monotonic()
         delay = API_RETRY_INITIAL_DELAY
         while (time.monotonic() - retry_start) < API_RETRY_TOTAL_TIMEOUT:
-            # Re-check workflow status each iteration: a failure/cancellation
-            # set on the row (by a concurrent path or a prior failure in this
-            # advance()) must abort retries, otherwise we keep spawning agent
-            # subprocesses on a dead workflow for the full 30-min window. #1029
-            _status = (self.workflow or {}).get("status")
-            if _status in ("failed", "cancelled"):
-                logger.info("API error retry aborted (workflow status=%s)", _status)
-                self._synthesize_transient_failure(result)
-                self._write_phase_usage(milestone_id, result)
-                with self._session_lock:
-                    self._current_session_id = result.session_id
-                return result
-
             response_text = result.response_text or ""
             error_text = result.error or ""
-            if not (
-                self._is_transient_api_error(response_text)
-                or self._is_transient_api_error(error_text)
-            ):
-                break  # Not a transient API error, no retry needed
+            if not (self._is_rate_limited(response_text) or self._is_rate_limited(error_text)):
+                break  # Not a 429 error, no retry needed
 
             elapsed = int(time.monotonic() - retry_start)
             logger.warning(
-                "Transient API error detected, retrying in %ds (elapsed: %ds / %ds): %s",
+                "API rate limit (429) detected, retrying in %ds (elapsed: %ds / %ds)",
                 delay,
                 elapsed,
                 API_RETRY_TOTAL_TIMEOUT,
-                (response_text or error_text)[:160],
             )
             self._emit(
-                "api_error_retry",
+                "rate_limit_retry",
                 {
                     "delay": delay,
                     "elapsed": elapsed,
@@ -1624,8 +700,7 @@ class AutonomousOrchestrator:
                 time.sleep(min(_CANCEL_POLL_INTERVAL, delay - slept))
                 slept += _CANCEL_POLL_INTERVAL
                 if self._cancel_requested.is_set():
-                    logger.info("API error retry cancelled (cancel requested)")
-                    self._synthesize_transient_failure(result)
+                    logger.info("429 retry cancelled (cancel requested)")
                     self._write_phase_usage(milestone_id, result)
                     with self._session_lock:
                         self._current_session_id = result.session_id
@@ -1642,48 +717,12 @@ class AutonomousOrchestrator:
             if result.session_id:
                 self._link_session_to_current_milestone(result.session_id)
 
-        # A transient-error body (e.g. a 529 "overloaded" returned as
-        # assistant_text with no tokens generated) must not be handed back as a
-        # success — callers would store it as plan/review content. The tokens==0
-        # gate avoids flagging a legitimate plan that merely mentions these
-        # phrases. #1001. Centralized in a helper so the retry loop's early-exit
-        # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
-        self._synthesize_transient_failure(result)
-
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result)
 
         with self._session_lock:
             self._current_session_id = result.tracking_session_id or result.session_id
         return result
-
-    def _synthesize_transient_failure(self, result: AgentTaskResult) -> None:
-        """Synthesize a failure if the result body is an unresolved transient
-        API error (e.g. a 529 "overloaded" body returned as assistant_text with
-        no tokens generated).
-
-        Prevents callers from storing the error body as plan/review content.
-        The ``tokens==0`` gate avoids flagging a legitimate plan that merely
-        mentions these phrases. Centralized here so the retry loop's post-loop
-        path AND its early-exit paths (status failed/cancelled, cancel-requested)
-        all apply it consistently. #1001, #1036.
-        """
-        if not (result.success and self._is_transient_api_error(result.response_text or "")):
-            return
-        if (result.total_tokens or 0) != 0:
-            return
-        err_snippet = (result.response_text or "")[:200]
-        logger.warning(
-            "API error response unresolved after retries, marking failed: %s",
-            err_snippet,
-        )
-        result.success = False
-        result.error = (
-            result.error or f"Transient API error not resolved after retries: {err_snippet}"
-        )
-        result.response_text = ""  # don't let callers store the error body
-        result.visible_response_text = ""
-        result.structured_tags = {}
 
     def _write_phase_usage(self, milestone_id: str, result: AgentTaskResult) -> None:
         """Write this call's token/request increment to its milestone."""
@@ -1702,36 +741,6 @@ class AutonomousOrchestrator:
         except Exception:
             logger.warning("Failed to write phase usage to milestone", exc_info=True)
 
-    def _write_realtime_phase_usage(self, activity: dict) -> None:
-        """Write the current call's running cumulative usage to the in-progress milestone.
-
-        Driven by live usage events so the workflow total climbs during a long
-        task instead of freezing until the call returns. Overwrites phase_* each
-        event (session totals are cumulative within the call); the final value is
-        re-written by _write_phase_usage at _run_agent return. request_count is
-        written per event too (it is incremented before the usage event fires),
-        so total_requests climbs in lockstep with total_tokens instead of only
-        jumping once the call returns.
-        """
-        try:
-            milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
-            if not milestones:
-                return
-            ms_id = milestones[-1].get("milestone_id", "")
-            if not ms_id:
-                return
-            self.repo.update_milestone(
-                ms_id,
-                {
-                    "phase_total_tokens": int(activity.get("total_tokens", 0) or 0),
-                    "phase_input_tokens": int(activity.get("total_input_tokens", 0) or 0),
-                    "phase_output_tokens": int(activity.get("total_output_tokens", 0) or 0),
-                    "phase_request_count": int(activity.get("request_count", 0) or 0),
-                },
-            )
-        except Exception:
-            logger.warning("Failed to write real-time phase usage", exc_info=True)
-
     def pause_current_task(self):
         """Pause the currently running agent task using SIGSTOP.
 
@@ -1739,39 +748,13 @@ class AutonomousOrchestrator:
         Unlike cancel, this does NOT clear _current_session_id so
         resume can find the session again.
 
-        **Phase 1 Enhancement (P0)**: Persist retry state before pause
-        to ensure counts survive pause/resume cycle.
+        Note: we intentionally do NOT set _cancel_requested here.
+        Since SIGSTOP freezes the process, _run_local's
+        session.completed.wait() will block until SIGCONT resumes
+        the process and it finishes. The scheduler won't re-poll
+        this workflow because its status is set to "paused" in the
+        database, which advance() checks at entry.
         """
-        # ── Phase 1: Persist retry state before pause ─────────────────────
-        wf = self.workflow
-        if wf and wf.get("status") in ("developing", "planning"):
-            # Read current retry counts
-            test_retries = wf.get("test_retries", 0)
-            skip_retries = wf.get("skip_retries", 0)
-            dev_retries = wf.get("dev_retries_on_test_fail", 0)
-
-            # Persist retry state + status + paused_at (原子写入)
-            try:
-                self._update_workflow(
-                    {
-                        "test_retries": test_retries,
-                        "skip_retries": skip_retries,
-                        "dev_retries_on_test_fail": dev_retries,
-                        "status": "paused",
-                        "paused_at": datetime.now(timezone.utc),
-                    }
-                )
-                logger.info(
-                    "Persisted retry state before pause: test=%d, skip=%d, dev=%d",
-                    test_retries,
-                    skip_retries,
-                    dev_retries,
-                )
-            except Exception as e:
-                # 写入失败仍允许 pause（避免阻塞用户操作）
-                logger.warning("Failed to persist retry state before pause: %s", e)
-
-        # ── Pause the agent process ───────────────────────────────────────
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:
@@ -1803,7 +786,7 @@ class AutonomousOrchestrator:
 
         Terminates the subprocess with SIGTERM/SIGKILL.
         """
-        self._cancel_requested.set()  # signal API-error retry loop to stop
+        self._cancel_requested.set()  # signal 429 retry loop to stop
         with self._session_lock:
             session_id = self._current_session_id
         if session_id:
@@ -1825,23 +808,13 @@ class AutonomousOrchestrator:
             logger.error("Workflow %s not found", self._workflow_id)
             return
 
-        if wf.get("status") in ("paused", "failed", "cancelled"):
+        if wf.get("status") == "paused":
             return
 
         phase = wf.get("current_phase", "preparation")
         logger.info("Advancing workflow %s phase=%s", self._workflow_id[:8], phase)
 
         try:
-            # Self-heal the worktree before any downstream phase runs. A
-            # retried/resumed workflow may find its worktree dir gone (cleaned
-            # up after a prior failure), which previously launched the agent
-            # against an empty path (#814). preparation creates it, so it's
-            # skipped here.
-            if phase != "preparation":
-                self._ensure_worktree(wf)
-                # Re-read so downstream phases see the healed worktree_path /
-                # branch_name in wf rather than the pre-heal snapshot.
-                wf = self.workflow
             if phase == "preparation":
                 self._do_preparation(wf)
             elif phase == "planning":
@@ -1856,50 +829,12 @@ class AutonomousOrchestrator:
                 self._do_wait(wf)
             elif phase == "merge":
                 self._do_merge(wf)
-            # Success — reset the transient retry counter so the next network
-            # blip starts fresh.
-            if wf.get("transient_retry_count", 0):
-                self._update_workflow({"transient_retry_count": 0, "error_message": ""})
         except Exception as e:
-            err_str = str(e).lower()
-            is_transient = isinstance(e, GitHubOpsError) and any(
-                kw in err_str for kw in _TRANSIENT_ORCHESTRATOR_KEYWORDS
-            )
-            if is_transient:
-                # Layer 2 auto-retry: don't mark failed. Increment the
-                # transient retry counter and let the scheduler retry on the
-                # next cycle (~10s). This handles sustained network outages
-                # that outlast the layer-1 in-call retry (3×10s in _run_git).
-                transient_count = int(wf.get("transient_retry_count", 0) or 0) + 1
-                if transient_count <= TRANSIENT_RETRY_MAX:
-                    logger.warning(
-                        "Transient error in %s for workflow %s (attempt %d/%d): %s — "
-                        "will retry on next scheduler cycle",
-                        phase,
-                        self._workflow_id[:8],
-                        transient_count,
-                        TRANSIENT_RETRY_MAX,
-                        e,
-                    )
-                    self._update_workflow(
-                        {
-                            "transient_retry_count": transient_count,
-                            "error_message": f"Transient network error (retry {transient_count}/{TRANSIENT_RETRY_MAX}): {e}",
-                        }
-                    )
-                    return
-                logger.error(
-                    "Transient error retry exhausted for workflow %s after %d attempts",
-                    self._workflow_id[:8],
-                    transient_count - 1,
-                )
-            # Non-transient error, or transient retries exhausted → fail.
             logger.error("Orchestrator error in %s: %s", phase, e, exc_info=True)
             self._update_workflow(
                 {
                     "status": "failed",
                     "error_message": str(e),
-                    "transient_retry_count": 0,
                 }
             )
             self._emit("error", {"phase": phase, "error": str(e)})
@@ -1940,34 +875,8 @@ class AutonomousOrchestrator:
             # Force worktree for parallel execution
             try:
                 gh._run_git(["fetch", "origin", "main"])
-                # normpath collapses the ".." so the stored path and the worktree
-                # dir on disk agree; an unnormalized path later breaks JSONL
-                # session detection (#814).
-                wt_path = os.path.normpath(f"{project_path}/../{branch_name.replace('/', '-')}")
-                # A prior fork attempt may have created the branch then failed
-                # before/after registering the worktree; cleanup only removes
-                # the worktree, not the branch. Probe for a surviving branch
-                # (local or remote) and attach via add_worktree (no -b) if it
-                # exists, otherwise create both fresh. Same pattern as the
-                # main prep path and _ensure_worktree (#814).
-                _fork_branch_exists = (
-                    gh._run_git(
-                        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
-                        check=False,
-                    ).returncode
-                    == 0
-                )
-                _fork_remote_exists = (
-                    gh._run_git(
-                        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
-                        check=False,
-                    ).returncode
-                    == 0
-                )
-                if _fork_branch_exists or _fork_remote_exists:
-                    gh.add_worktree(path=wt_path, branch=branch_name)
-                else:
-                    gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
+                wt_path = f"{project_path}/../{branch_name.replace('/', '-')}"
+                gh.create_worktree(path=wt_path, branch=branch_name, base=base_ref)
                 self._update_workflow(
                     {
                         "worktree_path": wt_path,
@@ -1975,9 +884,6 @@ class AutonomousOrchestrator:
                         "branch_strategy": "worktree",
                     }
                 )
-                # Worktree now exists; drop the cached gh (bound to the main
-                # repo) so the next _get_gh() rebinds to the worktree path.
-                self._gh = None
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
@@ -2012,15 +918,7 @@ class AutonomousOrchestrator:
         # New project: create GitHub repo
         if wf.get("is_new_project"):
             try:
-                # Get system_account for multi-user permission isolation (Issue #1395)
-                system_account = None
-                user_id = wf.get("user_id")
-                if user_id:
-                    user_repo = UserRepository()
-                    user = user_repo.get_user_by_id(user_id)
-                    if user:
-                        system_account = user.get("system_account")
-                gh = GitHubOps(project_path or ".", system_account=system_account)
+                gh = GitHubOps(project_path or ".")
                 repo_data = gh.create_repo(
                     name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
                     private=wf.get("is_private", True),
@@ -2036,7 +934,7 @@ class AutonomousOrchestrator:
                 )
                 self._update_workflow({"project_repo_url": repo_url})
                 project_path = project_path or "."
-                self._gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = GitHubOps(project_path)
             except GitHubOpsError as e:
                 self._create_milestone(
                     phase="preparation",
@@ -2082,12 +980,6 @@ class AutonomousOrchestrator:
                     body=requirements_text,
                 )
                 issue_number = issue_data.get("number")
-                # Persist the created issue number to the workflow so downstream
-                # phases (comment posting, timeline header badge, PR body "Closes
-                # #N") can resolve it. Mirrors the parsed-issue branch above.
-                # Without this, wf.github_issue_number stays NULL and every
-                # `wf.get("github_issue_number")` gate silently no-ops (#1194).
-                self._update_workflow({"github_issue_number": issue_number})
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="issue_created",
@@ -2106,214 +998,49 @@ class AutonomousOrchestrator:
                 )
                 raise
         elif issue_number and not requirements_text:
-            # Read issue content (body + all comments so planning sees the
-            # full discussion, not just the top-level description)
+            # Read issue content
             try:
                 issue_data = gh.get_issue(issue_number)
                 requirements_text = issue_data.get("body", "")
-                comments = issue_data.get("comments", []) or []
-                if comments:
-                    # Skip automation-authored comments (status reports / PR
-                    # links the bot itself posts) so a rerun or fork on an
-                    # existing issue doesn't re-ingest them as requirements.
-                    comments = [c for c in comments if not _is_bot_comment(c)]
-                if comments:
-                    # Format comments in chronological order. The gh CLI
-                    # returns author as {"login": "..."} and timestamps in
-                    # camelCase ("createdAt"), matching list_issue_comments.
-                    formatted = []
-                    for c in comments:
-                        author = c.get("author", {}) or {}
-                        author_name = (
-                            author.get("login") if isinstance(author, dict) else author
-                        ) or "unknown"
-                        created = c.get("createdAt", "") or c.get("created_at", "")
-                        stamp = f" ({created})" if created else ""
-                        formatted.append(f"### 评论 by @{author_name}{stamp}\n{c.get('body', '')}")
-                    requirements_text += "\n\n---\n\n## Issue 评论（补充信息）\n\n" + "\n\n".join(
-                        formatted
-                    )
                 self._create_milestone(
                     phase="preparation",
-                    milestone_type="issue_linked",
+                    milestone_type="issue_created",
                     status="completed",
-                    title=f"Linked to issue #{issue_number}",
+                    title=f"Read issue #{issue_number}",
                     github_issue_number=issue_number,
                     result_summary=issue_data.get("title", ""),
                 )
                 self._update_workflow({"requirements_text": requirements_text})
             except GitHubOpsError as e:
-                self._create_milestone(
-                    phase="preparation",
-                    milestone_type="issue_linked",
-                    status="failed",
-                    title=f"Failed to read issue #{issue_number}",
-                    github_issue_number=issue_number,
-                    error_message=str(e),
-                )
-                raise
+                logger.warning("Failed to read issue #%s: %s", issue_number, e)
 
         # Create branch
         strategy = wf.get("branch_strategy", "new-branch")
-        # Use pre-generated branch_name if available (Issue #1573)
         branch_name = wf.get("branch_name", "")
-        if not branch_name:
-            branch_name = f"auto-dev/{self._workflow_id[:8]}"
 
         if strategy == "new-branch" or strategy == "worktree":
+            if not branch_name:
+                branch_name = f"auto-dev/{self._workflow_id[:8]}"
             try:
                 # Ensure we branch from latest origin/main
                 gh._run_git(["fetch", "origin", "main"])
 
                 if strategy == "worktree":
-                    # Use pre-generated worktree_path if available (Issue #1573)
-                    # Format: {project_path}/.worktrees/{workflow_id}
-                    # Fallback to legacy format for backwards compatibility
-                    pre_generated_worktree_path = wf.get("worktree_path", "")
-                    if pre_generated_worktree_path and pre_generated_worktree_path.startswith(
-                        project_path
-                    ):
-                        worktree_path = pre_generated_worktree_path
-                    else:
-                        # Legacy format for backwards compatibility
-                        worktree_path = os.path.normpath(
-                            f"{project_path}/../{branch_name.replace('/', '-')}"
-                        )
-
-                    # Clean up prunable worktrees (directory lost but registered)
-                    # This happens when worktree dir was deleted externally (Issue #1442)
-                    gh._run_git(["worktree", "prune"])
-
-                    # Check and clean up residual worktree (Issue #1442).
-                    # Path.exists()/shutil.rmtree() run as the service user and
-                    # hit [Errno 13] under a user-private parent (700 home),
-                    # so we cross-check via git's own worktree registry (already
-                    # routed through the sudo wrapper in _run_git) instead of
-                    # Python filesystem calls. Bare residual dirs (registered
-                    # then pruned, but the directory survived) are detected via
-                    # path_exists_as_user; removal of those falls back to git
-                    # and, on failure, is left in place with a warning rather
-                    # than force-deleting as the service user.
-                    if any(wt.get("path") == worktree_path for wt in gh.list_worktrees()):
-                        try:
-                            gh.remove_worktree(worktree_path)
-                            logger.info("Removed residual worktree at %s", worktree_path)
-                        except GitHubOpsError as e:
-                            logger.warning(
-                                "Could not remove residual worktree %s: %s", worktree_path, e
-                            )
-                    elif gh.path_exists_as_user(worktree_path, dir_only=True):
-                        # Directory present but not git-registered (e.g. pruned).
-                        # git worktree remove will reject it; we cannot safely
-                        # rmtree as the service user, so leave it and let
-                        # create_worktree surface a clear error if it blocks.
-                        logger.warning(
-                            "Residual non-worktree directory at %s is not git-registered; "
-                            "leaving in place (no rm privilege as service user)",
-                            worktree_path,
-                        )
-
-                    # A prior run may have created the branch then failed before
-                    # (or after) registering the worktree; the cleanup above only
-                    # removes the worktree registration, not the branch. Blindly
-                    # calling create_worktree (which uses ``-b``) would then fail
-                    # with "a branch named '<branch>' already exists". If the
-                    # branch survives (local or remote), attach a worktree to it
-                    # via add_worktree (no ``-b``); otherwise create both fresh.
-                    # Mirrors the recovery logic in _ensure_worktree.
-                    branch_exists = (
-                        gh._run_git(
-                            ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
-                            check=False,
-                        ).returncode
-                        == 0
+                    wt_data = gh.create_worktree(
+                        path=f"{project_path}/../{branch_name.replace('/', '-')}",
+                        branch=branch_name,
+                        base="origin/main",
                     )
-                    remote_exists = (
-                        gh._run_git(
-                            [
-                                "show-ref",
-                                "--verify",
-                                "--quiet",
-                                f"refs/remotes/origin/{branch_name}",
-                            ],
-                            check=False,
-                        ).returncode
-                        == 0
-                    )
-                    if branch_exists or remote_exists:
-                        wt_data = gh.add_worktree(path=worktree_path, branch=branch_name)
-                    else:
-                        # Use locked base_commit_sha for batch workflows (Issue #1552)
-                        wf = self.workflow
-                        base_commit_sha = wf.get("base_commit_sha")
-                        base_ref = base_commit_sha if base_commit_sha else "origin/main"
-                        wt_data = gh.create_worktree(
-                            path=worktree_path,
-                            branch=branch_name,
-                            base=base_ref,  # Locked SHA or dynamic origin/main
-                        )
-
-                    # Issue #1573: Verify worktree was created on correct branch
-                    # Issue #1627: For worktree strategy, verify worktree_path is not empty
-                    actual_worktree_path = wt_data.get("worktree_path", "")
-                    if strategy == "worktree" and not actual_worktree_path:
-                        logger.error(
-                            "worktree strategy requires worktree_path but got empty for workflow %s",
-                            self._workflow_id[:8],
-                        )
-                        raise GitHubOpsError(
-                            "worktree strategy requires worktree_path but create_worktree returned empty"
-                        )
-
-                    if actual_worktree_path:
-                        try:
-                            wt_gh = GitHubOps(actual_worktree_path, system_account=system_account)
-                            actual_branch = wt_gh.get_current_branch()
-                            if actual_branch != branch_name:
-                                logger.error(
-                                    "Worktree created on wrong branch for workflow %s: expected=%s, actual=%s",
-                                    self._workflow_id[:8],
-                                    branch_name,
-                                    actual_branch,
-                                )
-                                raise GitHubOpsError(
-                                    f"Worktree created on wrong branch: expected {branch_name}, actual {actual_branch}"
-                                )
-                            logger.info(
-                                "Verified worktree %s is on correct branch %s",
-                                actual_worktree_path,
-                                branch_name,
-                            )
-                        except GitHubOpsError:
-                            raise
-                        except Exception as e:
-                            logger.warning("Failed to verify worktree branch: %s", e)
-
-                    # Update workflow with worktree_path and branch_name in single transaction
-                    self._update_workflow(
-                        {
-                            "worktree_path": actual_worktree_path,
-                            "branch_name": branch_name,
-                        }
-                    )
-                    # The worktree now exists; drop the cached gh (bound to the
-                    # main repo during preparation) so the next _get_gh() rebinds
-                    # to the worktree path — the agent's actual working repo.
-                    self._gh = None
+                    self._update_workflow({"worktree_path": wt_data.get("worktree_path", "")})
                 else:
-                    # Use locked base_commit_sha for batch workflows (Issue #1552)
-                    wf = self.workflow
-                    base_commit_sha = wf.get("base_commit_sha")
-                    base_ref = base_commit_sha if base_commit_sha else "origin/main"
-                    gh.create_branch(branch_name, base=base_ref)
-                    self._update_workflow({"branch_name": branch_name})
-
+                    gh.create_branch(branch_name, base="origin/main")
                 self._create_milestone(
                     phase="preparation",
                     milestone_type="branch_created",
                     status="completed",
                     title=f"Branch '{branch_name}' created",
                 )
+                self._update_workflow({"branch_name": branch_name})
             except GitHubOpsError as e:
                 self._create_milestone(
                     phase="preparation",
@@ -2341,7 +1068,6 @@ class AutonomousOrchestrator:
         wf = self.workflow  # Re-read for latest state
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_plan_rounds", 3)
-        force_full_rounds = self._must_run_full_review_rounds(wf)
         dev_round = wf.get("dev_round", 1)
         issue_number = wf.get("github_issue_number")
         gh = self._get_gh()
@@ -2368,15 +1094,7 @@ class AutonomousOrchestrator:
                     break
 
             prompt = (
-                PLANNING_CONTEXT + "你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
-            )
-            if issue_number:
-                prompt += (
-                    f"## 关联 Issue\n"
-                    f"本任务关联 GitHub Issue #{issue_number}。\n"
-                    f"完善后的方案需满足 Issue #{issue_number} 的所有需求。\n\n"
-                )
-            prompt += (
+                PLANNING_CONTEXT + f"你是一个高级开发工程师。请根据以下审查意见完善实现方案。\n\n"
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
@@ -2388,15 +1106,7 @@ class AutonomousOrchestrator:
             milestone_type = "plan_refined"
         else:
             prompt = (
-                PLANNING_CONTEXT + "你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
-            )
-            if issue_number:
-                prompt += (
-                    f"## 关联 Issue\n"
-                    f"本任务关联 GitHub Issue #{issue_number}。\n"
-                    f"方案中请明确引用此 Issue 编号 #{issue_number}。\n\n"
-                )
-            prompt += (
+                PLANNING_CONTEXT + f"你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
                 f"## 需求\n{requirements}\n\n"
                 f"## 项目路径\n{wf.get('project_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
@@ -2435,7 +1145,7 @@ class AutonomousOrchestrator:
             prompt=prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=_zcode_planning_mode(wf),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
             session_line="main",
@@ -2449,14 +1159,13 @@ class AutonomousOrchestrator:
         self._accumulate_tokens(result)
 
         # Store plan
-        plan_text = self._artifact_text(result)
+        plan_text = result.response_text or ""
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
             {
                 "status": "completed" if result.success else "failed",
                 "plan_content": plan_text,
                 "result_summary": plan_text[:200],
-                "tldr": self._artifact_tldr(result),
                 "session_id": result.session_id,
                 "error_message": result.error or "",
             },
@@ -2479,7 +1188,7 @@ class AutonomousOrchestrator:
                     {
                         "timeout": planning_timeout,
                         "tokens_used": result.total_tokens,
-                        "partial_plan": (self._artifact_visible_text(result) or plan_text)[:500],
+                        "partial_plan": (result.response_text or "")[:500],
                     },
                 )
             else:
@@ -2490,28 +1199,21 @@ class AutonomousOrchestrator:
 
         # Post plan as issue comment
         if issue_number:
-            self._post_github_comment(
-                gh,
-                issue_number,
-                f"## 📋 Implementation Plan (Round {round_num})\n\n{plan_text}",
-                context="plan",
-            )
+            try:
+                gh.add_issue_comment(
+                    issue_number,
+                    f"## 📋 Implementation Plan (Round {round_num})\n\n{self._clean_agent_text(plan_text)}",
+                )
+            except GitHubOpsError:
+                pass
 
         # Step 2: Review plan
         review_prompt = (
-            PLANNING_CONTEXT + "你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
-            "1. 遗漏的需求\n"
-            "2. 架构风险\n"
-            "3. 实现难度估计\n"
-            "4. 改进建议\n\n"
-        )
-        if issue_number:
-            review_prompt += (
-                f"## 关联 Issue\n"
-                f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"审查时请确保方案满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-        review_prompt += (
+            PLANNING_CONTEXT + f"你是一位资深技术评审专家。请严格审查以下实现方案，指出：\n"
+            f"1. 遗漏的需求\n"
+            f"2. 架构风险\n"
+            f"3. 实现难度估计\n"
+            f"4. 改进建议\n\n"
             f"## 方案\n{plan_text}\n\n"
             f"## 需求\n{requirements}\n\n"
             f"如果方案没有重大问题，请明确说明'方案通过审查'。\n\n"
@@ -2537,7 +1239,7 @@ class AutonomousOrchestrator:
             prompt=review_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=_zcode_planning_mode(wf),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=planning_allowed,
             timeout=planning_timeout,
             session_line="review",
@@ -2546,7 +1248,7 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(review_result)
 
-        review_text = self._artifact_text(review_result)
+        review_text = review_result.response_text or ""
 
         # Detect empty review output (agent produced no meaningful content)
         if not review_text.strip():
@@ -2566,24 +1268,25 @@ class AutonomousOrchestrator:
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "result_summary": review_text[:200],
-                "tldr": self._artifact_tldr(review_result),
                 "review_session_id": review_result.session_id,
             },
         )
 
         # Post review as issue comment
         if issue_number:
-            self._post_github_comment(
-                gh,
-                issue_number,
-                f"## 🔍 Plan Review (Round {round_num})\n\n{review_text}",
-                context="plan-review",
-            )
+            try:
+                gh.add_issue_comment(
+                    issue_number,
+                    f"## 🔍 Plan Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                )
+            except GitHubOpsError:
+                pass
 
         # Step 3: Check if all rounds are done
-        # max_plan_rounds is the cap for plan review rounds. In the default
-        # mode we continue only when the review has substantive feedback; in
-        # force-full mode we continue until the cap even after approval.
+        # max_plan_rounds means the max number of Plan→Review→Refine cycles.
+        # After the initial Plan + Review (round 1), we need at least one
+        # refinement round if the review had substantive feedback.
+        # So the total rounds = initial plan + up to max_plan_rounds refinements.
         self._update_workflow({"current_round": round_num})
 
         review_has_feedback = bool(
@@ -2591,14 +1294,11 @@ class AutonomousOrchestrator:
             and len(review_text.strip()) > REVIEW_FEEDBACK_MIN_LENGTH
             and "方案通过审查" not in review_text
         )
-        # Default mode may stop early when the review passes. When
-        # require_full_review_rounds is enabled, planning keeps going until the
-        # configured cap so the workflow always consumes exactly N review
-        # rounds. The cap is still strict: rounds run 1..max, never max+1.
-        needs_refinement = round_num < max_rounds and (force_full_rounds or review_has_feedback)
+        needs_refinement = review_has_feedback and round_num <= max_rounds
 
         if not needs_refinement:
-            # Planning complete. Gather the latest plan and the last review.
+            # Planning complete — finalize the plan via the main session.
+            # Gather the latest plan and the last review round's feedback.
             final_plan = ""
             last_review = ""
             all_milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
@@ -2614,100 +1314,10 @@ class AutonomousOrchestrator:
                 if final_plan and last_review:
                     break
 
-            # Act on the LAST review's feedback with one final plan_refined (its
-            # own milestone), so the timeline shows review(N) -> plan_refined ->
-            # plan_finalized and the Nth review is never wasted. Skipped only
-            # when the last review purely approved (nothing to integrate).
-            if final_plan and (review_has_feedback or self._should_refine_plan(last_review)):
-                refine_ms = self._create_milestone(
-                    phase="planning",
-                    dev_round=dev_round,
-                    round_number=round_num,
-                    milestone_type="plan_refined",
-                    status="in_progress",
-                    title=f"Plan refine (final, round {round_num})",
-                )
-                refine_prompt = (
-                    PLANNING_CONTEXT + "请根据以下审查意见完善实现方案，输出最终的完整方案。"
-                    "直接输出方案，不要输出思考过程或引导文字。\n\n"
-                )
-                if issue_number:
-                    refine_prompt += (
-                        f"## 关联 Issue\n"
-                        f"本任务关联 GitHub Issue #{issue_number}。\n"
-                        f"完善后的方案需满足 Issue #{issue_number} 的所有需求。\n\n"
-                    )
-                refine_prompt += (
-                    f"## 当前方案\n{final_plan}\n\n"
-                    f"## 审查意见\n{last_review}\n\n"
-                    "重要约束：只输出高层设计方案和实现步骤描述，"
-                    "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
-                )
-                planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
-                refine_result = self._run_agent(
-                    wf=wf,
-                    workflow_id=self._workflow_id,
-                    cli_tool=wf.get("cli_tool", "claude-code"),
-                    model=wf.get("model", ""),
-                    project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-                    prompt=refine_prompt,
-                    workspace_type=wf.get("workspace_type", "local"),
-                    remote_machine_id=wf.get("remote_machine_id"),
-                    permission_mode=_zcode_planning_mode(wf),
-                    allowed_tools=planning_allowed,
-                    timeout=PLANNING_TIMEOUT,
-                    session_line="main",
-                    milestone_id=refine_ms.get("milestone_id", ""),
-                )
-                self._accumulate_tokens(refine_result)
-                if refine_result.success:
-                    final_plan = self._artifact_text(refine_result) or final_plan
-                self.repo.update_milestone(
-                    refine_ms.get("milestone_id", ""),
-                    {
-                        "status": "completed" if refine_result.success else "failed",
-                        "plan_content": final_plan,
-                        "result_summary": final_plan[:200],
-                        "tldr": self._extract_tldr(final_plan),
-                        "error_message": refine_result.error or "",
-                    },
-                )
-                if not refine_result.success:
-                    # The final refine is what guarantees the Nth review's
-                    # feedback is acted on. If it failed (timeout / model /
-                    # runner), do NOT silently proceed with the pre-refine plan —
-                    # block for retry, mirroring the plan-agent failure path.
-                    # Otherwise the last review would be dropped quietly (#1200).
-                    if "timed out" in (refine_result.error or ""):
-                        self._update_workflow(
-                            {
-                                "status": "planning_timeout",
-                                "error_message": (
-                                    f"Plan refine timed out after {PLANNING_TIMEOUT}s. "
-                                    "You can extend the timeout and retry."
-                                ),
-                            }
-                        )
-                        self._emit(
-                            "planning_timeout",
-                            {
-                                "timeout": PLANNING_TIMEOUT,
-                                "tokens_used": refine_result.total_tokens,
-                                "partial_plan": final_plan[:500],
-                            },
-                        )
-                    else:
-                        self._update_workflow(
-                            {
-                                "status": "failed",
-                                "error_message": f"Plan refine failed: {refine_result.error}",
-                            }
-                        )
-                    return
-
-            final_plan = self._sanitize_artifact_text(final_plan)
-
-            # Record the authoritative final plan.
+            # Always record a plan_finalized milestone before development so the
+            # timeline shows the authoritative final plan (regardless of how many
+            # review rounds were preset). The main session resumes to integrate
+            # the last review round's feedback when the review carried suggestions.
             plan_final_ms = self._create_milestone(
                 phase="planning",
                 dev_round=dev_round,
@@ -2716,24 +1326,69 @@ class AutonomousOrchestrator:
                 status="in_progress",
                 title="Plan Finalized",
             )
+
+            if self._should_refine_plan(last_review) and final_plan:
+                finalize_prompt = (
+                    PLANNING_CONTEXT + "以下实现方案已通过审查，但审查专家给出了一些改进建议。\n"
+                    "请根据建议整合优化，输出最终方案。直接输出最终的完整方案，"
+                    "不要输出思考过程或其他引导文字。\n\n"
+                    f"## 已通过的方案\n{final_plan}\n\n"
+                    f"## 审查建议\n{last_review}\n\n"
+                    "重要约束：只输出高层设计方案和实现步骤描述，"
+                    "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
+                )
+                planning_allowed = PLANNING_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), [])
+                finalize_result = self._run_agent(
+                    wf=wf,
+                    workflow_id=self._workflow_id,
+                    cli_tool=wf.get("cli_tool", "claude-code"),
+                    model=wf.get("model", ""),
+                    project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                    prompt=finalize_prompt,
+                    workspace_type=wf.get("workspace_type", "local"),
+                    remote_machine_id=wf.get("remote_machine_id"),
+                    permission_mode=wf.get("permission_mode", "auto-edit"),
+                    allowed_tools=planning_allowed,
+                    timeout=PLANNING_TIMEOUT,
+                    session_line="main",
+                    milestone_id=plan_final_ms.get("milestone_id", ""),
+                )
+                self._accumulate_tokens(finalize_result)
+                if finalize_result.success and finalize_result.response_text:
+                    final_plan = finalize_result.response_text
+
+            # Clean up agent intro text (e.g. "我来分析代码库...")
+            final_plan = self._clean_agent_text(final_plan)
+
+            # Record the authoritative final plan on the milestone. When the
+            # review carried no suggestions, the existing plan is the final plan
+            # and no agent call was made (phase usage stays zero).
             self.repo.update_milestone(
                 plan_final_ms.get("milestone_id", ""),
                 {
                     "status": "completed",
                     "plan_content": final_plan,
                     "result_summary": final_plan[:200],
-                    "tldr": self._extract_tldr(final_plan),
                 },
             )
 
             issue_number = wf.get("github_issue_number")
             if issue_number and final_plan:
-                final_comment = (
-                    f"## 📋 Final Implementation Plan\n\n"
-                    f"Plan review completed after {round_num} round(s).\n\n"
-                    f"{final_plan}"
-                )
-                self._post_github_comment(gh, issue_number, final_comment, context="final-plan")
+                try:
+                    final_comment = (
+                        f"## 📋 Final Implementation Plan\n\n"
+                        f"Plan review completed after {round_num} round(s).\n\n"
+                        f"{final_plan}"
+                    )
+                    if self._should_show_review_warning(round_num, max_rounds, last_review):
+                        final_comment += (
+                            f"\n\n---\n\n"
+                            f"## ⚠️ Note: Last review had feedback not yet addressed\n\n"
+                            f"{last_review[:2000]}"
+                        )
+                    gh.add_issue_comment(issue_number, final_comment)
+                except Exception:
+                    pass
 
             # Plan finalized, move to development
             self._update_workflow(
@@ -2764,156 +1419,26 @@ class AutonomousOrchestrator:
         # ── Development phase (skipped on test-only/skip retry) ──
         if test_retries > 0 or skip_retries > 0:
             logger.info(
-                "Test/skip retry (test=%d, skip=%d) for dev round %d, skipping development phase",
+                "Test/skip retry (test=%d, skip=%d) for dev round %d, "
+                "skipping development phase",
                 test_retries,
                 skip_retries,
                 dev_round,
             )
         else:
             self._run_development_agent(wf, dev_round, gh)
-            # Post development completion comment — but only if dev succeeded.
-            # _run_development_agent sets status="failed" on failure; without
-            # this guard, a "✅ Completed" comment is posted with a stale
-            # commit that isn't the agent's work (#525).
-            wf = self.workflow or {}
-            if wf.get("status") != "failed":
-                self._post_dev_completion_comment(wf, dev_round, gh)
+            # Post development completion comment (before tests)
+            self._post_dev_completion_comment(wf, dev_round, gh)
 
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)
-
-    def _validate_path_strategy(self, wf: dict, dev_round: int) -> bool:
-        """Validate path consistency with branch_strategy (Issue #1627).
-
-        Returns True if validation passes, False if validation fails.
-        On failure, creates milestone and updates workflow status.
-        """
-        strategy = wf.get("branch_strategy", "new-branch")
-        worktree_path = wf.get("worktree_path", "")
-        project_path = wf.get("project_path", "")
-
-        if strategy == "worktree":
-            if not worktree_path:
-                self._report_path_validation_error(dev_round, strategy, "worktree_path")
-                return False
-        else:
-            # new-branch or same-branch: must use project_path
-            if not project_path:
-                self._report_path_validation_error(dev_round, strategy, "project_path")
-                return False
-
-        return True
-
-    def _report_path_validation_error(self, dev_round: int, strategy: str, path_name: str):
-        """Report path validation failure via milestone and workflow update (Issue #1627)."""
-        logger.error(
-            "%s strategy requires %s but got empty for workflow %s",
-            strategy,
-            path_name,
-            self._workflow_id[:8],
-        )
-        self._create_milestone(
-            phase="development",
-            dev_round=dev_round,
-            milestone_type="path_validation",
-            status="failed",
-            title=f"Missing {path_name} for {strategy} strategy",
-            error_message=f"branch_strategy is '{strategy}' but {path_name} is empty",
-        )
-        self._update_workflow(
-            {
-                "status": "failed",
-                "error_message": f"{strategy} strategy requires non-empty {path_name}",
-            }
-        )
 
     def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run the development agent, verify code changes, and return.
 
         On failure, updates workflow status to 'failed' and returns.
         Caller should check workflow status if needed.
-
-        Issue #1573: Added branch verification at the start of development phase.
         """
-        # Get Issue number for prompt context
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
-        # Issue #1573: Verify we're on the correct branch before development
-        expected_branch = wf.get("branch_name", "")
-        workflow_prefix = f"auto-dev/{self._workflow_id[:8]}"
-        try:
-            actual_branch = gh.get_current_branch()
-            if expected_branch and actual_branch != expected_branch:
-                logger.warning(
-                    "Development phase branch mismatch for workflow %s: expected=%s, actual=%s",
-                    self._workflow_id[:8],
-                    expected_branch,
-                    actual_branch,
-                )
-                # If expected_branch starts with auto-dev/, try to switch
-                if expected_branch.startswith("auto-dev/"):
-                    try:
-                        gh.checkout(expected_branch)
-                        logger.info(
-                            "Successfully switched to expected branch %s",
-                            expected_branch,
-                        )
-                        actual_branch = gh.get_current_branch()
-                    except GitHubOpsError as e:
-                        logger.error(
-                            "Failed to checkout to expected branch %s: %s",
-                            expected_branch,
-                            e,
-                        )
-                        self._create_milestone(
-                            phase="development",
-                            dev_round=dev_round,
-                            milestone_type="branch_mismatch",
-                            status="failed",
-                            title=f"Branch mismatch: expected {expected_branch}, actual {actual_branch}",
-                            error_message=f"Cannot checkout to expected branch: {e}",
-                        )
-                        self._update_workflow(
-                            {
-                                "status": "failed",
-                                "error_message": f"Branch mismatch: cannot checkout to {expected_branch}",
-                            }
-                        )
-                        return
-                else:
-                    # No auto-dev prefix, check if we're at least on workflow-specific branch
-                    if not actual_branch.startswith(workflow_prefix):
-                        logger.error(
-                            "Not on workflow-specific branch for workflow %s: %s",
-                            self._workflow_id[:8],
-                            actual_branch,
-                        )
-                        self._create_milestone(
-                            phase="development",
-                            dev_round=dev_round,
-                            milestone_type="branch_mismatch",
-                            status="failed",
-                            title=f"Not on workflow-specific branch: {actual_branch}",
-                            error_message=f"Expected branch starting with {workflow_prefix}",
-                        )
-                        self._update_workflow(
-                            {
-                                "status": "failed",
-                                "error_message": f"Not on workflow-specific branch: {actual_branch}",
-                            }
-                        )
-                        return
-        except GitHubOpsError as e:
-            logger.warning("Branch verification failed: %s", e)
-
-        # Issue #1627: Validate path strategy consistency before development
-        if not self._validate_path_strategy(wf, dev_round):
-            return
-
-        # Get path variables for agent execution
-        strategy = wf.get("branch_strategy", "new-branch")
-        worktree_path = wf.get("worktree_path", "")
-        project_path = wf.get("project_path", "")
-
         # Get the finalized plan — prefer the explicit plan_finalized milestone
         # (authoritative final plan), then fall back to the latest plan_content.
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
@@ -2947,14 +1472,8 @@ class AutonomousOrchestrator:
         except Exception:
             pass
 
-        dev_prompt = AUTONOMOUS_CONTEXT + "根据以下已审定的实现方案进行完整开发。\n\n"
-        if issue_number:
-            dev_prompt += (
-                f"## 关联 Issue\n"
-                f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"开发完成后的 commit message 必须包含 Issue #{issue_number} 的引用（如 'fix: ... (Issue #{issue_number})'）。\n\n"
-            )
-        dev_prompt += (
+        dev_prompt = (
+            AUTONOMOUS_CONTEXT + f"根据以下已审定的实现方案进行完整开发。\n\n"
             f"## 实现方案\n{final_plan}\n\n"
             f"## 要求\n"
             f"1. 严格按照方案实现所有功能\n"
@@ -2971,31 +1490,14 @@ class AutonomousOrchestrator:
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
-            project_path=worktree_path if strategy == "worktree" else project_path,
+            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
             prompt=dev_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
-            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="main",
-            timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
             milestone_id=ms.get("milestone_id", ""),
         )
-
-        # P2 修复（Issue #1611）：开发完成后重置 gh 缓存，重新绑定到正确路径
-        self._gh = None
-        gh = self._get_gh()
-
-        # 同步分支名（如果 Agent 创建了新分支）
-        current_branch = gh.get_current_branch()
-        expected_branch = wf.get("branch_name", "")
-        if current_branch != expected_branch:
-            logger.info(
-                "Agent created/switched to branch %s (expected: %s)",
-                current_branch,
-                expected_branch,
-            )
-            self._update_workflow({"branch_name": current_branch})
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
@@ -3068,11 +1570,7 @@ class AutonomousOrchestrator:
             except Exception:
                 pass
 
-            if branch_has_changes_vs_base and commit_sha != commit_before:
-                # The branch has commits vs origin/main AND the HEAD advanced
-                # during this session (commit_sha differs from commit_before).
-                # This covers resume scenarios where the agent committed in a
-                # prior session on the same branch.
+            if branch_has_changes_vs_base:
                 logger.info(
                     "No new commit this session, but branch '%s' has %d commits vs origin/main",
                     branch_name,
@@ -3084,23 +1582,16 @@ class AutonomousOrchestrator:
                         commit_sha = gh.get_current_commit()
                     except Exception:
                         pass
-            elif branch_has_changes_vs_base and commit_sha == commit_before:
-                # Branch has pre-existing divergence (e.g. it was created
-                # behind main), but the agent produced NO new commit this
-                # session. The diff is NOT the agent's work — treat as failure.
-                logger.warning(
-                    "Branch has %d commits vs origin/main but HEAD unchanged "
-                    "this session (commit_sha == commit_before) — not agent work",
-                    base_diff_stats.get("commits", 0),
-                )
+            else:
                 logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
                     {
                         "status": "failed",
                         "session_id": result.session_id,
-                        "result_summary": self._artifact_text(result)[:300],
-                        "tldr": self._artifact_tldr(result),
+                        "result_summary": (
+                            result.response_text[:300] if result.response_text else ""
+                        ),
                         "error_message": "Agent produced no code changes (commit SHA unchanged)",
                     },
                 )
@@ -3112,57 +1603,19 @@ class AutonomousOrchestrator:
                 )
                 return
 
-        # Salvage logic (issue #723): the dev agent may report failure
-        # (success=False) even though it produced real work this session — most
-        # commonly a subprocess timeout where claude-code finished and committed
-        # but never emitted a closing `result` event, or an API error that
-        # landed after the commit. When ``sha_changed`` proves the agent
-        # committed code, treat the round as completed instead of discarding
-        # hours of work. Only the no-commit case (handled at the ``not
-        # sha_changed`` branch above) is a true failure.
-        #
-        # Note (scope): ``sha_changed`` is set both by an explicit agent commit
-        # AND by the auto-commit of uncommitted changes above. So a failed agent
-        # that left half-finished edits is also salvaged and forwarded to the
-        # test phase. This is intentional: the test phase is the gate that
-        # catches broken/half-finished code, so salvaging lets the workflow
-        # progress to that gate rather than dying on a late subprocess error.
-        salvaged = (not result.success) and bool(sha_changed)
-        if salvaged:
-            logger.warning(
-                "Dev agent reported failure (%s) but produced a new commit %s "
-                "this session — salvaging development and proceeding to tests",
-                result.error,
-                (commit_sha or "")[:8],
-            )
-
-        dev_result_summary = self._build_dev_result_summary(
-            self._artifact_text(result),
-            diff_stats,
-            commit_sha,
-            result.success or salvaged,
-        )
-
-        milestone_error = ""
-        if salvaged:
-            milestone_error = f"Salvaged after agent error: {result.error or ''}".strip()
-        elif result.error:
-            milestone_error = result.error
-
         self.repo.update_milestone(
             ms.get("milestone_id", ""),
             {
-                "status": "completed" if (result.success or salvaged) else "failed",
+                "status": "completed" if result.success else "failed",
                 "session_id": result.session_id,
-                "result_summary": dev_result_summary,
-                "tldr": self._artifact_tldr(result),
+                "result_summary": result.response_text[:300] if result.response_text else "",
                 "commit_shas": json.dumps([commit_sha] if commit_sha else []),
                 "diff_stats": json.dumps(diff_stats),
-                "error_message": milestone_error,
+                "error_message": result.error or "",
             },
         )
 
-        if not result.success and not salvaged:
+        if not result.success:
             self._update_workflow(
                 {"status": "failed", "error_message": f"Development failed: {result.error}"}
             )
@@ -3205,96 +1658,10 @@ class AutonomousOrchestrator:
             )
         msg += "\nProgressing to test phase..."
 
-        self._post_github_comment(gh, issue_number, msg, context="dev-progress")
-
-    def _validate_test_report_format(self, text: str) -> tuple[bool, str]:
-        """Validate that test report follows standard format (Issue #1547).
-
-        Returns:
-            (is_valid, reason): True if format is valid, False with reason otherwise.
-
-        Standard formats (enforced by prompt):
-        - pytest: "X passed, Y failed, Z skipped" or "X passed in Y.Zs"
-        - Jest: "X tests passed" or "Test Suites: X passed"
-        - Go test: "PASS ok" or "X tests passed"
-        - Rust: "test result: ok" or "running X tests"
-        - Java: "Tests run: X" or "BUILD SUCCESS"
-
-        Invalid formats (trigger retry):
-        - "X个测试全部通过" (Chinese non-standard)
-        - "所有测试都成功了" (Chinese non-standard)
-        - "测试运行完成，全部通过" (Chinese non-standard)
-        - "测试在后台运行中" (hallucination)
-        - "测试进度约50%" (hallucination)
-        """
-        if not text or not text.strip():
-            return False, "Empty test report"
-
-        # Standard format patterns (these are VALID)
-        _standard_patterns = [
-            # pytest standard formats
-            r"\d+\s+passed(?:\s*,\s*\d+\s+failed)?(?:\s*,\s*\d+\s+skipped)?(?:\s+in\s+[\d.]+s)?",
-            r"\d+\s+passed\s+in\s+[\d.]+s",
-            # Jest standard formats
-            r"\d+\s+tests\s+passed(?:\s*,\s*\d+\s+tests\s+failed)?",
-            r"Test\s+Suites:\s*\d+\s+passed",
-            # Go test standard formats
-            r"PASS\s+ok",
-            r"FAIL\s+FAIL",
-            r"\d+\s+tests\s+passed",
-            # Rust cargo test standard formats
-            r"test\s+result:\s*ok(?:\.\s*\d+\s+passed(?:;\s*\d+\s+failed)?)?",
-            r"running\s+\d+\s+tests",
-            # Java Maven/Gradle standard formats
-            r"Tests\s+run:\s*\d+",
-            r"BUILD\s+SUCCESS(?:FUL)?",
-            r"BUILD\s+FAILURE",
-            # pytest session markers (valid indicators)
-            r"test\s+session\s+starts",
-            r"collected\s+\d+\s+items",
-            r"={3,}\s*\d+\s+(passed|failed|skipped)",
-        ]
-
-        # Check if text contains standard format
-        has_standard = any(re.search(p, text, re.IGNORECASE) for p in _standard_patterns)
-
-        # Non-standard format patterns (these are INVALID)
-        # Issue #1544/1538: Chinese formats that were previously missed
-        _non_standard_patterns = [
-            # Chinese non-standard formats
-            r"\d+\s*(个|项|件)\s*测试\s*(全部|全都|都)?\s*(通过|成功)",
-            r"(所有|全部|全部的)\s*\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
-            r"\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
-            r"(通过|成功)[:：\s]+\d+\s*(个|项|件|测试)?",  # Mixed colon formats
-            r"(失败|错误)[:：\s]+\d+\s*(个|项|件|测试)?",
-            r"\d+\s*(个|项|件|测试)\s*(通过|成功|失败|跳过)",
-            # Japanese non-standard formats
-            r"(通過|成功)[:：\s]+\d+\s*(件|テスト)?",
-            r"(失敗|エラー)[:：\s]+\d+\s*(件|テスト)?",
-            # Korean non-standard formats
-            r"(통과|성공)[:：\s]+\d+\s*(개|테스트)?",
-            r"(실패|오류)[:：\s]+\d+\s*(개|테스트)?",
-            # Natural language descriptions (hallucination indicators)
-            r"测试(全部|都)?(成功|通过)",
-            r"所有测试(都)?(成功|通过)",
-            r"测试运行完成",
-            r"测试.*后台.*运行",
-            r"测试正在.*运行",
-            r"测试进度.*%",
-        ]
-
-        has_non_standard = any(re.search(p, text, re.IGNORECASE) for p in _non_standard_patterns)
-
-        # Validation logic:
-        # 1. If has standard format → VALID (no retry needed)
-        # 2. If has non-standard format AND no standard → INVALID (trigger retry)
-        if has_standard:
-            return True, "Standard format detected"
-        elif has_non_standard:
-            return False, "Non-standard format detected (requires retry)"
-        else:
-            # No recognizable format → likely hallucination or empty
-            return False, "No test result format detected"
+        try:
+            gh.add_issue_comment(issue_number, msg)
+        except Exception:
+            pass
 
     def _run_test_phase(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run tests, post results to issue, handle retries.
@@ -3302,8 +1669,6 @@ class AutonomousOrchestrator:
         On unrecoverable failure, updates workflow status to 'failed' and returns.
         On success, transitions workflow to pr_review phase.
         """
-        # Get Issue number for prompt context
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
         test_ms = self._create_milestone(
             phase="development",
             dev_round=dev_round,
@@ -3316,14 +1681,6 @@ class AutonomousOrchestrator:
             AUTONOMOUS_CONTEXT
             + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
             "确保所有测试通过后再结束。\n\n"
-        )
-        if issue_number:
-            test_prompt += (
-                f"## 关联 Issue\n"
-                f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"测试验证需确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-        test_prompt += (
             "## 重要：测试执行策略\n"
             "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
             "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
@@ -3333,21 +1690,7 @@ class AutonomousOrchestrator:
             '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
             "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
             "   - 手动验证核心功能逻辑\n"
-            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
-            "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
-            "测试结果报告必须严格遵循以下标准格式之一：\n"
-            '- Python pytest: "X passed, Y failed, Z skipped" 或 "X passed in Y.Zs"\n'
-            '- JavaScript Jest: "X tests passed, Y tests failed" 或 "Test Suites: X passed"\n'
-            '- Go test: "PASS ok" 或 "FAIL FAIL" 或 "X tests passed"\n'
-            '- Rust cargo: "test result: ok. X passed; Y failed" 或 "running X tests"\n'
-            '- Java Maven/Gradle: "Tests run: X, Failures: Y" 或 "BUILD SUCCESS"\n\n'
-            "禁止使用以下非标准格式：\n"
-            '- "X个测试全部通过" ❌\n'
-            '- "所有测试都成功了" ❌\n'
-            '- "测试运行完成，全部通过" ❌\n'
-            '- "测试在后台运行中" ❌\n'
-            '- "测试进度约50%" ❌\n'
-            "如果不遵守此格式要求，测试轮次将被判定为失败并触发 retry。\n"
+            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n"
         )
 
         test_result = self._run_agent(
@@ -3360,40 +1703,26 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
-            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="test",
             milestone_id=test_ms.get("milestone_id", ""),
         )
 
         self._accumulate_tokens(test_result)
 
-        test_summary = self._artifact_text(test_result)
-        test_visible_text = self._artifact_visible_text(test_result)
         self.repo.update_milestone(
             test_ms.get("milestone_id", ""),
             {
                 "status": "completed" if test_result.success else "failed",
                 "session_id": test_result.session_id,
-                "result_summary": test_summary,
-                "tldr": self._artifact_tldr(test_result),
+                "result_summary": (
+                    test_result.response_text[:300] if test_result.response_text else ""
+                ),
             },
         )
 
         # Detect if tests were actually skipped (agent couldn't run them)
-        test_response_text = test_visible_text or test_summary
-        # TEST_STATUS: skipped is a status tag the agent emits on its own line
-        # at the end of the reply. Match it as a standalone line, not a bare
-        # substring — otherwise an agent that *explains* "TEST_STATUS: skipped
-        # 不适用" (i.e. asserts tests DID run) is false-positive matched and
-        # the workflow needlessly retries (#1277 regression).
-        _skip_tag_re = re.compile(r"(?mi)^\s*TEST_STATUS:\s*skipped\s*$")
-        # Chinese skip markers: only count when they appear as a short
-        # standalone statement (own line, <= 30 chars), not embedded in a
-        # longer sentence like "本次跳过测试是因为..." which is an explanation.
-        _cn_skip_re = re.compile(r"(?m)^\s*(测试被跳过|跳过测试)\s*[。.]?\s*$")
-        has_skip_tag = bool(_skip_tag_re.search(test_response_text)) or bool(
-            _cn_skip_re.search(test_response_text)
-        )
+        test_response_text = test_result.response_text or ""
+        _skipped_markers = ["TEST_STATUS: skipped", "测试被跳过", "跳过测试"]
         _skipped_keywords = [
             "pytest 未安装",
             "pytest was not installed",
@@ -3407,234 +1736,51 @@ class AutonomousOrchestrator:
             "could not run tests",
             "unable to execute tests",
             "test framework not found",
-            # Issue #1538: Japanese skipped keywords
-            "pytestがインストールされていません",
-            "テストフレームワークが利用できません",
-            "コマンドがブロックされました",
-            # Issue #1538: Korean skipped keywords
-            "pytest가 설치되지 않았습니다",
-            "테스트 프레임워크를 사용할 수 없습니다",
-            "명령이 차단되었습니다",
         ]
         has_skip_keyword = any(kw in test_response_text for kw in _skipped_keywords)
-        # ── Framework-aware test detection (Phase 1, P0) ──────────────────────
-        # Infer framework type for layered detection strategy
-        framework_type = _infer_test_framework(wf.get("project_path", ""), wf.get("cli_tool", ""))
-        logger.debug(
-            "Inferred test framework: %s for workflow %s", framework_type, self._workflow_id[:8]
-        )
-
-        # Detect hallucination patterns: agent claims tests are running but
-        # outputs only descriptive text, not actual pytest results.
-        _hallucination_patterns = [
-            # Chinese: "测试在后台运行中", "测试进度约50%", etc.
-            r"测试在后台运行",
-            r"测试正在运行.*%",
-            r"测试进度.*%",
-            r"后台测试.*进度",
-            # English: "tests running in background", "progress 50%", etc.
-            r"tests\s+(are\s+)?running\s+in\s+(the\s+)?background",
-            r"test\s+progress.*%",
-            r"running\s+tests.*%",
-            # Issue #1538: Japanese hallucination patterns
-            # Japanese: "テストがバックグラウンドで実行中", "テスト進捗50%"
-            r"テスト.*バックグラウンド",
-            r"テスト.*実行中",
-            r"テスト.*進捗.*%",
-            # Issue #1538: Korean hallucination patterns
-            # Korean: "테스트가 백그라운드에서 실행 중", "테스트 진행 50%"
-            r"테스트.*백그라운드",
-            r"테스트.*실행.*중",
-            r"테스트.*진행.*%",
+        # Negative detection: if response contains no test-result keywords at
+        # all (passed, failed, error, test, assertion, PASSED, FAILED), the
+        # agent likely never ran tests.
+        _test_result_keywords = [
+            "passed",
+            "failed",
+            "PASSED",
+            "FAILED",
+            "assertion",
+            "AssertionError",
+            "error",
+            "test",
         ]
-        has_hallucination_desc = any(
-            re.search(p, test_response_text, re.IGNORECASE) for p in _hallucination_patterns
-        )
-
-        # Framework-specific pytest output patterns (Layer 1)
-        _pytest_output_patterns = [
-            # pytest summary line: "3 passed, 2 failed" or "1 passed in 2.5s"
-            r"\d+\s+(passed|failed|skipped|warnings?|error)",
-            # pytest completion marker: "PASSED in 2.5s" / "FAILED in 1.2s"
-            r"(PASSED|FAILED)\s+in\s+[\d.]+s",
-            # pytest summary banner: "= 3 passed in 2.50s =" (short form)
-            r"={3,}\s*\d+\s+(passed|failed|skipped|error|warning)",
-            # pytest session start: "test session starts" / "collected 5 items"
-            r"test session starts",
-            r"collected\s+\d+\s+items",
-            # pytest individual test result: "PASSED" / "FAILED" as standalone
-            r"(?m)^\s*(PASSED|FAILED|SKIPPED)\s*$",
-            # assertion error marker (real pytest output)
-            r"AssertionError",
-            # Issue #1538: Chinese output patterns
-            # Chinese: "通过: 2398 个", "失败: 5 个", "跳过: 69 个"
-            r"(通过|成功)[:：\s]+\d+\s*(个|项|件|测试)?",
-            r"(失败|错误)[:：\s]+\d+\s*(个|项|件|测试)?",
-            r"(跳过|忽略)[:：\s]+\d+\s*(个|项|件|测试)?",
-            # Chinese reverse format: "2398个测试通过", "2398 个 通过"
-            r"\d+\s*(个|项|件|测试)\s*(通过|成功|失败|跳过)",
-            # Issue #1538: Japanese output patterns
-            # Japanese: "通過: 2398 件", "失敗: 5件", "スキップ: 69件"
-            r"(通過|成功)[:：\s]+\d+\s*(件|テスト)?",
-            r"(失敗|エラー)[:：\s]+\d+\s*(件|テスト)?",
-            r"(スキップ|スキップ済み)[:：\s]+\d+\s*(件|テスト)?",
-            # Issue #1538: Korean output patterns
-            # Korean: "통과: 2398개", "실패: 5개", "건너뜀: 69개"
-            r"(통과|성공)[:：\s]+\d+\s*(개|테스트)?",
-            r"(실패|오류)[:：\s]+\d+\s*(개|테스트)?",
-            r"(건너뜀|스킵)[:：\s]+\d+\s*(개|테스트)?",
-            # Issue #1544: Additional Chinese output patterns
-            # Chinese: "2216 个测试全部通过", "所有 2216 个单元测试通过"
-            r"\d+\s*(个|项|件)\s*测试\s*(全部|全都|都)?\s*(通过|成功)",
-            r"(所有|全部|全部的)\s*\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
-            r"\d+\s*(个|项|件)\s*(单元)?测试\s*(通过|成功)",
-        ]
-
-        # Jest patterns for JavaScript projects
-        _jest_patterns = [
-            r"PASS\s+\d+\s+tests",
-            r"FAIL\s+\d+\s+tests",
-            r"Test Suites:\s*\d+\s+passed",
-            r"Tests:\s*\d+\s+passed",
-            r"Snapshots:\s*\d+\s+passed",
-        ]
-
-        # Go test patterns for Go projects
-        _go_test_patterns = [
-            r"PASS\s+ok",
-            r"FAIL\s+FAIL",
-            r"===\s+RUN",
-            r"---\s+PASS:",
-            r"---\s+FAIL:",
-            r"PASS\s+\(\d+\s+tests\)",
-        ]
-
-        # Unittest patterns for Python unittest
-        _unittest_patterns = [
-            r"OK\s+\(\d+\s+tests\)",
-            r"FAILED\s+\(failures=\d+\)",
-            r"ERROR\s+\(errors=\d+\)",
-            r"Traceback\s+\(most\s+recent\s+call\s+last\)",
-        ]
-
-        # Issue #1538: Rust cargo test patterns
-        _rust_patterns = [
-            r"running\s+\d+\s+tests",
-            r"test\s+result:\s*ok",
-            r"test\s+result:\s*FAILED",
-            r"\d+\s+passed;\s*\d+\s+failed",
-            r"\d+\s+passed",
-        ]
-
-        # Issue #1538: Java Maven/Gradle patterns
-        _java_patterns = [
-            r"Tests\s+run:\s*\d+",
-            r"Failures:\s*\d+",
-            r"Errors:\s*\d+",
-            r"BUILD\s+SUCCESS",
-            r"BUILD\s+SUCCESSFUL",
-            r"BUILD\s+FAILURE",
-            r"FAILURE!",
-        ]
-
-        # Layered detection based on framework type
-        has_actual_pytest_output = False
-
-        if framework_type == "python":
-            # Python projects: pytest + unittest, no keyword fallback
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
-            ) or any(re.search(p, test_response_text, re.IGNORECASE) for p in _unittest_patterns)
-        elif framework_type == "javascript":
-            # JavaScript projects: Jest patterns + strict keywords
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _jest_patterns
-            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
-        elif framework_type == "go":
-            # Go projects: go test patterns + strict keywords (PASS/FAIL + ok)
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _go_test_patterns
-            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
-        elif framework_type == "rust":
-            # Issue #1538: Rust projects: cargo test patterns + strict keywords
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _rust_patterns
-            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
-        elif framework_type == "java":
-            # Issue #1538: Java projects: Maven/Gradle patterns + strict keywords
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _java_patterns
-            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
-        elif framework_type == "mixed":
-            # Mixed projects: combine all patterns + strict keywords
-            all_patterns = (
-                _pytest_output_patterns
-                + _jest_patterns
-                + _go_test_patterns
-                + _unittest_patterns
-                + _rust_patterns
-                + _java_patterns
-            )
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in all_patterns
-            ) or _has_strict_keyword_result(test_response_text, has_hallucination_desc)
-        else:  # unknown
-            # Unknown framework: pytest + multilingual patterns, NO keyword fallback
-            has_actual_pytest_output = any(
-                re.search(p, test_response_text, re.IGNORECASE) for p in _pytest_output_patterns
-            )
-
-        # Final test result determination
-        has_test_result = has_actual_pytest_output
-        test_status_tag = self._artifact_status_tag(test_result, "test_status").lower()
-
-        # Issue #1532 fix: Reverse judgment logic with tool_calls check
-        has_test_tool_call = _has_test_tool_call(test_result.tool_calls or [], framework_type)
-
-        tests_actually_run = (
-            test_status_tag in ("passed", "failed") or has_test_tool_call or has_test_result
-        )
-
-        # Issue #1547: Validate test report format
-        # If agent used non-standard format but tests actually ran, trigger retry
-        format_valid, format_reason = self._validate_test_report_format(test_response_text)
-        has_non_standard_format = not format_valid and tests_actually_run
-
+        has_test_result = any(kw in test_response_text for kw in _test_result_keywords)
         tests_actually_skipped = (
-            test_status_tag == "skipped"
-            or has_skip_tag
-            or (test_result.success and has_skip_keyword and not tests_actually_run)
-            or (test_result.success and not tests_actually_run)
+            any(m in test_response_text for m in _skipped_markers)
+            or (test_result.success and has_skip_keyword)
+            or (test_result.success and not has_test_result)
         )
 
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
-            if tests_actually_skipped:
-                status_line = "⚠️ Tests were not actually run — see details below"
-            elif test_result.success:
-                status_line = "✅ All tests passed"
-            else:
-                status_line = "❌ Tests failed"
-            test_comment = (
-                f"## 🧪 Test Results (Dev Round {dev_round})\n\n{status_line}\n\n{test_summary}"
-            )
-            self._post_github_comment(gh, issue_number, test_comment, context="test-results")
+            try:
+                test_summary = self._clean_agent_text(test_response_text)[:800]
+                if tests_actually_skipped:
+                    status_line = "⚠️ Tests were not actually run — see details below"
+                elif test_result.success:
+                    status_line = "✅ All tests passed"
+                else:
+                    status_line = "❌ Tests failed"
+                test_comment = (
+                    f"## 🧪 Test Results (Dev Round {dev_round})\n\n"
+                    f"{status_line}\n\n"
+                    f"{test_summary}"
+                )
+                gh.add_issue_comment(issue_number, test_comment)
+            except Exception:
+                pass
 
         # Treat skipped tests as failure — tests must actually run.
         # Allow 1 retry in case of transient environment issues.
         if tests_actually_skipped:
-            # Correct the milestone status: it was optimistically set to
-            # "completed" above based on session success alone, but tests
-            # were not actually executed. Without this correction, the
-            # timeline shows "completed" while the comment says "skipped".
-            self.repo.update_milestone(
-                test_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "error_message": "Tests were not actually run (skipped by agent)",
-                },
-            )
             skip_retries = wf.get("skip_retries", 0) + 1
             if skip_retries <= 1:
                 logger.warning(
@@ -3656,44 +1802,6 @@ class AutonomousOrchestrator:
                 }
             )
             return
-
-        # Issue #1547: Handle non-standard format with retry
-        # If agent used non-standard format but tests actually ran, trigger retry
-        if has_non_standard_format:
-            self.repo.update_milestone(
-                test_ms.get("milestone_id", ""),
-                {
-                    "status": "failed",
-                    "error_message": f"Non-standard test report format: {format_reason}",
-                },
-            )
-            format_retries = wf.get("format_retries", 0) + 1
-            if format_retries <= 1:
-                logger.warning(
-                    "Non-standard test report format for dev round %d, retry %d/1: %s",
-                    dev_round,
-                    format_retries,
-                    format_reason,
-                )
-                self._update_workflow({"format_retries": format_retries})
-                return  # Scheduler will re-call _run_test_phase
-            logger.warning(
-                "Non-standard test report format after retry for dev round %d: %s",
-                dev_round,
-                format_reason,
-            )
-            # After retry exhausted, still proceed (tests did run, just format issue)
-            # But log warning and post comment to issue
-            if issue_number:
-                format_comment = (
-                    f"⚠️ **Format Warning**: Test report used non-standard format.\n"
-                    f"Reason: {format_reason}\n\n"
-                    f"Tests were executed successfully, but format validation failed.\n"
-                    f"Please ensure future reports follow standard format guidelines."
-                )
-                self._post_github_comment(
-                    gh, issue_number, format_comment, context="format-warning"
-                )
 
         # Handle test failure with retry logic
         if not test_result.success:
@@ -3722,7 +1830,7 @@ class AutonomousOrchestrator:
                 return
 
         # Situation B: test agent succeeded but reported unfixable failures
-        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
+        test_response = test_result.response_text or ""
         _unfixable_marker = "[UNFIXABLE]"
         has_unfixable = _unfixable_marker in test_response
         if not has_unfixable:
@@ -3777,14 +1885,17 @@ class AutonomousOrchestrator:
 
         # Post test-passed status to issue
         if issue_number:
-            branch = wf.get("branch_name", "")
-            status_msg = (
-                f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
-                f"- **Status**: Development + tests completed successfully\n"
-                f"- **Branch**: `{branch}`\n"
-                f"- **Next**: Creating PR and running code review\n"
-            )
-            self._post_github_comment(gh, issue_number, status_msg, context="dev-complete")
+            try:
+                branch = wf.get("branch_name", "")
+                status_msg = (
+                    f"## 🎯 All Checks Passed (Dev Round {dev_round})\n\n"
+                    f"- **Status**: Development + tests completed successfully\n"
+                    f"- **Branch**: `{branch}`\n"
+                    f"- **Next**: Creating PR and running code review\n"
+                )
+                gh.add_issue_comment(issue_number, status_msg)
+            except Exception:
+                pass
 
         # Move to PR review
         self._update_workflow(
@@ -3803,83 +1914,38 @@ class AutonomousOrchestrator:
         wf = self.workflow
         round_num = wf.get("current_round", 0) + 1
         max_rounds = wf.get("max_pr_review_rounds", 5)
-        force_full_rounds = self._must_run_full_review_rounds(wf)
         dev_round = wf.get("dev_round", 1)
         branch_name = wf.get("branch_name", "")
         gh = self._get_gh()
-        # Language-aware approval marker for PR review (matches what the agent,
-        # writing in content_language, is asked to state).
-        approval_phrase = _review_approval_phrase(wf.get("content_language"))
 
         # Check if branch has any changes vs main
-        # Distinguish "branch behind main (timing issue)" from "no actual changes" (Issue #1552)
         has_changes = False
-        is_timing_issue = False
         try:
-            branch_sha = gh._run_git(["rev-parse", branch_name]).stdout.strip()
-            main_sha = gh._run_git(["rev-parse", "main"]).stdout.strip()
-
-            # Check if branch is an ancestor of main (behind main)
-            is_ancestor = (
-                gh._run_git(
-                    ["merge-base", "--is-ancestor", branch_sha, main_sha], check=False
-                ).returncode
-                == 0
-            )
-
-            if is_ancestor:
-                # Branch is behind main → timing issue
-                is_timing_issue = True
-                has_changes = False
-                logger.warning(
-                    "Branch %s is behind main (timing issue). base_commit_sha=%s",
-                    branch_name,
-                    wf.get("base_commit_sha", "none"),
-                )
-            else:
-                # Branch is ahead or parallel → normal diff check
-                diff_stats = gh.get_diff_stats("main", branch_name)
-                has_changes = diff_stats.get("commits", 0) > 0
-        except Exception as e:
-            logger.warning("Failed to check branch status: %s", e)
+            diff_stats = gh.get_diff_stats("main", branch_name)
+            has_changes = diff_stats.get("commits", 0) > 0
+        except Exception:
             pass
 
         if not has_changes:
             # No code changes produced — skip PR, post to issue, and mark completed
             issue_number = wf.get("github_issue_number")
-
-            # Distinguish timing issue from no changes (Issue #1552)
-            if is_timing_issue:
-                no_change_msg = (
-                    f"## ⚠️ Timing Issue Detected\n\n"
-                    f"Branch `{branch_name}` is behind main (created from an older commit that was merged).\n"
-                    f"This indicates a race condition during workflow creation.\n\n"
-                    f"**Recommendation**: This issue should be fixed by locking base commit during batch creation.\n"
-                )
-            else:
-                no_change_msg = (
-                    f"## ℹ️ No Changes Detected\n\n"
-                    f"Agent completed dev round {dev_round} without producing code changes.\n"
-                    f"Skipping PR creation."
-                )
-
+            no_change_msg = (
+                f"## ℹ️ No Changes Detected\n\n"
+                f"Agent completed dev round {dev_round} without producing code changes. "
+                f"Skipping PR creation."
+            )
             if issue_number:
-                self._post_github_comment(gh, issue_number, no_change_msg, context="no-changes")
+                try:
+                    gh.add_issue_comment(issue_number, no_change_msg)
+                except GitHubOpsError:
+                    pass
             self._create_milestone(
                 phase="pr_review",
                 dev_round=dev_round,
-                milestone_type="timing_issue" if is_timing_issue else "no_changes",
+                milestone_type="no_changes",
                 status="completed",
-                title=(
-                    "Branch behind main (timing issue)"
-                    if is_timing_issue
-                    else "No code changes produced"
-                ),
-                result_summary=(
-                    "Branch behind main: possible timing issue during workflow creation"
-                    if is_timing_issue
-                    else "Agent did not produce any code changes. Skipping PR creation."
-                ),
+                title="No code changes produced",
+                result_summary="Agent did not produce any code changes. Skipping PR creation.",
             )
             self._update_workflow(
                 {
@@ -3893,18 +1959,6 @@ class AutonomousOrchestrator:
 
         # Ensure branch is pushed to remote before PR creation
         try:
-            # P1 修复（Issue #1611）：检查当前分支是否与预期一致
-            current_branch = gh.get_current_branch()
-            if current_branch != branch_name:
-                logger.warning(
-                    "Branch mismatch before push: expected=%s, actual=%s",
-                    branch_name,
-                    current_branch,
-                )
-                # 同步 workflow 中的 branch_name（仅限自主开发分支）
-                if current_branch.startswith("auto-dev/") or current_branch.startswith("fix/"):
-                    self._update_workflow({"branch_name": current_branch})
-                    branch_name = current_branch
             gh.git_push(branch=branch_name)
         except Exception as e:
             logger.warning("Failed to push branch %s: %s", branch_name, e)
@@ -3913,7 +1967,7 @@ class AutonomousOrchestrator:
         if round_num == 1:
             try:
                 # Build PR body with issue linkage
-                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
+                pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')[:500]}"
                 issue_number = wf.get("github_issue_number")
                 if issue_number:
                     pr_body += f"\n\nCloses #{issue_number}"
@@ -3955,22 +2009,19 @@ class AutonomousOrchestrator:
             if pr_number:
                 try:
                     ci_checks_post = self._poll_ci_status(gh, pr_number)
+                    ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
+                    if ci_fails_post:
+                        ci_summary = "\n".join(
+                            f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
+                        )
+                        gh.add_pr_comment(
+                            pr_number,
+                            "## ⚠️ CI 检查状态\n\n"
+                            f"以下 CI 检查未通过：\n{ci_summary}\n\n"
+                            "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
+                        )
                 except Exception:
-                    ci_checks_post = []
-                ci_fails_post = [c for c in ci_checks_post if c.get("bucket") == "fail"]
-                if ci_fails_post:
-                    ci_summary = "\n".join(
-                        f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_fails_post
-                    )
-                    self._post_github_comment(
-                        gh,
-                        pr_number,
-                        "## ⚠️ CI 检查状态\n\n"
-                        f"以下 CI 检查未通过：\n{ci_summary}\n\n"
-                        "将在后续代码审查轮次中分析这些失败是否由本 PR 引入。",
-                        is_pr=True,
-                        context="ci-fails",
-                    )
+                    pass
 
         pr_number = wf.get("github_pr_number")
         if not pr_number:
@@ -4005,26 +2056,35 @@ class AutonomousOrchestrator:
 
         review_prompt = (
             AUTONOMOUS_CONTEXT + f"你是一位资深代码审查专家。请审查以下 PR 的代码变更。\n\n"
+            f"## 需求\n{wf.get('requirements_text', '')[:500]}\n\n"
             f"## 代码变更\n{self._smart_truncate_diff(diff_text)}\n\n"
         )
 
-        # Add Issue reference
-        if issue_number:
-            review_prompt += (
-                f"## 关联 Issue\n"
-                f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                f"审查时请确保代码变更满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-
-        # For rounds > 1, the previous round's review is already in this review
-        # session's resumed history (--resume). Ask the reviewer to revisit it
-        # and confirm whether each point was addressed.
+        # Include previous review feedback for rounds > 1
         if round_num > 1:
-            review_prompt += (
-                "## 上一轮审查\n"
-                "请回顾你上一轮的审查意见（在本会话历史中），逐条确认是否已落实："
-                "已落实（说明如何修改）/ 未落实（说明原因）/ 不适用（说明理由）。\n\n"
-            )
+            prev_review_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
+            last_review_text = ""
+            for ms in reversed(prev_review_milestones):
+                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
+                    last_review_text = ms["review_content"]
+                    break
+            if last_review_text:
+                cleaned_review = self._clean_agent_text(last_review_text)
+                truncated = cleaned_review[:PREV_REVIEW_MAX_LENGTH]
+                truncation_notice = (
+                    "\n> ⚠️ 以上审查意见已截断至 3000 字符，部分内容可能被省略。\n"
+                    if len(cleaned_review) > PREV_REVIEW_MAX_LENGTH
+                    else ""
+                )
+                review_prompt += (
+                    f"## 上一轮审查意见（Round {round_num - 1}）\n\n"
+                    f"{truncated}\n"
+                    f"{truncation_notice}\n"
+                    "**请逐条确认上一轮审查意见是否已被落实：**\n"
+                    "- 已落实：说明如何修改\n"
+                    "- 未落实：说明原因\n"
+                    "- 不适用：说明理由\n\n"
+                )
 
         review_prompt += (
             "请检查：\n"
@@ -4034,7 +2094,7 @@ class AutonomousOrchestrator:
             "4. 性能影响\n"
             "5. 与需求的对齐程度\n"
             "6. 上一轮审查意见的落实情况(如有)\n\n"
-            f"如果没有重大问题，请在审查结论中明确写出批准标记：{approval_phrase}。\n\n"
+            "如果没有重大问题，请明确说明'代码审查通过'。\n\n"
             "重要：直接输出审查结果，不要添加引导文字(如'我来审查...'、'让我...'等)"
             "或结尾引导(如'下一步是否...'等)。"
         )
@@ -4060,73 +2120,57 @@ class AutonomousOrchestrator:
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
-            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
             session_line="review",
             milestone_id=review_ms.get("milestone_id", ""),
         )
 
         self._accumulate_tokens(review_result)
 
-        review_text = self._artifact_text(review_result)
-        # Detect approval using the language-aware marker, then persist a
-        # structured verdict so progress_reported doesn't re-scan review text.
-        # The legacy zh marker is accepted too, for workflows whose content
-        # language predates this field (mirrors _derive_review_passed).
-        review_passed = (
-            self._review_is_approved(review_text, approval_phrase) or "代码审查通过" in review_text
-        )
-        review_metadata = _merge_milestone_metadata(
-            self.repo.get_milestone(review_ms.get("milestone_id", "")),
-            {"review_verdict": {"passed": review_passed, "round": round_num}},
-        )
+        review_text = review_result.response_text or ""
         self.repo.update_milestone(
             review_ms.get("milestone_id", ""),
             {
                 "status": "completed" if review_result.success else "failed",
                 "review_content": review_text,
                 "review_session_id": review_result.session_id,
-                "tldr": self._artifact_tldr(review_result),
-                "metadata": review_metadata,
             },
         )
 
         # Post review as PR comment
         if pr_number:
-            self._post_github_comment(
-                gh,
-                pr_number,
-                f"## 🔍 Code Review (Round {round_num})\n\n{review_text}",
-                is_pr=True,
-                context="code-review",
-            )
+            try:
+                gh.add_pr_comment(
+                    pr_number,
+                    f"## 🔍 Code Review (Round {round_num})\n\n{self._clean_agent_text(review_text)}",
+                )
+            except GitHubOpsError:
+                pass
 
         # Check if all rounds done
         self._update_workflow({"current_round": round_num})
 
-        # Every review with findings gets a fix — including the cap round — so
-        # the last review's feedback is never silently dropped. Total reviews are
-        # capped at max_pr_review_rounds (matches the "PR 审查最大轮次" label):
-        # after the cap-round fix we go straight to summary/report instead of
-        # scheduling another review. In the default mode, an approved review can
-        # also end PR review early; with require_full_review_rounds enabled, only
-        # the cap ends the loop. There is never an (N+1)-th review.
-        at_cap = round_num >= max_rounds
-        if not review_passed:
-            self._apply_pr_review_fix(
-                wf, gh, review_text, round_num, dev_round, ci_failures, pr_number
-            )
-
-        if (review_passed and not force_full_rounds) or at_cap:
+        if round_num >= max_rounds:
             # All PR review rounds completed — summarize via the main session,
-            # then move to report. The main session resumes with the development
-            # history (incl. fixes) and is given the last review round's feedback
-            # (review runs on the review session, so it must be injected), then
-            # asked whether all review points were addressed and the PR is ready.
+            # then move to report. The main session resumes and is given the
+            # last review round's feedback plus the last fix record, then asked
+            # whether all review points were addressed and the PR is ready.
             last_pr_review = ""
+            last_fix_summary = ""
             pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
             for ms in reversed(pr_milestones):
-                if ms.get("milestone_type") == "pr_reviewed" and ms.get("review_content"):
+                if (
+                    ms.get("milestone_type") == "pr_reviewed"
+                    and ms.get("review_content")
+                    and not last_pr_review
+                ):
                     last_pr_review = ms["review_content"]
+                if (
+                    ms.get("milestone_type") == "pr_updated"
+                    and ms.get("result_summary")
+                    and not last_fix_summary
+                ):
+                    last_fix_summary = ms["result_summary"]
+                if last_pr_review and last_fix_summary:
                     break
 
             summary_ms = self._create_milestone(
@@ -4139,21 +2183,14 @@ class AutonomousOrchestrator:
             )
 
             summary_prompt = (
-                AUTONOMOUS_CONTEXT + "代码审查已全部完成。请根据最后一轮审查意见，"
-                "并结合本会话历史中开发环节的修复记录，"
+                AUTONOMOUS_CONTEXT
+                + "代码审查已全部完成。请根据最后一轮审查意见和最后一次修复记录，"
                 "输出一份 PR 评审总结，明确：\n"
                 "1. 最后一轮审查意见是否已全部落实\n"
                 "2. 是否还有遗留问题需要处理\n"
                 "3. 当前 PR 是否可以合并\n\n"
-            )
-            if issue_number:
-                summary_prompt += (
-                    f"## 关联 Issue\n"
-                    f"本 PR 关联 GitHub Issue #{issue_number}。\n"
-                    f"总结中请确认修改是否满足 Issue #{issue_number} 的所有需求。\n\n"
-                )
-            summary_prompt += (
                 f"## 最后一轮审查意见\n{self._clean_agent_text(last_pr_review)}\n\n"
+                f"## 最后一次修复记录\n{self._clean_agent_text(last_fix_summary)}\n\n"
                 "如果审查意见已全部落实、无遗留问题，请明确说明'可以合并'。"
                 "直接输出总结，不要添加引导文字。"
             )
@@ -4167,32 +2204,28 @@ class AutonomousOrchestrator:
                 workspace_type=wf.get("workspace_type", "local"),
                 remote_machine_id=wf.get("remote_machine_id"),
                 permission_mode=wf.get("permission_mode", "auto-edit"),
-                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                    wf.get("cli_tool", "claude-code"), []
-                ),
                 session_line="main",
                 milestone_id=summary_ms.get("milestone_id", ""),
             )
             self._accumulate_tokens(summary_result)
-            summary_text = self._artifact_text(summary_result)
+            summary_text = self._clean_agent_text(summary_result.response_text or "")
             self.repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
                 {
                     "status": "completed" if summary_result.success else "failed",
                     "review_content": summary_text,
                     "result_summary": summary_text[:200],
-                    "tldr": self._artifact_tldr(summary_result),
                 },
             )
 
             if pr_number and summary_text:
-                self._post_github_comment(
-                    gh,
-                    pr_number,
-                    f"## ✅ PR Review Summary\n\n{summary_text}",
-                    is_pr=True,
-                    context="review-summary",
-                )
+                try:
+                    gh.add_pr_comment(
+                        pr_number,
+                        f"## ✅ PR Review Summary\n\n{summary_text}",
+                    )
+                except GitHubOpsError:
+                    pass
 
             # Move to report
             self._update_workflow(
@@ -4202,157 +2235,105 @@ class AutonomousOrchestrator:
                 }
             )
             self._emit("phase_change", {"phase": "report"})
-        # Under cap, the scheduler re-enters _do_pr_review for the next review
-        # round. In the default mode this path means "not approved and the fix
-        # above already ran"; with force-full enabled it also covers "approved
-        # early, but keep reviewing until the configured cap".
-
-    def _apply_pr_review_fix(
-        self,
-        wf: dict,
-        gh,
-        review_text: str,
-        round_num: int,
-        dev_round: int,
-        ci_failures: list,
-        pr_number,
-    ) -> None:
-        """Apply one round of code-review fixes (pr_updated milestone).
-
-        Runs for every non-passing review — including the cap round — so the
-        last review's feedback is never silently dropped (#1200 review).
-        """
-        fix_ms = self._create_milestone(
-            phase="pr_review",
-            dev_round=dev_round,
-            round_number=round_num,
-            milestone_type="pr_updated",
-            status="in_progress",
-            title=f"PR fixes round {round_num}",
-        )
-
-        fix_prompt = (
-            AUTONOMOUS_CONTEXT
-            + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
-        )
-        # Issue reference is available in this method's scope
-        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
-        if issue_number:
-            fix_prompt += (
-                f"## 关联 Issue\n"
-                f"本任务关联 GitHub Issue #{issue_number}。\n"
-                f"修复时请确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
-            )
-        fix_prompt += (
-            "重要要求：\n"
-            "1. 修改完成后，运行项目测试确保所有测试通过\n"
-            "2. 如果测试失败，分析失败原因：\n"
-            "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
-            "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
-            "单独一行输出 `CI_STATUS: pre-existing`\n"
-            "3. 确认测试通过后提交 git commit 并推送\n"
-        )
-        if ci_failures:
-            ci_summary = "\n".join(
-                f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
-            )
-            fix_prompt += (
-                f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
-                "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。\n"
-                "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
+        else:
+            # Fix issues and continue to next round
+            fix_ms = self._create_milestone(
+                phase="pr_review",
+                dev_round=dev_round,
+                round_number=round_num,
+                milestone_type="pr_updated",
+                status="in_progress",
+                title=f"PR fixes round {round_num}",
             )
 
-        commit_before = ""
-        try:
-            commit_before = gh.get_current_commit()
-        except Exception:
-            pass
+            fix_prompt = (
+                AUTONOMOUS_CONTEXT
+                + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
+                "重要要求：\n"
+                "1. 修改完成后，运行项目测试确保所有测试通过\n"
+                "2. 如果测试失败，分析失败原因：\n"
+                "   - 如果是本 PR 引入的问题，修复后重新运行测试\n"
+                "   - 如果是预先存在的问题（与本 PR 修改的文件无关），在回复末尾"
+                "单独一行输出 `CI_STATUS: pre-existing`\n"
+                "3. 确认测试通过后提交 git commit 并推送\n"
+            )
+            if ci_failures:
+                ci_summary = "\n".join(
+                    f"- **{c['name']}**: {c.get('state', 'unknown')}" for c in ci_failures
+                )
+                fix_prompt += (
+                    f"\n\n## 当前 CI 失败的检查\n{ci_summary}\n"
+                    "请分析这些 CI 失败是否由本 PR 的代码变更引入，并尝试修复。\n"
+                    "如果确认是预先存在的问题，在回复末尾单独一行输出 `CI_STATUS: pre-existing`。"
+                )
 
-        fix_result = self._run_agent(
-            wf=wf,
-            workflow_id=self._workflow_id,
-            cli_tool=wf.get("cli_tool", "claude-code"),
-            model=wf.get("model", ""),
-            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
-            prompt=fix_prompt,
-            workspace_type=wf.get("workspace_type", "local"),
-            remote_machine_id=wf.get("remote_machine_id"),
-            permission_mode=wf.get("permission_mode", "auto-edit"),
-            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
-            session_line="main",
-            milestone_id=fix_ms.get("milestone_id", ""),
-        )
+            fix_result = self._run_agent(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=fix_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                session_line="main",
+                milestone_id=fix_ms.get("milestone_id", ""),
+            )
 
-        self._accumulate_tokens(fix_result)
+            self._accumulate_tokens(fix_result)
 
-        # Clear user feedback after it has been injected into the prompt
-        if wf.get("user_feedback", "").strip():
-            self._update_workflow({"user_feedback": ""})
+            # Clear user feedback after it has been injected into the prompt
+            if wf.get("user_feedback", "").strip():
+                self._update_workflow({"user_feedback": ""})
 
-        # Agent may fail to commit (bash blocked / forgot) — salvage uncommitted
-        # changes the way dev does, else the fix never reaches the PR (#960
-        # symptom). A no-op fix is genuinely empty, not a failed dev round.
-        commit_sha = ""
-        diff_stats = {}
-        try:
-            commit_sha = gh.get_current_commit()
-        except Exception:
-            pass
-        sha_changed = commit_before and commit_sha and commit_before != commit_sha
-        if not sha_changed:
-            try:
-                if gh.has_uncommitted_changes():
-                    gh.git_add_all()
-                    gh.git_commit(
-                        f"auto: review fixes (round {round_num})",
-                        no_verify=True,
-                    )
-                    commit_sha = gh.get_current_commit()
-                    sha_changed = True
-            except Exception as e:
-                logger.warning("Fix auto-commit failed: %s", e)
-        if sha_changed:
+            commit_sha = ""
+            diff_stats = {}
             try:
                 gh.git_push()
-            except Exception as e:
-                # push failure leaves the fix local; the next pr_review re-reads
-                # the old PR state — log so it's diagnosable.
-                logger.warning("Fix git_push failed (round %d): %s", round_num, e)
-        try:
-            diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
-        except Exception:
-            pass
+                commit_sha = gh.get_current_commit()
+                diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
+            except Exception:
+                pass
 
-        self.repo.update_milestone(
-            fix_ms.get("milestone_id", ""),
-            {
-                "status": "completed" if fix_result.success else "failed",
-                "session_id": fix_result.session_id,
-                "commit_shas": json.dumps([commit_sha] if commit_sha else []),
-                "diff_stats": json.dumps(diff_stats),
-                "result_summary": self._artifact_text(fix_result)[:200],
-                "tldr": self._artifact_tldr(fix_result),
-            },
-        )
-
-        if pr_number:
-            # Extract fix summary from agent response in full; GitHub comments
-            # render long content fine (capped by _post_github_comment if huge).
-            fix_summary = self._artifact_text(fix_result)
-            comment = (
-                f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
-                f"### Changes Made\n{fix_summary}\n\n"
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {
+                    "status": "completed" if fix_result.success else "failed",
+                    "session_id": fix_result.session_id,
+                    "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+                    "diff_stats": json.dumps(diff_stats),
+                },
             )
-            if commit_sha:
-                comment += f"- Commit: `{commit_sha[:8]}`\n"
-            # Note pre-existing CI failures if fix agent identified them.
-            if self._artifact_status_tag(
-                fix_result, "ci_status"
-            ).lower() == "pre-existing" or self._is_pre_existing_ci_failure(
-                self._artifact_visible_text(fix_result)
-            ):
-                comment += "\n> ⚠️ 部分 CI 检查失败，但经分析为预先存在的问题，非本 PR 引入。\n"
-            self._post_github_comment(gh, pr_number, comment, is_pr=True, context="fix")
+
+            if pr_number:
+                try:
+                    # Extract fix summary from agent response (no hard truncation —
+                    # _clean_agent_text already strips noise; only cap at 5000 chars
+                    # to avoid excessively long comments, breaking at paragraph boundary).
+                    fix_summary = self._clean_agent_text(fix_result.response_text or "")
+                    if len(fix_summary) > 5000:
+                        # Truncate at last paragraph break within limit
+                        truncated = fix_summary[:5000]
+                        last_break = max(truncated.rfind("\n\n"), truncated.rfind("\n##"), 0)
+                        if last_break > 1000:
+                            fix_summary = truncated[:last_break].rstrip() + "\n\n..."
+                        else:
+                            fix_summary = truncated.rstrip() + "..."
+                    comment = (
+                        f"## ✅ Addressed Review Feedback (Round {round_num})\n\n"
+                        f"### Changes Made\n{fix_summary}\n\n"
+                    )
+                    if commit_sha:
+                        comment += f"- Commit: `{commit_sha[:8]}`\n"
+                    # Note pre-existing CI failures if fix agent identified them.
+                    if self._is_pre_existing_ci_failure(fix_result.response_text or ""):
+                        comment += (
+                            "\n> ⚠️ 部分 CI 检查失败，" "但经分析为预先存在的问题，非本 PR 引入。\n"
+                        )
+                    gh.add_pr_comment(pr_number, comment)
+                except GitHubOpsError:
+                    pass
 
     # ── Phase: Report ───────────────────────────────────────────────
 
@@ -4372,12 +2353,12 @@ class AutonomousOrchestrator:
                 and ms.get("phase") == "planning"
                 and ms.get("milestone_type") == "plan_finalized"
             ):
-                plan_summary = self._clean_agent_text(ms["plan_content"])
+                plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
                 break
         if not plan_summary:
             for ms in reversed(all_milestones):
                 if ms.get("plan_content") and ms.get("phase") == "planning":
-                    plan_summary = self._clean_agent_text(ms["plan_content"])
+                    plan_summary = self._clean_agent_text(ms["plan_content"])[:300]
                     break
 
         # 2. Diff stats
@@ -4392,36 +2373,55 @@ class AutonomousOrchestrator:
         test_summary = ""
         for ms in all_milestones:
             if ms.get("milestone_type") == "tests_run" and ms.get("result_summary"):
-                test_summary = self._clean_agent_text(ms["result_summary"])
+                test_summary = self._clean_agent_text(ms["result_summary"])[:200]
                 break
 
-        # 4. Code review rounds + structured approval verdict
-        pr_review_milestones = [
-            ms for ms in all_milestones if ms.get("milestone_type") == "pr_reviewed"
-        ]
-        review_rounds = sum(1 for ms in pr_review_milestones if ms.get("phase") == "pr_review")
-        review_passed = self._derive_review_passed(pr_review_milestones, wf.get("content_language"))
-
-        # Build the structured report payload — the single source of truth. The
-        # one-line summary and full report are NOT persisted as localized prose;
-        # the frontend renders them from ``metadata.report`` in the viewer's UI
-        # language. The GitHub issue comment is rendered here in the workflow's
-        # content_language (the issue audience expects the workflow's language).
-        content_language = wf.get("content_language")
-        payload = build_progress_payload(
-            dev_round=dev_round,
-            plan_summary=plan_summary,
-            diff_stats=diff_stats,
-            test_summary=test_summary,
-            review_rounds=review_rounds,
-            review_passed=review_passed,
-            pr_number=pr_number,
-            branch=wf.get("branch_name", ""),
-            total_tokens=wf.get("total_tokens", 0),
-            total_requests=wf.get("total_requests", 0),
+        # 4. Code review rounds
+        review_rounds = sum(
+            1
+            for ms in all_milestones
+            if ms.get("milestone_type") == "pr_reviewed" and ms.get("phase") == "pr_review"
         )
-        report_metadata = json.dumps({"report": payload}, ensure_ascii=False)
-        report_markdown = render_progress_report(payload, content_language)
+        review_passed = any(
+            "代码审查通过" in (ms.get("review_content") or "")
+            for ms in all_milestones
+            if ms.get("milestone_type") == "pr_reviewed"
+        )
+
+        # Build report
+        report = f"## 📊 Dev Round {dev_round} Summary\n\n"
+
+        if plan_summary:
+            report += f"### 📋 Plan\n{plan_summary}\n\n"
+
+        # Changes section
+        report += "### 📝 Changes\n"
+        branch = wf.get("branch_name", "")
+        if diff_stats:
+            report += (
+                f"- Files: {diff_stats.get('files', 0)} changed "
+                f"(+{diff_stats.get('additions', 0)}/-{diff_stats.get('deletions', 0)})\n"
+            )
+        if branch:
+            report += f"- Branch: `{branch}`\n"
+        report += "\n"
+
+        if test_summary:
+            report += f"### 🧪 Tests\n{test_summary}\n\n"
+
+        if review_rounds > 0:
+            report += "### 🔍 Code Review\n"
+            report += f"- Rounds: {review_rounds}\n"
+            report += f"- Final status: {'✅ Passed' if review_passed else '⚠️ Issues found'}\n\n"
+
+        if pr_number:
+            report += f"### 🔗 PR\n- PR #{pr_number}\n\n"
+
+        report += (
+            "### 📈 Resources\n"
+            f"- Tokens: {wf.get('total_tokens', 0):,}\n"
+            f"- API Requests: {wf.get('total_requests', 0)}\n"
+        )
 
         self._create_milestone(
             phase="report",
@@ -4429,12 +2429,15 @@ class AutonomousOrchestrator:
             milestone_type="progress_reported",
             status="completed",
             title=f"Progress report for round {dev_round}",
-            metadata=report_metadata,
+            result_summary=report[:500],
         )
 
         # Post report to issue
         if issue_number:
-            self._post_github_comment(gh, issue_number, report_markdown, context="progress-report")
+            try:
+                gh.add_issue_comment(issue_number, report)
+            except GitHubOpsError:
+                pass
 
         # Mark round completed
         self._create_milestone(
@@ -4561,7 +2564,15 @@ class AutonomousOrchestrator:
             return  # No new comments
 
         # Filter out bot's own comments (comments authored by the automation)
-        user_comments = [c for c in comments if not _is_bot_comment(c)]
+        bot_author_keywords = ["open-ace-bot", "autonomous", "bot"]
+        user_comments = [
+            c
+            for c in comments
+            if not any(
+                kw in (c.get("author", {}).get("login", "") or "").lower()
+                for kw in bot_author_keywords
+            )
+        ]
 
         # Check for completion signals — match whole words/lines only
         for comment in reversed(user_comments):
@@ -4611,35 +2622,12 @@ class AutonomousOrchestrator:
     # ── Phase: Merge ────────────────────────────────────────────────
 
     def _do_merge(self, wf: dict):
-        """Merge PR and clean up. Resolves merge conflicts automatically.
-
-        Merge is retried across scheduler cycles instead of blocking on CI:
-        if CI is still running we return (staying in 'merging') and the
-        scheduler retries in ~10s. This avoids hogging a workflow thread for
-        the full CI duration (10+ min for Python 3.9) and naturally adapts
-        to variable CI times without --admin bypass or long polls.
-        """
+        """Merge PR and clean up. Resolves merge conflicts automatically."""
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
-            # If CI is still running, defer this merge to the next scheduler
-            # cycle instead of blocking (synchronous poll) or failing. The
-            # scheduler re-enters _do_merge every ~10s.
-            try:
-                checks = gh.get_pr_checks(pr_number)
-            except Exception:
-                checks = []
-            pending = [c for c in checks if c.get("bucket") == "pending"]
-            if pending:
-                logger.info(
-                    "PR #%s: %d CI checks pending, deferring merge to next cycle",
-                    pr_number,
-                    len(pending),
-                )
-                return
-
             try:
                 gh.merge_pr(pr_number, strategy="merge")
                 self._create_milestone(
@@ -4648,68 +2636,34 @@ class AutonomousOrchestrator:
                     status="completed",
                     title=f"PR #{pr_number} merged",
                 )
-            except GitHubOpsError as e:
-                err_msg = str(e)
-                if "base branch policy prohibits" in err_msg:
-                    # CI reports done but GitHub hasn't reconciled yet, or a
-                    # late check started. Check whether CI actually failed —
-                    # if so, this is a real failure, not a transient deferral.
-                    failed = [c for c in checks if c.get("bucket") == "fail"]
-                    if failed:
-                        failed_names = ", ".join(c.get("name", "?") for c in failed)
-                        raise GitHubOpsError(
-                            f"PR #{pr_number} CI failed ({failed_names}), cannot merge"
-                        )
-                    # No failures, just policy lag — defer to next cycle.
-                    logger.info(
-                        "PR #%s: policy prohibits (CI not failed), deferring merge", pr_number
-                    )
-                    return
+            except GitHubOpsError:
+                # Merge conflict — resolve locally and retry
+                logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
                 try:
-                    # Merge conflict — resolve locally and retry
-                    logger.info("PR #%s not mergeable, resolving conflicts", pr_number)
                     self._resolve_merge_conflicts(gh, branch_name, pr_number)
-                    # Conflicts resolved + pushed, but NOT merged yet — the push
-                    # triggered a fresh CI run. Return here (staying in 'merging')
-                    # so _do_merge's CI-pending deferral handles the wait on the
-                    # next cycle. Falling through to cleanup would delete the
-                    # branch before the PR is merged (#1112 P1).
-                    return
-                except Exception as resolve_err:
+                except Exception as e:
                     self._create_milestone(
                         phase="merge",
                         milestone_type="merged",
                         status="failed",
                         title="PR merge failed",
-                        error_message=f"Merge conflict resolution failed: {resolve_err}",
+                        error_message=f"Merge conflict resolution failed: {e}",
                     )
                     raise
 
-        # Clean up branch/worktree. Re-read wf because _resolve_merge_conflicts
-        # may have cleared worktree_path (removed the original worktree to free
-        # the branch for the temp merge worktree); using the stale snapshot
-        # would retry the removal and fail, skipping branch deletion (#1107).
-        wf = self.workflow
+        # Clean up branch/worktree
         branch_name = wf.get("branch_name", "")
         worktree_path = wf.get("worktree_path", "")
         project_path = wf.get("project_path", "")
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
         try:
             if worktree_path:
                 # Must use main repo's gh to remove worktree
                 # (can't remove a worktree from within itself)
-                main_gh = GitHubOps(project_path, system_account=system_account)
+                main_gh = GitHubOps(project_path)
                 main_gh.remove_worktree(worktree_path)
                 self._update_workflow({"worktree_path": ""})
                 # Reinitialize gh to point at main repo for branch deletion
-                self._gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = GitHubOps(project_path)
                 gh = self._gh
             if branch_name:
                 gh.delete_branch(branch_name)
@@ -4732,171 +2686,76 @@ class AutonomousOrchestrator:
         self._emit("phase_change", {"phase": "completed"})
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):
-        """Resolve merge conflicts in an isolated worktree, push, and merge the PR.
-
-        Previously this checked out the PR branch directly in the main repo,
-        which polluted the shared working tree (``index.lock`` races with
-        concurrent workflows, ``reset --hard`` clobbered in-flight resolution
-        on scheduler re-entry). Now a throwaway worktree is created for the
-        branch, all merge/resolve/push happens inside it, and it is removed in
-        a ``finally`` — the main repo's index and HEAD are never touched.
-        """
+        """Resolve merge conflicts locally, push, and merge the PR."""
+        # Remove worktree if it's blocking checkout (must do before any git ops
+        # on the main repo, since removing worktree deletes its directory)
         wf = self.workflow
-        project_path = wf.get("project_path", "")
         worktree_path = wf.get("worktree_path", "")
-        # Get system_account for multi-user permission isolation (Issue #1395)
-        system_account = None
-        user_id = wf.get("user_id")
-        if user_id:
-            user_repo = UserRepository()
-            user = user_repo.get_user_by_id(user_id)
-            if user:
-                system_account = user.get("system_account")
-
-        # Git forbids checking out the same branch in two worktrees, so the
-        # workflow's own worktree (if still present) must be removed first to
-        # free the branch for the temp worktree below.
-        main_gh = GitHubOps(project_path, system_account=system_account)
+        project_path = wf.get("project_path", "")
         if worktree_path:
             try:
+                # Use a separate GitHubOps for the main repo to remove worktree
+                main_gh = GitHubOps(project_path)
                 main_gh.remove_worktree(worktree_path)
-            except GitHubOpsError as e:
-                logger.warning("Could not remove existing worktree %s: %s", worktree_path, e)
+            except Exception:
+                pass
             self._update_workflow({"worktree_path": ""})
-            # The caller's gh still points at the now-deleted worktree dir as
-            # its cwd. Rebind it (and the cached self._gh) to the main repo so
-            # the later merge_pr / _do_merge cleanup don't run subprocess with
-            # a gone cwd (#1107 review).
-            gh = GitHubOps(project_path, system_account=system_account)
-            self._gh = gh
+            # Reinitialize gh to point at project_path (worktree dir is gone)
+            self._gh = GitHubOps(project_path)
+            gh = self._gh
 
-        # Create an isolated worktree for the existing PR branch. Use the main
-        # repo's gh so the worktree is registered against the real .git.
-        temp_wt_path = os.path.normpath(f"{project_path}/../merge-{self._workflow_id[:8]}")
-        main_gh.add_worktree(temp_wt_path, branch_name)
-        logger.info("Created temporary merge worktree at %s", temp_wt_path)
-
-        # All subsequent git ops run inside the temp worktree.
-        wt_gh = GitHubOps(temp_wt_path, system_account=system_account)
+        # Clean up any leftover git state (conflicts, uncommitted changes)
+        gh._run_git(["reset", "--hard", "HEAD"])
+        gh._run_git(["clean", "-fd"])
+        # Fetch latest main and checkout our branch
+        gh._run_git(["fetch", "origin", "main"])
+        gh._run_git(["checkout", branch_name])
         try:
-            # Fetch latest main and merge into the branch.
-            wt_gh._run_git(["fetch", "origin", "main"])
-            merge_result = wt_gh._run_git(["merge", "origin/main"], check=False)
-            # git writes conflict summaries to STDOUT (not stderr), so we must
-            # check both streams. Checking only stderr left stderr empty on a
-            # real conflict and the code misclassified it as a "non-conflict"
-            # failure, abandoning merge without ever invoking the AI resolver.
-            combined_output = f"{merge_result.stdout}\n{merge_result.stderr}"
-            if merge_result.returncode != 0:
-                if "CONFLICT" not in combined_output:
-                    raise GitHubOpsError(
-                        f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
-                    )
-
-                # Ask AI agent to resolve conflicts inside the temp worktree.
-                conflict_prompt = (
-                    AUTONOMOUS_CONTEXT
-                    + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
-                    "保留两边的有效修改。\n\n"
-                )
-                # Issue reference is available in this method's scope
-                issue_number = wf.get("github_issue_number") or self.workflow.get(
-                    "github_issue_number"
-                )
-                if issue_number:
-                    conflict_prompt += (
-                        f"## 关联 Issue\n"
-                        f"本任务关联 GitHub Issue #{issue_number}。\n"
-                        f"冲突解决时请确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
-                    )
-                conflict_prompt += (
-                    "步骤：\n"
-                    "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
-                    "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
-                    "3. git add 所有解决后的文件\n"
-                    "4. 运行测试验证冲突解决没有破坏功能（不能跳过）：\n"
-                    "   - python -m pytest 或 python3 -m pytest\n"
-                    "   - 如果有测试失败，分析原因并修复，然后重新测试\n"
-                    "   - 特别注意：main 上的改动可能修改了函数签名/SQL/接口，\n"
-                    "     冲突文件相关的测试也需要同步更新\n"
-                    "   - 重复直到所有测试通过\n"
-                    "5. 测试全部通过后，git commit 完成合并\n\n"
-                    "## 总结报告（必须）\n"
-                    "在回复末尾简要总结：\n"
-                    "- 解决了哪些文件的冲突\n"
-                    "- 是否执行了测试，测试结果如何（如 42 passed, 0 failed）\n"
-                    "- 如果跳过了测试，说明原因\n"
-                    "- 这个总结会显示在工作流的 timeline 中，供用户查看"
+            gh._run_git(["merge", "origin/main"])
+        except GitHubOpsError:
+            # There are conflicts — use AI agent to resolve them
+            gh._run_git(["merge", "--abort"])  # Clean state first
+            merge_result = gh._run_git(["merge", "origin/main"], check=False)
+            if merge_result.returncode != 0 and "CONFLICT" not in merge_result.stderr:
+                raise GitHubOpsError(
+                    f"git merge failed (non-conflict): {merge_result.stderr.strip()}"
                 )
 
-                wf = self.workflow
-                # Track this as its own milestone so conflict-resolution usage is
-                # captured in phase_* (and thus workflow totals = SUM(phase_*)).
-                conflict_ms = self._create_milestone(
-                    phase="merge",
-                    dev_round=wf.get("dev_round", 1),
-                    milestone_type="conflicts_resolved",
-                    status="in_progress",
-                    title=f"Resolving merge conflicts (PR #{pr_number})",
-                )
-                result = self._run_agent(
-                    wf=wf,
-                    workflow_id=self._workflow_id,
-                    cli_tool=wf.get("cli_tool", "claude-code"),
-                    model=wf.get("model", ""),
-                    project_path=temp_wt_path,
-                    prompt=conflict_prompt,
-                    workspace_type=wf.get("workspace_type", "local"),
-                    remote_machine_id=wf.get("remote_machine_id"),
-                    permission_mode=wf.get("permission_mode", "auto-edit"),
-                    allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
-                        wf.get("cli_tool", "claude-code"), []
-                    ),
-                    session_line="fresh",
-                    milestone_id=conflict_ms.get("milestone_id", ""),
-                )
-                self._accumulate_tokens(result)
-                response_text = self._artifact_text(result)
-                self.repo.update_milestone(
-                    conflict_ms.get("milestone_id", ""),
-                    {
-                        "status": "completed" if result.success else "failed",
-                        "session_id": result.session_id,
-                        "error_message": result.error or "",
-                        "result_summary": response_text,
-                        "tldr": self._artifact_tldr(result),
-                    },
-                )
-
-                if not result.success:
-                    raise RuntimeError(f"Conflict resolution failed: {result.error}")
-
-            # Push the resolved branch. The new merge commit triggers a fresh
-            # CI run, so we do NOT merge here — _do_merge will retry on the
-            # next scheduler cycle once CI passes (it checks for pending CI
-            # at the top and defers until checks are green).
-            # P1 修复（Issue #1611）：Conflict 解决后检查分支一致性
-            current_branch = wt_gh.get_current_branch()
-            if current_branch != branch_name:
-                logger.warning(
-                    "Conflict resolution branch mismatch: expected=%s, actual=%s",
-                    branch_name,
-                    current_branch,
-                )
-                branch_name = current_branch
-            wt_gh.git_push(branch=branch_name)
-            self._create_milestone(
-                phase="merge",
-                milestone_type="conflicts_pushed",
-                status="completed",
-                title=f"PR #{pr_number} conflicts resolved, waiting for CI to merge",
+            # Ask AI agent to resolve conflicts
+            conflict_prompt = (
+                AUTONOMOUS_CONTEXT
+                + "当前分支与 main 存在合并冲突。请解决所有冲突文件中的冲突标记，"
+                "保留两边的有效修改。解决完成后执行 git add 并 git commit。\n\n"
+                "步骤：\n"
+                "1. 查看所有冲突文件：git diff --name-only --diff-filter=U\n"
+                "2. 逐个解决冲突标记（<<<<<<, ======, >>>>>>）\n"
+                "3. git add 所有解决后的文件\n"
+                "4. git commit 完成合并"
             )
-        finally:
-            # Always tear down the temp worktree, even on failure, so it does
-            # not leak and block future runs. Use the main repo's gh because
-            # a worktree cannot remove itself.
-            try:
-                main_gh.remove_worktree(temp_wt_path)
-                logger.info("Removed temporary merge worktree at %s", temp_wt_path)
-            except GitHubOpsError as e:
-                logger.warning("Failed to remove temp worktree %s: %s", temp_wt_path, e)
+
+            wf = self.workflow
+            result = self._run_agent(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=conflict_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+            )
+
+            if not result.success:
+                raise RuntimeError(f"Conflict resolution failed: {result.error}")
+
+        # Push the merged branch and retry PR merge
+        gh.git_push(branch=branch_name)
+        gh.merge_pr(pr_number, strategy="merge")
+
+        self._create_milestone(
+            phase="merge",
+            milestone_type="merged",
+            status="completed",
+            title=f"PR #{pr_number} merged (conflicts resolved)",
+        )

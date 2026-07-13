@@ -47,7 +47,6 @@ class AutonomousWorkflow:
     batch_id: Optional[str] = None
     batch_order: Optional[int] = None
     batch_total: Optional[int] = None
-    base_commit_sha: Optional[str] = None  # Locked SHA for batch workflows (Issue #1552)
     auto_merge: bool = True  # Auto merge PR and proceed to next workflow in batch
     definition_snapshot: Optional[dict] = None
     current_phase: str = (
@@ -57,17 +56,11 @@ class AutonomousWorkflow:
     dev_round: int = 1
     max_plan_rounds: int = 3
     max_pr_review_rounds: int = 5
-    require_full_review_rounds: bool = False
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_requests: int = 0
     error_message: str = ""
-    # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
-    # at creation; persisted content is generated in this language and rendered
-    # verbatim (it does NOT switch per viewer). System-authored structured
-    # content is rendered from structured payloads instead.
-    content_language: str = "en"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -118,7 +111,6 @@ class AutonomousWorkflow:
             "batch_id": self.batch_id,
             "batch_order": self.batch_order,
             "batch_total": self.batch_total,
-            "base_commit_sha": self.base_commit_sha,
             "auto_merge": self.auto_merge,
             "definition_snapshot": self.definition_snapshot,
             "current_phase": self.current_phase,
@@ -126,13 +118,11 @@ class AutonomousWorkflow:
             "dev_round": self.dev_round,
             "max_plan_rounds": self.max_plan_rounds,
             "max_pr_review_rounds": self.max_pr_review_rounds,
-            "require_full_review_rounds": self.require_full_review_rounds,
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
             "total_requests": self.total_requests,
             "error_message": self.error_message,
-            "content_language": self.content_language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -169,7 +159,6 @@ class AutonomousWorkflow:
             batch_id=data.get("batch_id"),
             batch_order=data.get("batch_order"),
             batch_total=data.get("batch_total"),
-            base_commit_sha=data.get("base_commit_sha"),
             auto_merge=bool(data.get("auto_merge", True)),
             definition_snapshot=data.get("definition_snapshot"),
             current_phase=data.get("current_phase", "preparation"),
@@ -177,13 +166,11 @@ class AutonomousWorkflow:
             dev_round=data.get("dev_round", 1),
             max_plan_rounds=data.get("max_plan_rounds", 3),
             max_pr_review_rounds=data.get("max_pr_review_rounds", 5),
-            require_full_review_rounds=bool(data.get("require_full_review_rounds", False)),
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
             total_requests=data.get("total_requests", 0),
             error_message=data.get("error_message", ""),
-            content_language=data.get("content_language", "en"),
             created_at=(
                 datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
             ),
@@ -226,7 +213,6 @@ class WorkflowMilestone:
     error_message: str = ""
     parent_milestone_id: str = ""
     fork_branch: str = ""
-    fork_workflow_id: str = ""
     metadata: str = ""  # JSON
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -258,7 +244,6 @@ class WorkflowMilestone:
             "error_message": self.error_message,
             "parent_milestone_id": self.parent_milestone_id,
             "fork_branch": self.fork_branch,
-            "fork_workflow_id": self.fork_workflow_id,
             "metadata": self.metadata,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
@@ -294,7 +279,6 @@ class WorkflowMilestone:
             error_message=data.get("error_message", ""),
             parent_milestone_id=data.get("parent_milestone_id", ""),
             fork_branch=data.get("fork_branch", ""),
-            fork_workflow_id=data.get("fork_workflow_id", ""),
             metadata=data.get("metadata", ""),
             started_at=(
                 datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None
@@ -354,11 +338,7 @@ class AgentTaskResult:
 
     session_id: str = ""
     tracking_session_id: str = ""
-    source_session_id: str = ""
-    prompt: str = ""
     response_text: str = ""
-    visible_response_text: str = ""
-    structured_tags: dict[str, str] = field(default_factory=dict)
     messages: list = field(default_factory=list)
     total_tokens: int = 0
     total_input_tokens: int = 0

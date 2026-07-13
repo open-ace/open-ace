@@ -14,12 +14,6 @@ from app.repositories.database import Database, adapt_sql, escape_like, is_postg
 
 logger = logging.getLogger(__name__)
 
-# Supported content languages for workflow-authored content (en/zh/ja/ko).
-# Shared by the repository (persistence) and the orchestrator (AI prompt
-# injection) so the two layers can never drift apart.
-ALLOWED_CONTENT_LANGUAGES = ("en", "zh", "ja", "ko")
-DEFAULT_CONTENT_LANGUAGE = "en"
-
 
 class AutonomousWorkflowRepository:
     """Repository for autonomous workflow CRUD operations."""
@@ -48,7 +42,6 @@ class AutonomousWorkflowRepository:
         "batch_id",
         "batch_order",
         "batch_total",
-        "base_commit_sha",
         "auto_merge",
         "definition_snapshot",
         "current_phase",
@@ -56,7 +49,6 @@ class AutonomousWorkflowRepository:
         "dev_round",
         "max_plan_rounds",
         "max_pr_review_rounds",
-        "require_full_review_rounds",
         "total_tokens",
         "total_input_tokens",
         "total_output_tokens",
@@ -79,12 +71,6 @@ class AutonomousWorkflowRepository:
         "main_session_id",
         "review_session_id",
         "test_session_id",
-        "transient_retry_count",
-        "content_language",
-        "test_retries",
-        "skip_retries",
-        "dev_retries_on_test_fail",
-        "system_account",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -104,7 +90,6 @@ class AutonomousWorkflowRepository:
         "result_summary",
         "plan_content",
         "review_content",
-        "tldr",
         "phase_total_tokens",
         "phase_input_tokens",
         "phase_output_tokens",
@@ -163,17 +148,6 @@ class AutonomousWorkflowRepository:
     # ── Workflow CRUD ──────────────────────────────────────────────
 
     @staticmethod
-    def _normalize_content_language(value) -> str:
-        """Validate content_language against the supported set, falling back.
-
-        Accepts the 4 supported languages; anything else (None, empty, unknown)
-        falls back to the default so persisted content always has a language.
-        """
-        if isinstance(value, str) and value.strip() in ALLOWED_CONTENT_LANGUAGES:
-            return value.strip()
-        return DEFAULT_CONTENT_LANGUAGE
-
-    @staticmethod
     def _coerce_bool(value, default: bool = False) -> bool:
         """Coerce a value to Python bool for BOOLEAN columns.
 
@@ -191,10 +165,6 @@ class AutonomousWorkflowRepository:
         """Create a new autonomous workflow. Returns the created record."""
         workflow_id = data.get("workflow_id") or str(uuid.uuid4())
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        # Normalize content_language up front so both INSERT branches stay in
-        # sync and the value cannot be silently dropped by a missing column.
-        data = dict(data)
-        data["content_language"] = self._normalize_content_language(data.get("content_language"))
 
         if is_postgresql():
             result = self.db.fetch_one(
@@ -207,11 +177,11 @@ class AutonomousWorkflowRepository:
                      remote_machine_id, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
-                     max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
+                     max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name, content_language, system_account,
+                     original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -242,19 +212,16 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
-                    self._coerce_bool(data.get("require_full_review_rounds"), False),
                     data.get("parent_workflow_id"),
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
-                    data.get("content_language", "en"),
-                    data.get("system_account", ""),
                     now,
                     now,
                 ),
                 commit=True,
             )
-            created = result
+            return result
         else:
             self.db.execute(
                 """
@@ -266,11 +233,11 @@ class AutonomousWorkflowRepository:
                      remote_machine_id, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
-                     max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
+                     max_plan_rounds, max_pr_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
-                     original_branch_name, content_language, system_account,
+                     original_branch_name,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -300,29 +267,15 @@ class AutonomousWorkflowRepository:
                     data.get("dev_round", 1),
                     data.get("max_plan_rounds", 3),
                     data.get("max_pr_review_rounds", 5),
-                    self._coerce_bool(data.get("require_full_review_rounds"), False),
                     data.get("parent_workflow_id"),
                     data.get("fork_milestone_id"),
                     data.get("user_feedback", ""),
                     data.get("original_branch_name", ""),
-                    data.get("content_language", "en"),
-                    data.get("system_account", ""),
                     now,
                     now,
                 ),
             )
-            created = self.get_workflow(workflow_id)
-
-        # Silent-drop guard: content_language must round-trip. If the INSERT
-        # column list ever drifts out of sync with the value tuple, this would
-        # catch a missing column instead of persisting a NULL silently.
-        if created and not created.get("content_language"):
-            logger.error(
-                "content_language missing after create_workflow %s — falling back to 'en'",
-                workflow_id,
-            )
-            created["content_language"] = "en"
-        return created
+            return self.get_workflow(workflow_id)
 
     def get_workflow(self, workflow_id: str) -> Optional[dict]:
         """Get a workflow by workflow_id."""
@@ -435,30 +388,6 @@ class AutonomousWorkflowRepository:
             """
         )
 
-    def get_paused_workflows(self, quota_prefix: str = "") -> list:
-        """Get paused workflows, optionally filtered to a quota-pause reason.
-
-        With ``quota_prefix`` empty this returns every paused workflow. With a
-        prefix it filters in SQL (``error_message LIKE 'prefix%'``) so the
-        auto-resume scan stays cheap and doesn't grow with the full paused set.
-        """
-        if quota_prefix:
-            return self.db.fetch_all(
-                """
-                SELECT * FROM autonomous_workflows
-                WHERE status = 'paused' AND error_message LIKE ? ESCAPE '\\'
-                ORDER BY created_at ASC
-                """,
-                (f"{escape_like(quota_prefix)}%",),
-            )
-        return self.db.fetch_all(
-            """
-            SELECT * FROM autonomous_workflows
-            WHERE status = 'paused'
-            ORDER BY created_at ASC
-            """
-        )
-
     def get_queued_workflows(self) -> list:
         """Get workflows that are queued behind another workflow in the same batch."""
         return self.db.fetch_all(
@@ -504,23 +433,8 @@ class AutonomousWorkflowRepository:
         finally:
             conn.close()
 
-    def update_workflow(
-        self, workflow_id: str, updates: dict, expected_values: Optional[dict] = None
-    ) -> Optional[dict]:
-        """Update a workflow's fields. Returns updated record.
-
-        **Phase 1 Enhancement (P0)**: Optional optimistic lock support.
-        If `expected_values` dict is provided, adds WHERE conditions checking
-        old values before update (prevents concurrent modification).
-
-        Args:
-            workflow_id: Workflow UUID
-            updates: Dict of fields to update
-            expected_values: Optional dict of {field: old_value} for optimistic lock
-
-        Returns:
-            Updated workflow dict if successful, None if optimistic lock failed
-        """
+    def update_workflow(self, workflow_id: str, updates: dict) -> Optional[dict]:
+        """Update a workflow's fields. Returns updated record."""
         if not updates:
             return self.get_workflow(workflow_id)
 
@@ -532,12 +446,7 @@ class AutonomousWorkflowRepository:
             return self.get_workflow(workflow_id)
 
         # Boolean columns — coerce to Python bool for PostgreSQL BOOLEAN type
-        _BOOL_COLS = {
-            "is_new_project",
-            "is_private",
-            "auto_merge",
-            "require_full_review_rounds",
-        }
+        _BOOL_COLS = {"is_new_project", "is_private", "auto_merge"}
 
         set_clauses = []
         params = []
@@ -546,39 +455,11 @@ class AutonomousWorkflowRepository:
             params.append(self._coerce_bool(value) if key in _BOOL_COLS else value)
 
         params.append(workflow_id)
-
-        # ── Optimistic lock support (Phase 1, P0) ──────────────────────
-        where_clauses = ["workflow_id = ?"]
-        if expected_values:
-            # Filter expected_values to retry fields only (保守策略)
-            _RETRY_FIELDS = {"test_retries", "skip_retries", "dev_retries_on_test_fail"}
-            safe_expected = {k: v for k, v in expected_values.items() if k in _RETRY_FIELDS}
-            for key, old_value in safe_expected.items():
-                where_clauses.append(f"{key} = ?")
-                params.append(old_value)
-
-        sql = f"UPDATE autonomous_workflows SET {', '.join(set_clauses)} WHERE {' AND '.join(where_clauses)}"
-
-        # Execute and check affected rows
-        conn = self.db.get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute(adapt_sql(sql), tuple(params))
-            affected_rows = cursor.rowcount
-            conn.commit()
-
-            if expected_values and affected_rows == 0:
-                # Optimistic lock failed - concurrent modification detected
-                logger.warning(
-                    "Optimistic lock failed for workflow %s: expected_values=%s",
-                    workflow_id[:8],
-                    expected_values,
-                )
-                return None
-
-            return self.get_workflow(workflow_id)
-        finally:
-            conn.close()
+        self.db.execute(
+            f"UPDATE autonomous_workflows SET {', '.join(set_clauses)} WHERE workflow_id = ?",
+            tuple(params),
+        )
+        return self.get_workflow(workflow_id)
 
     def update_workflow_tokens(self, workflow_id: str, tokens: dict) -> None:
         """Accumulate token counts for a workflow."""
@@ -741,7 +622,6 @@ class AutonomousWorkflowRepository:
             "error_message",
             "parent_milestone_id",
             "fork_branch",
-            "fork_workflow_id",
             "metadata",
         ]
         col_names = [
@@ -769,16 +649,8 @@ class AutonomousWorkflowRepository:
                     now,
                     now,
                 ]
-                # Copied milestones become the child workflow's own history. They
-                # are not the fork point this child originated from, so the
-                # ancestor's fork_workflow_id (which points at a *sibling*
-                # workflow, e.g. an earlier fork) must not be carried over —
-                # otherwise a later fork from this child misattributes its split
-                # to the ancestor's branch point. See PR #1243 review.
-                source_milestone = dict(ms)
-                source_milestone["fork_workflow_id"] = ""
                 for f in fields:
-                    col_values.append(source_milestone.get(f, ""))
+                    col_values.append(ms.get(f, ""))
 
                 cursor.execute(
                     adapt_sql(
@@ -870,13 +742,13 @@ class AutonomousWorkflowRepository:
                      session_id, review_session_id,
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
-                     plan_content, review_content, tldr,
-                     parent_milestone_id, fork_branch, fork_workflow_id, metadata,
+                     plan_content, review_content,
+                     parent_milestone_id, fork_branch, metadata,
                      error_message,
                      phase_total_tokens, phase_input_tokens,
                      phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -899,10 +771,8 @@ class AutonomousWorkflowRepository:
                     data.get("result_summary", ""),
                     data.get("plan_content", ""),
                     data.get("review_content", ""),
-                    data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
-                    data.get("fork_workflow_id", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
                     data.get("phase_total_tokens", 0),
@@ -925,13 +795,13 @@ class AutonomousWorkflowRepository:
                      session_id, review_session_id,
                      github_issue_number, github_pr_number, github_comment_id,
                      commit_shas, diff_stats, result_summary,
-                     plan_content, review_content, tldr,
-                     parent_milestone_id, fork_branch, fork_workflow_id, metadata,
+                     plan_content, review_content,
+                     parent_milestone_id, fork_branch, metadata,
                      error_message,
                      phase_total_tokens, phase_input_tokens,
                      phase_output_tokens, phase_request_count,
                      started_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     data.get("workflow_id", ""),
@@ -953,10 +823,8 @@ class AutonomousWorkflowRepository:
                     data.get("result_summary", ""),
                     data.get("plan_content", ""),
                     data.get("review_content", ""),
-                    data.get("tldr", ""),
                     data.get("parent_milestone_id", ""),
                     data.get("fork_branch", ""),
-                    data.get("fork_workflow_id", ""),
                     data.get("metadata", ""),
                     data.get("error_message", ""),
                     data.get("phase_total_tokens", 0),

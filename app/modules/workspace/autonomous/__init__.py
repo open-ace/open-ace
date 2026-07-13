@@ -28,7 +28,7 @@ def get_ddl_statements():
     bool_false = "FALSE" if use_pg else "0"
     bool_true = "TRUE" if use_pg else "1"
 
-    statements = [
+    return [
         f"""
         CREATE TABLE IF NOT EXISTS autonomous_workflows (
             id {pk_type},
@@ -50,11 +50,6 @@ def get_ddl_statements():
             workspace_type TEXT DEFAULT 'local',
             remote_machine_id TEXT DEFAULT '',
             worktree_path TEXT DEFAULT '',
-            main_session_id TEXT DEFAULT '',
-            review_session_id TEXT DEFAULT '',
-            test_session_id TEXT DEFAULT '',
-            agent_session_id TEXT DEFAULT '',
-            agent_pid INTEGER,
             github_issue_number INTEGER,
             github_pr_number INTEGER,
             github_pr_url TEXT DEFAULT '',
@@ -68,7 +63,6 @@ def get_ddl_statements():
             dev_round INTEGER DEFAULT 1,
             max_plan_rounds INTEGER DEFAULT 3,
             max_pr_review_rounds INTEGER DEFAULT 5,
-            require_full_review_rounds {bool_type} DEFAULT {bool_false},
             total_tokens INTEGER DEFAULT 0,
             total_input_tokens INTEGER DEFAULT 0,
             total_output_tokens INTEGER DEFAULT 0,
@@ -86,62 +80,22 @@ def get_ddl_statements():
             parent_workflow_id TEXT,
             fork_milestone_id TEXT,
             user_feedback TEXT DEFAULT '',
-            original_branch_name TEXT DEFAULT '',
-            transient_retry_count INTEGER DEFAULT 0,
-            content_language TEXT DEFAULT 'en',
-            test_retries INTEGER DEFAULT 0,
-            skip_retries INTEGER DEFAULT 0,
-            dev_retries_on_test_fail INTEGER DEFAULT 0,
-            system_account TEXT DEFAULT ''
+            original_branch_name TEXT DEFAULT ''
         )
         """,
-    ]
-    # Add transient_retry_count for existing databases that predate this
-    # column. CREATE TABLE IF NOT EXISTS is a no-op on existing tables, so
-    # the column won't appear without this ALTER. Use plain ADD COLUMN (no
-    # IF NOT EXISTS) — works on both PG and SQLite. schema_init wraps each
-    # statement in try/except so "duplicate column" errors are silently
-    # ignored on databases that already have the column.
-    statements.append(
-        "ALTER TABLE autonomous_workflows ADD COLUMN transient_retry_count INTEGER DEFAULT 0"
-    )
-    # content_language: persisted workflow content language (source of truth
-    # for AI-authored content). The authoritative path for existing Postgres
-    # databases is the Alembic migration; this ALTER mirrors the column for the
-    # SQLite dev path. See schema_init transaction-cascade caveat.
-    statements.append(
-        "ALTER TABLE autonomous_workflows ADD COLUMN content_language TEXT DEFAULT 'en'"
-    )
-    statements.append(
-        f"ALTER TABLE autonomous_workflows ADD COLUMN require_full_review_rounds {bool_type} DEFAULT {bool_false}"
-    )
-    # test_retries / skip_retries / dev_retries_on_test_fail: counters for the
-    # development-phase test retry logic. Mirrors Alembic migration
-    # 20260704_001_add_test_retry_columns for the SQLite dev/test path.
-    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN test_retries INTEGER DEFAULT 0")
-    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN skip_retries INTEGER DEFAULT 0")
-    statements.append(
-        "ALTER TABLE autonomous_workflows ADD COLUMN dev_retries_on_test_fail INTEGER DEFAULT 0"
-    )
-    # system_account: user's system account for sudo execution when accessing
-    # private directories. Mirrors Alembic migration
-    # 20260707_001_add_system_account_to_workflows for the SQLite dev/test path.
-    statements.append("ALTER TABLE autonomous_workflows ADD COLUMN system_account TEXT DEFAULT ''")
-    statements.extend(
-        [
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_workflows_user_status
             ON autonomous_workflows(user_id, status)
         """,
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_workflows_parent
             ON autonomous_workflows(parent_workflow_id)
         """,
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_workflows_batch_order
             ON autonomous_workflows(batch_id, batch_order)
         """,
-            f"""
+        f"""
         CREATE TABLE IF NOT EXISTS workflow_milestones (
             id {pk_type},
             workflow_id TEXT NOT NULL REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE,
@@ -163,31 +117,26 @@ def get_ddl_statements():
             result_summary TEXT DEFAULT '',
             plan_content TEXT DEFAULT '',
             review_content TEXT DEFAULT '',
-            tldr TEXT DEFAULT '',
             error_message TEXT DEFAULT '',
             parent_milestone_id TEXT DEFAULT '',
             fork_branch TEXT DEFAULT '',
             fork_workflow_id TEXT DEFAULT '',
             metadata TEXT DEFAULT '',
-            phase_total_tokens INTEGER DEFAULT 0,
-            phase_input_tokens INTEGER DEFAULT 0,
-            phase_output_tokens INTEGER DEFAULT 0,
-            phase_request_count INTEGER DEFAULT 0,
             started_at TIMESTAMP,
             completed_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_milestones_workflow_phase
             ON workflow_milestones(workflow_id, phase, status)
         """,
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_milestones_workflow_round
             ON workflow_milestones(workflow_id, dev_round)
         """,
-            f"""
+        f"""
         CREATE TABLE IF NOT EXISTS workflow_events (
             id {pk_type},
             workflow_id TEXT NOT NULL,
@@ -197,13 +146,11 @@ def get_ddl_statements():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
-            """
+        """
         CREATE INDEX IF NOT EXISTS idx_events_workflow_created
             ON workflow_events(workflow_id, created_at)
         """,
-        ]
-    )
-    return statements
+    ]
 
 
 __all__ = [
