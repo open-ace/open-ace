@@ -358,13 +358,13 @@ export interface SelectOption {
 
 export interface GroupedSelectOption {
   label: string;
-  options: SelectOption[];
+  options?: SelectOption[];
 }
 
 export type SelectOptionOrGroup = SelectOption | GroupedSelectOption;
 
 export interface SelectProps extends BaseComponentProps {
-  options: SelectOption[];
+  options?: SelectOption[];
   value?: string;
   onChange: (value: string) => void;
   placeholder?: string;
