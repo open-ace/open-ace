@@ -13,11 +13,8 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required, auth_required
-from app.modules.governance.audit_logger import (
-    AuditAction,
-    AuditLogger,
-    get_action_categories,
-)
+from app.modules.governance.audit_logger import (AuditAction, AuditLogger,
+                                                 get_action_categories)
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.governance_repo import GovernanceRepository
