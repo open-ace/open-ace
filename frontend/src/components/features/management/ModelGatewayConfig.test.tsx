@@ -77,13 +77,7 @@ vi.mock('@/components/common', () => ({
     />
   ),
   Loading: () => <div data-testid="loading">Loading...</div>,
-  Error: ({
-    message,
-    onRetry,
-  }: {
-    message: string;
-    onRetry?: () => void;
-  }) => (
+  Error: ({ message, onRetry }: { message: string; onRetry?: () => void }) => (
     <div data-testid="error">
       {message}
       {onRetry && <button onClick={onRetry}>Retry</button>}
@@ -180,9 +174,7 @@ describe('ModelGatewayConfig', () => {
 
   describe('Loading and Error States', () => {
     it('shows loading state initially', () => {
-      vi.mocked(modelGatewayApi.getConfig).mockImplementation(
-        () => new Promise(() => {})
-      ); // Never resolves
+      vi.mocked(modelGatewayApi.getConfig).mockImplementation(() => new Promise(() => {})); // Never resolves
 
       render(<ModelGatewayConfig />);
       expect(screen.getByTestId('loading')).toBeInTheDocument();
