@@ -37,6 +37,9 @@ describe('App Store', () => {
       workspaceTabs: [],
       workspaceActiveTabId: '',
       autonomousEnabled: false,
+      modelGatewayEnabled: false,
+      runTimelineEnabled: false,
+      policyEnabled: false,
       configLoaded: false,
       reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => {
         const state = useAppStore.getState();
@@ -315,6 +318,54 @@ describe('App Store', () => {
       });
 
       expect(useAppStore.getState().autonomousEnabled).toBe(false);
+    });
+
+    it('should set modelGatewayEnabled', () => {
+      expect(useAppStore.getState().modelGatewayEnabled).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setModelGatewayEnabled(true);
+      });
+
+      expect(useAppStore.getState().modelGatewayEnabled).toBe(true);
+
+      act(() => {
+        useAppStore.getState().setModelGatewayEnabled(false);
+      });
+
+      expect(useAppStore.getState().modelGatewayEnabled).toBe(false);
+    });
+
+    it('should set runTimelineEnabled', () => {
+      expect(useAppStore.getState().runTimelineEnabled).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setRunTimelineEnabled(true);
+      });
+
+      expect(useAppStore.getState().runTimelineEnabled).toBe(true);
+
+      act(() => {
+        useAppStore.getState().setRunTimelineEnabled(false);
+      });
+
+      expect(useAppStore.getState().runTimelineEnabled).toBe(false);
+    });
+
+    it('should set policyEnabled', () => {
+      expect(useAppStore.getState().policyEnabled).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setPolicyEnabled(true);
+      });
+
+      expect(useAppStore.getState().policyEnabled).toBe(true);
+
+      act(() => {
+        useAppStore.getState().setPolicyEnabled(false);
+      });
+
+      expect(useAppStore.getState().policyEnabled).toBe(false);
     });
 
     it('should set configLoaded', () => {
