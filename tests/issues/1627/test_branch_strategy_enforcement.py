@@ -6,8 +6,9 @@ Tests verify that:
 3. new-branch strategy uses project_path
 """
 
+from unittest.mock import MagicMock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -42,7 +43,9 @@ def _make_orchestrator(wf_data):
     """Create orchestrator with mocked dependencies (following existing pattern)."""
     with (
         patch("app.modules.workspace.autonomous.orchestrator.Database"),
-        patch("app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository") as mock_repo_cls,
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+        ) as mock_repo_cls,
     ):
         mock_repo = MagicMock()
         mock_repo.get_workflow.return_value = wf_data
