@@ -277,6 +277,21 @@
   --bs-border-color: #334155;
   --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
 
+  /* Bootstrap semantic color overrides for dark backgrounds (Issue #1630)
+     Bootstrap .text-danger/.text-success/.text-primary use --bs-*-rgb variables
+     with default colors optimized for light backgrounds. Override them with the
+     project's theme-aware colors to ensure WCAG AA contrast (≥4.5:1) on dark bg. */
+  --bs-danger: var(--color-danger);
+  --bs-danger-rgb: 239, 68, 68; /* #ef4444 → 4.74:1 on #0f172a */
+  --bs-success: var(--color-success);
+  --bs-success-rgb: 16, 185, 129; /* #10b981 → 7.04:1 on #0f172a */
+  --bs-primary: var(--color-primary);
+  --bs-primary-rgb: 56, 189, 248; /* #38bdf8 → 8.33:1 on #0f172a */
+  --bs-warning: var(--color-warning);
+  --bs-warning-rgb: 245, 158, 11; /* #f59e0b → 8.31:1 on #0f172a */
+  --bs-info: var(--color-info);
+  --bs-info-rgb: 59, 130, 246; /* #3b82f6 → 4.63:1 on #0f172a */
+
   /* Bootstrap Modal Dark Theme Variables */
   --bs-modal-bg: var(--bg-primary);
   --bs-modal-color: var(--text-primary);
