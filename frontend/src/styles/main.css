@@ -1304,6 +1304,36 @@ link[rel='dns-prefetch'] {
   color: #f1f5f9 !important; /* 4.72:1+ on all darkened backgrounds */
 }
 
+/* Dark theme: darken badge backgrounds for text contrast ≥4.5:1 (Issue #1648)
+   Badge component uses text-dark for warning/info/success — override to white
+   in dark theme so white text on darkened backgrounds meets WCAG AA. */
+[data-theme='dark'] .badge.bg-danger {
+  background-color: #dc2626 !important; /* 4.83:1 with white */
+}
+[data-theme='dark'] .badge.bg-success {
+  background-color: #047857 !important; /* 5.48:1 with white */
+  color: #fff !important;
+}
+[data-theme='dark'] .badge.bg-info {
+  background-color: #1e40af !important; /* 8.72:1 with white */
+  color: #fff !important;
+}
+[data-theme='dark'] .badge.bg-warning {
+  background-color: #b45309 !important; /* 5.02:1 with white */
+  color: #fff !important;
+}
+[data-theme='dark'] .badge.bg-primary {
+  background-color: #1e40af !important; /* 8.72:1 with white */
+}
+
+/* Anomaly detection baseline banner — theme-aware subtle background (Issue #1648) */
+.anomaly-baseline-banner {
+  background-color: var(--bg-secondary);
+}
+[data-theme='dark'] .anomaly-baseline-banner {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
 .dashboard-section h5 {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
