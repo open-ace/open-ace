@@ -185,7 +185,7 @@ export const Analysis: React.FC = () => {
   // Calculate additional metrics
   const activeUsers = userRanking?.users?.length ?? 0;
   const activeTools = tools.length;
-  const healthScore = calculateHealthScore(keyMetrics, conversationStats);
+  const healthScoreResult = calculateHealthScore(keyMetrics, conversationStats);
   const anomalyCount = detectAnomalies(dailyTrend).length;
 
   // Overview tab content
@@ -317,9 +317,20 @@ export const Analysis: React.FC = () => {
             <div className="col-md-2">
               <StatCard
                 label={t('healthScore', language)}
-                value={`${healthScore}%`}
+                value={
+                  healthScoreResult.status === 'no_data'
+                    ? t('healthScoreNoData', language)
+                    : `${healthScoreResult.score}%`
+                }
                 icon={<i className="bi bi-heart-pulse fs-4" />}
-                variant={healthScore >= 80 ? 'success' : healthScore >= 60 ? 'warning' : 'danger'}
+                variant={
+                  healthScoreResult.status === 'no_data'
+                    ? 'secondary'
+                    : healthScoreResult.status === 'healthy'
+                      ? 'success'
+                      : 'warning'
+                }
+                helpTooltip={t(`healthScoreTooltip_${healthScoreResult.status}`, language)}
               />
             </div>
           </div>

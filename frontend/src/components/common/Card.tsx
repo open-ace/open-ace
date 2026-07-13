@@ -73,8 +73,9 @@ export interface StatCardProps {
     value: number;
     isPositive: boolean;
   };
-  variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
+  variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'secondary';
   className?: string;
+  helpTooltip?: string;
 }
 
 const statVariantClasses: Record<string, string> = {
@@ -84,6 +85,7 @@ const statVariantClasses: Record<string, string> = {
   warning: 'bg-warning',
   danger: 'bg-danger text-white',
   info: 'bg-info text-white',
+  secondary: 'bg-secondary text-white',
 };
 
 export const StatCard: React.FC<StatCardProps> = ({
@@ -93,13 +95,24 @@ export const StatCard: React.FC<StatCardProps> = ({
   trend,
   variant = 'default',
   className,
+  helpTooltip,
 }) => {
   return (
     <div className={cn('card stat-card', statVariantClasses[variant], className)}>
       <div className="card-body">
         <div className="d-flex justify-content-between align-items-start">
           <div>
-            <h6 className="card-subtitle mb-2 text-muted">{label}</h6>
+            <h6 className="card-subtitle mb-2 text-muted">
+              {label}
+              {helpTooltip && (
+                <Tooltip content={helpTooltip} placement="top">
+                  <i
+                    className="bi bi-info-circle text-muted ms-1"
+                    style={{ cursor: 'help', fontSize: '0.8em' }}
+                  />
+                </Tooltip>
+              )}
+            </h6>
             <h3 className="card-title mb-0">{value}</h3>
             {trend && (
               <small

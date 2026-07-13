@@ -446,6 +446,13 @@ export const translations: Record<Language, Translations> = {
     ignored: 'Ignored',
     pending: 'Pending',
     healthScore: 'Health Score',
+    healthScoreNoData: 'N/A',
+    healthScoreTooltip_no_data:
+      'No data available. Requires at least 1 session to evaluate health status.',
+    healthScoreTooltip_healthy:
+      'System is healthy. Score based on: avg tokens per session ≥ 1000, conversation length ≥ 2 turns.',
+    healthScoreTooltip_warning:
+      'Optimization recommended. Deductions: avg tokens < 1000 (-20pts), conversation length < 2 (-15pts).',
     usageHeatmap: 'Usage Heatmap (24 Hours)',
     usageHeatmapDescription:
       'Shows token usage distribution by hour (0-23). Darker blue = higher usage. Hover over a cell to see exact token count.',
@@ -2079,6 +2086,11 @@ export const translations: Record<Language, Translations> = {
     ignored: '已忽略',
     pending: '待处理',
     healthScore: '健康分数',
+    healthScoreNoData: 'N/A',
+    healthScoreTooltip_no_data: '暂无数据，无法评估健康状态。需要至少 1 个会话记录。',
+    healthScoreTooltip_healthy: '系统运行良好。评分标准：会话平均 tokens ≥ 1000，对话长度 ≥ 2 轮。',
+    healthScoreTooltip_warning:
+      '存在优化空间。扣分项：会话平均 tokens < 1000（-20分），对话长度 < 2（-15分）。',
     usageHeatmap: '使用热力图（24小时）',
     usageHeatmapDescription:
       '显示一天中各时段（0-23点）的 Token 使用分布。颜色越深表示使用量越高。鼠标悬停可查看具体数值。',
@@ -3913,6 +3925,13 @@ export const translations: Record<Language, Translations> = {
     ignored: '無視済み',
     pending: '保留中',
     healthScore: 'ヘルススコア',
+    healthScoreNoData: 'N/A',
+    healthScoreTooltip_no_data:
+      'データがありません。ヘルス状態を評価するには少なくとも1つのセッションが必要です。',
+    healthScoreTooltip_healthy:
+      'システムは正常です。スコア基準：セッション平均トークン ≥ 1000、会話長 ≥ 2ラウンド。',
+    healthScoreTooltip_warning:
+      '最適化をお勧めします。減点項目：セッション平均トークン < 1000（-20点）、会話長 < 2（-15点）。',
     usageHeatmap: '使用ヒートマップ（24時間）',
     usageHeatmapDescription:
       '時間帯別（0-23時）のトークン使用分布を表示。色が濃いほど使用量が多い。セルにホバーすると詳細が表示されます。',
@@ -5371,6 +5390,13 @@ export const translations: Record<Language, Translations> = {
     ignored: '무시됨',
     pending: '대기 중',
     healthScore: '건강 점수',
+    healthScoreNoData: 'N/A',
+    healthScoreTooltip_no_data:
+      '데이터가 없습니다. 건강 상태를 평가하려면 최소 1개의 세션이 필요합니다.',
+    healthScoreTooltip_healthy:
+      '시스템이 정상입니다. 점수 기준: 세션당 평균 토큰 ≥ 1000, 대화 길이 ≥ 2회.',
+    healthScoreTooltip_warning:
+      '최적화가 권장됩니다. 감점 항목: 세션당 평균 토큰 < 1000(-20점), 대화 길이 < 2(-15점).',
     usageHeatmap: '사용 히트맵 (24시간)',
     usageHeatmapDescription:
       '시간대별(0-23시) 토큰 사용 분포를 표시합니다. 색이 짙을수록 사용량이 많습니다. 셀에 마우스를 올리면 상세 정보가 표시됩니다.',
