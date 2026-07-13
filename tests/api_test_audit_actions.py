@@ -21,7 +21,9 @@ issues = []
 
 
 def add_issue(endpoint, description, severity="medium"):
-    issues.append({"endpoint": endpoint, "description": description, "severity": severity})
+    issues.append(
+        {"endpoint": endpoint, "description": description, "severity": severity}
+    )
     print(f"  [ISSUE-{severity.upper()}] {endpoint}: {description}")
 
 
@@ -65,14 +67,20 @@ def test_audit_actions_api():
 
     # Validate actions count
     if len(actions) != 31:
-        add_issue("/api/audit-actions", f"Expected 31 actions, got {len(actions)}", "high")
+        add_issue(
+            "/api/audit-actions", f"Expected 31 actions, got {len(actions)}", "high"
+        )
         return False
 
     print(f"  OK - Actions count: {len(actions)}")
 
     # Validate categories count
     if len(categories) != 8:
-        add_issue("/api/audit-actions", f"Expected 8 categories, got {len(categories)}", "high")
+        add_issue(
+            "/api/audit-actions",
+            f"Expected 8 categories, got {len(categories)}",
+            "high",
+        )
         return False
 
     print(f"  OK - Categories count: {len(categories)}")
@@ -82,7 +90,11 @@ def test_audit_actions_api():
     for i, action in enumerate(actions):
         for field in required_action_fields:
             if field not in action:
-                add_issue("/api/audit-actions", f"Action {i} missing field '{field}'", "medium")
+                add_issue(
+                    "/api/audit-actions",
+                    f"Action {i} missing field '{field}'",
+                    "medium",
+                )
                 return False
 
     print("  OK - All actions have required fields")
@@ -92,13 +104,26 @@ def test_audit_actions_api():
     for i, category in enumerate(categories):
         for field in required_category_fields:
             if field not in category:
-                add_issue("/api/audit-actions", f"Category {i} missing field '{field}'", "medium")
+                add_issue(
+                    "/api/audit-actions",
+                    f"Category {i} missing field '{field}'",
+                    "medium",
+                )
                 return False
 
     print("  OK - All categories have required fields")
 
     # Validate all categories are present
-    expected_categories = ["auth", "user_management", "permission", "quota", "data", "system", "content", "agent"]
+    expected_categories = [
+        "auth",
+        "user_management",
+        "permission",
+        "quota",
+        "data",
+        "system",
+        "content",
+        "agent",
+    ]
     category_keys = [c["key"] for c in categories]
     for expected in expected_categories:
         if expected not in category_keys:
