@@ -2207,8 +2207,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </Badge>
                   {typeof msg.content === 'string' ? (
                     <pre
-                      className="bg-light p-2 rounded mt-1 mb-0"
+                      className="p-2 rounded mt-1 mb-0"
                       style={{
+                        backgroundColor: 'var(--bg-secondary)',
                         fontSize: '0.8rem',
                         maxHeight: '200px',
                         overflow: 'auto',
@@ -2474,8 +2475,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     )}
                   </div>
                   <pre
-                    className="bg-light border rounded p-3 mb-0"
+                    className="border rounded p-3 mb-0"
                     style={{
+                      backgroundColor: 'var(--bg-secondary)',
                       fontSize: '0.82rem',
                       maxHeight: '220px',
                       overflow: 'auto',

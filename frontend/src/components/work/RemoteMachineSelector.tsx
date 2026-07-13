@@ -313,7 +313,12 @@ export const RemoteMachineSelector: React.FC<RemoteMachineSelectorProps> = ({
               key={machine.machine_id}
               className={`list-group-item list-group-item-action ${
                 selectedMachineId === machine.machine_id ? 'active' : ''
-              } ${focusedIndex === index && selectedMachineId !== machine.machine_id ? 'border-primary bg-light' : ''}`}
+              } ${focusedIndex === index && selectedMachineId !== machine.machine_id ? 'border-primary' : ''}`}
+              style={
+                focusedIndex === index && selectedMachineId !== machine.machine_id
+                  ? { backgroundColor: 'var(--bg-secondary)' }
+                  : undefined
+              }
               onClick={() => handleSelect(machine)}
               onMouseEnter={() => setFocusedIndex(index)}
               role="option"
