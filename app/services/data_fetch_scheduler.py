@@ -154,6 +154,7 @@ class DataFetchScheduler:
         """Run fetch and update heartbeat."""
         self._run_fetch()
         from datetime import timezone as tz
+
         self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
 
     def stop(self):

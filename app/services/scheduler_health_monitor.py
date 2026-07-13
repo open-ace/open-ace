@@ -33,9 +33,7 @@ HEALTH_MONITOR_ENABLED = (
 )
 
 # Scheduler implementation backend (Issue #1481)
-SCHEDULER_IMPLEMENTATION = os.environ.get(
-    "SCHEDULER_IMPLEMENTATION", "threading"
-).lower()
+SCHEDULER_IMPLEMENTATION = os.environ.get("SCHEDULER_IMPLEMENTATION", "threading").lower()
 
 # Try to import APScheduler
 try:
