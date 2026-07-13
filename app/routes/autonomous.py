@@ -743,13 +743,10 @@ def create_workflow():
                         "status": "pending" if index == 1 else "queued",
                         "definition_snapshot": _serialize_definition_snapshot(definition_snapshot),
                         # Pre-generated values for scheduler conflict checks (Issue #1573)
-                        # Only set branch_name/worktree_path for worktree strategy (Issue #1627)
-                        "branch_name": (
-                            branch_name
-                            if branch_strategy == "worktree"
-                            else (user_branch_name or f"fix/issue-{selector['issue_number']}")
-                        ),
-                        "worktree_path": worktree_path if branch_strategy == "worktree" else "",
+                        "branch_name": branch_name,
+                        "worktree_path": worktree_path,
+                        "branch_strategy": "worktree",  # Force worktree for batch workflows
+                        "original_branch_name": user_branch_name,  # Preserve user's original input
                     }
                 )
                 workflow = repo.create_workflow(workflow_data)
@@ -1265,8 +1262,7 @@ def fork_milestone(workflow_id, milestone_id):
         "model": workflow.get("model", ""),
         "permission_mode": workflow.get("permission_mode", "auto-edit"),
         "branch_name": fork_branch,
-        # Preserve parent's branch_strategy for fork workflow (Issue #1627)
-        "branch_strategy": workflow.get("branch_strategy", "new-branch"),
+        "branch_strategy": "worktree",  # Force worktree for parallel execution
         "workspace_type": workflow.get("workspace_type", "local"),
         "remote_machine_id": workflow.get("remote_machine_id", ""),
         "max_plan_rounds": workflow.get("max_plan_rounds", 3),
@@ -1277,6 +1273,7 @@ def fork_milestone(workflow_id, milestone_id):
         "parent_workflow_id": workflow_id,
         "fork_milestone_id": milestone_id,
         "user_feedback": user_feedback,
+        "original_branch_name": workflow.get("branch_name", ""),
         # Inherit the parent's content language so forked AI content stays
         # consistent with the original workflow.
         "content_language": workflow.get("content_language", "en"),
