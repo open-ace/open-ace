@@ -381,7 +381,10 @@ export const InsightsReport: React.FC = () => {
                       </h6>
                       <p className="text-muted small mb-2">{suggestion.description}</p>
                       {suggestion.example && (
-                        <div className="rounded p-2" style={{ backgroundColor: 'var(--bg-secondary)' }}>
+                        <div
+                          className="rounded p-2"
+                          style={{ backgroundColor: 'var(--bg-secondary)' }}
+                        >
                           <small className="text-muted fw-medium">
                             {t('exampleLabel', language)}：
                           </small>
