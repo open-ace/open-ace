@@ -973,7 +973,7 @@ def test_route_list_machines_returns_user_role():
         resp = _auth_get(client, "/api/remote/machines", "test-token-1-admin")
         data = resp.get_json()
         if data.get("user_role") == "admin":
-            ok(f"system admin gets user_role='admin'")
+            ok("system admin gets user_role='admin'")
         else:
             fail(f"expected user_role='admin', got {data.get('user_role')}")
 
@@ -981,9 +981,113 @@ def test_route_list_machines_returns_user_role():
         resp2 = _auth_get(client, "/api/remote/machines", "test-token-2-user")
         data2 = resp2.get_json()
         if data2.get("user_role") == "user":
-            ok(f"regular user gets user_role='user'")
+            ok("regular user gets user_role='user'")
         else:
             fail(f"expected user_role='user', got {data2.get('user_role')}")
+
+
+# ════════════════════════════════════════════
+#  Regression: machine_id source must be the URL path
+#  (decorator authorizes the same machine the route operates on).
+# ════════════════════════════════════════════
+
+
+def test_route_assign_path_machine_id_overrides_body():
+    """Body machine_id must not let a machine-admin authorize against a
+    different machine than the one in the URL path."""
+    test("Regression: body machine_id cannot override path (assign)")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # User 2 is admin of machine-a but only a user on machine-b. Before the
+    # fix, sending machine_id=mid-machine-a in the body authorized against A
+    # while the route assigned the user to B (path).
+    with app.test_client() as client:
+        resp = _auth_post(
+            client,
+            "/api/remote/machines/mid-machine-b/assign",
+            "test-token-2-user",  # machine-admin of A, plain user of B
+            json={"user_id": 99, "permission": "user", "machine_id": "mid-machine-a"},
+        )
+        # Path (B) wins: user 2 is not a machine-admin of B -> 403, and B stays unchanged.
+        untouched = mgr.check_user_access("mid-machine-b", 99)
+        if resp.status_code == 403 and untouched is None:
+            ok("body machine_id ignored; path machine_id authorized (403, no mutation)")
+        else:
+            fail(
+                f"expected 403 and no mutation, got status={resp.status_code}, "
+                f"perm_on_b={untouched!r}, body={resp.get_json()}"
+            )
+
+
+def test_route_revoke_path_machine_id_overrides_body():
+    """Body machine_id must not let a machine-admin revoke on a foreign machine."""
+    test("Regression: body machine_id cannot override path (revoke)")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # User 3 is a regular user of machine-a; user 2 is machine-admin of machine-a
+    # but only a plain user of machine-b. Revoking user 3 from B with body
+    # machine_id=A must still be denied by the path (B) authorization.
+    with app.test_client() as client:
+        resp = _auth_delete(
+            client,
+            "/api/remote/machines/mid-machine-b/assign/3",
+            "test-token-2-user",  # machine-admin of A, plain user of B
+            json={"machine_id": "mid-machine-a"},
+        )
+        # user 3 must still be assigned to A (untouched, since the revoke was denied).
+        still_assigned_on_a = mgr.check_user_access("mid-machine-a", 3)
+        if resp.status_code == 403 and still_assigned_on_a == "user":
+            ok("body machine_id ignored; path machine_id authorized (403)")
+        else:
+            fail(
+                f"expected 403, got status={resp.status_code}, "
+                f"perm_on_a={still_assigned_on_a!r}"
+            )
+
+
+def test_route_get_users_path_machine_id_overrides_query():
+    """Query machine_id must not let a machine-admin enumerate a foreign machine's users."""
+    test("Regression: query machine_id cannot override path (get_machine_users)")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    with app.test_client() as client:
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/mid-machine-b/users?machine_id=mid-machine-a",
+            "test-token-2-user",  # machine-admin of A, plain user of B
+        )
+        if resp.status_code == 403:
+            ok("query machine_id ignored; path machine_id authorized (403)")
+        else:
+            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+
+
+def test_route_create_session_body_machine_id_still_works():
+    """Routes without a path machine_id (e.g. create_remote_session) must still
+    resolve machine_id from the body — the path-first fix must not break them."""
+    test("Regression: body machine_id still honored for path-less routes")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    with app.test_client() as client:
+        # User 3 is a regular user of machine-a -> create_session should be allowed.
+        resp = _auth_post(
+            client,
+            "/api/remote/sessions",
+            "test-token-3-user",
+            json={"machine_id": "mid-machine-a", "project_path": "/tmp/p"},
+        )
+        if resp.status_code == 200:
+            ok("create_remote_session still reads machine_id from body")
+        else:
+            fail(f"expected 200, got {resp.status_code}, body={resp.get_json()}")
 
 
 # ════════════════════════════════════════════
@@ -1032,6 +1136,12 @@ def main():
     test_route_create_session_by_machine_admin()
     test_route_browse_by_unassigned_user()
     test_route_list_machines_returns_user_role()
+
+    # Regression: decorator must authorize the path machine_id, not body/query
+    test_route_assign_path_machine_id_overrides_body()
+    test_route_revoke_path_machine_id_overrides_body()
+    test_route_get_users_path_machine_id_overrides_query()
+    test_route_create_session_body_machine_id_still_works()
 
     all_passed = print_summary()
 

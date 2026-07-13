@@ -262,13 +262,23 @@ def _check_session_access(session_id):
 
 
 def _extract_machine_id():
-    """Extract machine_id from request (JSON body or query string)."""
-    # Try JSON body first
-    data = request.get_json(silent=True) or {}
-    machine_id = data.get("machine_id")
-    # Fall back to query string
+    """Extract machine_id from request.
+
+    Resolution order is path → query → body. Path wins when present so the
+    machine the decorator authorizes is always the one the route actually
+    operates on (routes read ``machine_id`` from ``view_args``). Letting a body
+    field override the path would let a machine admin authorize against machine
+    A while the route mutates machine B (cross-machine privilege escalation).
+    """
+    # URL path parameter is authoritative for routes like
+    # /machines/<machine_id>/..., which already read it from the handler arg.
+    machine_id = (request.view_args or {}).get("machine_id")
+    # Fall back to query string, then JSON body (routes without a path arg).
     if not machine_id:
-        machine_id = request.args.get("machine_id") or request.view_args.get("machine_id")
+        machine_id = request.args.get("machine_id")
+    if not machine_id:
+        data = request.get_json(silent=True) or {}
+        machine_id = data.get("machine_id")
     return machine_id
 
 
@@ -295,6 +305,7 @@ def machine_access_required(f):
         if error:
             return error
         return f(*args, **kwargs)
+
     return decorated
 
 
@@ -309,6 +320,7 @@ def machine_admin_required(f):
         if error:
             return error
         return f(*args, **kwargs)
+
     return decorated
 
 
