@@ -299,6 +299,10 @@ def register_blueprints(app):
     from app.routes.model_gateway import model_gateway_bp
 
     app.register_blueprint(model_gateway_bp, url_prefix="/api")
+    # feature flags: returns current state of all configurable features
+    from app.routes.feature_flags import feature_flags_bp
+
+    app.register_blueprint(feature_flags_bp)
     app.register_blueprint(pages_bp)
 
     logger.info("All blueprints registered")

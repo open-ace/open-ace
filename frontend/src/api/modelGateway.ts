@@ -19,6 +19,11 @@ export interface ModelGatewayConfig {
   updated_at?: string;
 }
 
+export interface ModelGatewayConfigResponse {
+  enabled: boolean;
+  data: ModelGatewayConfig | null;
+}
+
 export interface ModelGatewayTestResult {
   ok: boolean;
   status: number | null;
@@ -26,13 +31,17 @@ export interface ModelGatewayTestResult {
 }
 
 export const modelGatewayApi = {
-  async getConfig(): Promise<ModelGatewayConfig | null> {
+  async getConfig(): Promise<ModelGatewayConfigResponse> {
     const response = await apiClient.get<{
       success: boolean;
+      enabled: boolean;
       data: ModelGatewayConfig | null;
       message?: string;
     }>('/api/management/model-gateway-config');
-    return response.data;
+    return {
+      enabled: response.enabled,
+      data: response.data,
+    };
   },
 
   async saveConfig(config: {

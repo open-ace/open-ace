@@ -34,14 +34,22 @@ def check_admin():
 
 @model_gateway_bp.route("/management/model-gateway-config", methods=["GET"])
 def get_model_gateway_config():
-    """Get the model gateway configuration (API key masked)."""
+    """Get the model gateway configuration (API key masked) with enabled status."""
+    from app.utils.config import is_model_gateway_enabled
+
     try:
         config = get_gateway_service().get_config()
+        enabled = is_model_gateway_enabled()  # 60s TTL cache
         if not config:
             return jsonify(
-                {"success": True, "data": None, "message": "Model gateway not configured"}
+                {
+                    "success": True,
+                    "enabled": enabled,
+                    "data": None,
+                    "message": "Model gateway not configured",
+                }
             )
-        return jsonify({"success": True, "data": config})
+        return jsonify({"success": True, "enabled": enabled, "data": config})
     except Exception as e:
         logger.error("Error getting model gateway config: %s", e)
         return jsonify({"success": False, "error": "Internal server error"}), 500

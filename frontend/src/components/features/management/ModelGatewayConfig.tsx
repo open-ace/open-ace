@@ -31,6 +31,7 @@ export const ModelGatewayConfig: React.FC = () => {
   const confirm = useConfirm();
 
   const [config, setConfig] = useState<ModelGatewayConfigType | null>(null);
+  const [enabled, setEnabled] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -50,18 +51,42 @@ export const ModelGatewayConfig: React.FC = () => {
     setError(null);
     try {
       const result = await modelGatewayApi.getConfig();
-      setConfig(result);
-      if (result) {
-        setBaseUrl(result.base_url ?? '');
+      setEnabled(result.enabled);
+      setConfig(result.data);
+      if (result.data) {
+        setBaseUrl(result.data.base_url ?? '');
         setApiKey(''); // never populate the secret
-        setPrefixMode(Boolean(result.model_prefix_mode));
-        setModelPrefix(result.model_prefix ?? '');
+        setPrefixMode(Boolean(result.data.model_prefix_mode));
+        setModelPrefix(result.data.model_prefix ?? '');
       }
     } catch (err) {
       setError((err as Error).message || 'Failed to fetch gateway config');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Get status info for Alert/Badge display (three-level simplified)
+  const getStatusInfo = () => {
+    if (!enabled) {
+      return {
+        variant: 'warning' as const,
+        text: t('gatewayDisabled', language),
+        showInstructions: true,
+      };
+    }
+    if (!config) {
+      return {
+        variant: 'warning' as const,
+        text: t('gatewayEnabledNoConfig', language),
+        showInstructions: false,
+      };
+    }
+    return {
+      variant: 'success' as const,
+      text: t('gatewayEnabled', language),
+      showInstructions: false,
+    };
   };
 
   const handleSave = async () => {
@@ -127,8 +152,40 @@ export const ModelGatewayConfig: React.FC = () => {
   if (loading) return <Loading />;
   if (error) return <Error message={error} onRetry={fetchConfig} />;
 
+  const statusInfo = getStatusInfo();
+
   return (
     <Card>
+      {/* Status Alert/Badge at the top */}
+      <div
+        style={{
+          marginBottom: '1rem',
+          padding: '0.75rem',
+          borderRadius: '0.25rem',
+          backgroundColor:
+            statusInfo.variant === 'success'
+              ? 'var(--color-success-bg, #d4edda)'
+              : 'var(--color-warning-bg, #fff3cd)',
+          borderLeft:
+            statusInfo.variant === 'success'
+              ? '4px solid var(--color-success, #28a745)'
+              : '4px solid var(--color-warning, #ffc107)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {statusInfo.variant === 'success' ? (
+            <Badge variant="success">{statusInfo.text}</Badge>
+          ) : (
+            <span style={{ fontWeight: 500 }}>{statusInfo.text}</span>
+          )}
+        </div>
+        {statusInfo.showInstructions && (
+          <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9em' }}>
+            {t('gatewayEnableInstructions', language)}
+          </p>
+        )}
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{t('modelGatewayConfiguration', language)}</h2>
         {config && <Badge variant="success">{config.mode}</Badge>}
@@ -185,10 +242,6 @@ export const ModelGatewayConfig: React.FC = () => {
             />
           </div>
         )}
-
-        <p style={{ color: 'var(--text-secondary, #666)', fontSize: '0.85em' }}>
-          {t('gatewayEnableHint', language)}
-        </p>
 
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <Button variant="primary" onClick={handleSave} disabled={saving || testing}>

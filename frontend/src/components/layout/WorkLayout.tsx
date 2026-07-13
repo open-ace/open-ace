@@ -22,6 +22,7 @@ import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
 import { SessionList, AssistPanel, StatusBar } from '@/components/work';
 import { workspaceApi } from '@/api/workspace';
+import { featureFlagsApi } from '@/api/featureFlags';
 
 interface NavItem {
   id: string;
@@ -57,23 +58,40 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
     previousRightPanelCollapsed,
     autonomousEnabled,
     setAutonomousEnabled,
+    setModelGatewayEnabled,
+    setRunTimelineEnabled,
+    setPolicyEnabled,
     setConfigLoaded,
   } = useAppStore();
 
-  // Load workspace config on mount to determine feature flags
+  // Load workspace config and feature flags on mount
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const config = await workspaceApi.getConfig();
+        // Load both workspace config and feature flags
+        const [config, flags] = await Promise.all([
+          workspaceApi.getConfig(),
+          featureFlagsApi.getFlags(),
+        ]);
         setAutonomousEnabled(config.autonomous_enabled);
+        setModelGatewayEnabled(flags.model_gateway);
+        setRunTimelineEnabled(flags.run_timeline);
+        setPolicyEnabled(flags.policy);
         setConfigLoaded(true);
-      } catch {
+      } catch (error) {
+        console.error('Failed to load config or feature flags:', error);
         // Config fetch failed, keep defaults but mark as loaded
         setConfigLoaded(true);
       }
     };
     loadConfig();
-  }, [setAutonomousEnabled, setConfigLoaded]);
+  }, [
+    setAutonomousEnabled,
+    setModelGatewayEnabled,
+    setRunTimelineEnabled,
+    setPolicyEnabled,
+    setConfigLoaded,
+  ]);
 
   // Filter nav items based on feature flags
   const visibleNavItems = autonomousEnabled
