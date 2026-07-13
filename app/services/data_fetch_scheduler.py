@@ -175,7 +175,7 @@ class DataFetchScheduler:
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
         if self._implementation == "apscheduler":
-            return self._running and self._scheduler and self._scheduler.running
+            return bool(self._running and self._scheduler and self._scheduler.running)
         elif self._implementation == "gevent":
             return self._running and hasattr(self, "_greenlet") and not self._greenlet.dead
         return self._running and self._thread is not None and self._thread.is_alive()
