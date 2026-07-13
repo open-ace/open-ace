@@ -37,9 +37,8 @@ export const Select: React.FC<CombinedSelectProps> = ({
   style,
 }) => {
   // Use groupedOptions if provided, otherwise use flat options
-  const renderOptions: SelectOptionOrGroup[] = groupedOptions
-    ? groupedOptions
-    : options?.map((o) => o as SelectOptionOrGroup) || [];
+  const renderOptions: SelectOptionOrGroup[] =
+    groupedOptions ?? options?.map((o) => o as SelectOptionOrGroup) ?? [];
 
   return (
     <select
