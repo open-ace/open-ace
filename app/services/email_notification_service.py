@@ -12,12 +12,14 @@ Provides:
 import logging
 import queue
 import smtplib
+import socket
+import ssl
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from app.repositories.email_notification_log_repository import get_email_log_repository
 from app.repositories.smtp_config_repository import get_smtp_config_repository
@@ -336,11 +338,22 @@ class EmailQueue:
             msg.attach(MIMEText(body, "plain", "utf-8"))
 
             # Connect and send
-            if config["use_tls"]:
-                smtp = smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30)
+            # Port 465 uses SSL connection (SMTPS), other ports use SMTP with optional STARTTLS
+            smtp_port = config["smtp_port"]
+            use_ssl = smtp_port == 465
+            use_tls = config["use_tls"]
+            smtp: Union[smtplib.SMTP, smtplib.SMTP_SSL]
+
+            if use_ssl:
+                smtp = smtplib.SMTP_SSL(config["smtp_host"], smtp_port, timeout=30)
+                logger.info(f"SMTP_SSL connection established for port {smtp_port}")
+            elif use_tls:
+                smtp = smtplib.SMTP(config["smtp_host"], smtp_port, timeout=30)
                 smtp.starttls()
+                logger.info(f"SMTP STARTTLS connection established for port {smtp_port}")
             else:
-                smtp = smtplib.SMTP(config["smtp_host"], config["smtp_port"], timeout=30)
+                smtp = smtplib.SMTP(config["smtp_host"], smtp_port, timeout=30)
+                logger.info(f"SMTP plain connection established for port {smtp_port}")
 
             # Login if credentials provided
             if config["smtp_user"] and config["smtp_password"]:
@@ -356,6 +369,21 @@ class EmailQueue:
 
             return True
 
+        except ssl.SSLError as e:
+            logger.error(f"SMTP SSL error: {e}")
+            return False
+        except socket.timeout as e:
+            logger.error(f"SMTP timeout error: {e}")
+            return False
+        except socket.gaierror as e:
+            logger.error(f"SMTP address resolution error: {e}")
+            return False
+        except ConnectionRefusedError as e:
+            logger.error(f"SMTP connection refused: {e}")
+            return False
+        except smtplib.SMTPException as e:
+            logger.error(f"SMTP error: {e}")
+            return False
         except Exception as e:
             logger.error(f"SMTP send error: {e}")
             return False
