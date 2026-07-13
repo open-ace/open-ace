@@ -59,7 +59,7 @@ export const Select: React.FC<CombinedSelectProps> = ({
         if (isGroupedOption(option)) {
           return (
             <optgroup key={`group-${index}`} label={option.label}>
-              {option.options?.map((subOption: SelectOption) => (
+              {(option.options ?? []).map((subOption: SelectOption) => (
                 <option key={subOption.value} value={subOption.value} disabled={subOption.disabled}>
                   {subOption.label}
                 </option>
