@@ -58,7 +58,9 @@ class AlertCompensationWorker:
         self._total_success = 0
         self._total_failed = 0
         self._initialized = True
-        logger.info(f"AlertCompensationWorker initialized (interval: {COMPENSATION_INTERVAL_MIN} min)")
+        logger.info(
+            f"AlertCompensationWorker initialized (interval: {COMPENSATION_INTERVAL_MIN} min)"
+        )
 
     def configure(
         self,
@@ -92,7 +94,7 @@ class AlertCompensationWorker:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
         self._running = True
-        logger.info(f"AlertCompensationWorker started")
+        logger.info("AlertCompensationWorker started")
 
     def stop(self):
         """Stop the worker."""

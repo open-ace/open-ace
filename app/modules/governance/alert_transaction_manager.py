@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from app.repositories.database import Database, adapt_sql, is_postgresql
 
@@ -72,14 +72,16 @@ class QuotaAlertData:
             "message": self._generate_message(),
             "user_id": self.user_id,
             "username": self.username,
-            "metadata": json.dumps({
-                "quota_type": self.quota_type,
-                "usage_percent": self.usage_percent,
-                "current_usage": self.current_usage,
-                "quota_limit": self.quota_limit,
-                "threshold": self.threshold,
-                "original_alert_type": self.original_alert_type,
-            }),
+            "metadata": json.dumps(
+                {
+                    "quota_type": self.quota_type,
+                    "usage_percent": self.usage_percent,
+                    "current_usage": self.current_usage,
+                    "quota_limit": self.quota_limit,
+                    "threshold": self.threshold,
+                    "original_alert_type": self.original_alert_type,
+                }
+            ),
             "action_url": "/report",
             "action_text": "View Usage",
         }
@@ -96,7 +98,9 @@ class QuotaAlertData:
     def _generate_message(self) -> str:
         """Generate alert message."""
         if self.original_alert_type == "exceeded":
-            return f"Your {self.quota_type} quota has been fully used. Please contact administrator."
+            return (
+                f"Your {self.quota_type} quota has been fully used. Please contact administrator."
+            )
         elif self.original_alert_type == "critical":
             return f"You have used {self.usage_percent:.1f}% of your {self.quota_type} quota."
         else:
@@ -207,9 +211,7 @@ class AlertTransactionManager:
                 if success:
                     return True, alert_id
             except Exception as e:
-                logger.warning(
-                    f"Alert creation attempt {attempt + 1} failed: {e}"
-                )
+                logger.warning(f"Alert creation attempt {attempt + 1} failed: {e}")
                 if attempt < len(retry_intervals):
                     time.sleep(retry_intervals[attempt])
 
@@ -234,12 +236,14 @@ class AlertTransactionManager:
                 # Write to quota_alerts table
                 quota_data = alert_data.to_quota_alerts_dict()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         INSERT INTO quota_alerts
                         (user_id, alert_type, quota_type, period, threshold,
                          current_usage, quota_limit, percentage, message)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """),
+                    """
+                    ),
                     (
                         quota_data["user_id"],
                         quota_data["alert_type"],
@@ -256,12 +260,14 @@ class AlertTransactionManager:
                 # Write to alerts table
                 alerts_data = alert_data.to_alerts_dict()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         INSERT INTO alerts
                         (alert_id, alert_type, severity, title, message, user_id,
                          username, metadata, created_at, read, action_url, action_text)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """),
+                    """
+                    ),
                     (
                         alert_id,
                         alerts_data["alert_type"],
@@ -298,10 +304,12 @@ class AlertTransactionManager:
 
         # Check quota_alerts
         quota_result = self.db.fetch_one(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT COUNT(*) as count FROM quota_alerts
                 WHERE user_id = ? AND quota_type = ? AND created_at >= ?
-            """),
+            """
+            ),
             (user_id, quota_type, threshold_str),
         )
 
@@ -336,10 +344,12 @@ class AlertTransactionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         INSERT INTO alert_creation_failures (alert_data, retry_count, status)
                         VALUES (?, 0, 'pending')
-                    """),
+                    """
+                    ),
                     (json.dumps(alert_data.__dict__),),
                 )
                 conn.commit()
@@ -349,13 +359,15 @@ class AlertTransactionManager:
     def get_pending_failures(self, limit: int = 100) -> list[AlertCreationFailure]:
         """Get pending failures from the queue."""
         rows = self.db.fetch_all(
-            adapt_sql("""
+            adapt_sql(
+                """
                 SELECT * FROM alert_creation_failures
                 WHERE status IN ('pending', 'retrying')
                 AND retry_count < ?
                 ORDER BY created_at ASC
                 LIMIT ?
-            """),
+            """
+            ),
             (ALERT_COMPENSATION_MAX_RETRIES, limit),
         )
 
@@ -365,14 +377,16 @@ class AlertTransactionManager:
             if created_at_val is None:
                 created_at_val = datetime.now(timezone.utc).replace(tzinfo=None)
 
-            failures.append(AlertCreationFailure(
-                id=row.get("id"),
-                alert_data=row.get("alert_data", ""),
-                retry_count=row.get("retry_count", 0),
-                last_retry_at=row.get("last_retry_at"),
-                created_at=created_at_val,
-                status=row.get("status", "pending"),
-            ))
+            failures.append(
+                AlertCreationFailure(
+                    id=row.get("id"),
+                    alert_data=row.get("alert_data", ""),
+                    retry_count=row.get("retry_count", 0),
+                    last_retry_at=row.get("last_retry_at"),
+                    created_at=created_at_val,
+                    status=row.get("status", "pending"),
+                )
+            )
 
         return failures
 
@@ -394,11 +408,13 @@ class AlertTransactionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         UPDATE alert_creation_failures
                         SET retry_count = ?, last_retry_at = ?, status = ?
                         WHERE id = ?
-                    """),
+                    """
+                    ),
                     (
                         new_retry_count,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
@@ -428,13 +444,17 @@ class AlertTransactionManager:
             """
         )
 
-        return dict(result) if result else {
-            "total": 0,
-            "pending": 0,
-            "retrying": 0,
-            "failed": 0,
-            "success": 0,
-        }
+        return (
+            dict(result)
+            if result
+            else {
+                "total": 0,
+                "pending": 0,
+                "retrying": 0,
+                "failed": 0,
+                "success": 0,
+            }
+        )
 
 
 # Global instance

@@ -16,7 +16,6 @@ import logging
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,9 @@ class QuotaEnforcementScheduler:
         self._scheduler = None  # APScheduler instance
         self._job = None  # APScheduler job
         self._heartbeat = datetime.now(timezone.utc).replace(tzinfo=None)
-        logger.info(f"QuotaEnforcementScheduler initialized (implementation: {self._implementation})")
+        logger.info(
+            f"QuotaEnforcementScheduler initialized (implementation: {self._implementation})"
+        )
 
     def configure(
         self,
@@ -338,7 +339,9 @@ class QuotaEnforcementScheduler:
             max_pct = max(tokens_pct, requests_pct)
 
             # Use transactional alert creation
-            from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
+            from app.modules.governance.alert_transaction_manager import (
+                create_quota_alert_transactional,
+            )
 
             success, alert_id = create_quota_alert_transactional(
                 user_id=user_id,

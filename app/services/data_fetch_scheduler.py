@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,8 @@ SCHEDULER_IMPLEMENTATION = os.environ.get(
 
 # Try to import APScheduler
 try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.interval import IntervalTrigger
+    from apscheduler.schedulers.background import BackgroundScheduler  # noqa: F401
+    from apscheduler.triggers.interval import IntervalTrigger  # noqa: F401
 
     APSCHEDULER_AVAILABLE = True
 except ImportError:
@@ -127,9 +127,7 @@ class DataFetchScheduler:
         # Check heartbeat freshness
         heartbeat_age = None
         if self._heartbeat:
-            heartbeat_age = (
-                dt.now(tz.utc).replace(tzinfo=None) - self._heartbeat
-            ).total_seconds()
+            heartbeat_age = (dt.now(tz.utc).replace(tzinfo=None) - self._heartbeat).total_seconds()
 
         heartbeat_ok = heartbeat_age is not None and heartbeat_age < self._interval + 60
 
@@ -332,7 +330,9 @@ class DataFetchScheduler:
             max_pct = max(tokens_pct, requests_pct)
 
             # Use transactional alert creation
-            from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
+            from app.modules.governance.alert_transaction_manager import (
+                create_quota_alert_transactional,
+            )
 
             success, alert_id = create_quota_alert_transactional(
                 user_id=user_id,

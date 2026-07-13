@@ -15,14 +15,17 @@ import logging
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Configuration
 HEALTH_CHECK_INTERVAL_SEC = int(os.environ.get("SCHEDULER_HEALTH_CHECK_INTERVAL_SEC", "60"))
-SCHEDULER_STOP_THRESHOLD_SEC = int(os.environ.get("SCHEDULER_STOP_THRESHOLD_SEC", "300"))  # 5 minutes
-HEALTH_MONITOR_ENABLED = os.environ.get("SCHEDULER_HEALTH_MONITOR_ENABLED", "true").lower() == "true"
+SCHEDULER_STOP_THRESHOLD_SEC = int(
+    os.environ.get("SCHEDULER_STOP_THRESHOLD_SEC", "300")
+)  # 5 minutes
+HEALTH_MONITOR_ENABLED = (
+    os.environ.get("SCHEDULER_HEALTH_MONITOR_ENABLED", "true").lower() == "true"
+)
 
 
 class SchedulerHealthMonitor:
@@ -57,7 +60,7 @@ class SchedulerHealthMonitor:
         self._scheduler_statuses = {}
         self._alert_created_for = set()  # Track which schedulers we've alerted for
         self._initialized = True
-        logger.info(f"SchedulerHealthMonitor initialized")
+        logger.info("SchedulerHealthMonitor initialized")
 
     def configure(
         self,
@@ -222,7 +225,7 @@ class SchedulerHealthMonitor:
             create_system_alert(
                 title=f"Scheduler Stopped: {name}",
                 message=f"The {name} scheduler has stopped running. "
-                        f"Please check the system logs. Status: {status}",
+                f"Please check the system logs. Status: {status}",
                 severity="critical",
             )
             logger.warning(f"Created alert for stopped scheduler: {name}")

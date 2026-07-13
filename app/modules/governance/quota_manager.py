@@ -346,7 +346,9 @@ class QuotaManager:
 
         # Determine which quota type has higher usage percentage
         max_pct = max(status.token_percentage, status.request_percentage)
-        max_quota_type = "tokens" if status.token_percentage >= status.request_percentage else "requests"
+        max_quota_type = (
+            "tokens" if status.token_percentage >= status.request_percentage else "requests"
+        )
 
         if max_quota_type == "tokens":
             current_usage = status.tokens_used
@@ -359,7 +361,9 @@ class QuotaManager:
         if max_pct >= 80:
             try:
                 # Use transactional dual-write for consistency
-                from app.modules.governance.alert_transaction_manager import create_quota_alert_transactional
+                from app.modules.governance.alert_transaction_manager import (
+                    create_quota_alert_transactional,
+                )
 
                 success, alert_id = create_quota_alert_transactional(
                     user_id=user_id,

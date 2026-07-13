@@ -298,7 +298,9 @@ class TestQuotaEnforcementSchedulerEnforcement:
         action_key = f"1:quota_exceeded:{today}:daily"
         scheduler._enforced_users = {action_key}
 
-        with patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional") as mock_alert:
+        with patch(
+            "app.modules.governance.alert_transaction_manager.create_quota_alert_transactional"
+        ) as mock_alert:
             scheduler._enforce_user(row, today, "daily")
             mock_alert.assert_not_called()
 

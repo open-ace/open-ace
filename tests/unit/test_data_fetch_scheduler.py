@@ -401,7 +401,9 @@ class TestDataFetchSchedulerEnforceUserQuota:
             "daily_token_quota": 1,
         }
 
-        with patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional") as mock_alert:
+        with patch(
+            "app.modules.governance.alert_transaction_manager.create_quota_alert_transactional"
+        ) as mock_alert:
             s._enforce_user_quota(row, today, "daily")
             mock_alert.assert_not_called()
 

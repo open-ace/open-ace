@@ -64,11 +64,13 @@ def get_scheduler_status():
         except Exception:
             pass
 
-        return jsonify({
-            "success": True,
-            "data": statuses,
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "data": statuses,
+                "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error getting scheduler status: {e}")
@@ -206,11 +208,13 @@ def trigger_quota_check():
         from app.services.quota_enforcement_scheduler import enforcement_scheduler
 
         enforcement_scheduler._run_enforcement()
-        return jsonify({
-            "success": True,
-            "message": "Quota check triggered",
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": "Quota check triggered",
+                "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error triggering quota check: {e}")
@@ -228,9 +232,9 @@ def migrate_quota_alerts():
         return admin_check
 
     try:
-        batch_size = request.json.get("batch_size", 1000) if request.json else 1000
+        request.json.get("batch_size", 1000) if request.json else 1000
 
-        from app.repositories.database import Database, adapt_sql, is_postgresql
+        from app.repositories.database import Database
 
         db = Database()
 
@@ -239,14 +243,16 @@ def migrate_quota_alerts():
         total_count = count_result.get("count", 0) if count_result else 0
 
         if total_count == 0:
-            return jsonify({
-                "success": True,
-                "data": {
-                    "migrated": 0,
-                    "total": 0,
-                    "message": "No quota_alerts to migrate",
-                },
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "data": {
+                        "migrated": 0,
+                        "total": 0,
+                        "message": "No quota_alerts to migrate",
+                    },
+                }
+            )
 
         # Migrate in batches
         migrated = 0
@@ -255,15 +261,17 @@ def migrate_quota_alerts():
         # For now, just report the count
         # Full migration would require more complex logic
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "total": total_count,
-                "migrated": migrated,
-                "errors": errors,
-                "message": f"Found {total_count} quota_alerts to migrate. Migration not yet implemented.",
-            },
-        })
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "total": total_count,
+                    "migrated": migrated,
+                    "errors": errors,
+                    "message": f"Found {total_count} quota_alerts to migrate. Migration not yet implemented.",
+                },
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error migrating quota alerts: {e}")
@@ -288,14 +296,16 @@ def get_migration_progress():
             "SELECT COUNT(*) as count FROM alerts WHERE alert_type = 'quota'"
         )
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "quota_alerts_total": quota_count.get("count", 0) if quota_count else 0,
-                "alerts_quota_count": alerts_count.get("count", 0) if alerts_count else 0,
-                "migration_in_progress": False,
-            },
-        })
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "quota_alerts_total": quota_count.get("count", 0) if quota_count else 0,
+                    "alerts_quota_count": alerts_count.get("count", 0) if alerts_count else 0,
+                    "migration_in_progress": False,
+                },
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error getting migration progress: {e}")
