@@ -150,7 +150,8 @@ def make_manager():
         "created_at TIMESTAMP, "
         "updated_at TIMESTAMP, "
         "completed_at TIMESTAMP, "
-        "expires_at TIMESTAMP)"
+        "expires_at TIMESTAMP, "
+        "cli_session_id TEXT)"
     )
     # Agent identity tables (PR #754)
     conn.execute(
@@ -468,8 +469,17 @@ def _make_app(mgr):
     auth_dec._load_user_from_token = _mock_load_user
     # Also patch the imported reference in remote module
     remote_mod._load_user_from_token = _mock_load_user
+    # Patch the binding in session_access too: remote_bp.before_request routes
+    # through session_access._set_user_from_token(), which resolves
+    # ``_load_user_from_token`` from its OWN module globals — not from auth_dec.
+    # Without this, every route-level test got 401 because the real DB-backed
+    # loader ran against the test token. (See Issue #1475 review follow-up.)
+    import app.modules.workspace.session_access as session_access_mod
+
+    session_access_mod._load_user_from_token = _mock_load_user
     app._auth_dec = auth_dec
     app._remote_mod = remote_mod
+    app._session_access_mod = session_access_mod
     app._original_load_user = _original_load_user
 
     return app
@@ -788,6 +798,59 @@ def _restore_patches(patches):
         setattr(module, attr, original)
 
 
+@contextlib.contextmanager
+def _patched_session_env(mgr):
+    """Patch the remote session environment so a real Flask request can create
+    a session without a live remote machine or api_key_store table.
+
+    Unlike ``_create_session_for_test`` (which calls the manager directly and
+    bypasses the route+decorator), this only sets up the patches and lets the
+    caller drive the actual HTTP path — so the decorator is exercised for real.
+    """
+    from unittest.mock import MagicMock
+
+    import app.modules.workspace.remote_agent_manager as ram_mod
+    import app.modules.workspace.remote_session_manager as rsm_mod
+    from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
+    ram_mod._agent_manager = mgr
+    mgr._connections["mid-machine-a"] = True
+    mgr.send_command = MagicMock(return_value=True)
+
+    original_get = rsm_mod.get_remote_agent_manager
+    original_rsm_get = rsm_mod.get_remote_session_manager
+    rsm_mod.get_remote_agent_manager = lambda: mgr
+
+    session_mgr = RemoteSessionManager()
+    mock_proxy = MagicMock()
+    mock_proxy.generate_proxy_token.return_value = "test-proxy-token"
+    mock_proxy.get_cli_settings_for_tool.return_value = None
+    session_mgr._api_key_proxy = mock_proxy
+
+    import app.routes.remote as remote_mod
+
+    original_remote_rsm = remote_mod.get_remote_session_manager
+    remote_mod.get_remote_session_manager = lambda: session_mgr
+
+    patches = {
+        "rsm_mod.get_remote_agent_manager": (rsm_mod, "get_remote_agent_manager", original_get),
+        "rsm_mod.get_remote_session_manager": (
+            rsm_mod,
+            "get_remote_session_manager",
+            original_rsm_get,
+        ),
+        "remote_mod.get_remote_session_manager": (
+            remote_mod,
+            "get_remote_session_manager",
+            original_remote_rsm,
+        ),
+    }
+    try:
+        yield session_mgr
+    finally:
+        _restore_patches(patches)
+
+
 def test_route_session_access_owner():
     test("Route: session owner can access own session")
     mgr = make_manager()
@@ -905,41 +968,61 @@ def test_route_create_session_by_unassigned_user():
 
 
 def test_route_create_session_by_assigned_user():
-    """P1-1: Assigned users can create sessions."""
+    """P1-1: Assigned users can create sessions.
+
+    Goes through the real Flask route + @machine_access_required decorator
+    (not the manager directly), so the decorator is actually exercised.
+    """
     test("Route: assigned user can create session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
-    # Simulate machine connection
-    mgr._connections["mid-machine-a"] = True
-
-    with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
-        _restore_patches(patches)
-        if result and result.get("session_id"):
-            ok(f"assigned user created session: {result['session_id'][:8]}...")
+    with app.test_client() as client, _patched_session_env(mgr):
+        resp = _auth_post(
+            client,
+            "/api/remote/sessions",
+            "test-token-3-user",  # regular user assigned to machine-a
+            json={
+                "machine_id": "mid-machine-a",
+                "project_path": "/home/test",
+                "cli_tool": "claude-code",
+            },
+        )
+        data = resp.get_json() or {}
+        if resp.status_code == 200 and data.get("session", {}).get("session_id"):
+            ok(f"assigned user created session: {data['session']['session_id'][:8]}...")
         else:
-            fail(f"session creation failed: {result}")
+            fail(f"expected 200 with session, got status={resp.status_code}, body={data}")
 
 
 def test_route_create_session_by_machine_admin():
-    """P1-1: Machine admins can create sessions."""
+    """P1-1: Machine admins can create sessions.
+
+    Goes through the real Flask route + @machine_access_required decorator
+    (not the manager directly), so the decorator is actually exercised.
+    """
     test("Route: machine admin can create session")
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
 
-    # Simulate machine connection
-    mgr._connections["mid-machine-a"] = True
-
-    with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
-        _restore_patches(patches)
-        if result and result.get("session_id"):
-            ok(f"machine admin created session: {result['session_id'][:8]}...")
+    with app.test_client() as client, _patched_session_env(mgr):
+        resp = _auth_post(
+            client,
+            "/api/remote/sessions",
+            "test-token-2-user",  # machine-admin of machine-a
+            json={
+                "machine_id": "mid-machine-a",
+                "project_path": "/home/test",
+                "cli_tool": "claude-code",
+            },
+        )
+        data = resp.get_json() or {}
+        if resp.status_code == 200 and data.get("session", {}).get("session_id"):
+            ok(f"machine admin created session: {data['session']['session_id'][:8]}...")
         else:
-            fail(f"session creation failed: {result}")
+            fail(f"expected 200 with session, got status={resp.status_code}, body={data}")
 
 
 def test_route_browse_by_unassigned_user():
@@ -1076,18 +1159,66 @@ def test_route_create_session_body_machine_id_still_works():
     setup_test_data(mgr)
     app = _make_app(mgr)
 
-    with app.test_client() as client:
+    with app.test_client() as client, _patched_session_env(mgr):
         # User 3 is a regular user of machine-a -> create_session should be allowed.
         resp = _auth_post(
             client,
             "/api/remote/sessions",
             "test-token-3-user",
-            json={"machine_id": "mid-machine-a", "project_path": "/tmp/p"},
+            json={
+                "machine_id": "mid-machine-a",
+                "project_path": "/tmp/p",
+                "cli_tool": "claude-code",
+            },
         )
         if resp.status_code == 200:
             ok("create_remote_session still reads machine_id from body")
         else:
             fail(f"expected 200, got {resp.status_code}, body={resp.get_json()}")
+
+
+def test_route_get_machine_path_machine_id_overrides_query():
+    """Query machine_id must not let a user with access to A read machine B's
+    details. ``get_machine`` uses @machine_access_required + path arg, so the
+    decorator must authorize by the path machine_id."""
+    test("Regression: query machine_id cannot override path (get_machine)")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    # User 3 has 'user' access to machine-a only. Before the fix, query
+    # ?machine_id=mid-machine-a would authorize against A while the route
+    # returned B's details.
+    with app.test_client() as client:
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/mid-machine-b?machine_id=mid-machine-a",
+            "test-token-3-user",  # user of A, no access to B
+        )
+        if resp.status_code == 403:
+            ok("query machine_id ignored; path machine_id authorized (403)")
+        else:
+            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
+
+
+def test_route_browse_path_machine_id_overrides_query():
+    """Query machine_id must not let a user with access to A browse machine B's
+    files. ``browse_remote_directory`` uses @machine_access_required + path arg."""
+    test("Regression: query machine_id cannot override path (browse)")
+    mgr = make_manager()
+    setup_test_data(mgr)
+    app = _make_app(mgr)
+
+    with app.test_client() as client:
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/mid-machine-b/browse?machine_id=mid-machine-a",
+            "test-token-3-user",  # user of A, no access to B
+        )
+        if resp.status_code == 403:
+            ok("query machine_id ignored; path machine_id authorized (403)")
+        else:
+            fail(f"expected 403, got {resp.status_code}, body={resp.get_json()}")
 
 
 # ════════════════════════════════════════════
@@ -1142,6 +1273,8 @@ def main():
     test_route_revoke_path_machine_id_overrides_body()
     test_route_get_users_path_machine_id_overrides_query()
     test_route_create_session_body_machine_id_still_works()
+    test_route_get_machine_path_machine_id_overrides_query()
+    test_route_browse_path_machine_id_overrides_query()
 
     all_passed = print_summary()
 
