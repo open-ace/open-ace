@@ -2804,9 +2804,7 @@ class AutonomousOrchestrator:
 
         return True
 
-    def _report_path_validation_error(
-        self, dev_round: int, strategy: str, path_name: str
-    ):
+    def _report_path_validation_error(self, dev_round: int, strategy: str, path_name: str):
         """Report path validation failure via milestone and workflow update (Issue #1627)."""
         logger.error(
             "%s strategy requires %s but got empty for workflow %s",
@@ -2910,6 +2908,11 @@ class AutonomousOrchestrator:
         # Issue #1627: Validate path strategy consistency before development
         if not self._validate_path_strategy(wf, dev_round):
             return
+
+        # Get path variables for agent execution
+        strategy = wf.get("branch_strategy", "new-branch")
+        worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
 
         # Get the finalized plan — prefer the explicit plan_finalized milestone
         # (authoritative final plan), then fall back to the latest plan_content.
