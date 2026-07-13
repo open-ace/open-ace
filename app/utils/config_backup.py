@@ -78,12 +78,14 @@ def restore_config(config_path: str, backup_index: int = 1) -> dict[str, Any] | 
 
     try:
         with open(backup_path) as f:
-            config = json.load(f)
+            config_data = json.load(f)
 
         # Validate the backup before restoring
-        if not isinstance(config, dict):
+        if not isinstance(config_data, dict):
             logger.error("Backup file is not a valid JSON object")
             return None
+
+        config: dict[str, Any] = config_data
 
         # Create backup of current config before restore
         if os.path.exists(config_path):

@@ -7,6 +7,8 @@ export { Button } from './Button';
 export { Card, StatCard } from './Card';
 export { Loading, LoadingOverlay, Skeleton, SkeletonCard } from './Loading';
 export { Error, EmptyState } from './Error';
+export { Alert } from './Alert';
+export type { AlertVariant, AlertProps } from './Alert';
 export { Select, createOptions } from './Select';
 export { SearchableSelect } from './SearchableSelect';
 export { Pagination } from './Pagination';

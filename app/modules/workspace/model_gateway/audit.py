@@ -35,7 +35,7 @@ def log_config_change(
         error_msg: Error message if the operation failed.
         version: Configuration version number.
     """
-    audit_data = {
+    audit_data: dict[str, str | int | None | dict[str, Any]] = {
         "event_type": "model_gateway_config_change",
         "user_id": user_id,
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -101,7 +101,7 @@ def log_config_error(
         error_msg: Detailed error message.
         details: Additional error details.
     """
-    audit_data = {
+    audit_data: dict[str, str | int | None | dict[str, Any]] = {
         "event_type": "model_gateway_config_error",
         "user_id": user_id,
         "timestamp": datetime.utcnow().isoformat() + "Z",

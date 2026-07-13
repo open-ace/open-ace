@@ -160,7 +160,7 @@ export const ModelGatewayConfig: React.FC = () => {
       toast.success(result.message + ' ' + result.effective_time);
       await fetchConfig();
     } catch (err: any) {
-      const errorMsg = err?.response?.data?.error || (err as Error).message || 'Toggle failed';
+      const errorMsg = err?.response?.data?.error ?? (err as Error).message ?? 'Toggle failed';
       const errorCode = err?.response?.data?.error_code;
 
       if (errorCode === 'version_conflict') {
@@ -201,7 +201,10 @@ export const ModelGatewayConfig: React.FC = () => {
           <p style={{ margin: '0.5rem 0 0', fontSize: '0.9em' }}>
             {t('gatewayEnabledIncompleteHint', language)}
             {status.missing_fields.length > 0 && (
-              <span> {t('missingFields', language)}: {status.missing_fields.join(', ')}</span>
+              <span>
+                {' '}
+                {t('missingFields', language)}: {status.missing_fields.join(', ')}
+              </span>
             )}
           </p>
         </Alert>
@@ -244,9 +247,10 @@ export const ModelGatewayConfig: React.FC = () => {
   };
 
   const canToggle = status && !status.env_override && (status.config_complete || !status.enabled);
-  const configSourceText = status?.config_source === 'env'
-    ? t('gatewayConfigSourceEnv', language)
-    : t('gatewayConfigSourceDb', language);
+  const configSourceText =
+    status?.config_source === 'env'
+      ? t('gatewayConfigSourceEnv', language)
+      : t('gatewayConfigSourceDb', language);
 
   return (
     <Card>
@@ -256,7 +260,9 @@ export const ModelGatewayConfig: React.FC = () => {
           {status && (
             <>
               <Badge variant={status.enabled ? 'success' : 'secondary'}>
-                {status.enabled ? t('gatewayStatusEnabled', language) : t('gatewayStatusDisabled', language)}
+                {status.enabled
+                  ? t('gatewayStatusEnabled', language)
+                  : t('gatewayStatusDisabled', language)}
               </Badge>
               <Badge variant="light" style={{ fontSize: '0.8em' }}>
                 v{status.version}
@@ -274,12 +280,14 @@ export const ModelGatewayConfig: React.FC = () => {
 
       {/* Enable/Disable Toggle */}
       {status && (
-        <div style={{
-          marginBottom: '1.5rem',
-          padding: '1rem',
-          backgroundColor: 'var(--bg-secondary, #f5f5f5)',
-          borderRadius: '0.5rem'
-        }}>
+        <div
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1rem',
+            backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+            borderRadius: '0.5rem',
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>
@@ -289,7 +297,13 @@ export const ModelGatewayConfig: React.FC = () => {
                 {t('gatewayRoutingToggleDesc', language)}
               </div>
               {status.env_override && (
-                <div style={{ fontSize: '0.85em', color: 'var(--text-warning, #f0ad4e)', marginTop: '0.25rem' }}>
+                <div
+                  style={{
+                    fontSize: '0.85em',
+                    color: 'var(--text-warning, #f0ad4e)',
+                    marginTop: '0.25rem',
+                  }}
+                >
                   {t('gatewayEnvOverrideWarning', language)}
                 </div>
               )}
@@ -305,8 +319,7 @@ export const ModelGatewayConfig: React.FC = () => {
                   ? t('loading', language)
                   : status.enabled
                     ? t('gatewayDisable', language)
-                    : t('gatewayEnable', language)
-                }
+                    : t('gatewayEnable', language)}
               </Button>
             </div>
           </div>
@@ -314,7 +327,7 @@ export const ModelGatewayConfig: React.FC = () => {
       )}
 
       {/* Configuration Form (hide or make read-only if env override) */}
-      {(!status || !status.env_override) && (
+      {!status?.env_override && (
         <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div>
             <label style={{ display: 'block', marginBottom: '0.25rem' }}>
@@ -333,7 +346,8 @@ export const ModelGatewayConfig: React.FC = () => {
               {t('gatewayApiKey', language)} *
               {status?.api_key_masked && (
                 <span style={{ color: 'var(--text-secondary, #666)', fontWeight: 'normal' }}>
-                  {' '}({t('current', language)}: {status.api_key_masked})
+                  {' '}
+                  ({t('current', language)}: {status.api_key_masked})
                 </span>
               )}
             </label>
@@ -344,7 +358,13 @@ export const ModelGatewayConfig: React.FC = () => {
               placeholder={status?.api_key_masked ?? 'sk-...'}
               disabled={saving || testing}
             />
-            <div style={{ fontSize: '0.8em', color: 'var(--text-secondary, #666)', marginTop: '0.25rem' }}>
+            <div
+              style={{
+                fontSize: '0.8em',
+                color: 'var(--text-secondary, #666)',
+                marginTop: '0.25rem',
+              }}
+            >
               {t('gatewayApiKeyHint', language)}
             </div>
           </div>
@@ -383,7 +403,11 @@ export const ModelGatewayConfig: React.FC = () => {
             <Button variant="primary" onClick={handleSave} disabled={saving || testing}>
               {t('save', language)}
             </Button>
-            <Button variant="secondary" onClick={handleTest} disabled={saving || testing || !baseUrl}>
+            <Button
+              variant="secondary"
+              onClick={handleTest}
+              disabled={saving || testing || !baseUrl}
+            >
               {t('testConnection', language)}
             </Button>
             {status && status.db_config_complete && (
@@ -397,18 +421,22 @@ export const ModelGatewayConfig: React.FC = () => {
 
       {/* Env config info */}
       {status?.env_override && (
-        <div style={{
-          marginTop: '1rem',
-          padding: '1rem',
-          backgroundColor: 'var(--bg-secondary, #f5f5f5)',
-          borderRadius: '0.5rem',
-          fontSize: '0.9em'
-        }}>
+        <div
+          style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            backgroundColor: 'var(--bg-secondary, #f5f5f5)',
+            borderRadius: '0.5rem',
+            fontSize: '0.9em',
+          }}
+        >
           <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
             {t('gatewayEnvConfig', language)}
           </div>
           <div style={{ color: 'var(--text-secondary, #666)' }}>
-            <div>{t('gatewayConfigSource', language)}: <strong>{configSourceText}</strong></div>
+            <div>
+              {t('gatewayConfigSource', language)}: <strong>{configSourceText}</strong>
+            </div>
             {status.base_url && (
               <div style={{ marginTop: '0.25rem' }}>
                 {t('gatewayBaseUrl', language)}: <code>{status.base_url}</code>
