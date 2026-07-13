@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.governance.audit_logger import AuditAction, AuditLog, AuditLogger, AuditSeverity
+from app.modules.governance.audit_logger import (
+    AuditAction,
+    AuditLog,
+    AuditLogger,
+    AuditSeverity,
+)
 
 
 class TestAuditLogger:
@@ -541,7 +546,10 @@ class TestGetActionCategories:
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""
-        from app.modules.governance.audit_logger import AuditAction, get_action_categories
+        from app.modules.governance.audit_logger import (
+            AuditAction,
+            get_action_categories,
+        )
 
         categories = get_action_categories()
         enum_values = {e.value for e in AuditAction}
@@ -549,7 +557,9 @@ class TestGetActionCategories:
         for category_data in categories.values():
             for action in category_data["actions"]:
                 action_values.add(action["value"])
-        assert action_values == enum_values, f"Action values don't match enum: {action_values - enum_values} extra, {enum_values - action_values} missing"
+        assert (
+            action_values == enum_values
+        ), f"Action values don't match enum: {action_values - enum_values} extra, {enum_values - action_values} missing"
 
     def test_get_action_categories_includes_content_warned_and_redacted(self):
         """Test that content_warned and content_redacted are included (Issue #1439)."""
