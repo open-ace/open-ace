@@ -12,7 +12,7 @@ import logging
 import os
 import shutil
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def restore_config(config_path: str, backup_index: int = 1) -> dict[str, Any] | 
             logger.error("Backup file is not a valid JSON object")
             return None
 
-        config: dict[str, Any] = config_data
+        config = cast(dict[str, Any], config_data)
 
         # Create backup of current config before restore
         if os.path.exists(config_path):
