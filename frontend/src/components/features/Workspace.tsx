@@ -270,6 +270,30 @@ export const Workspace: React.FC = () => {
     });
   }, [theme, tabs, tabsInitialized]);
 
+  // Language sync: Send postMessage to all iframes when language changes (Issue #1425)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0) return;
+
+    // Send language change message to all iframe tabs
+    tabs.forEach((tab) => {
+      const iframe = iframeRefs.current.get(tab.id);
+      if (iframe?.contentWindow && iframe.src) {
+        try {
+          // Use iframe's actual origin for security (instead of '*')
+          const targetOrigin = new URL(iframe.src).origin;
+          iframe.contentWindow.postMessage(
+            { type: 'openace-language-change', language },
+            targetOrigin
+          );
+        } catch (error) {
+          // Fallback to '*' origin if URL parsing fails (e.g., relative URLs)
+          console.warn('[Language Sync] Failed to get iframe origin, using wildcard:', error);
+          iframe.contentWindow.postMessage({ type: 'openace-language-change', language }, '*');
+        }
+      }
+    });
+  }, [language, tabs, tabsInitialized]);
+
   // Clear notification state for a tab (used when leaving/switching away from a tab)
   // Declared early so effects below can reference it
   const clearTabNotification = useCallback((tabId: string) => {

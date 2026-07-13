@@ -10,6 +10,15 @@ Open-ACE 在多用户模式下，每个用户拥有独立的 qwen-code-webui 进
 
 > **注意**：问题 2（React Router basename）已由 qwen-code-webui v0.2.29+ 内置支持解决，webui 会自动读取 `window.__WEBUI_BASENAME__` 作为 Router 的 basename，无需 nginx 侧对 JS 文件做 `sub_filter` 注入。
 
+## qwen-code-webui 版本要求
+
+| 功能 | 最低版本 | 说明 |
+|------|----------|------|
+| React Router basename 支持 | v0.2.29 | 自动读取 `window.__WEBUI_BASENAME__` 作为 Router basename |
+| 语言同步 postMessage 监听 | 待发布 | 监听 `openace-language-change` 消息，实现实时语言切换 |
+
+> **语言同步说明**（Issue #1425）：Open ACE 管理界面切换语言时，会通过 postMessage 发送 `openace-language-change` 消息到 iframe。若 qwen-code-webui 未实现该消息监听，语言切换仅在新建标签页或 iframe 重载后生效。
+
 ## 整体架构
 
 ```
