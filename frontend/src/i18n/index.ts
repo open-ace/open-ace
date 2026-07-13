@@ -304,11 +304,23 @@ export const translations: Record<Language, Translations> = {
     actionSystemStop: 'System Stop',
     actionContentBlocked: 'Content Blocked',
     actionContentFlagged: 'Content Flagged',
+    actionContentWarned: 'Content Warned',
+    actionContentRedacted: 'Content Redacted',
     actionAgentRegister: 'Agent Register',
     actionAgentTokenRotate: 'Token Rotate',
     actionAgentTokenRevoke: 'Token Revoke',
     actionAgentAuthFailure: 'Auth Failure',
     actionAgentReconnect: 'Agent Reconnect',
+
+    // Audit Action Categories (for grouped dropdown display)
+    categoryAuth: 'Authentication',
+    categoryUserManagement: 'User Management',
+    categoryPermission: 'Permission',
+    categoryQuota: 'Quota',
+    categoryData: 'Data',
+    categorySystem: 'System',
+    categoryContent: 'Content',
+    categoryAgent: 'Agent',
 
     // Audit Resource Types (matching backend actual usage)
     resourceAuditLogs: 'Audit Logs',
@@ -1914,11 +1926,23 @@ export const translations: Record<Language, Translations> = {
     actionSystemStop: '系统停止',
     actionContentBlocked: '内容拦截',
     actionContentFlagged: '内容标记',
+    actionContentWarned: '内容警告',
+    actionContentRedacted: '内容脱敏',
     actionAgentRegister: '代理注册',
     actionAgentTokenRotate: '令牌轮换',
     actionAgentTokenRevoke: '令牌撤销',
     actionAgentAuthFailure: '认证失败',
     actionAgentReconnect: '代理重连',
+
+    // Audit Action Categories (for grouped dropdown display)
+    categoryAuth: '认证',
+    categoryUserManagement: '用户管理',
+    categoryPermission: '权限',
+    categoryQuota: '配额',
+    categoryData: '数据',
+    categorySystem: '系统',
+    categoryContent: '内容',
+    categoryAgent: '代理',
 
     // Audit Resource Types (matching backend actual usage)
     resourceAuditLogs: '审计日志',
@@ -3704,11 +3728,23 @@ export const translations: Record<Language, Translations> = {
     actionSystemStop: 'システム停止',
     actionContentBlocked: 'コンテンツブロック',
     actionContentFlagged: 'コンテンツ警告',
+    actionContentWarned: 'コンテンツ警告',
+    actionContentRedacted: 'コンテンツ秘匿化',
     actionAgentRegister: 'エージェント登録',
     actionAgentTokenRotate: 'トークンローテート',
     actionAgentTokenRevoke: 'トークン剥奪',
     actionAgentAuthFailure: '認証失敗',
     actionAgentReconnect: 'エージェント再接続',
+
+    // Audit Action Categories (for grouped dropdown display)
+    categoryAuth: '認証',
+    categoryUserManagement: 'ユーザー管理',
+    categoryPermission: '権限',
+    categoryQuota: 'クォータ',
+    categoryData: 'データ',
+    categorySystem: 'システム',
+    categoryContent: 'コンテンツ',
+    categoryAgent: 'エージェント',
 
     // Audit Resource Types (matching backend actual usage)
     resourceAuditLogs: '監査ログ',
@@ -5137,11 +5173,23 @@ export const translations: Record<Language, Translations> = {
     actionSystemStop: '시스템 중지',
     actionContentBlocked: '콘텐츠 차단',
     actionContentFlagged: '콘텐츠 표시',
+    actionContentWarned: '콘텐츠 경고',
+    actionContentRedacted: '콘텐츠 비공개',
     actionAgentRegister: '에이전트 등록',
     actionAgentTokenRotate: '토큰 회전',
     actionAgentTokenRevoke: '토큰 회수',
     actionAgentAuthFailure: '인증 실패',
     actionAgentReconnect: '에이전트 재연결',
+
+    // Audit Action Categories (for grouped dropdown display)
+    categoryAuth: '인증',
+    categoryUserManagement: '사용자 관리',
+    categoryPermission: '권한',
+    categoryQuota: '할당량',
+    categoryData: '데이터',
+    categorySystem: '시스템',
+    categoryContent: '콘텐츠',
+    categoryAgent: '에이전트',
 
     // Audit Resource Types (matching backend actual usage)
     resourceAuditLogs: '감사 로그',

@@ -640,3 +640,222 @@ def get_ddl_statements() -> list[str]:
         "CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_logs (resource_type, resource_id)",
         "CREATE INDEX IF NOT EXISTS idx_audit_severity ON audit_logs (severity)",
     ]
+
+
+def get_action_categories() -> dict[str, dict[str, Any]]:
+    """Return audit action types organized by category.
+
+    This function provides a structured mapping of all AuditAction enum values
+    organized by category, including i18n keys for internationalization.
+
+    Returns:
+        Dict with category keys, each containing:
+        - label: English label for the category
+        - i18n_key: Translation key for the category
+        - actions: List of action dicts with value, label, i18n_key
+    """
+    return {
+        "auth": {
+            "label": "Authentication",
+            "i18n_key": "categoryAuth",
+            "actions": [
+                {
+                    "value": "login",
+                    "label": "Login",
+                    "i18n_key": "actionLogin",
+                },
+                {
+                    "value": "logout",
+                    "label": "Logout",
+                    "i18n_key": "actionLogout",
+                },
+                {
+                    "value": "login_failed",
+                    "label": "Login Failed",
+                    "i18n_key": "actionLoginFailed",
+                },
+                {
+                    "value": "session_expired",
+                    "label": "Session Expired",
+                    "i18n_key": "actionSessionExpired",
+                },
+            ],
+        },
+        "user_management": {
+            "label": "User Management",
+            "i18n_key": "categoryUserManagement",
+            "actions": [
+                {
+                    "value": "user_create",
+                    "label": "User Create",
+                    "i18n_key": "actionUserCreate",
+                },
+                {
+                    "value": "user_update",
+                    "label": "User Update",
+                    "i18n_key": "actionUserUpdate",
+                },
+                {
+                    "value": "user_delete",
+                    "label": "User Delete",
+                    "i18n_key": "actionUserDelete",
+                },
+                {
+                    "value": "user_password_change",
+                    "label": "Password Change",
+                    "i18n_key": "actionUserPasswordChange",
+                },
+                {
+                    "value": "user_role_change",
+                    "label": "Role Change",
+                    "i18n_key": "actionUserRoleChange",
+                },
+                {
+                    "value": "user_status_change",
+                    "label": "Status Change",
+                    "i18n_key": "actionUserStatusChange",
+                },
+            ],
+        },
+        "permission": {
+            "label": "Permission",
+            "i18n_key": "categoryPermission",
+            "actions": [
+                {
+                    "value": "permission_grant",
+                    "label": "Permission Grant",
+                    "i18n_key": "actionPermissionGrant",
+                },
+                {
+                    "value": "permission_revoke",
+                    "label": "Permission Revoke",
+                    "i18n_key": "actionPermissionRevoke",
+                },
+            ],
+        },
+        "quota": {
+            "label": "Quota",
+            "i18n_key": "categoryQuota",
+            "actions": [
+                {
+                    "value": "quota_update",
+                    "label": "Quota Update",
+                    "i18n_key": "actionQuotaUpdate",
+                },
+                {
+                    "value": "quota_alert",
+                    "label": "Quota Alert",
+                    "i18n_key": "actionQuotaAlert",
+                },
+                {
+                    "value": "quota_exceeded",
+                    "label": "Quota Exceeded",
+                    "i18n_key": "actionQuotaExceeded",
+                },
+            ],
+        },
+        "data": {
+            "label": "Data",
+            "i18n_key": "categoryData",
+            "actions": [
+                {
+                    "value": "data_view",
+                    "label": "Data View",
+                    "i18n_key": "actionDataView",
+                },
+                {
+                    "value": "data_export",
+                    "label": "Data Export",
+                    "i18n_key": "actionDataExport",
+                },
+                {
+                    "value": "data_import",
+                    "label": "Data Import",
+                    "i18n_key": "actionDataImport",
+                },
+                {
+                    "value": "data_delete",
+                    "label": "Data Delete",
+                    "i18n_key": "actionDataDelete",
+                },
+            ],
+        },
+        "system": {
+            "label": "System",
+            "i18n_key": "categorySystem",
+            "actions": [
+                {
+                    "value": "system_config_change",
+                    "label": "Config Change",
+                    "i18n_key": "actionSystemConfigChange",
+                },
+                {
+                    "value": "system_start",
+                    "label": "System Start",
+                    "i18n_key": "actionSystemStart",
+                },
+                {
+                    "value": "system_stop",
+                    "label": "System Stop",
+                    "i18n_key": "actionSystemStop",
+                },
+            ],
+        },
+        "content": {
+            "label": "Content",
+            "i18n_key": "categoryContent",
+            "actions": [
+                {
+                    "value": "content_blocked",
+                    "label": "Content Blocked",
+                    "i18n_key": "actionContentBlocked",
+                },
+                {
+                    "value": "content_flagged",
+                    "label": "Content Flagged",
+                    "i18n_key": "actionContentFlagged",
+                },
+                {
+                    "value": "content_warned",
+                    "label": "Content Warned",
+                    "i18n_key": "actionContentWarned",
+                },
+                {
+                    "value": "content_redacted",
+                    "label": "Content Redacted",
+                    "i18n_key": "actionContentRedacted",
+                },
+            ],
+        },
+        "agent": {
+            "label": "Agent",
+            "i18n_key": "categoryAgent",
+            "actions": [
+                {
+                    "value": "agent_register",
+                    "label": "Agent Register",
+                    "i18n_key": "actionAgentRegister",
+                },
+                {
+                    "value": "agent_token_rotate",
+                    "label": "Token Rotate",
+                    "i18n_key": "actionAgentTokenRotate",
+                },
+                {
+                    "value": "agent_token_revoke",
+                    "label": "Token Revoke",
+                    "i18n_key": "actionAgentTokenRevoke",
+                },
+                {
+                    "value": "agent_auth_failure",
+                    "label": "Auth Failure",
+                    "i18n_key": "actionAgentAuthFailure",
+                },
+                {
+                    "value": "agent_reconnect",
+                    "label": "Agent Reconnect",
+                    "i18n_key": "actionAgentReconnect",
+                },
+            ],
+        },
+    }

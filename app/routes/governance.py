@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required, auth_required
-from app.modules.governance.audit_logger import AuditAction, AuditLogger
+from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.governance_repo import GovernanceRepository
@@ -105,6 +105,48 @@ def api_audit_logs():
 def api_governance_audit_logs():
     """Get audit logs with filters (full path alias for /audit/logs)."""
     return api_get_audit_logs()
+
+
+@governance_bp.route("/audit-actions", methods=["GET"])
+@admin_required
+def api_audit_actions():
+    """Get all audit action types with categories.
+
+    Returns all AuditAction enum values organized by category,
+    including i18n keys for internationalization.
+
+    Returns:
+        JSON response with:
+        - actions: List of all action types with value, label, category, i18n_key
+        - categories: List of category info with key, label, i18n_key
+    """
+    categories_data = get_action_categories()
+
+    # Build flat list of all actions
+    all_actions = []
+    for category_key, category_data in categories_data.items():
+        for action in category_data["actions"]:
+            all_actions.append(
+                {
+                    "value": action["value"],
+                    "label": action["label"],
+                    "category": category_key,
+                    "i18n_key": action["i18n_key"],
+                }
+            )
+
+    # Build categories list
+    categories = [
+        {"key": key, "label": data["label"], "i18n_key": data["i18n_key"]}
+        for key, data in categories_data.items()
+    ]
+
+    return jsonify(
+        {
+            "actions": all_actions,
+            "categories": categories,
+        }
+    )
 
 
 @governance_bp.route("/audit/logs/export", methods=["GET"])

@@ -356,8 +356,15 @@ export interface SelectOption {
   disabled?: boolean;
 }
 
+export interface GroupedSelectOption {
+  label: string;
+  options?: SelectOption[];
+}
+
+export type SelectOptionOrGroup = SelectOption | GroupedSelectOption;
+
 export interface SelectProps extends BaseComponentProps {
-  options: SelectOption[];
+  options?: SelectOption[];
   value?: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -382,4 +389,23 @@ export interface FilterBarProps extends BaseComponentProps {
   onFilterChange: (filters: Record<string, unknown>) => void;
   onReset?: () => void;
   children?: React.ReactNode;
+}
+
+// Audit Action types
+export interface AuditActionItem {
+  value: string;
+  label: string;
+  category: string;
+  i18n_key: string;
+}
+
+export interface AuditCategory {
+  key: string;
+  label: string;
+  i18n_key: string;
+}
+
+export interface AuditActionsResponse {
+  actions: AuditActionItem[];
+  categories: AuditCategory[];
 }

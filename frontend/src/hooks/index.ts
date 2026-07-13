@@ -121,3 +121,11 @@ export {
   type UsePageRefreshReturn,
 } from './usePageRefresh';
 export { useGlobalRefreshPause } from './useGlobalRefreshPause';
+
+// Audit actions hook
+export {
+  useAuditActions,
+  AUDIT_ACTION_OPTIONS_FALLBACK,
+  AUDIT_CATEGORIES_FALLBACK,
+} from './useAuditActions';
+export type { AuditActionItem, AuditCategory, AuditActionsResponse } from '@/types';
