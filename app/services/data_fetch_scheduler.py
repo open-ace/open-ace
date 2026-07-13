@@ -83,7 +83,7 @@ class DataFetchScheduler:
 
     def start(self):
         """Start the scheduler."""
-        if self._thread is not None and self._thread.is_alive():
+        if self._running:
             logger.warning("DataFetchScheduler is already running")
             return
 
@@ -92,23 +92,92 @@ class DataFetchScheduler:
             return
 
         self._stop_event.clear()
+
+        if self._implementation == "apscheduler" and APSCHEDULER_AVAILABLE:
+            self._start_apscheduler()
+        elif self._implementation == "gevent":
+            self._start_gevent()
+        else:
+            self._start_threading()
+
+        self._running = True
+        logger.info(
+            f"DataFetchScheduler started (implementation: {self._implementation}, interval: {self._interval}s)"
+        )
+
+    def _start_threading(self):
+        """Start using threading backend."""
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self._running = True
-        logger.info(f"DataFetchScheduler started with interval {self._interval} seconds")
+
+    def _start_gevent(self):
+        """Start using gevent greenlets."""
+        try:
+            import gevent
+            import gevent.event
+
+            self._gevent_stop_event = gevent.event.Event()
+
+            def gevent_loop():
+                from datetime import timezone as tz
+
+                self._next_run = datetime.now().timestamp() + self._interval
+                while not self._gevent_stop_event.is_set():
+                    gevent.sleep(self._interval)
+                    self._run_fetch()
+                    self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
+                    self._next_run = datetime.now().timestamp() + self._interval
+
+            self._greenlet = gevent.spawn(gevent_loop)
+            logger.info("Started gevent-based scheduler")
+
+        except ImportError:
+            logger.warning("gevent not available, falling back to threading")
+            self._start_threading()
+
+    def _start_apscheduler(self):
+        """Start using APScheduler backend."""
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        self._scheduler = BackgroundScheduler()
+        self._scheduler.add_job(
+            self._run_fetch_with_heartbeat,
+            IntervalTrigger(seconds=self._interval),
+            id="data_fetch",
+            name="Data Fetch",
+            replace_existing=True,
+        )
+        self._scheduler.start()
+
+    def _run_fetch_with_heartbeat(self):
+        """Run fetch and update heartbeat."""
+        self._run_fetch()
+        from datetime import timezone as tz
+
+        self._heartbeat = datetime.now(tz.utc).replace(tzinfo=None)
 
     def stop(self):
         """Stop the scheduler."""
-        if self._thread is None:
-            return
+        if self._implementation == "apscheduler" and self._scheduler:
+            self._scheduler.shutdown(wait=False)
+            self._scheduler = None
+        elif self._implementation == "gevent" and hasattr(self, "_greenlet"):
+            self._gevent_stop_event.set()
+            self._greenlet.kill()
+        elif self._thread is not None:
+            self._stop_event.set()
+            self._thread.join(timeout=5)
 
-        self._stop_event.set()
-        self._thread.join(timeout=5)
         self._running = False
         logger.info("DataFetchScheduler stopped")
 
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
+        if self._implementation == "apscheduler":
+            return bool(self._running and self._scheduler and self._scheduler.running)
+        elif self._implementation == "gevent":
+            return self._running and hasattr(self, "_greenlet") and not self._greenlet.dead
         return self._running and self._thread is not None and self._thread.is_alive()
 
     def get_status(self) -> dict:
