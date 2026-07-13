@@ -1546,6 +1546,25 @@ table .latency-row:hover td {
   opacity: 0.5;
 }
 
+/* Dark mode: StatCard coloured variants — use deeper backgrounds so that
+   white text meets WCAG AA contrast (≥ 4.5 : 1).  Issue #1641. */
+[data-theme='dark'] .stat-card.bg-primary {
+  background-color: #075985 !important; /* white on #075985 ≈ 5.0:1 */
+}
+[data-theme='dark'] .stat-card.bg-success {
+  background-color: #065f46 !important; /* white on #065f46 ≈ 5.8:1 */
+}
+[data-theme='dark'] .stat-card.bg-info {
+  background-color: #1e40af !important; /* white on #1e40af ≈ 5.6:1 */
+}
+[data-theme='dark'] .stat-card.bg-danger {
+  background-color: #991b1b !important; /* white on #991b1b ≈ 5.5:1 */
+}
+[data-theme='dark'] .stat-card.bg-warning {
+  background-color: #92400e !important; /* white on #92400e ≈ 5.1:1 */
+  color: #fff !important;
+}
+
 /* Chart Container */
 .chart-container {
   position: relative;
