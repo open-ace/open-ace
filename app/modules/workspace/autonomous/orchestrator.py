@@ -1492,6 +1492,17 @@ class AutonomousOrchestrator:
             milestone_id: Milestone to attribute this call's phase usage to.
         """
         workflow_data = wf or self.workflow
+
+        # Issue #1627: Log project path and strategy for debugging
+        strategy = workflow_data.get("branch_strategy", "new-branch")
+        project_path = kwargs.get("project_path", workflow_data.get("project_path", ""))
+        logger.info(
+            "Running agent for workflow %s with strategy=%s, project_path=%s",
+            self._workflow_id[:8],
+            strategy,
+            project_path,
+        )
+
         # Resolve the session line: resume an established session or start new.
         session_id, resume_session_id, resume = self._resolve_session_line(
             workflow_data, session_line
@@ -2243,7 +2254,17 @@ class AutonomousOrchestrator:
                         )
 
                     # Issue #1573: Verify worktree was created on correct branch
+                    # Issue #1627: For worktree strategy, verify worktree_path is not empty
                     actual_worktree_path = wt_data.get("worktree_path", "")
+                    if strategy == "worktree" and not actual_worktree_path:
+                        logger.error(
+                            "worktree strategy requires worktree_path but got empty for workflow %s",
+                            self._workflow_id[:8],
+                        )
+                        raise GitHubOpsError(
+                            "worktree strategy requires worktree_path but create_worktree returned empty"
+                        )
+
                     if actual_worktree_path:
                         try:
                             wt_gh = GitHubOps(actual_worktree_path, system_account=system_account)
@@ -2839,6 +2860,56 @@ class AutonomousOrchestrator:
         except GitHubOpsError as e:
             logger.warning("Branch verification failed: %s", e)
 
+        # Issue #1627: Validate path strategy consistency before development
+        strategy = wf.get("branch_strategy", "new-branch")
+        worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
+
+        if strategy == "worktree":
+            if not worktree_path:
+                logger.error(
+                    "worktree strategy requires worktree_path but got empty for workflow %s",
+                    self._workflow_id[:8],
+                )
+                self._create_milestone(
+                    phase="development",
+                    dev_round=dev_round,
+                    milestone_type="path_validation",
+                    status="failed",
+                    title="Missing worktree_path for worktree strategy",
+                    error_message="branch_strategy is 'worktree' but worktree_path is empty",
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": "worktree strategy requires non-empty worktree_path",
+                    }
+                )
+                return
+        else:
+            # new-branch or same-branch: must use project_path
+            if not project_path:
+                logger.error(
+                    "%s strategy requires project_path but got empty for workflow %s",
+                    strategy,
+                    self._workflow_id[:8],
+                )
+                self._create_milestone(
+                    phase="development",
+                    dev_round=dev_round,
+                    milestone_type="path_validation",
+                    status="failed",
+                    title=f"Missing project_path for {strategy} strategy",
+                    error_message=f"branch_strategy is '{strategy}' but project_path is empty",
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": f"{strategy} strategy requires non-empty project_path",
+                    }
+                )
+                return
+
         # Get the finalized plan — prefer the explicit plan_finalized milestone
         # (authoritative final plan), then fall back to the latest plan_content.
         milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
@@ -2896,7 +2967,7 @@ class AutonomousOrchestrator:
             workflow_id=self._workflow_id,
             cli_tool=wf.get("cli_tool", "claude-code"),
             model=wf.get("model", ""),
-            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+            project_path=worktree_path if strategy == "worktree" else project_path,
             prompt=dev_prompt,
             workspace_type=wf.get("workspace_type", "local"),
             remote_machine_id=wf.get("remote_machine_id"),
