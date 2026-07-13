@@ -6,18 +6,38 @@ import { useLanguage } from '@/store';
 import { formatTokens } from '@/utils';
 import type { ConversationStats } from '@/api/analysis';
 
+/** Health score status types for semantic display. */
+export type HealthScoreStatus = 'healthy' | 'warning' | 'no_data';
+
+/** Health score result with semantic status. */
+export interface HealthScoreResult {
+  score: number | null;
+  status: HealthScoreStatus;
+}
+
 /**
  * Shared health-score calculation for analysis pages.
  *
- * Extracted from the (previously duplicated) `calculateHealthScore` helpers in
- * `TrendAnalysis.tsx` and `Analysis.tsx` so the two pages can no longer drift
- * apart. The thresholds and the `avg_conversation_length` dependency are
- * intentionally unchanged.
+ * Returns a structured result with score and semantic status:
+ * - `no_data`: no sessions recorded, score is null (display "N/A")
+ * - `healthy`: score >= 80, system running well
+ * - `warning`: score < 80, optimization recommended
+ *
+ * Deduction rules:
+ * - avg_tokens_per_session < 1000: -20 points
+ * - avg_conversation_length < 2: -15 points
  */
 export function calculateHealthScore(
   keyMetrics: { total_sessions?: number; avg_tokens_per_session?: number } | undefined,
   conversationStats: { avg_conversation_length?: number } | undefined
-): number {
+): HealthScoreResult {
+  const totalSessions = keyMetrics?.total_sessions ?? 0;
+
+  // No data: return null score with no_data status
+  if (totalSessions === 0) {
+    return { score: null, status: 'no_data' };
+  }
+
   let score = 100;
 
   // Deduct points for low engagement
@@ -30,7 +50,12 @@ export function calculateHealthScore(
     score -= 15;
   }
 
-  return Math.max(0, Math.min(100, score));
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    score,
+    status: score >= 80 ? 'healthy' : 'warning',
+  };
 }
 
 /** Small "?" affordance that surfaces a metric's tooltip via a stable anchor. */
