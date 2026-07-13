@@ -21,9 +21,7 @@ issues = []
 
 
 def add_issue(endpoint, description, severity="medium"):
-    issues.append(
-        {"endpoint": endpoint, "description": description, "severity": severity}
-    )
+    issues.append({"endpoint": endpoint, "description": description, "severity": severity})
     print(f"  [ISSUE-{severity.upper()}] {endpoint}: {description}")
 
 
@@ -67,9 +65,7 @@ def test_audit_actions_api():
 
     # Validate actions count
     if len(actions) != 31:
-        add_issue(
-            "/api/audit-actions", f"Expected 31 actions, got {len(actions)}", "high"
-        )
+        add_issue("/api/audit-actions", f"Expected 31 actions, got {len(actions)}", "high")
         return False
 
     print(f"  OK - Actions count: {len(actions)}")
