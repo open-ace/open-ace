@@ -2782,6 +2782,53 @@ class AutonomousOrchestrator:
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)
 
+    def _validate_path_strategy(self, wf: dict, dev_round: int) -> bool:
+        """Validate path consistency with branch_strategy (Issue #1627).
+
+        Returns True if validation passes, False if validation fails.
+        On failure, creates milestone and updates workflow status.
+        """
+        strategy = wf.get("branch_strategy", "new-branch")
+        worktree_path = wf.get("worktree_path", "")
+        project_path = wf.get("project_path", "")
+
+        if strategy == "worktree":
+            if not worktree_path:
+                self._report_path_validation_error(dev_round, strategy, "worktree_path")
+                return False
+        else:
+            # new-branch or same-branch: must use project_path
+            if not project_path:
+                self._report_path_validation_error(dev_round, strategy, "project_path")
+                return False
+
+        return True
+
+    def _report_path_validation_error(
+        self, dev_round: int, strategy: str, path_name: str
+    ):
+        """Report path validation failure via milestone and workflow update (Issue #1627)."""
+        logger.error(
+            "%s strategy requires %s but got empty for workflow %s",
+            strategy,
+            path_name,
+            self._workflow_id[:8],
+        )
+        self._create_milestone(
+            phase="development",
+            dev_round=dev_round,
+            milestone_type="path_validation",
+            status="failed",
+            title=f"Missing {path_name} for {strategy} strategy",
+            error_message=f"branch_strategy is '{strategy}' but {path_name} is empty",
+        )
+        self._update_workflow(
+            {
+                "status": "failed",
+                "error_message": f"{strategy} strategy requires non-empty {path_name}",
+            }
+        )
+
     def _run_development_agent(self, wf: dict, dev_round: int, gh: GitHubOps):
         """Run the development agent, verify code changes, and return.
 
@@ -2861,54 +2908,8 @@ class AutonomousOrchestrator:
             logger.warning("Branch verification failed: %s", e)
 
         # Issue #1627: Validate path strategy consistency before development
-        strategy = wf.get("branch_strategy", "new-branch")
-        worktree_path = wf.get("worktree_path", "")
-        project_path = wf.get("project_path", "")
-
-        if strategy == "worktree":
-            if not worktree_path:
-                logger.error(
-                    "worktree strategy requires worktree_path but got empty for workflow %s",
-                    self._workflow_id[:8],
-                )
-                self._create_milestone(
-                    phase="development",
-                    dev_round=dev_round,
-                    milestone_type="path_validation",
-                    status="failed",
-                    title="Missing worktree_path for worktree strategy",
-                    error_message="branch_strategy is 'worktree' but worktree_path is empty",
-                )
-                self._update_workflow(
-                    {
-                        "status": "failed",
-                        "error_message": "worktree strategy requires non-empty worktree_path",
-                    }
-                )
-                return
-        else:
-            # new-branch or same-branch: must use project_path
-            if not project_path:
-                logger.error(
-                    "%s strategy requires project_path but got empty for workflow %s",
-                    strategy,
-                    self._workflow_id[:8],
-                )
-                self._create_milestone(
-                    phase="development",
-                    dev_round=dev_round,
-                    milestone_type="path_validation",
-                    status="failed",
-                    title=f"Missing project_path for {strategy} strategy",
-                    error_message=f"branch_strategy is '{strategy}' but project_path is empty",
-                )
-                self._update_workflow(
-                    {
-                        "status": "failed",
-                        "error_message": f"{strategy} strategy requires non-empty project_path",
-                    }
-                )
-                return
+        if not self._validate_path_strategy(wf, dev_round):
+            return
 
         # Get the finalized plan — prefer the explicit plan_finalized milestone
         # (authoritative final plan), then fall back to the latest plan_content.
