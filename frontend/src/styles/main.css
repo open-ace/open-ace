@@ -1547,22 +1547,54 @@ table .latency-row:hover td {
 }
 
 /* Dark mode: StatCard coloured variants — use deeper backgrounds so that
-   white text meets WCAG AA contrast (≥ 4.5 : 1).  Issue #1641. */
+   white text meets WCAG AA contrast (≥ 4.5 : 1).  Issue #1641.
+
+   The label (<h6 class="text-muted">) applies its own direct color which
+   overrides the inherited text-white from the parent.  We must explicitly
+   lighten it here so it contrasts against the dark coloured background. */
 [data-theme='dark'] .stat-card.bg-primary {
-  background-color: #075985 !important; /* white on #075985 ≈ 5.0:1 */
+  background-color: #075985 !important;
 }
 [data-theme='dark'] .stat-card.bg-success {
-  background-color: #065f46 !important; /* white on #065f46 ≈ 5.8:1 */
+  background-color: #065f46 !important;
 }
 [data-theme='dark'] .stat-card.bg-info {
-  background-color: #1e40af !important; /* white on #1e40af ≈ 5.6:1 */
+  background-color: #1e40af !important;
 }
 [data-theme='dark'] .stat-card.bg-danger {
-  background-color: #991b1b !important; /* white on #991b1b ≈ 5.5:1 */
+  background-color: #991b1b !important;
 }
 [data-theme='dark'] .stat-card.bg-warning {
-  background-color: #92400e !important; /* white on #92400e ≈ 5.1:1 */
+  background-color: #92400e !important;
   color: #fff !important;
+}
+
+/* StatCard label & icon inside coloured variants — light text on dark bg.
+   .text-muted direct style overrides inherited text-white, so we need a
+   selector with higher specificity than the global .text-muted rule. */
+[data-theme='dark'] .stat-card.bg-primary .card-subtitle,
+[data-theme='dark'] .stat-card.bg-success .card-subtitle,
+[data-theme='dark'] .stat-card.bg-info .card-subtitle,
+[data-theme='dark'] .stat-card.bg-danger .card-subtitle,
+[data-theme='dark'] .stat-card.bg-warning .card-subtitle {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+[data-theme='dark'] .stat-card.bg-primary .card-title,
+[data-theme='dark'] .stat-card.bg-success .card-title,
+[data-theme='dark'] .stat-card.bg-info .card-title,
+[data-theme='dark'] .stat-card.bg-danger .card-title,
+[data-theme='dark'] .stat-card.bg-warning .card-title {
+  color: #fff !important;
+}
+
+[data-theme='dark'] .stat-card.bg-primary .stat-icon,
+[data-theme='dark'] .stat-card.bg-success .stat-icon,
+[data-theme='dark'] .stat-card.bg-info .stat-icon,
+[data-theme='dark'] .stat-card.bg-danger .stat-icon,
+[data-theme='dark'] .stat-card.bg-warning .stat-icon {
+  opacity: 0.7;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 /* Chart Container */
