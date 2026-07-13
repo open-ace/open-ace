@@ -511,7 +511,7 @@ export const UsageOverview: React.FC = () => {
       )}
 
       {/* Help Text */}
-      <Card className="bg-light">
+      <Card style={{ backgroundColor: 'var(--bg-secondary)' }}>
         <div className="d-flex align-items-start">
           <i className="bi bi-info-circle text-muted me-2" />
           <div className="small text-muted">
