@@ -5,12 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.governance.audit_logger import (
-    AuditAction,
-    AuditLog,
-    AuditLogger,
-    AuditSeverity,
-)
+from app.modules.governance.audit_logger import (AuditAction, AuditLog,
+                                                 AuditLogger, AuditSeverity)
 
 
 class TestAuditLogger:
@@ -546,10 +542,8 @@ class TestGetActionCategories:
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""
-        from app.modules.governance.audit_logger import (
-            AuditAction,
-            get_action_categories,
-        )
+        from app.modules.governance.audit_logger import (AuditAction,
+                                                         get_action_categories)
 
         categories = get_action_categories()
         enum_values = {e.value for e in AuditAction}
