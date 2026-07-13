@@ -375,7 +375,7 @@ export const Dashboard: React.FC = () => {
       {/* Trend Chart + Distribution Chart - Two columns with shared filter */}
       <section className="dashboard-section mb-4">
         {/* Global chart filter bar - controls both trend and distribution charts */}
-        <div className="chart-filter-bar bg-light rounded p-2 mb-3">
+        <div className="chart-filter-bar rounded p-2 mb-3">
           <div className="d-flex align-items-center page-header-controls">
             <span className="text-muted small me-2" style={{ whiteSpace: 'nowrap' }}>
               {t('tool', language)}:
