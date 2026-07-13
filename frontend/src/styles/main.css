@@ -3793,10 +3793,11 @@ table .latency-row:hover td {
   color: #fff !important;
 }
 
-/* Fix Bootstrap .text-dark on warning/info badges in dark theme */
+/* Fix Bootstrap .text-dark on warning/info badges in dark theme —
+   use white text on darkened badge backgrounds (Issue #1652) */
 [data-theme='dark'] .session-detail-content .badge.bg-warning.text-dark,
 [data-theme='dark'] .session-detail-content .badge.bg-info.text-dark {
-  color: #000 !important;
+  color: #fff !important;
 }
 
 /* Filter buttons - improve contrast for outline buttons in dark theme */
@@ -3848,6 +3849,40 @@ table .latency-row:hover td {
   --bs-btn-hover-color: #fff;
   --bs-btn-hover-bg: var(--color-success-hover);
   --bs-btn-hover-border-color: var(--color-success-hover);
+}
+
+/* Conversation History page — dark theme overrides (Issue #1652) */
+
+/* Fullscreen mode — replace bg-white with dark background */
+[data-theme='dark'] .conversation-history-fullscreen.bg-white {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Message items in conversation detail modal (rendered via portal) */
+[data-theme='dark'] .modal .message-item.bg-light,
+[data-theme='dark'] .modal .message-item.bg-white {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Latency statistics cards inside conversation detail modal */
+[data-theme='dark'] .modal .latency-chart .card.bg-light {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Message items on the conversation history page itself */
+[data-theme='dark'] .conversation-history .message-item.bg-light,
+[data-theme='dark'] .conversation-history .message-item.bg-white {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Latency statistics cards on the conversation history page */
+[data-theme='dark'] .conversation-history .card.bg-light {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
 }
 
 /* Dark mode: global btn-secondary override (Issue #1634)
