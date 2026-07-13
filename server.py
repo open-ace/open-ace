@@ -21,6 +21,12 @@ from gevent import monkey
 
 monkey.patch_all()
 
+# 确保 scheduler 在 gevent 环境下正常运行（Issue #1481）
+# gevent patch 后 threading.Thread 变为协程，在 serve_forever 循环中无法调度
+# 使用 APScheduler 作为默认后端，创建真实线程不受 gevent 影响
+import os
+os.environ.setdefault("SCHEDULER_IMPLEMENTATION", "apscheduler")
+
 # Make psycopg2 cooperative with gevent (prevents blocking the event loop)
 import psycogreen.gevent
 

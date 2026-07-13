@@ -7,6 +7,11 @@ Features:
 - Periodic health checks (every minute)
 - Automatic alert creation when scheduler stops
 - Status reporting for all schedulers
+
+Supports multiple implementation backends:
+- threading: Default Python threading (may not work with gevent)
+- gevent: Greenlet-based scheduling for gevent environments
+- apscheduler: APScheduler-based scheduling (recommended for stability)
 """
 
 from __future__ import annotations
@@ -26,6 +31,21 @@ SCHEDULER_STOP_THRESHOLD_SEC = int(
 HEALTH_MONITOR_ENABLED = (
     os.environ.get("SCHEDULER_HEALTH_MONITOR_ENABLED", "true").lower() == "true"
 )
+
+# Scheduler implementation backend (Issue #1481)
+SCHEDULER_IMPLEMENTATION = os.environ.get(
+    "SCHEDULER_IMPLEMENTATION", "threading"
+).lower()
+
+# Try to import APScheduler
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    APSCHEDULER_AVAILABLE = True
+except ImportError:
+    APSCHEDULER_AVAILABLE = False
+    logger.warning("APScheduler not available, falling back to threading")
 
 
 class SchedulerHealthMonitor:
@@ -59,8 +79,10 @@ class SchedulerHealthMonitor:
         self._last_check = None
         self._scheduler_statuses = {}
         self._alert_created_for = set()  # Track which schedulers we've alerted for
+        self._implementation = SCHEDULER_IMPLEMENTATION
+        self._scheduler = None  # APScheduler instance
         self._initialized = True
-        logger.info("SchedulerHealthMonitor initialized")
+        logger.info(f"SchedulerHealthMonitor initialized (implementation: {self._implementation})")
 
     def configure(
         self,
@@ -91,23 +113,76 @@ class SchedulerHealthMonitor:
             return
 
         self._stop_event.clear()
+
+        if self._implementation == "apscheduler" and APSCHEDULER_AVAILABLE:
+            self._start_apscheduler()
+        elif self._implementation == "gevent":
+            self._start_gevent()
+        else:
+            self._start_threading()
+
+        self._running = True
+        logger.info(f"SchedulerHealthMonitor started (implementation: {self._implementation})")
+
+    def _start_threading(self):
+        """Start using threading backend."""
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        self._running = True
-        logger.info("SchedulerHealthMonitor started")
+
+    def _start_gevent(self):
+        """Start using gevent greenlets."""
+        try:
+            import gevent
+            import gevent.event
+
+            self._gevent_stop_event = gevent.event.Event()
+
+            def gevent_loop():
+                while not self._gevent_stop_event.is_set():
+                    self._check_schedulers()
+                    gevent.sleep(self._interval)
+
+            self._greenlet = gevent.spawn(gevent_loop)
+            logger.info("Started gevent-based health monitor")
+
+        except ImportError:
+            logger.warning("gevent not available, falling back to threading")
+            self._start_threading()
+
+    def _start_apscheduler(self):
+        """Start using APScheduler backend."""
+        self._scheduler = BackgroundScheduler()
+        self._scheduler.add_job(
+            self._check_schedulers,
+            IntervalTrigger(seconds=self._interval),
+            id="scheduler_health_check",
+            name="Scheduler Health Check",
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        logger.info("Started APScheduler-based health monitor")
 
     def stop(self):
         """Stop the monitor."""
-        if self._thread is None:
-            return
+        if self._implementation == "apscheduler" and self._scheduler:
+            self._scheduler.shutdown(wait=False)
+            self._scheduler = None
+        elif self._implementation == "gevent" and hasattr(self, "_greenlet"):
+            self._gevent_stop_event.set()
+            self._greenlet.kill()
+        elif self._thread is not None:
+            self._stop_event.set()
+            self._thread.join(timeout=5)
 
-        self._stop_event.set()
-        self._thread.join(timeout=5)
         self._running = False
         logger.info("SchedulerHealthMonitor stopped")
 
     def is_running(self) -> bool:
         """Check if the monitor is running."""
+        if self._implementation == "apscheduler":
+            return self._running and self._scheduler and self._scheduler.running
+        elif self._implementation == "gevent":
+            return self._running and hasattr(self, "_greenlet") and not self._greenlet.dead
         return self._running and self._thread is not None and self._thread.is_alive()
 
     def get_status(self) -> dict:
@@ -115,6 +190,7 @@ class SchedulerHealthMonitor:
         return {
             "running": self._running,
             "enabled": self._enabled,
+            "implementation": self._implementation,
             "interval_seconds": self._interval,
             "last_check": self._last_check.isoformat() if self._last_check else None,
             "schedulers": self._scheduler_statuses,
