@@ -32,7 +32,8 @@ def test_audit_actions_api():
     s = requests.Session()
 
     # Login
-    print("\n[1] Login")
+    print("
+[1] Login")
     r = s.post(
         f"{BASE_URL}/api/auth/login",
         json={"username": "admin", "password": "admin123"},
@@ -44,7 +45,8 @@ def test_audit_actions_api():
     print("  OK - Login successful")
 
     # Test audit-actions API
-    print("\n[2] GET /api/audit-actions")
+    print("
+[2] GET /api/audit-actions")
     r = s.get(f"{BASE_URL}/api/audit-actions", timeout=10)
 
     if r.status_code != 200:
@@ -142,7 +144,8 @@ if __name__ == "__main__":
 
     success = test_audit_actions_api()
 
-    print("\n" + "=" * 60)
+    print("
+" + "=" * 60)
     if success and not issues:
         print("All tests passed!")
     else:
