@@ -154,8 +154,9 @@ def check_and_recover_corrupted_config(config_path: str) -> dict[str, Any] | Non
     # Try to read and parse the config
     try:
         with open(config_path) as f:
-            config = json.load(f)
-        if isinstance(config, dict):
+            config_data = json.load(f)
+        if isinstance(config_data, dict):
+            config = cast(dict[str, Any], config_data)
             return config
         else:
             logger.error("Config file is not a valid JSON object")
@@ -168,10 +169,10 @@ def check_and_recover_corrupted_config(config_path: str) -> dict[str, Any] | Non
     logger.warning("Config file is corrupted, attempting to recover from backup")
 
     for backup_index in range(1, MAX_BACKUP_VERSIONS + 1):
-        config = restore_config(config_path, backup_index)
-        if config is not None:
+        recovered_config = restore_config(config_path, backup_index)
+        if recovered_config is not None:
             logger.info("Successfully recovered config from backup %d", backup_index)
-            return config
+            return recovered_config
 
     logger.error("Failed to recover config from all backups")
     return None
