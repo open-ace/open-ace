@@ -78,7 +78,8 @@ export const WorkLayout: React.FC<WorkLayoutProps> = ({ children }) => {
         setRunTimelineEnabled(flags.run_timeline);
         setPolicyEnabled(flags.policy);
         setConfigLoaded(true);
-      } catch {
+      } catch (error) {
+        console.error('Failed to load config or feature flags:', error);
         // Config fetch failed, keep defaults but mark as loaded
         setConfigLoaded(true);
       }
