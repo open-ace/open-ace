@@ -4,7 +4,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { cn } from '@/utils';
-import { useLanguage } from '@/store';
+import { useLanguage, useTheme } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
@@ -605,6 +605,7 @@ export const Analysis: React.FC = () => {
 
 /**
  * Usage Heatmap Component
+ * Issue #1641: theme-aware cell opacity and text color for dark mode.
  */
 interface UsageHeatmapProps {
   hourlyData: Array<{ hour: number; tokens: number; requests: number }>;
@@ -612,7 +613,17 @@ interface UsageHeatmapProps {
 }
 
 const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => {
+  const theme = useTheme();
+  const isDark = theme === 'dark';
   const maxTokens = Math.max(...hourlyData.map((d) => d.tokens), 1);
+
+  const minOpacity = isDark ? 0.15 : 0;
+  const getCellBg = (intensity: number) => {
+    const opacity = minOpacity + (intensity / 100) * (1 - minOpacity);
+    return `rgba(13, 110, 253, ${opacity.toFixed(2)})`;
+  };
+
+  const legendOpacities = isDark ? [0.15, 0.35, 0.6, 1] : [0.1, 0.3, 0.6, 1];
 
   return (
     <div className="usage-heatmap">
@@ -631,13 +642,13 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
               style={{
                 width: 'calc(100% / 24 - 4px)',
                 height: '40px',
-                backgroundColor: `rgba(13, 110, 253, ${intensity / 100})`,
+                backgroundColor: getCellBg(intensity),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderRadius: '4px',
                 fontSize: '10px',
-                color: intensity > 50 ? 'white' : 'black',
+                color: isDark ? 'white' : intensity > 50 ? 'white' : 'black',
               }}
               title={`${hour}:00 - ${data?.tokens ?? 0} tokens`}
             >
@@ -653,38 +664,18 @@ const UsageHeatmap: React.FC<UsageHeatmapProps> = ({ hourlyData, language }) => 
       </div>
       <div className="mt-2 d-flex align-items-center justify-content-end gap-2">
         <small className="text-muted">{t('less', language)}</small>
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.1)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.3)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.6)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 1)',
-            borderRadius: '2px',
-          }}
-        />
+        {legendOpacities.map((opacity, i) => (
+          <div
+            key={i}
+            style={{
+              width: '20px',
+              height: '12px',
+              backgroundColor: `rgba(13, 110, 253, ${opacity})`,
+              borderRadius: '2px',
+              border: isDark ? '1px solid rgba(255,255,255,0.15)' : undefined,
+            }}
+          />
+        ))}
         <small className="text-muted">{t('more', language)}</small>
       </div>
     </div>
