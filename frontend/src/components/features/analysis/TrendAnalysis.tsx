@@ -17,7 +17,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { cn } from '@/utils';
-import { useLanguage } from '@/store';
+import { useLanguage, useTheme } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
   Card,
@@ -586,6 +586,12 @@ export const TrendAnalysis: React.FC = () => {
 /**
  * Usage Heatmap Component
  * Memoized for performance (rerender-memo optimization)
+ *
+ * Issue #1641: In dark mode the card background is very dark (#0f172a), so the
+ * original transparent-blue cells (rgba(13,110,253, 0-0.5)) were nearly
+ * invisible and the black text on them was unreadable.  Fix: use higher
+ * base-opacity in dark mode and always render white text so every cell is
+ * legible regardless of theme.
  */
 interface UsageHeatmapProps {
   hourlyData: Array<{ hour: number; tokens: number; requests: number }>;
@@ -593,7 +599,22 @@ interface UsageHeatmapProps {
 }
 
 const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) => {
+  const theme = useTheme();
+  const isDark = theme === 'dark';
   const maxTokens = Math.max(...hourlyData.map((d) => d.tokens), 1);
+
+  // In dark mode, start opacity at 0.15 so cells are always visible on dark bg.
+  // In light mode, keep the original 0-1 range.
+  const minOpacity = isDark ? 0.15 : 0;
+  const maxOpacity = 1;
+
+  const getCellBg = (intensity: number) => {
+    const opacity = minOpacity + (intensity / 100) * (maxOpacity - minOpacity);
+    return `rgba(13, 110, 253, ${opacity.toFixed(2)})`;
+  };
+
+  // Legend swatch opacities — boosted in dark mode for visibility
+  const legendOpacities = isDark ? [0.15, 0.35, 0.6, 1] : [0.1, 0.3, 0.6, 1];
 
   return (
     <div className="usage-heatmap">
@@ -612,13 +633,13 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
               style={{
                 width: 'calc(100% / 24 - 4px)',
                 height: '40px',
-                backgroundColor: `rgba(13, 110, 253, ${intensity / 100})`,
+                backgroundColor: getCellBg(intensity),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderRadius: '4px',
                 fontSize: '10px',
-                color: intensity > 50 ? 'white' : 'black',
+                color: isDark ? 'white' : intensity > 50 ? 'white' : 'black',
               }}
               title={`${hour}:00 - ${data?.tokens ?? 0} tokens`}
             >
@@ -634,38 +655,18 @@ const UsageHeatmap = React.memo<UsageHeatmapProps>(({ hourlyData, language }) =>
       </div>
       <div className="mt-2 d-flex align-items-center justify-content-end gap-2">
         <small className="text-muted">{t('less', language)}</small>
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.1)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.3)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 0.6)',
-            borderRadius: '2px',
-          }}
-        />
-        <div
-          style={{
-            width: '20px',
-            height: '12px',
-            backgroundColor: 'rgba(13, 110, 253, 1)',
-            borderRadius: '2px',
-          }}
-        />
+        {legendOpacities.map((opacity, i) => (
+          <div
+            key={i}
+            style={{
+              width: '20px',
+              height: '12px',
+              backgroundColor: `rgba(13, 110, 253, ${opacity})`,
+              borderRadius: '2px',
+              border: isDark ? '1px solid rgba(255,255,255,0.15)' : undefined,
+            }}
+          />
+        ))}
         <small className="text-muted">{t('more', language)}</small>
       </div>
     </div>
