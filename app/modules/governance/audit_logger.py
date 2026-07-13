@@ -190,13 +190,9 @@ class AuditLog:
                 return {}
             if isinstance(parsed, dict):
                 return parsed
-            logger.warning(
-                "Audit log details JSON is not an object, ignoring: %r", value
-            )
+            logger.warning("Audit log details JSON is not an object, ignoring: %r", value)
             return {}
-        logger.warning(
-            "Unexpected audit log details type %s, ignoring", type(value).__name__
-        )
+        logger.warning("Unexpected audit log details type %s, ignoring", type(value).__name__)
         return {}
 
 
@@ -298,9 +294,7 @@ class AuditLogger:
                 )
                 conn.commit()
 
-            logger.debug(
-                f"Audit log: {action} by user {username or user_id or 'system'}"
-            )
+            logger.debug(f"Audit log: {action} by user {username or user_id or 'system'}")
             return True
 
         except Exception as e:
@@ -496,9 +490,7 @@ class AuditLogger:
         Returns:
             Dict with activity summary.
         """
-        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-            days=days
-        )
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
         logs = self.query(user_id=user_id, start_time=start_time, limit=1000)
 
@@ -624,9 +616,7 @@ def get_ddl_statements() -> list[str]:
     """
     from app.repositories.database import is_postgresql
 
-    id_type = (
-        "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    )
+    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
     return [
         f"""CREATE TABLE IF NOT EXISTS audit_logs (
             id {id_type},
