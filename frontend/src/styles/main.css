@@ -1262,6 +1262,23 @@ link[rel='dns-prefetch'] {
   box-shadow: var(--shadow-xl);
 }
 
+/* Dark theme: darken usage-card backgrounds for white text contrast ≥4.5:1 (Issue #1639) */
+[data-theme='dark'] .dashboard .usage-card.bg-danger {
+  background-color: #dc2626 !important; /* 4.83:1 with white */
+}
+[data-theme='dark'] .dashboard .usage-card.bg-success {
+  background-color: #047857 !important; /* 5.48:1 with white */
+}
+[data-theme='dark'] .dashboard .usage-card.bg-info {
+  background-color: #2563eb !important; /* 5.17:1 with white */
+}
+[data-theme='dark'] .dashboard .usage-card.bg-primary {
+  background-color: #0369a1 !important; /* 5.93:1 with white */
+}
+[data-theme='dark'] .dashboard .usage-card.bg-warning {
+  background-color: #b45309 !important; /* 5.02:1 with white */
+}
+
 .dashboard-section h5 {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
@@ -3727,10 +3744,7 @@ table .latency-row:hover td {
   --bs-btn-hover-border-color: var(--color-success-hover);
 }
 
-/* Dark mode: global btn-secondary override (Issue #1634)
-   Previously scoped to .session-detail-content only, leaving portal-rendered
-   modals (NewSessionModal, ConfirmModal, etc.) with white-on-white text. */
-[data-theme='dark'] .btn-secondary {
+[data-theme='dark'] .session-detail-content .btn-secondary {
   --bs-btn-color: #fff;
   --bs-btn-bg: #495057;
   --bs-btn-border-color: #495057;
@@ -3742,7 +3756,7 @@ table .latency-row:hover td {
   border-color: #495057 !important;
 }
 
-[data-theme='dark'] .btn-secondary:hover {
+[data-theme='dark'] .session-detail-content .btn-secondary:hover {
   color: #fff !important;
   background-color: #3d4349 !important;
   border-color: #373b3f !important;
