@@ -94,13 +94,22 @@ def get_unread_count():
 
 @alerts_bp.route("/alerts/<alert_id>/read", methods=["POST"])
 def mark_alert_read(alert_id):
-    """Mark an alert as read."""
+    """Mark an alert as read and sync to quota_alerts."""
     try:
         notifier = get_alert_notifier()
         success = notifier.mark_as_read(alert_id)
 
         if not success:
             return jsonify({"success": False, "error": "Alert not found"}), 404
+
+        # Sync to quota_alerts table
+        try:
+            from app.modules.governance.alert_state_synchronizer import sync_acknowledge
+
+            user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            sync_acknowledge(alert_id, user_id)
+        except Exception as e:
+            logger.warning(f"Failed to sync acknowledge to quota_alerts: {e}")
 
         return jsonify({"success": True})
     except Exception as e:
@@ -125,8 +134,17 @@ def mark_all_read():
 
 @alerts_bp.route("/alerts/<alert_id>", methods=["DELETE"])
 def delete_alert(alert_id):
-    """Delete an alert."""
+    """Delete an alert and sync to quota_alerts."""
     try:
+        # Sync delete to quota_alerts first (need alert data before deletion)
+        try:
+            from app.modules.governance.alert_state_synchronizer import sync_delete
+
+            user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+            sync_delete(alert_id, user_id)
+        except Exception as e:
+            logger.warning(f"Failed to sync delete to quota_alerts: {e}")
+
         notifier = get_alert_notifier()
         success = notifier.delete_alert(alert_id)
 
