@@ -19,6 +19,7 @@ import {
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
+  Badge,
   Card,
   Button,
   Select,
@@ -803,10 +804,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             </span>
           )}
           {msg.model && (
-            <span className="badge bg-dark">
+            <Badge variant="dark">
               <i className="bi bi-cpu me-1" />
               {msg.model}
-            </span>
+            </Badge>
           )}
         </div>
         <small className="text-muted">
@@ -1045,34 +1046,34 @@ export const ConversationDetailModal: React.FC<ConversationDetailModalProps> = (
               </div>
               {messageStats.user > 0 && (
                 <div className="col-auto">
-                  <span className="badge bg-primary me-1">
+                  <Badge variant="primary" className="me-1">
                     <i className="bi bi-person me-1" />
                     User: {messageStats.user}
-                  </span>
+                  </Badge>
                 </div>
               )}
               {messageStats.assistant > 0 && (
                 <div className="col-auto">
-                  <span className="badge bg-success me-1">
+                  <Badge variant="success" className="me-1">
                     <i className="bi bi-robot me-1" />
                     Assistant: {messageStats.assistant}
-                  </span>
+                  </Badge>
                 </div>
               )}
               {messageStats.toolResult > 0 && (
                 <div className="col-auto">
-                  <span className="badge bg-info me-1">
+                  <Badge variant="info" className="me-1">
                     <i className="bi bi-wrench me-1" />
                     Tool: {messageStats.toolResult}
-                  </span>
+                  </Badge>
                 </div>
               )}
               {messageStats.totalTokens > 0 && (
                 <div className="col-auto">
-                  <span className="badge bg-dark me-1">
+                  <Badge variant="dark" className="me-1">
                     <i className="bi bi-coin me-1" />
                     {formatTokens(messageStats.totalTokens)} {t('tokens', language)}
-                  </span>
+                  </Badge>
                 </div>
               )}
             </div>
@@ -1273,18 +1274,17 @@ export const ConversationDetailModal: React.FC<ConversationDetailModalProps> = (
                                 <small>{truncatePreview(d.content)}</small>
                               </td>
                               <td>
-                                <span
-                                  className={cn(
-                                    'badge',
+                                <Badge
+                                  variant={
                                     d.latency > 10
-                                      ? 'bg-danger'
+                                      ? 'danger'
                                       : d.latency > 5
-                                        ? 'bg-warning'
-                                        : 'bg-success'
-                                  )}
+                                        ? 'warning'
+                                        : 'success'
+                                  }
                                 >
                                   {d.latency}s
-                                </span>
+                                </Badge>
                               </td>
                               <td>
                                 <small>{formatDateTime(d.timestamp)}</small>
