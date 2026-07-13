@@ -341,7 +341,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
     def setup_method(self):
         DataFetchScheduler._instance = None
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_daily_quota(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
@@ -363,7 +363,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
         s._enforce_user_quota(row, today, "daily")
         mock_alert.assert_called_once()
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_monthly_quota(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
@@ -401,11 +401,11 @@ class TestDataFetchSchedulerEnforceUserQuota:
             "daily_token_quota": 1,
         }
 
-        with patch("app.modules.governance.alert_notifier.create_quota_alert") as mock_alert:
+        with patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional") as mock_alert:
             s._enforce_user_quota(row, today, "daily")
             mock_alert.assert_not_called()
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_terminates_sessions(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
@@ -429,7 +429,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
         s._enforce_user_quota(row, today, "daily")
         mock_sm.complete_session.assert_called_once_with("session123")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_session_failure_continues(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
@@ -451,7 +451,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
         # Should not raise
         s._enforce_user_quota(row, today, "daily")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_cleans_old_action_keys(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()
@@ -478,7 +478,7 @@ class TestDataFetchSchedulerEnforceUserQuota:
         assert action_key in s._enforced_users
         assert "99:quota_exceeded:2020-01-01:daily" not in s._enforced_users
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_initializes_enforced_users(self, mock_sm_cls, mock_alert):
         s = DataFetchScheduler()

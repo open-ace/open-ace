@@ -328,7 +328,7 @@ class AlertTransactionManager:
                 (user_id, "quota", threshold_str, quota_type),
             )
 
-        return alerts_result and alerts_result.get("count", 0) > 0
+        return alerts_result is not None and alerts_result.get("count", 0) > 0
 
     def _add_to_failure_queue(self, alert_data: QuotaAlertData) -> None:
         """Add failed alert to compensation queue."""
@@ -361,12 +361,16 @@ class AlertTransactionManager:
 
         failures = []
         for row in rows:
+            created_at_val = row.get("created_at")
+            if created_at_val is None:
+                created_at_val = datetime.now(timezone.utc).replace(tzinfo=None)
+
             failures.append(AlertCreationFailure(
                 id=row.get("id"),
                 alert_data=row.get("alert_data", ""),
                 retry_count=row.get("retry_count", 0),
                 last_retry_at=row.get("last_retry_at"),
-                created_at=row.get("created_at"),
+                created_at=created_at_val,
                 status=row.get("status", "pending"),
             ))
 

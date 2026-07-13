@@ -298,11 +298,11 @@ class TestQuotaEnforcementSchedulerEnforcement:
         action_key = f"1:quota_exceeded:{today}:daily"
         scheduler._enforced_users = {action_key}
 
-        with patch("app.modules.governance.alert_notifier.create_quota_alert") as mock_alert:
+        with patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional") as mock_alert:
             scheduler._enforce_user(row, today, "daily")
             mock_alert.assert_not_called()
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_creates_alert(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
@@ -328,7 +328,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         assert call_kwargs[1]["user_id"] == 1
         assert call_kwargs[1]["username"] == "testuser"
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_terminates_sessions(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
@@ -353,7 +353,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
 
         mock_sm.complete_session.assert_called_once_with("abc12345")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_alert_failure_continues(self, mock_sm_cls, mock_create_alert):
         mock_create_alert.side_effect = Exception("Alert service down")
@@ -377,7 +377,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         # Should not raise
         scheduler._enforce_user(row, today, "daily")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_session_terminate_failure_continues(self, mock_sm_cls, mock_create_alert):
         mock_sm_instance = MagicMock()
@@ -399,7 +399,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         # Should not raise
         scheduler._enforce_user(row, today, "daily")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_monthly_prefix(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()
@@ -424,7 +424,7 @@ class TestQuotaEnforcementSchedulerEnforcement:
         quota_type = mock_create_alert.call_args[1]["quota_type"]
         assert quota_type.startswith("monthly")
 
-    @patch("app.modules.governance.alert_notifier.create_quota_alert")
+    @patch("app.modules.governance.alert_transaction_manager.create_quota_alert_transactional")
     @patch("app.modules.workspace.session_manager.SessionManager")
     def test_enforce_user_cleans_old_action_keys(self, mock_sm_cls, mock_create_alert):
         scheduler = QuotaEnforcementScheduler()

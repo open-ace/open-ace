@@ -113,7 +113,7 @@ class SchedulerHealthMonitor:
             "running": self._running,
             "enabled": self._enabled,
             "interval_seconds": self._interval,
-            "last_check": self._last_check.isoformat() if self._last_run else None,
+            "last_check": self._last_check.isoformat() if self._last_check else None,
             "schedulers": self._scheduler_statuses,
         }
 
@@ -204,7 +204,7 @@ class SchedulerHealthMonitor:
         # Check heartbeat freshness if available
         heartbeat_ok = status.get("heartbeat_ok")
         if heartbeat_ok is not None:
-            return heartbeat_ok
+            return bool(heartbeat_ok)
 
         # If no heartbeat info, just check running flag
         return True

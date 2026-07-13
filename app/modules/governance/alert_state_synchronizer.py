@@ -8,7 +8,7 @@ Ensures consistency when users acknowledge, delete, or clean up alerts.
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from app.repositories.database import Database, adapt_sql, adapt_boolean_value, is_postgresql
 
@@ -411,7 +411,7 @@ class AlertStateSynchronizer:
         Returns:
             Dict with consistency statistics and mismatch details.
         """
-        result = {
+        result: dict[str, Any] = {
             "quota_alerts_count": 0,
             "alerts_quota_count": 0,
             "mismatches": [],
@@ -530,7 +530,7 @@ class AlertStateSynchronizer:
         Returns:
             Dict with repair statistics.
         """
-        result = {
+        result: dict[str, Any] = {
             "alerts_created": 0,
             "quota_alerts_created": 0,
             "errors": [],

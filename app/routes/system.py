@@ -250,7 +250,7 @@ def migrate_quota_alerts():
 
         # Migrate in batches
         migrated = 0
-        errors = []
+        errors: list[str] = []
 
         # For now, just report the count
         # Full migration would require more complex logic

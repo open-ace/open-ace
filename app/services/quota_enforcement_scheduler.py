@@ -191,7 +191,7 @@ class QuotaEnforcementScheduler:
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
         if self._implementation == "apscheduler" and self._scheduler:
-            return self._scheduler.running
+            return bool(self._scheduler.running)
         elif self._implementation == "gevent" and hasattr(self, "_greenlet"):
             return not self._greenlet.dead
         else:

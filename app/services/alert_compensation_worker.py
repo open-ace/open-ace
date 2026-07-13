@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 from datetime import datetime, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ class AlertCompensationWorker:
         Returns:
             Dict with processing results.
         """
-        result = {
+        result: dict[str, Any] = {
             "processed": 0,
             "success": 0,
             "failed": 0,
