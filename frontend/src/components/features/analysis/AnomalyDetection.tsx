@@ -16,6 +16,8 @@ import { cn, createMatcherConfig } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
 import {
+  Badge,
+  type BadgeVariant,
   Card,
   StatCard,
   Select,
@@ -376,7 +378,7 @@ export const AnomalyDetection: React.FC = () => {
               >
                 {/* Baseline banner — surfaces the detection context (currently discarded) */}
                 {anomalyData?.statistics && (
-                  <div className="mb-3 p-2 bg-light rounded">
+                  <div className="anomaly-baseline-banner mb-3 p-2 rounded">
                     <small className="fw-semibold text-muted d-block mb-1">
                       {t('anomalyMethodIntro', language)}
                     </small>
@@ -401,16 +403,11 @@ export const AnomalyDetection: React.FC = () => {
                           <div className="d-flex justify-content-between align-items-start">
                             <div className="me-2 flex-grow-1" style={{ minWidth: 0 }}>
                               <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
-                                <span
-                                  className={cn(
-                                    'badge',
-                                    anomaly.type === 'spike' ? 'bg-danger' : 'bg-info'
-                                  )}
-                                >
+                                <Badge variant={anomaly.type === 'spike' ? 'danger' : 'info'}>
                                   {anomaly.type === 'spike'
                                     ? t('usageSpike', language)
                                     : t('usageDrop', language)}
-                                </span>
+                                </Badge>
                                 <span className="text-muted small" style={{ whiteSpace: 'nowrap' }}>
                                   {anomaly.date}
                                 </span>
@@ -431,18 +428,18 @@ export const AnomalyDetection: React.FC = () => {
                                 {getAnomalySuggestion(anomaly.type, language)}
                               </p>
                             </div>
-                            <span
-                              className={cn(
-                                'badge ms-2',
+                            <Badge
+                              className="ms-2"
+                              variant={
                                 anomaly.severity === 'high'
-                                  ? 'bg-danger'
+                                  ? 'danger'
                                   : anomaly.severity === 'medium'
-                                    ? 'bg-warning'
-                                    : 'bg-info'
-                              )}
+                                    ? 'warning'
+                                    : 'info'
+                              }
                             >
                               {anomaly.severity}
-                            </span>
+                            </Badge>
                           </div>
                         </li>
                       );
@@ -479,9 +476,9 @@ export const AnomalyDetection: React.FC = () => {
                               </p>
                             )}
                           </div>
-                          <span className={cn('badge', getImpactBadge(rec.type))}>
+                          <Badge variant={getImpactBadgeVariant(rec.type)}>
                             {t(getImpactKey(rec.type), language)}
-                          </span>
+                          </Badge>
                         </div>
                       </li>
                     ))}
@@ -512,17 +509,17 @@ function getRecommendationIcon(type: string): string {
   return icons[type] ?? 'bi-lightbulb';
 }
 
-function getImpactBadge(type: string): string {
-  const badges: Record<string, string> = {
-    optimization: 'bg-warning',
-    cost: 'bg-danger',
-    performance: 'bg-warning',
-    security: 'bg-danger',
-    usage: 'bg-info',
-    info: 'bg-info',
-    success: 'bg-success',
+function getImpactBadgeVariant(type: string): BadgeVariant {
+  const variants: Record<string, BadgeVariant> = {
+    optimization: 'warning',
+    cost: 'danger',
+    performance: 'warning',
+    security: 'danger',
+    usage: 'info',
+    info: 'info',
+    success: 'success',
   };
-  return badges[type] || 'bg-secondary';
+  return variants[type] || 'secondary';
 }
 
 function getImpactKey(type: string): string {
