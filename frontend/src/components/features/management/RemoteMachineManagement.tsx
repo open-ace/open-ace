@@ -51,9 +51,8 @@ export const RemoteMachineManagement: React.FC = () => {
 
   const machines = machinesData?.machines ?? [];
 
-  // Derive isSystemAdmin: if no machine has current_user_permission, user is system admin
-  // (backend only sets this field when querying with user_id for non-admin users)
-  const isSystemAdmin = machines.length === 0 || machines.every((m) => !m.current_user_permission);
+  // P1-3: Use explicit user_role from API instead of implicit derivation
+  const isSystemAdmin = machinesData?.user_role === 'admin';
 
   // Dialog states
   const [showTokenDialog, setShowTokenDialog] = useState(false);
