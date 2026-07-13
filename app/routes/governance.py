@@ -14,8 +14,7 @@ from app.auth.decorators import admin_required, auth_required
 from app.repositories.governance_repo import GovernanceRepository
 from flask import Blueprint, g, jsonify, request
 
-from app.modules.governance.audit_logger import (AuditAction, AuditLogger,
-                                                 get_action_categories)
+from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
 
@@ -203,9 +202,7 @@ def api_export_audit_logs():
             {
                 "data": exported_data,
                 "format": format_type,
-                "exported_at": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
+                "exported_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             }
         )
 
@@ -260,14 +257,10 @@ def api_check_quota():
 def api_get_quota_alerts():
     """Get quota alerts."""
 
-    unacknowledged_only = request.args.get(
-        "unacknowledged_only", default=False, type=bool
-    )
+    unacknowledged_only = request.args.get("unacknowledged_only", default=False, type=bool)
     limit = request.args.get("limit", default=100, type=int)
 
-    alerts = quota_manager.get_all_alerts(
-        unacknowledged_only=unacknowledged_only, limit=limit
-    )
+    alerts = quota_manager.get_all_alerts(unacknowledged_only=unacknowledged_only, limit=limit)
 
     return jsonify([a.to_dict() for a in alerts])
 
