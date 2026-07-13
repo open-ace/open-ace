@@ -608,6 +608,8 @@ def create_remote_session():
     permission_mode = data.get("permission_mode")
     ha_pool_token = data.get("ha_pool_token")
 
+    if not machine_id:  # decorator already guards; narrows type for mypy
+        return jsonify({"error": "machine_id is required"}), 400
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
 
@@ -1751,6 +1753,9 @@ def start_terminal():
     machine_id = data.get("machine_id")
     work_dir = data.get("work_dir")
 
+    if not machine_id:  # decorator already guards; narrows type for mypy
+        return jsonify({"error": "machine_id is required"}), 400
+
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
@@ -1858,6 +1863,9 @@ def start_cli_terminal():
     work_dir = data.get("work_dir") or ""
     source = data.get("source") or "ssh_cli"
 
+    if not machine_id:  # decorator already guards; narrows type for mypy
+        return jsonify({"error": "machine_id is required"}), 400
+
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
@@ -1954,6 +1962,8 @@ def stop_terminal():
 
     if not terminal_id:
         return jsonify({"error": "terminal_id is required"}), 400
+    if not machine_id:  # decorator already guards; narrows type for mypy
+        return jsonify({"error": "machine_id is required"}), 400
 
     agent_mgr = get_remote_agent_manager()
     cmd = {
