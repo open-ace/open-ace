@@ -259,9 +259,7 @@ def ensure_agent_sessions_project_columns(connection: sa.Connection) -> bool:
                 "ALTER TABLE agent_sessions ADD COLUMN paused_at timestamp without time zone"
             )
         else:
-            connection.exec_driver_sql(
-                "ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP"
-            )
+            connection.exec_driver_sql("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
         changed = True
 
     return changed
@@ -589,7 +587,8 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
             "paused_at",
         ]
         missing_agent_sessions_cols = [
-            col for col in agent_sessions_columns
+            col
+            for col in agent_sessions_columns
             if not _column_exists(connection, "agent_sessions", col)
         ]
         if missing_agent_sessions_cols:
