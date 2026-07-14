@@ -206,10 +206,7 @@ def _column_exists(conn, table_name: str, column_name: str, dialect: str) -> boo
         return cursor.fetchone() is not None
     else:
         cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        for row in cursor.fetchall():
-            if row[1] == column_name:
-                return True
-        return False
+        return any(row[1] == column_name for row in cursor.fetchall())
 
 
 def _table_exists(conn, table_name: str, dialect: str) -> bool:
