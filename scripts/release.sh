@@ -16,6 +16,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Portable in-place sed: GNU sed uses `sed -i`, BSD sed (macOS default) needs
+# `sed -i ''`. Probe the running sed rather than guessing by OS.
+if sed --version 2>/dev/null | grep -q GNU; then
+    SED_INPLACE=(sed -i)
+else
+    SED_INPLACE=(sed -i '')
+fi
+
 # Parse arguments
 VERSION=""
 DRY_RUN=false
@@ -100,7 +108,7 @@ echo "Step 1: Updating pyproject.toml..."
 if [[ "$DRY_RUN" == true ]]; then
     echo "  [dry-run] Would update version to $VERSION"
 else
-    sed -i "s/^version = \".*\"/version = \"$VERSION\"/" "$PROJECT_ROOT/pyproject.toml"
+    "${SED_INPLACE[@]}" "s/^version = \".*\"/version = \"$VERSION\"/" "$PROJECT_ROOT/pyproject.toml"
     echo "  ✓ Updated version to $VERSION"
 fi
 
@@ -112,13 +120,32 @@ CHANGELOG="$PROJECT_ROOT/CHANGELOG.md"
 if [[ "$DRY_RUN" == true ]]; then
     echo "  [dry-run] Would replace [Unreleased] with [$TAG] - $RELEASE_DATE"
 else
-    # Replace [Unreleased] header with new version header
-    sed -i "s/^## \[Unreleased\]$/## [Unreleased]\n\n## [$TAG] - $RELEASE_DATE/" "$CHANGELOG"
+    # Replace [Unreleased] header with new version header.
+    # Use awk (not sed) for the multi-line insertion: BSD sed treats `\n` in an
+    # s/// replacement as a literal 'n', which would corrupt the CHANGELOG.
+    awk -v tag="$TAG" -v date="$RELEASE_DATE" '
+        /^## \[Unreleased\]$/ && !done {
+            print
+            print ""
+            print "## [" tag "] - " date
+            done = 1
+            next
+        }
+        { print }
+    ' "$CHANGELOG" > "$CHANGELOG.tmp" && mv "$CHANGELOG.tmp" "$CHANGELOG"
     echo "  ✓ Added version header to CHANGELOG"
 
-    # Update bottom links
-    # Add new version link before [Unreleased] link
-    sed -i "s|^\[Unreleased\]: .*|\[$TAG\]: https://github.com/open-ace/open-ace/releases/tag/$TAG\n\[Unreleased\]: https://github.com/open-ace/open-ace/compare/$TAG...HEAD|" "$CHANGELOG"
+    # Update bottom links: add the new version link before the [Unreleased] link.
+    # awk avoids the GNU-only `\n`-in-replacement sed behavior.
+    awk -v tag="$TAG" '
+        /^\[Unreleased\]: / && !done {
+            print "[" tag "]: https://github.com/open-ace/open-ace/releases/tag/" tag
+            print "[Unreleased]: https://github.com/open-ace/open-ace/compare/" tag "...HEAD"
+            done = 1
+            next
+        }
+        { print }
+    ' "$CHANGELOG" > "$CHANGELOG.tmp" && mv "$CHANGELOG.tmp" "$CHANGELOG"
     echo "  ✓ Updated version links"
 fi
 
@@ -129,7 +156,7 @@ echo "---"
 echo "Release notes preview (from CHANGELOG.md):"
 echo ""
 # Extract the new version section from CHANGELOG
-sed -n "/^## \[$TAG\]/,/^## \[v/p" "$CHANGELOG" | head -n -1
+sed -n "/^## \[$TAG\]/,/^## \[v/p" "$CHANGELOG" | sed '$d'
 echo "---"
 
 # Git operations
