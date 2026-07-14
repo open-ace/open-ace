@@ -206,7 +206,13 @@ def test_cutover_skips_active_revision_when_schema_complete(tmp_path, revision):
         CREATE TABLE agent_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT,
-            cli_session_id TEXT DEFAULT ''
+            cli_session_id TEXT DEFAULT '',
+            project_id INTEGER,
+            project_path TEXT,
+            request_count INTEGER DEFAULT 0,
+            workspace_type TEXT DEFAULT 'local',
+            remote_machine_id TEXT,
+            paused_at TIMESTAMP
         );
         CREATE TABLE session_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
