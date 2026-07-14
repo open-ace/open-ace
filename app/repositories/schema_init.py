@@ -195,36 +195,48 @@ def ensure_all_tables() -> None:
 
 def _column_exists(conn, table_name: str, column_name: str, dialect: str) -> bool:
     """Check if a column exists in a table."""
-    if dialect == "postgresql":
-        cursor = conn.execute(
-            """
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = %s AND column_name = %s
-            """,
-            (table_name, column_name),
-        )
-        return cursor.fetchone() is not None
-    else:
-        cursor = conn.execute(f"PRAGMA table_info({table_name})")
-        return any(row[1] == column_name for row in cursor.fetchall())
+    # Use an explicit cursor: psycopg2 connections have no .execute() (only
+    # cursors do), unlike sqlite3 connections. conn.cursor() works for both.
+    cursor = conn.cursor()
+    try:
+        if dialect == "postgresql":
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+                """,
+                (table_name, column_name),
+            )
+            return cursor.fetchone() is not None
+        else:
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            return any(row[1] == column_name for row in cursor.fetchall())
+    finally:
+        cursor.close()
 
 
 def _table_exists(conn, table_name: str, dialect: str) -> bool:
     """Check if a table exists."""
-    if dialect == "postgresql":
-        cursor = conn.execute(
-            """
-            SELECT 1 FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = %s
-            """,
-            (table_name,),
-        )
-        return cursor.fetchone() is not None
-    else:
-        cursor = conn.execute(
-            f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-        )
-        return cursor.fetchone() is not None
+    # Use an explicit cursor (see _column_exists): psycopg2 connections have no
+    # .execute(), so conn.execute() only works on sqlite3.
+    cursor = conn.cursor()
+    try:
+        if dialect == "postgresql":
+            cursor.execute(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = %s
+                """,
+                (table_name,),
+            )
+            return cursor.fetchone() is not None
+        else:
+            cursor.execute(
+                f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+            )
+            return cursor.fetchone() is not None
+    finally:
+        cursor.close()
 
 
 def _backfill_missing_columns(conn, dialect: str) -> None:
@@ -236,6 +248,9 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
     Issue #1663: Old SQLite databases missing these columns fail schema init.
     """
     is_postgres = dialect == "postgresql"
+    # Explicit cursor: psycopg2 connections have no .execute() (only cursors
+    # do), so the ALTERs below must run via a cursor on both dialects.
+    cursor = conn.cursor()
 
     # agent_sessions columns
     if _table_exists(conn, "agent_sessions", dialect):
@@ -255,7 +270,7 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
                         sql += f" DEFAULT {default}::text"
                     else:
                         sql += f" DEFAULT {default}"
-                conn.execute(sql)
+                cursor.execute(sql)
         conn.commit()
 
     # session_messages columns
@@ -279,5 +294,7 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
                         sql += f" DEFAULT {default}::text"
                     else:
                         sql += f" DEFAULT {default}"
-                conn.execute(sql)
+                cursor.execute(sql)
         conn.commit()
+
+    cursor.close()
