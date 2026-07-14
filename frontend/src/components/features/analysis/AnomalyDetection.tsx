@@ -38,23 +38,23 @@ import {
   useDataRange,
 } from '@/hooks';
 
+const getAnomalyTypeOptions = (language: Language) => [
+  { value: '', label: t('allTypes', language) },
+  { value: 'spike', label: t('usageSpike', language) },
+  { value: 'drop', label: t('usageDrop', language) },
+];
+
+const getSeverityOptions = (language: Language) => [
+  { value: '', label: t('allSeverities', language) },
+  { value: 'high', label: t('severityHigh', language) },
+  { value: 'medium', label: t('severityMedium', language) },
+  { value: 'low', label: t('severityLow', language) },
+];
+
 export const AnomalyDetection: React.FC = () => {
   const language = useLanguage();
-
-  // Anomaly type options (i18n)
-  const anomalyTypeOptions = [
-    { value: '', label: t('allTypes', language) },
-    { value: 'spike', label: t('usageSpike', language) },
-    { value: 'drop', label: t('usageDrop', language) },
-  ];
-
-  // Severity options (i18n)
-  const severityOptions = [
-    { value: '', label: t('allSeverities', language) },
-    { value: 'high', label: t('severityHigh', language) },
-    { value: 'medium', label: t('severityMedium', language) },
-    { value: 'low', label: t('severityLow', language) },
-  ];
+  const anomalyTypeOptions = getAnomalyTypeOptions(language);
+  const severityOptions = getSeverityOptions(language);
 
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState<string>('');
