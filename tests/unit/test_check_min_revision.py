@@ -23,11 +23,13 @@ def post_baseline_revision() -> str:
     """A real post-baseline revision, derived at runtime from the live migrations dir.
 
     Avoids hard-coding (and then maintaining) a head revision constant that
-    drifts every time a new migration lands.
+    drifts every time a new migration lands. Returns the earliest post-baseline
+    revision (revision ids are timestamp-prefixed, so sorted() orders them) for
+    reproducibility across runs regardless of PYTHONHASHSEED.
     """
     revisions = collect_active_revision_ids()
     assert revisions, "expected at least one post-baseline migration"
-    return next(iter(revisions))
+    return sorted(revisions)[0]
 
 
 def _stamp_sqlite(db_path, revision: str | None) -> None:
