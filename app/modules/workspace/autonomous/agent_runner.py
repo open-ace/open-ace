@@ -992,10 +992,7 @@ class AutonomousAgentRunner:
             sid = ""
             if isinstance(rec, dict):
                 sid = (
-                    rec.get("sessionId")
-                    or rec.get("session_id")
-                    or rec.get("uuid")
-                    or ""
+                    rec.get("sessionId") or rec.get("session_id") or rec.get("uuid") or ""
                 ).strip()
             if sid:
                 return sid

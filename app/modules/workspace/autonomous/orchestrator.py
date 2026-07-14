@@ -817,9 +817,7 @@ class AutonomousOrchestrator:
         )
         return "\n".join(lines) + "\n"
 
-    def _capture_repo_state(
-        self, repo_path: str, system_account: Optional[str]
-    ) -> dict[str, str]:
+    def _capture_repo_state(self, repo_path: str, system_account: Optional[str]) -> dict[str, str]:
         """Capture the repo root, branch, and HEAD for post-run validation."""
         gh = GitHubOps(repo_path, system_account=system_account)
         top_level = gh._run_git(["rev-parse", "--show-toplevel"]).stdout.strip()
