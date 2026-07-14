@@ -234,8 +234,34 @@ def _normalize_sqlite_type(type_name: str | None) -> str:
     return "NUMERIC"
 
 
+def _normalize_postgres_session_stats_qualification(sql: str) -> str:
+    """Normalize PG15/PG16 qualification noise in the session_stats view.
+
+    PostgreSQL 15's pg_dump may emit fully-qualified ``daily_messages.*``
+    references inside the ``session_stats`` materialized view, while newer
+    versions collapse the same expressions to unqualified column names. The
+    view semantics are identical, so snapshot generation and comparison should
+    canonicalize both forms to the same text.
+    """
+    if "CREATE MATERIALIZED VIEW session_stats AS" not in sql:
+        return sql
+
+    pattern = re.compile(
+        r"(CREATE MATERIALIZED VIEW session_stats AS\s+)(.*?)(\s+WITH NO DATA;)",
+        re.DOTALL,
+    )
+
+    def _rewrite(match: re.Match[str]) -> str:
+        body = match.group(2)
+        normalized_body = re.sub(r"\bdaily_messages\.", "", body)
+        return f"{match.group(1)}{normalized_body}{match.group(3)}"
+
+    return pattern.sub(_rewrite, sql)
+
+
 def normalize_sql_text(sql: str) -> str:
     """Normalize SQL text for stable textual diffs."""
+    sql = _normalize_postgres_session_stats_qualification(sql)
     lines = [line.rstrip() for line in sql.replace("\r\n", "\n").splitlines()]
     return "\n".join(lines).strip() + "\n"
 
