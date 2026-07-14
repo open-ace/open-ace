@@ -39,7 +39,7 @@ const DateInput = forwardRef<
     style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
   >
     <span className={cn(!value && 'text-muted', 'flex-grow-1 text-truncate')}>
-      {value || placeholder || 'Select date'}
+      {value ?? placeholder ?? 'Select date'}
     </span>
     <i className="bi bi-calendar3 text-muted flex-shrink-0" />
   </button>

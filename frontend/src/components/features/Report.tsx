@@ -103,17 +103,11 @@ export const Report: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-4">
             <label className="form-label">{t('startDate', language)}</label>
-            <DatePicker
-              value={startDate}
-              onChange={setStartDate}
-            />
+            <DatePicker value={startDate} onChange={setStartDate} />
           </div>
           <div className="col-md-4">
             <label className="form-label">{t('endDate', language)}</label>
-            <DatePicker
-              value={endDate}
-              onChange={setEndDate}
-            />
+            <DatePicker value={endDate} onChange={setEndDate} />
           </div>
           <div className="col-md-4 d-flex align-items-end">
             <Button variant="primary" onClick={() => refetch()}>

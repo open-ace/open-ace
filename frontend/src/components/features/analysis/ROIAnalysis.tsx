@@ -478,17 +478,11 @@ export const ROIAnalysis: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <DatePicker
-              value={startDate}
-              onChange={setStartDate}
-            />
+            <DatePicker value={startDate} onChange={setStartDate} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <DatePicker
-              value={endDate}
-              onChange={setEndDate}
-            />
+            <DatePicker value={endDate} onChange={setEndDate} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('tableTool', language)}</label>
