@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from migrations.baseline import ACTIVE_MIGRATIONS_DIR, BASELINE_REVISION, HEAD_REVISION
+from migrations.baseline import ACTIVE_MIGRATIONS_DIR, BASELINE_REVISION
 from scripts.check_min_revision import collect_active_revision_ids, is_supported_revision
 
 
@@ -16,6 +16,20 @@ from scripts.check_min_revision import collect_active_revision_ids, is_supported
 def _clean_argv(monkeypatch):
     """main() parses sys.argv; strip pytest's args so argparse doesn't choke."""
     monkeypatch.setattr(sys, "argv", ["check_min_revision.py"])
+
+
+@pytest.fixture(scope="session")
+def post_baseline_revision() -> str:
+    """A real post-baseline revision, derived at runtime from the live migrations dir.
+
+    Avoids hard-coding (and then maintaining) a head revision constant that
+    drifts every time a new migration lands. Returns the earliest post-baseline
+    revision (revision ids are timestamp-prefixed, so sorted() orders them) for
+    reproducibility across runs regardless of PYTHONHASHSEED.
+    """
+    revisions = collect_active_revision_ids()
+    assert revisions, "expected at least one post-baseline migration"
+    return sorted(revisions)[0]
 
 
 def _stamp_sqlite(db_path, revision: str | None) -> None:
@@ -33,10 +47,10 @@ def _stamp_sqlite(db_path, revision: str | None) -> None:
     conn.close()
 
 
-def test_collect_active_revision_ids_includes_post_baseline_head():
+def test_collect_active_revision_ids_is_non_empty_and_excludes_baseline():
     """The allowlist is derived from the live migrations dir."""
     active_ids = collect_active_revision_ids()
-    assert HEAD_REVISION in active_ids
+    assert active_ids  # post-baseline lineage exists
     # The baseline pins its revision to a symbol, so it is unioned in by the
     # caller rather than surfaced by the collector.
     assert BASELINE_REVISION not in active_ids
@@ -60,10 +74,10 @@ def test_collect_covers_every_non_baseline_migration():
     assert len(collect_active_revision_ids()) == len(migration_files) - 1
 
 
-def test_is_supported_revision_accepts_baseline_and_successors():
+def test_is_supported_revision_accepts_baseline_and_successors(post_baseline_revision):
     supported = collect_active_revision_ids() | {BASELINE_REVISION}
     assert is_supported_revision(BASELINE_REVISION, supported) is True
-    assert is_supported_revision(HEAD_REVISION, supported) is True
+    assert is_supported_revision(post_baseline_revision, supported) is True
 
 
 def test_is_supported_revision_rejects_pre_baseline_hash():
@@ -90,11 +104,11 @@ def test_main_allows_baseline_revision(tmp_path, monkeypatch, capsys):
     assert "supported lineage" in out
 
 
-def test_main_allows_head_revision(tmp_path, monkeypatch, capsys):
+def test_main_allows_post_baseline_revision(tmp_path, monkeypatch, capsys, post_baseline_revision):
     import scripts.check_min_revision as mod
 
-    db_path = tmp_path / "head.db"
-    _stamp_sqlite(db_path, HEAD_REVISION)
+    db_path = tmp_path / "post_baseline.db"
+    _stamp_sqlite(db_path, post_baseline_revision)
     monkeypatch.setattr(mod, "_get_db_url", lambda: f"sqlite:///{db_path}")
 
     rc = mod.main()
