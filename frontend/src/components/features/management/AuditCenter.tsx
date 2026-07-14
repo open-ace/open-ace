@@ -215,6 +215,15 @@ export const AuditCenter: React.FC = () => {
   }, [activeTab, fetchAnalysisData]);
 
   // --- Audit Log Handlers ---
+  // Create action value -> i18n_key mapping for translation
+  const actionI18nMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    auditActions.forEach((a) => {
+      map[a.value] = a.i18n_key;
+    });
+    return map;
+  }, [auditActions]);
+
   // Grouped action options for optgroup display
   const groupedActionOptions = useMemo(() => {
     const groups: Array<{
@@ -279,6 +288,13 @@ export const AuditCenter: React.FC = () => {
     return key ? t(key, language) : code;
   };
 
+  // Localized action label, falling back to the raw code.
+  const renderAction = (actionValue: string | null | undefined): string => {
+    if (!actionValue) return '-';
+    const i18nKey = actionI18nMap[actionValue];
+    return i18nKey ? t(i18nKey, language) : actionValue;
+  };
+
   // details is normalized to an object by the backend; guard legacy rows.
   // Accepts the broadest shape (both the API AuditLog and the local type) so
   // it works on rows from useAuditLogs without an unsafe cast.
@@ -316,10 +332,10 @@ export const AuditCenter: React.FC = () => {
     if (!patterns?.action_distribution) return { labels: [], data: [] };
     const entries = Object.entries(patterns.action_distribution);
     return {
-      labels: entries.map(([op]) => op),
+      labels: entries.map(([op]) => renderAction(op)),
       data: entries.map(([, count]) => count),
     };
-  }, [patterns]);
+  }, [patterns, actionI18nMap, language]);
 
   const anomalyStats = useMemo(() => {
     const total = anomalies.length;
@@ -441,7 +457,7 @@ export const AuditCenter: React.FC = () => {
                       <td>{log.username ?? `User ${log.user_id}`}</td>
                       <td>
                         <Badge variant={ACTION_COLORS[log.action] ?? 'secondary'}>
-                          {log.action}
+                          {renderAction(log.action)}
                         </Badge>
                       </td>
                       <td>{renderResourceType(log.resource_type)}</td>
@@ -526,7 +542,7 @@ export const AuditCenter: React.FC = () => {
                     <div className="modal-header">
                       <h5 className="modal-title">
                         <i className="bi bi-journal-text me-2" />
-                        {t('details', language)} - {selectedLog.action}
+                        {t('details', language)} - {renderAction(selectedLog.action)}
                       </h5>
                       <button
                         type="button"
@@ -549,7 +565,7 @@ export const AuditCenter: React.FC = () => {
                             <th>{t('tableAction', language)}</th>
                             <td>
                               <Badge variant={ACTION_COLORS[selectedLog.action] ?? 'secondary'}>
-                                {selectedLog.action}
+                                {renderAction(selectedLog.action)}
                               </Badge>
                             </td>
                           </tr>
@@ -1049,7 +1065,7 @@ export const AuditCenter: React.FC = () => {
                         .slice(0, 10)
                         .map(([op, count]) => (
                           <li key={op} className="list-group-item d-flex justify-content-between">
-                            <span>{op}</span>
+                            <span>{renderAction(op)}</span>
                             <Badge variant="secondary">{count}</Badge>
                           </li>
                         ))}
