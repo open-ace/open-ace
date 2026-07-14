@@ -38,23 +38,24 @@ import {
   useDataRange,
 } from '@/hooks';
 
-// Anomaly type options
-const anomalyTypeOptions = [
-  { value: '', label: 'All Types' },
-  { value: 'spike', label: 'Usage Spike' },
-  { value: 'drop', label: 'Usage Drop' },
+const getAnomalyTypeOptions = (language: Language) => [
+  { value: '', label: t('allTypes', language) },
+  { value: 'spike', label: t('usageSpike', language) },
+  { value: 'drop', label: t('usageDrop', language) },
 ];
 
-// Severity options
-const severityOptions = [
-  { value: '', label: 'All Severities' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
+const getSeverityOptions = (language: Language) => [
+  { value: '', label: t('allSeverities', language) },
+  { value: 'high', label: t('severityHigh', language) },
+  { value: 'medium', label: t('severityMedium', language) },
+  { value: 'low', label: t('severityLow', language) },
 ];
 
 export const AnomalyDetection: React.FC = () => {
   const language = useLanguage();
+  const anomalyTypeOptions = getAnomalyTypeOptions(language);
+  const severityOptions = getSeverityOptions(language);
+
   const [selectedHost, setSelectedHost] = useState<string>('');
   const [anomalyTypeFilter, setAnomalyTypeFilter] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('');
