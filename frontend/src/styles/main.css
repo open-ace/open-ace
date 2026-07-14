@@ -1591,6 +1591,50 @@ table .latency-row:hover td {
   border-top: 1px solid var(--border-color);
 }
 
+/* SearchableSelect dropdown - theme-aware styling */
+.searchable-select-dropdown {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color) !important;
+}
+
+.searchable-select-dropdown .border-bottom {
+  border-color: var(--border-color) !important;
+}
+
+.searchable-select-dropdown .form-control {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.searchable-select-dropdown .form-control::placeholder {
+  color: var(--text-muted);
+}
+
+.searchable-select-dropdown .form-control:focus {
+  background-color: var(--bg-secondary);
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
+}
+
+.searchable-select-option {
+  background-color: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast);
+}
+
+.searchable-select-option:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.searchable-select-option.active {
+  background-color: rgba(var(--color-primary-rgb), 0.1);
+}
+
 /* Legacy message-content class for backward compatibility */
 .message-content {
   white-space: pre-wrap;
