@@ -615,7 +615,7 @@ export const AuditCenter: React.FC = () => {
                           <div className="mt-3">
                             <h6>{t('tableDetails', language)}</h6>
                             <pre
-                              className="bg-light p-3 rounded"
+                              className="audit-detail-pre p-3 rounded"
                               style={{
                                 maxHeight: '300px',
                                 overflow: 'auto',
@@ -665,24 +665,13 @@ export const AuditCenter: React.FC = () => {
                   className={cn(
                     'security-score-circle',
                     securityScore.score >= 80
-                      ? 'text-success'
+                      ? 'security-score-good'
                       : securityScore.score >= 60
-                        ? 'text-warning'
-                        : 'text-danger'
+                        ? 'security-score-medium'
+                        : 'security-score-poor'
                   )}
                 >
-                  <div
-                    className="display-1 fw-bold"
-                    style={{
-                      fontSize: '4rem',
-                      color:
-                        securityScore.score >= 80
-                          ? '#198754'
-                          : securityScore.score >= 60
-                            ? '#ffc107'
-                            : '#dc3545',
-                    }}
-                  >
+                  <div className="display-1 fw-bold security-score-value">
                     {securityScore.score}
                   </div>
                   <div className="text-muted">

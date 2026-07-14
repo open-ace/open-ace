@@ -1651,6 +1651,81 @@ table .latency-row:hover td {
   background-color: rgba(var(--color-primary-rgb), 0.1);
 }
 
+/* Audit Center - theme-aware styling */
+.audit-detail-pre {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+
+/* Security Score Circle - theme-aware colors */
+.security-score-value {
+  font-size: 4rem;
+}
+
+.security-score-good .security-score-value {
+  color: var(--color-success);
+}
+
+.security-score-medium .security-score-value {
+  color: var(--color-warning);
+}
+
+.security-score-poor .security-score-value {
+  color: var(--color-danger);
+}
+
+/* Audit Center tables - dark theme */
+[data-theme='dark'] .audit-center .table {
+  --bs-table-color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--border-color);
+  --bs-table-hover-color: var(--text-primary);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+  --bs-table-striped-color: var(--text-primary);
+  --bs-table-striped-bg: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+}
+
+/* Audit Center modal table */
+[data-theme='dark'] .audit-center .modal .table {
+  --bs-table-color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+/* Audit Center modal detail pre */
+[data-theme='dark'] .audit-center .modal pre {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+/* Audit Center list-group - dark theme */
+[data-theme='dark'] .audit-center .list-group-item {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+/* Audit Analysis page - same overrides (standalone page) */
+[data-theme='dark'] .audit-analysis .table {
+  --bs-table-color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--border-color);
+  --bs-table-hover-color: var(--text-primary);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .audit-analysis .list-group-item {
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
 /* Legacy message-content class for backward compatibility */
 .message-content {
   white-space: pre-wrap;
