@@ -1590,7 +1590,10 @@ def stream_workflow_events(workflow_id):
                     if not token or not validate_session_token(token):
                         break  # Token invalid or revoked — close stream
                     emitter.mark_read(workflow_id, q)
-                    yield ": keepalive\n\n"
+                    # Emit as a `data:` event (not an SSE comment line) so the
+                    # browser fires onmessage and the frontend stall detector can
+                    # reset on every keepalive. See app/routes/remote.py.
+                    yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
         except GeneratorExit:
             pass  # cleanup handled by finally
         finally:
