@@ -136,6 +136,62 @@ class TestOrchestratorAdvance:
         orch.advance()
 
 
+class TestOrchestratorRunAgentContract:
+    def _make_orchestrator(self, wf_data):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+            ) as mock_repo_cls,
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = wf_data
+            mock_repo.list_milestones.return_value = []
+            mock_repo.update_workflow.return_value = wf_data
+            mock_repo_cls.return_value = mock_repo
+            orch = AutonomousOrchestrator(wf_data["workflow_id"])
+            orch.repo = mock_repo
+
+        orch.emitter = MagicMock()
+        orch._runner = MagicMock()
+        orch._runner._uses_sidebar_session_source.return_value = False
+        orch._runner.run_agent_task.return_value = _make_agent_result()
+        orch._link_session_to_current_milestone = MagicMock()
+        orch._snapshot_repo_context = MagicMock(return_value=None)
+        return orch
+
+    def test_run_agent_binds_prompt_and_project_to_worktree(self):
+        wf = _make_workflow(
+            current_phase="planning",
+            branch_strategy="worktree",
+            project_path="/repo/main",
+            worktree_path="/repo/.worktrees/wf-1",
+            branch_name="auto-dev/test",
+        )
+        orch = self._make_orchestrator(wf)
+
+        orch._run_agent(
+            wf=wf,
+            workflow_id=wf["workflow_id"],
+            cli_tool=wf["cli_tool"],
+            model=wf["model"],
+            project_path=wf["project_path"],
+            prompt="Plan this change",
+            workspace_type="local",
+            permission_mode="read-only",
+            allowed_tools=[],
+            session_line="main",
+            milestone_id="ms-1",
+        )
+
+        call = orch._runner.run_agent_task.call_args.kwargs
+        assert call["project_path"] == "/repo/.worktrees/wf-1"
+        assert "/repo/.worktrees/wf-1" in call["prompt"]
+        assert "auto-dev/test" in call["prompt"]
+
+
 class TestOrchestratorPreparation:
     """Tests for the preparation phase."""
 
@@ -306,6 +362,7 @@ class TestOrchestratorPreparation:
 
         mock_gh = MagicMock()
         mock_gh.create_issue.return_value = {"number": 1, "url": ""}
+        mock_gh.get_current_branch.return_value = "main"
         mock_gh_cls.return_value = mock_gh
 
         orch._do_preparation(wf)
@@ -313,6 +370,9 @@ class TestOrchestratorPreparation:
         # Should NOT create branch or worktree
         mock_gh.create_branch.assert_not_called()
         mock_gh.create_worktree.assert_not_called()
+        mock_repo.update_workflow.assert_any_call(
+            wf["workflow_id"], {"branch_name": mock_gh.get_current_branch.return_value}
+        )
         # But should still transition to planning
         update_calls = mock_repo.update_workflow.call_args_list
         phases = [c[0][1].get("current_phase") for c in update_calls if "current_phase" in c[0][1]]

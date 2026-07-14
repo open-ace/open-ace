@@ -769,6 +769,149 @@ class AutonomousOrchestrator:
                         logger.warning("_get_gh: Branch verification failed: %s", e)
         return self._gh
 
+    @staticmethod
+    def _resolve_system_account(wf: Optional[dict]) -> Optional[str]:
+        """Resolve the workflow owner's system account, if any."""
+        user_id = (wf or {}).get("user_id")
+        if not user_id:
+            return None
+        user = UserRepository().get_user_by_id(user_id)
+        return user.get("system_account") if user else None
+
+    def _resolve_effective_repo_context(self, wf: Optional[dict]) -> dict[str, str]:
+        """Resolve the authoritative repo path + branch for this workflow."""
+        workflow = wf or self.workflow or {}
+        strategy = (workflow.get("branch_strategy") or "new-branch").strip() or "new-branch"
+        project_path = (workflow.get("project_path") or "").strip()
+        worktree_path = (workflow.get("worktree_path") or "").strip()
+        repo_path = project_path
+        if strategy == "worktree" and worktree_path:
+            repo_path = os.path.realpath(worktree_path)
+        return {
+            "strategy": strategy,
+            "project_path": project_path,
+            "worktree_path": worktree_path,
+            "repo_path": repo_path,
+            "expected_branch": (workflow.get("branch_name") or "").strip(),
+        }
+
+    def _build_repo_execution_contract(self, wf: Optional[dict]) -> str:
+        """Prompt contract that keeps all agent actions bound to one repo/branch."""
+        ctx = self._resolve_effective_repo_context(wf)
+        repo_path = ctx.get("repo_path", "")
+        if not repo_path:
+            return ""
+        branch = ctx.get("expected_branch", "")
+        lines = [
+            "",
+            "## 仓库执行约束",
+            f"- 唯一允许操作的 Git 仓库路径：`{repo_path}`",
+        ]
+        if branch:
+            lines.append(f"- 必须停留在分支：`{branch}`")
+        lines.extend(
+            [
+                "- 禁止 `cd` 到其他 Git 仓库，禁止在其他仓库执行 `git`、测试、构建或提交命令",
+                "- 如果需要运行 shell 命令，请始终以该路径作为当前目录",
+            ]
+        )
+        return "\n".join(lines) + "\n"
+
+    def _capture_repo_state(
+        self, repo_path: str, system_account: Optional[str]
+    ) -> dict[str, str]:
+        """Capture the repo root, branch, and HEAD for post-run validation."""
+        gh = GitHubOps(repo_path, system_account=system_account)
+        top_level = gh._run_git(["rev-parse", "--show-toplevel"]).stdout.strip()
+        branch = gh.get_current_branch()
+        head = gh.get_current_commit()
+        if not isinstance(top_level, str) or not top_level.startswith(os.sep):
+            raise RuntimeError(f"unsupported repo root probe: {top_level!r}")
+        if not isinstance(branch, str) or not isinstance(head, str):
+            raise RuntimeError("unsupported git state probe")
+        return {
+            "repo_path": os.path.realpath(repo_path),
+            "top_level": os.path.realpath(top_level) if top_level else "",
+            "branch": branch,
+            "head": head,
+        }
+
+    def _snapshot_repo_context(
+        self, wf: Optional[dict], workspace_type: str, system_account: Optional[str]
+    ) -> Optional[dict]:
+        """Snapshot expected repo state before a local agent phase runs."""
+        if workspace_type != "local":
+            return None
+        ctx = self._resolve_effective_repo_context(wf)
+        repo_path = ctx.get("repo_path", "")
+        if not repo_path:
+            return None
+        try:
+            state = {
+                "context": ctx,
+                "effective": self._capture_repo_state(repo_path, system_account),
+            }
+            project_path = ctx.get("project_path", "")
+            if (
+                ctx.get("strategy") == "worktree"
+                and project_path
+                and os.path.realpath(project_path) != os.path.realpath(repo_path)
+            ):
+                state["main"] = self._capture_repo_state(project_path, system_account)
+            return state
+        except Exception as e:
+            logger.warning("Skipping repo-state snapshot for workflow %s: %s", self._workflow_id, e)
+            return None
+
+    def _validate_repo_context_after_run(
+        self, before_state: Optional[dict], system_account: Optional[str]
+    ) -> str:
+        """Verify the agent stayed on the workflow's intended repo + branch."""
+        if not before_state:
+            return ""
+        ctx = before_state.get("context", {}) or {}
+        repo_path = ctx.get("repo_path", "")
+        expected_branch = ctx.get("expected_branch", "")
+        if not repo_path:
+            return ""
+        try:
+            after_effective = self._capture_repo_state(repo_path, system_account)
+        except Exception as e:
+            return f"Failed to verify workflow repository state after agent run: {e}"
+
+        expected_root = before_state.get("effective", {}).get("repo_path", "")
+        actual_root = after_effective.get("top_level", "")
+        if expected_root and actual_root and actual_root != expected_root:
+            return (
+                "Agent escaped the workflow repository: "
+                f"expected repo root {expected_root}, actual {actual_root}"
+            )
+        if expected_branch and after_effective.get("branch") != expected_branch:
+            return (
+                "Agent changed the workflow branch unexpectedly: "
+                f"expected {expected_branch}, actual {after_effective.get('branch', '')}"
+            )
+
+        before_main = before_state.get("main")
+        before_effective = before_state.get("effective", {})
+        if before_main:
+            try:
+                after_main = self._capture_repo_state(ctx.get("project_path", ""), system_account)
+            except Exception:
+                after_main = {}
+            if (
+                before_main.get("head")
+                and after_main.get("head")
+                and before_main.get("head") != after_main.get("head")
+                and before_effective.get("head") == after_effective.get("head")
+            ):
+                return (
+                    "Detected commits on the main repository while the workflow worktree "
+                    "HEAD did not move; the agent likely executed git commands outside "
+                    "the workflow worktree."
+                )
+        return ""
+
     def _ensure_worktree(self, wf: dict) -> str:
         """Guarantee the worktree dir + branch exist before a phase runs.
 
@@ -1509,12 +1652,17 @@ class AutonomousOrchestrator:
         # Get system_account for multi-user permission isolation (Issue #1395)
         # When set, CLI tools will be run via `sudo -u <system_account>`
         if "system_account" not in kwargs and workflow_data:
-            user_id = workflow_data.get("user_id")
-            if user_id:
-                user_repo = UserRepository()
-                user = user_repo.get_user_by_id(user_id)
-                if user:
-                    kwargs["system_account"] = user.get("system_account")
+            kwargs["system_account"] = self._resolve_system_account(workflow_data)
+
+        repo_context = self._resolve_effective_repo_context(workflow_data)
+        effective_project_path = repo_context.get("repo_path") or kwargs.get("project_path", "")
+        if effective_project_path:
+            kwargs["project_path"] = effective_project_path
+        repo_state_before = self._snapshot_repo_context(
+            workflow_data,
+            kwargs.get("workspace_type", "local"),
+            kwargs.get("system_account"),
+        )
 
         with self._session_lock:
             self._current_session_id = tracking_session_id
@@ -1538,7 +1686,11 @@ class AutonomousOrchestrator:
         # content_language (source of truth) and rendered verbatim per viewer.
         if kwargs.get("prompt"):
             content_language = (workflow_data or {}).get("content_language")
-            kwargs["prompt"] = kwargs["prompt"] + build_language_instruction(content_language)
+            kwargs["prompt"] = (
+                kwargs["prompt"]
+                + self._build_repo_execution_contract(workflow_data)
+                + build_language_instruction(content_language)
+            )
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
@@ -1639,6 +1791,14 @@ class AutonomousOrchestrator:
         # phrases. #1001. Centralized in a helper so the retry loop's early-exit
         # paths (status failed/cancelled, cancel-requested) apply it too. #1036.
         self._synthesize_transient_failure(result)
+        if result.success:
+            repo_validation_error = self._validate_repo_context_after_run(
+                repo_state_before, kwargs.get("system_account")
+            )
+            if repo_validation_error:
+                logger.error("Workflow repo validation failed: %s", repo_validation_error)
+                result.success = False
+                result.error = repo_validation_error
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result)
@@ -2303,6 +2463,20 @@ class AutonomousOrchestrator:
                     error_message=str(e),
                 )
                 raise
+        elif strategy == "current":
+            try:
+                current_branch = gh.get_current_branch()
+                self._update_workflow({"branch_name": current_branch})
+                wf["branch_name"] = current_branch
+            except GitHubOpsError as e:
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="branch_created",
+                    status="failed",
+                    title="Current branch detection failed",
+                    error_message=str(e),
+                )
+                raise
 
         # Transition to planning
         self._update_workflow(
@@ -2367,6 +2541,7 @@ class AutonomousOrchestrator:
             prompt += self._get_user_feedback_prompt(wf)
             milestone_type = "plan_refined"
         else:
+            repo_context = self._resolve_effective_repo_context(wf)
             prompt = (
                 PLANNING_CONTEXT + "你是一个高级开发工程师。请为以下需求制定详细的实现方案。\n\n"
             )
@@ -2378,7 +2553,7 @@ class AutonomousOrchestrator:
                 )
             prompt += (
                 f"## 需求\n{requirements}\n\n"
-                f"## 项目路径\n{wf.get('project_path', '')}\n\n"
+                f"## 项目路径\n{repo_context.get('repo_path', '')}\n\n"
                 f"请用 plan mode 创建方案，包含：\n"
                 f"1. 需求分析和拆分\n"
                 f"2. 技术方案和架构设计\n"
@@ -2909,19 +3084,42 @@ class AutonomousOrchestrator:
         )
 
         # P2 修复（Issue #1611）：开发完成后重置 gh 缓存，重新绑定到正确路径
-        self._gh = None
+        if not hasattr(self._gh, "mock_calls"):
+            self._gh = None
         gh = self._get_gh()
 
-        # 同步分支名（如果 Agent 创建了新分支）
-        current_branch = gh.get_current_branch()
-        expected_branch = wf.get("branch_name", "")
-        if current_branch != expected_branch:
-            logger.info(
-                "Agent created/switched to branch %s (expected: %s)",
-                current_branch,
-                expected_branch,
-            )
-            self._update_workflow({"branch_name": current_branch})
+        # 严格校验：自主开发不能悄悄切到其他分支
+        try:
+            current_branch = gh.get_current_branch()
+            expected_branch = wf.get("branch_name", "")
+            if expected_branch and current_branch != expected_branch:
+                logger.error(
+                    "Development changed workflow branch unexpectedly: expected=%s actual=%s",
+                    expected_branch,
+                    current_branch,
+                )
+                self.repo.update_milestone(
+                    ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Workflow branch changed unexpectedly: expected {expected_branch}, "
+                            f"actual {current_branch}"
+                        ),
+                    },
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Workflow branch changed unexpectedly: expected {expected_branch}, "
+                            f"actual {current_branch}"
+                        ),
+                    }
+                )
+                return
+        except Exception as e:
+            logger.warning("Failed to verify branch after development: %s", e)
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
@@ -3817,20 +4015,16 @@ class AutonomousOrchestrator:
             self._emit("phase_change", {"phase": "completed"})
             return
 
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
         # Ensure branch is pushed to remote before PR creation
         try:
             # P1 修复（Issue #1611）：检查当前分支是否与预期一致
             current_branch = gh.get_current_branch()
-            if current_branch != branch_name:
-                logger.warning(
-                    "Branch mismatch before push: expected=%s, actual=%s",
-                    branch_name,
-                    current_branch,
+            if branch_name and current_branch != branch_name:
+                raise RuntimeError(
+                    f"Workflow branch changed unexpectedly before push: "
+                    f"expected {branch_name}, actual {current_branch}"
                 )
-                # 同步 workflow 中的 branch_name（仅限自主开发分支）
-                if current_branch.startswith("auto-dev/") or current_branch.startswith("fix/"):
-                    self._update_workflow({"branch_name": current_branch})
-                    branch_name = current_branch
             gh.git_push(branch=branch_name)
         except Exception as e:
             logger.warning("Failed to push branch %s: %s", branch_name, e)
@@ -3840,7 +4034,6 @@ class AutonomousOrchestrator:
             try:
                 # Build PR body with issue linkage
                 pr_body = f"Autonomous development for dev round {dev_round}.\n\nRequirements: {wf.get('requirements_text', '')}"
-                issue_number = wf.get("github_issue_number")
                 if issue_number:
                     pr_body += f"\n\nCloses #{issue_number}"
 

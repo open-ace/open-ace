@@ -189,6 +189,7 @@ class _LocalSession:
     sdk_initialized: threading.Event = field(default_factory=threading.Event)
     # Milestone this task belongs to — tags session_messages for per-phase detail views.
     milestone_id: str = ""
+    system_account: str | None = None
     # Distinct assistant message_ids counted toward request_count (dedup, since
     # claude emits multiple assistant events per message: thinking then text).
     _counted_message_ids: set = field(default_factory=set)
@@ -622,19 +623,103 @@ class AutonomousAgentRunner:
         if not isinstance(parsed, dict):
             return ""
 
-        candidates: list[Any] = [parsed.get("session_id")]
+        def _append_candidates(container: Any, candidates: list[Any]) -> None:
+            if not isinstance(container, dict):
+                return
+            candidates.extend(
+                [
+                    container.get("session_id"),
+                    container.get("sessionId"),
+                    container.get("uuid"),
+                ]
+            )
+
+        candidates: list[Any] = []
+        _append_candidates(parsed, candidates)
         response = parsed.get("response", {}) or {}
-        if isinstance(response, dict):
-            candidates.append(response.get("session_id"))
-            inner_response = response.get("response", {}) or {}
-            if isinstance(inner_response, dict):
-                candidates.append(inner_response.get("session_id"))
+        _append_candidates(response, candidates)
+        inner_response = response.get("response", {}) or {}
+        _append_candidates(inner_response, candidates)
 
         for candidate in candidates:
             session_id = str(candidate or "").strip()
             if session_id:
                 return session_id
         return ""
+
+    @staticmethod
+    def _resolve_home_dir(system_account: str | None) -> Path:
+        """Resolve the target user's home dir for Claude history lookups."""
+        if system_account:
+            try:
+                pw_entry = pwd.getpwnam(system_account)
+                if pw_entry.pw_dir:
+                    return Path(pw_entry.pw_dir)
+            except KeyError:
+                logger.warning("Unknown system_account for Claude history: %s", system_account)
+        return Path.home()
+
+    @classmethod
+    def _claude_projects_root(cls, system_account: str | None) -> Path:
+        """Return the ~/.claude/projects root for the workflow owner."""
+        return cls._resolve_home_dir(system_account) / ".claude" / "projects"
+
+    @staticmethod
+    def _read_text_as_user(path: Path, system_account: str | None) -> str:
+        """Read a text file, routing through sudo for cross-user private homes."""
+        if not AutonomousAgentRunner._is_cross_user(system_account):
+            return path.read_text(encoding="utf-8")
+        assert system_account is not None  # _is_cross_user guarantees non-empty
+        result = subprocess.run(
+            ["sudo", "-u", system_account, "cat", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.strip() or f"cat exited {result.returncode}")
+        return result.stdout
+
+    @staticmethod
+    def _list_jsonl_files(project_dir: Path, system_account: str | None) -> list[Path]:
+        """List Claude JSONL files, even when the directory sits under a 0700 home."""
+        if not AutonomousAgentRunner._is_cross_user(system_account):
+            if not project_dir.is_dir():
+                return []
+            return list(project_dir.glob("*.jsonl"))
+        assert system_account is not None  # _is_cross_user guarantees non-empty
+        result = subprocess.run(
+            ["sudo", "-u", system_account, "ls", "-1", str(project_dir)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        return [
+            project_dir / line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().endswith(".jsonl")
+        ]
+
+    @staticmethod
+    def _stat_mtime(path: Path, system_account: str | None) -> float:
+        """Stat a file, routing through sudo when the owner differs."""
+        if not AutonomousAgentRunner._is_cross_user(system_account):
+            return path.stat().st_mtime
+        assert system_account is not None  # _is_cross_user guarantees non-empty
+        result = subprocess.run(
+            ["sudo", "-u", system_account, "stat", "-c", "%Y", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.strip() or f"stat exited {result.returncode}")
+        return float((result.stdout or "0").strip())
 
     def _capture_cli_session_id(
         self,
@@ -834,6 +919,7 @@ class AutonomousAgentRunner:
         encoded_project_path: str,
         min_mtime_epoch: float,
         bound_cli_session_ids: set[str] | None = None,
+        system_account: str | None = None,
     ) -> str:
         """Find the latest Claude JSONL session created for the active worktree.
 
@@ -850,21 +936,22 @@ class AutonomousAgentRunner:
         if not encoded_project_path:
             return ""
 
-        project_dir = Path.home() / ".claude" / "projects" / encoded_project_path
-        if not project_dir.is_dir():
+        project_dir = self._claude_projects_root(system_account) / encoded_project_path
+        candidates = self._list_jsonl_files(project_dir, system_account)
+        if not candidates:
             return ""
 
         latest_file = None
         latest_mtime = min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
         try:
-            for candidate in project_dir.glob("*.jsonl"):
+            for candidate in candidates:
                 try:
-                    stat = candidate.stat()
-                except OSError:
+                    candidate_mtime = self._stat_mtime(candidate, system_account)
+                except (OSError, ValueError):
                     continue
                 if not (
-                    stat.st_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
-                    and stat.st_mtime >= latest_mtime
+                    candidate_mtime >= min_mtime_epoch - SESSION_DETECTION_GRACE_SECONDS
+                    and candidate_mtime >= latest_mtime
                 ):
                     continue
                 # Exclude files whose session id is already bound to another line
@@ -872,18 +959,18 @@ class AutonomousAgentRunner:
                 # shared main session from being re-picked for a fresh review/test
                 # line and collapsing the 3-session design (#723).
                 if bound_cli_session_ids:
-                    sid = self._peek_jsonl_session_id(candidate)
+                    sid = self._peek_jsonl_session_id(candidate, system_account=system_account)
                     if sid and sid in bound_cli_session_ids:
                         continue
                 latest_file = candidate
-                latest_mtime = stat.st_mtime
+                latest_mtime = candidate_mtime
         except OSError:
             return ""
 
         return latest_file.stem if latest_file else ""
 
     @staticmethod
-    def _peek_jsonl_session_id(filepath: Path) -> str:
+    def _peek_jsonl_session_id(filepath: Path, system_account: str | None = None) -> str:
         """Read the session id from the first record of a Claude JSONL file.
 
         Claude writes the session uuid as ``sessionId`` (and sometimes ``uuid``)
@@ -891,23 +978,28 @@ class AutonomousAgentRunner:
         file's owning session without parsing the whole transcript.
         """
         try:
-            with open(filepath, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-                    sid = ""
-                    if isinstance(rec, dict):
-                        sid = (rec.get("sessionId") or rec.get("uuid") or "").strip()
-                    if sid:
-                        return sid
-                    break
+            content = AutonomousAgentRunner._read_text_as_user(filepath, system_account)
         except OSError:
-            pass
+            return ""
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            sid = ""
+            if isinstance(rec, dict):
+                sid = (
+                    rec.get("sessionId")
+                    or rec.get("session_id")
+                    or rec.get("uuid")
+                    or ""
+                ).strip()
+            if sid:
+                return sid
+            break
         return ""
 
     def _replay_usage_from_jsonl(self, session: _LocalSession, cli_session_id: str) -> None:
@@ -926,13 +1018,13 @@ class AutonomousAgentRunner:
         if not cli_session_id or not session.encoded_project_path:
             return
         jsonl_path = (
-            Path.home()
-            / ".claude"
-            / "projects"
+            self._claude_projects_root(session.system_account)
             / session.encoded_project_path
             / f"{cli_session_id}.jsonl"
         )
-        if not jsonl_path.is_file():
+        try:
+            content = self._read_text_as_user(jsonl_path, session.system_account)
+        except OSError:
             return
         # Accumulate usage per distinct message_id. Claude repeats the FULL
         # message usage on every block-line of a message (thinking line, text
@@ -942,35 +1034,34 @@ class AutonomousAgentRunner:
         per_msg: dict[str, dict[str, int]] = {}
         started = session.started_at_epoch
         try:
-            with open(jsonl_path, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-                    if not isinstance(rec, dict):
-                        continue
-                    # Only count records from this call onward.
-                    ts = rec.get("timestamp", "")
-                    ts_epoch = _iso_to_epoch(ts)
-                    if ts_epoch is not None and ts_epoch < started:
-                        continue
-                    if rec.get("type") == "assistant":
-                        msg = rec.get("message", {}) or {}
-                        mid = msg.get("id") or ""
-                        usage = msg.get("usage") or {}
-                        if isinstance(usage, dict):
-                            row_in = usage.get("input_tokens", 0) or 0
-                            row_out = usage.get("output_tokens", 0) or 0
-                            cur = per_msg.get(mid, {"in": 0, "out": 0})
-                            # max per message_id (rows repeat the same totals)
-                            cur["in"] = max(cur["in"], row_in)
-                            cur["out"] = max(cur["out"], row_out)
-                            per_msg[mid] = cur
-        except OSError:
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                # Only count records from this call onward.
+                ts = rec.get("timestamp", "")
+                ts_epoch = _iso_to_epoch(ts)
+                if ts_epoch is not None and ts_epoch < started:
+                    continue
+                if rec.get("type") == "assistant":
+                    msg = rec.get("message", {}) or {}
+                    mid = msg.get("id") or ""
+                    usage = msg.get("usage") or {}
+                    if isinstance(usage, dict):
+                        row_in = usage.get("input_tokens", 0) or 0
+                        row_out = usage.get("output_tokens", 0) or 0
+                        cur = per_msg.get(mid, {"in": 0, "out": 0})
+                        # max per message_id (rows repeat the same totals)
+                        cur["in"] = max(cur["in"], row_in)
+                        cur["out"] = max(cur["out"], row_out)
+                        per_msg[mid] = cur
+        except Exception:
             logger.warning("Failed to replay usage JSONL for session %s", cli_session_id[:8])
             return
         in_t = sum(v["in"] for v in per_msg.values())
@@ -1019,6 +1110,7 @@ class AutonomousAgentRunner:
                 session.encoded_project_path,
                 session.started_at_epoch,
                 bound_cli_session_ids=bound_ids,
+                system_account=session.system_account,
             )
             logger.warning(
                 "Using mtime fallback to resolve session (control_response missed) — "
@@ -1530,6 +1622,7 @@ class AutonomousAgentRunner:
             workspace_type=workspace_type,
             started_at_epoch=time.time(),
             milestone_id=milestone_id,
+            system_account=system_account,
         )
         # For a resumed session the real CLI session_id is known up front; pin
         # it so sidebar detection reuses the existing record instead of guessing.
@@ -2523,8 +2616,6 @@ class AutonomousAgentRunner:
                 session.output_lines.append(line)
 
                 try:
-                    if not session.persisted_session_id:
-                        self._resolve_sidebar_session(session)
                     parsed = json.loads(line)
                     msg_type = parsed.get("type", "")
 
@@ -2696,6 +2787,13 @@ class AutonomousAgentRunner:
                                     },
                                 }
                             self._write_stdin(session, json.dumps(response))
+
+                    if not session.persisted_session_id and (
+                        session.cli_session_id
+                        or session.sdk_initialized.is_set()
+                        or msg_type == "result"
+                    ):
+                        self._resolve_sidebar_session(session)
 
                 except (json.JSONDecodeError, ValueError):
                     pass  # Non-JSON output, skip

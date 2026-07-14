@@ -15,6 +15,8 @@ Two fixes:
 """
 
 import json
+import os
+import pwd
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -201,6 +203,42 @@ class TestReplayUsageFromJsonl:
         with patch("pathlib.Path.home", return_value=tmp_path):
             runner._replay_usage_from_jsonl(session, cli_sid)
         assert session.total_tokens == 0
+
+    def test_replay_uses_system_account_home(self, tmp_path):
+        runner = AutonomousAgentRunner()
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+        user_home = tmp_path / "user-home"
+        service_home = tmp_path / "service-home"
+        started = time.time() - 5
+        session = _make_session(started_at_epoch=started, system_account=current_user)
+        cli_sid = "abc12345"
+        jsonl = user_home / ".claude" / "projects" / "enc-wt" / f"{cli_sid}.jsonl"
+        jsonl.parent.mkdir(parents=True)
+        jsonl.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(started + 1)),
+                    "message": {
+                        "id": "m1",
+                        "usage": {"input_tokens": 111, "output_tokens": 22},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        fake_pw = type("Pw", (), {"pw_dir": str(user_home)})()
+        with (
+            patch("pwd.getpwnam", return_value=fake_pw),
+            patch("pathlib.Path.home", return_value=service_home),
+        ):
+            runner._replay_usage_from_jsonl(session, cli_sid)
+
+        assert session.total_input_tokens == 111
+        assert session.total_output_tokens == 22
+        assert session.total_tokens == 133
 
     def test_replay_counts_distinct_message_ids(self, tmp_path):
         """Replay dedups assistant turns by message_id (matching _read_stdout)."""

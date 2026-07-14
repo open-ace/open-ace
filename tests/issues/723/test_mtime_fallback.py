@@ -13,6 +13,7 @@ Two fixes:
 
 import json
 import os
+import pwd
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -109,6 +110,27 @@ class TestFindLatestClaudeSessionIdExcludesBound:
             _write_jsonl(project_dir / "newer.jsonl", "newer", mtime_offset=+3.0)
             result = self.runner._find_latest_claude_session_id(encoded, time.time())
             assert result == "newer"
+
+    def test_uses_system_account_home_not_service_home(self, tmp_path):
+        encoded = "encoded-worktree"
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+        user_home = tmp_path / "user-home"
+        service_home = tmp_path / "service-home"
+        _write_jsonl(user_home / ".claude" / "projects" / encoded / "newer.jsonl", "newer")
+        (service_home / ".claude" / "projects").mkdir(parents=True, exist_ok=True)
+
+        fake_pw = type("Pw", (), {"pw_dir": str(user_home)})()
+        with (
+            patch("pwd.getpwnam", return_value=fake_pw),
+            patch("pathlib.Path.home", return_value=service_home),
+        ):
+            result = self.runner._find_latest_claude_session_id(
+                encoded,
+                time.time(),
+                system_account=current_user,
+            )
+
+        assert result == "newer"
 
 
 def _init_session_manager(tmp_path):
