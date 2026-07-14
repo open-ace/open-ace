@@ -33,6 +33,22 @@ class TestAgentRunnerInit:
         assert runner.remote_session_manager is rsm
 
 
+class TestClaudeSessionIdExtraction:
+    def test_extract_stream_session_id_accepts_camel_case_nested(self):
+        runner = AutonomousAgentRunner()
+        parsed = {
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "response": {
+                    "sessionId": "claude-camel-123",
+                },
+            },
+        }
+
+        assert runner._extract_stream_session_id(parsed) == "claude-camel-123"
+
+
 class TestAgentRunnerRunTask:
     """Tests for run_agent_task method."""
 

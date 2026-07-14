@@ -805,6 +805,10 @@ def create_workflow():
             # For new-branch/same-branch, use user's input if provided, otherwise pre-generate
             if user_branch_name:
                 base_workflow_data["branch_name"] = user_branch_name
+            elif branch_strategy == "current":
+                # Lock to the actual current branch during preparation; avoid
+                # showing a misleading auto-generated branch name up front.
+                base_workflow_data["branch_name"] = ""
             else:
                 branch_name = f"auto-dev/{workflow_id[:8]}"
                 base_workflow_data["branch_name"] = branch_name
