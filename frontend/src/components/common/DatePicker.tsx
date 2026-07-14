@@ -32,11 +32,16 @@ const DateInput = forwardRef<
     ref={ref}
     onClick={onClick}
     disabled={disabled}
-    className={cn('form-control text-start d-flex align-items-center justify-content-between', className)}
+    className={cn(
+      'form-control text-start d-flex align-items-center justify-content-between gap-2',
+      className
+    )}
     style={{ cursor: disabled ? 'not-allowed' : 'pointer' }}
   >
-    <span className={cn(!value && 'text-muted')}>{value || placeholder || 'Select date'}</span>
-    <i className="bi bi-calendar3 text-muted" />
+    <span className={cn(!value && 'text-muted', 'flex-grow-1 text-truncate')}>
+      {value || placeholder || 'Select date'}
+    </span>
+    <i className="bi bi-calendar3 text-muted flex-shrink-0" />
   </button>
 ));
 DateInput.displayName = 'DateInput';
