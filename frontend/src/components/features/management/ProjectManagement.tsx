@@ -326,7 +326,7 @@ export const ProjectManagement: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="project-management space-y-4">
       {/* Page Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
@@ -451,7 +451,9 @@ export const ProjectManagement: React.FC = () => {
                       <tr
                         onClick={() => toggleExpand(category.category_name)}
                         style={{ cursor: 'pointer' }}
-                        className={isUncategorized ? 'table-secondary' : ''}
+                        className={
+                          isUncategorized ? 'project-category-secondary' : 'project-category-row'
+                        }
                       >
                         <td>
                           <i
@@ -494,7 +496,7 @@ export const ProjectManagement: React.FC = () => {
 
                       {/* Expanded Workspace Rows */}
                       {isExpanded && category.workspaces.length > 0 && (
-                        <tr className="table-light">
+                        <tr className="project-workspace-expand">
                           <td colSpan={8} style={{ padding: 0 }}>
                             <div className="p-2 ps-4">
                               <table className="table table-sm mb-0">
@@ -639,8 +641,8 @@ const WorkspaceDetailContent: React.FC<{
       {/* Workspace Header */}
       <div className="d-flex align-items-start gap-3">
         <div
-          className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0"
-          style={{ width: 48, height: 48, backgroundColor: 'var(--bs-info-bg-subtle, #cff4fc)' }}
+          className="d-flex align-items-center justify-content-center rounded-3 flex-shrink-0 project-detail-icon-box"
+          style={{ width: 48, height: 48 }}
         >
           <i className="bi bi-folder2-open-fill text-info fs-4" />
         </div>
@@ -668,30 +670,21 @@ const WorkspaceDetailContent: React.FC<{
       {/* Stats Grid */}
       <div className="row g-3">
         <div className="col-6 col-md-3">
-          <div
-            className="text-center p-3 rounded-3"
-            style={{ backgroundColor: 'var(--bs-primary-bg-subtle, #cfe2ff)' }}
-          >
+          <div className="text-center p-3 rounded-3 project-detail-stat-box project-detail-stat-primary">
             <i className="bi bi-people text-primary d-block mb-1" />
             <div className="text-muted small">{t('users', language)}</div>
             <div className="fs-4 fw-bold text-primary">{workspace.total_users}</div>
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div
-            className="text-center p-3 rounded-3"
-            style={{ backgroundColor: 'var(--bs-info-bg-subtle, #cff4fc)' }}
-          >
+          <div className="text-center p-3 rounded-3 project-detail-stat-box project-detail-stat-info">
             <i className="bi bi-chat-square-text text-info d-block mb-1" />
             <div className="text-muted small">{t('sessions', language)}</div>
             <div className="fs-4 fw-bold text-info">{workspace.total_sessions}</div>
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div
-            className="text-center p-3 rounded-3"
-            style={{ backgroundColor: 'var(--bs-success-bg-subtle, #d1e7dd)' }}
-          >
+          <div className="text-center p-3 rounded-3 project-detail-stat-box project-detail-stat-success">
             <i className="bi bi-cpu text-success d-block mb-1" />
             <div className="text-muted small">{t('tokens', language)}</div>
             <div className="fs-4 fw-bold text-success">
@@ -700,10 +693,7 @@ const WorkspaceDetailContent: React.FC<{
           </div>
         </div>
         <div className="col-6 col-md-3">
-          <div
-            className="text-center p-3 rounded-3"
-            style={{ backgroundColor: 'var(--bs-warning-bg-subtle, #fff3cd)' }}
-          >
+          <div className="text-center p-3 rounded-3 project-detail-stat-box project-detail-stat-warning">
             <i className="bi bi-clock text-warning d-block mb-1" />
             <div className="text-muted small">{t('workTime', language)}</div>
             <div className="fs-4 fw-bold text-warning">
