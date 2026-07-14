@@ -32,7 +32,7 @@ import {
   Skeleton,
   PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatToolName, createMatcherConfig } from '@/utils';
+import { formatTokens, formatToolName, createMatcherConfig, formatHourRange } from '@/utils';
 import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 import { SessionStatisticsCard, calculateHealthScore } from './SessionStatisticsCard';
 
@@ -430,7 +430,7 @@ export const TrendAnalysis: React.FC = () => {
         {/* Peak Usage Periods */}
         <div className="col-md-6">
           <Card title={t('peakUsagePeriods', language)}>
-            {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
+            {peakUsage?.peak_hours && peakUsage.peak_hours.length > 0 ? (
               <div style={{ minHeight: 380 }}>
                 <table
                   className="table table-sm table-hover"
@@ -439,18 +439,18 @@ export const TrendAnalysis: React.FC = () => {
                   <thead>
                     <tr>
                       <th style={{ width: '10%' }}>#</th>
-                      <th style={{ width: '45%' }}>{t('tableDate', language)}</th>
+                      <th style={{ width: '45%' }}>{t('tableTimePeriod', language)}</th>
                       <th style={{ width: '45%' }} className="text-end">
                         {t('tableTokens', language)}
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {peakUsage.peak_days.slice(0, 10).map((day, index) => (
+                    {peakUsage.peak_hours.slice(0, 10).map((hour, index) => (
                       <tr key={index}>
                         <td>{index + 1}</td>
-                        <td>{day.date}</td>
-                        <td className="text-end">{formatTokens(day.tokens)}</td>
+                        <td>{formatHourRange(hour.hour)}</td>
+                        <td className="text-end">{formatTokens(hour.avg_tokens)}</td>
                       </tr>
                     ))}
                   </tbody>

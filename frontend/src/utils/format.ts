@@ -269,3 +269,14 @@ export function formatChartDate(
     ...(options.dayOnly ? {} : { month: 'short' }),
   });
 }
+
+/**
+ * Format an hour (0-23) as a time range string.
+ * Example: 14 → "14:00-15:00", 23 → "23:00-00:00"
+ */
+export function formatHourRange(hour: number): string {
+  const start = hour.toString().padStart(2, '0') + ':00';
+  const endHour = hour === 23 ? 0 : hour + 1;
+  const end = endHour.toString().padStart(2, '0') + ':00';
+  return `${start}-${end}`;
+}

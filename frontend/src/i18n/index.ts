@@ -145,6 +145,7 @@ export const translations: Record<Language, Translations> = {
 
     // Table
     tableDate: 'Date',
+    tableTimePeriod: 'Time Period',
     tableRequests: 'Requests',
     tableAverage: 'Average',
     tableInput: 'Input',
@@ -1791,6 +1792,7 @@ export const translations: Record<Language, Translations> = {
 
     // Table
     tableDate: '日期',
+    tableTimePeriod: '时段',
     tableRequests: '请求数',
     tableAverage: '平均值',
     tableInput: '输入',
@@ -3511,6 +3513,7 @@ export const translations: Record<Language, Translations> = {
 
     // Table
     tableDate: '日付',
+    tableTimePeriod: '時間帯',
     tableRequests: 'リクエスト数',
     tableAverage: '平均',
     tableInput: '入力',
@@ -4980,6 +4983,7 @@ export const translations: Record<Language, Translations> = {
 
     // Table
     tableDate: '날짜',
+    tableTimePeriod: '시간대',
     tableRequests: '요청 수',
     tableAverage: '평균',
     tableInput: '입력',

@@ -19,7 +19,7 @@ import {
   DoughnutChart,
   SimpleTabs,
 } from '@/components/common';
-import { formatTokens, formatDate, formatToolName } from '@/utils';
+import { formatTokens, formatDate, formatToolName, formatHourRange } from '@/utils';
 import {
   useKeyMetrics,
   useDailyHourlyUsage,
@@ -396,20 +396,20 @@ export const Analysis: React.FC = () => {
             {/* Peak Usage Periods */}
             <div className="col-md-6">
               <Card title={t('peakUsagePeriods', language)}>
-                {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
+                {peakUsage?.peak_hours && peakUsage.peak_hours.length > 0 ? (
                   <div className="table-responsive">
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>{t('tableDate', language)}</th>
+                          <th>{t('tableTimePeriod', language)}</th>
                           <th>{t('tableTokens', language)}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {peakUsage.peak_days.slice(0, 5).map((day, index) => (
+                        {peakUsage.peak_hours.slice(0, 5).map((hour, index) => (
                           <tr key={index}>
-                            <td>{day.date}</td>
-                            <td>{formatTokens(day.tokens)}</td>
+                            <td>{formatHourRange(hour.hour)}</td>
+                            <td>{formatTokens(hour.avg_tokens)}</td>
                           </tr>
                         ))}
                       </tbody>
