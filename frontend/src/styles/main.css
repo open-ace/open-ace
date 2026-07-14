@@ -1251,13 +1251,17 @@ link[rel='dns-prefetch'] {
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day:hover,
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-text:hover,
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__quarter-text:hover {
-  background-color: rgba(56, 189, 248, 0.2);
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #fff;
 }
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--selected,
-[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected {
-  background-color: var(--color-primary, #38bdf8);
-  color: #0f172a;
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--selected:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected:hover {
+  background-color: #0369a1 !important;
+  color: #ffffff !important;
   border-radius: 0.3rem;
+  font-weight: 600;
 }
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--today {
   font-weight: 700;
