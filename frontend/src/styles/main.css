@@ -1174,6 +1174,41 @@ link[rel='dns-prefetch'] {
   filter: var(--date-input-calendar-icon-filter, invert(1));
 }
 
+/* Dark theme — native date/time inputs
+   ──────────────────────────────────────────────────────────────────────────
+   Firefox renders the date-picker popup in a separate document that does
+   NOT inherit `color-scheme` from <html>. Setting `color-scheme: dark`
+   directly on the <input> forces the popup to use dark colours in Firefox
+   (118+) as well as Chromium.
+   We also style the input itself so it looks correct on dark backgrounds. */
+[data-theme='dark'] input[type='date'],
+[data-theme='dark'] input[type='datetime-local'],
+[data-theme='dark'] input[type='month'],
+[data-theme='dark'] input[type='week'],
+[data-theme='dark'] input[type='time'] {
+  color-scheme: dark;
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color, #334155);
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] input[type='date']:focus,
+[data-theme='dark'] input[type='datetime-local']:focus,
+[data-theme='dark'] input[type='month']:focus,
+[data-theme='dark'] input[type='week']:focus,
+[data-theme='dark'] input[type='time']:focus {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--color-primary, #38bdf8);
+  color: var(--text-primary, #f8fafc);
+}
+/* Invert the calendar-picker indicator so it is visible on dark backgrounds */
+[data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.7);
+  cursor: pointer;
+}
+
 .page-header-controls .btn {
   white-space: nowrap;
   flex-shrink: 0;
