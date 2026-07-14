@@ -262,7 +262,11 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
     if _table_exists(conn, "session_messages", dialect):
         session_messages_columns = [
             ("source", "TEXT", "''"),
-            ("source_timestamp", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+            (
+                "source_timestamp",
+                "TIMESTAMP" if not is_postgres else "timestamp without time zone",
+                None,
+            ),
             ("external_message_id", "TEXT", "''"),
             ("content_blocks", "TEXT", None),
             ("milestone_id", "INTEGER", None),
