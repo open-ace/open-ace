@@ -323,6 +323,16 @@
   --date-input-calendar-icon-filter: invert(1);
 }
 
+/* Dark theme form-switch - Issue #1483 */
+[data-theme='dark'] .form-switch .form-check-input {
+  --switch-bg: var(--bg-tertiary);
+  background-color: var(--switch-bg);
+}
+
+[data-theme='dark'] .form-switch .form-check-input:checked {
+  background-color: var(--color-primary);
+}
+
 /* Reset and Base Styles */
 *,
 *::before,
@@ -2455,11 +2465,23 @@ table .latency-row:hover td {
   cursor: pointer;
 }
 
-/* Switch */
+/* Switch - Issue #1483: Compact form-switch size with CSS variables */
 .form-switch .form-check-input {
-  width: 2.5rem;
-  height: 1.25rem;
-  border-radius: 1.25rem;
+  /* Component-level CSS variables for flexibility */
+  --switch-width: 2rem; /* 32px */
+  --switch-height: 1rem; /* 16px */
+  --switch-thumb-size: calc(var(--switch-height) - 4px); /* ~12px */
+
+  width: var(--switch-width);
+  height: var(--switch-height);
+  border-radius: var(--switch-height);
+  background-size: var(--switch-thumb-size);
+  background-position: left 2px center;
+  transition: background-position 0.15s ease-in-out;
+}
+
+.form-switch .form-check-input:checked {
+  background-position: right 2px center;
 }
 
 /* Divider Styles */
