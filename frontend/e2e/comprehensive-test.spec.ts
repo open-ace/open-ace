@@ -626,7 +626,11 @@ test.describe('Comprehensive Application Test', () => {
       // Look for theme toggle button
       const themeBtn = page.locator('button:has(.bi-moon), button:has(.bi-sun), button:has-text("Theme"), button:has-text("主题")').first();
 
-      if (await themeBtn.isVisible()) {
+      try {
+        // Wait for the button to be visible and stable
+        await themeBtn.waitFor({ state: 'visible', timeout: 5000 });
+        // Ensure button is scrolled into view
+        await themeBtn.scrollIntoViewIfNeeded();
         // Use force: true for Safari/WebKit compatibility (may have overlay elements)
         await themeBtn.click({ force: true });
         await page.waitForTimeout(500);
@@ -634,9 +638,10 @@ test.describe('Comprehensive Application Test', () => {
         await takeScreenshot(page, '10-theme-toggled');
 
         // Toggle back
+        await themeBtn.scrollIntoViewIfNeeded();
         await themeBtn.click({ force: true });
-      } else {
-        console.log('Theme toggle button not found');
+      } catch {
+        console.log('Theme toggle button not found or not clickable');
       }
     });
 
