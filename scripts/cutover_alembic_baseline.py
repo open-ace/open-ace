@@ -305,7 +305,9 @@ def ensure_session_messages_transcript_columns(connection: sa.Connection) -> boo
 
     # milestone_id - for milestone tracking (Issue #1663)
     if not _column_exists(connection, "session_messages", "milestone_id"):
-        connection.exec_driver_sql("ALTER TABLE session_messages ADD COLUMN milestone_id INTEGER")
+        connection.exec_driver_sql(
+            "ALTER TABLE session_messages ADD COLUMN milestone_id TEXT DEFAULT ''"
+        )
         changed = True
 
     if is_postgres:

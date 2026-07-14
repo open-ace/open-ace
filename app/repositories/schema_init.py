@@ -269,7 +269,7 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ),
             ("external_message_id", "TEXT", "''"),
             ("content_blocks", "TEXT", None),
-            ("milestone_id", "INTEGER", None),
+            ("milestone_id", "TEXT", "''"),
         ]
         for col_name, col_type, default in session_messages_columns:
             if not _column_exists(conn, "session_messages", col_name, dialect):
