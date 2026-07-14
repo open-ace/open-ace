@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 管理-设置-模型网关配置页面深色模式对比度问题：状态提示框（"网关路由未启用"警告与"已启用"成功状态）文字与背景对比度不足，新增 `--color-{success,warning,danger,info}-{bg,text}` CSS 变量并在深色模式下使用低透明度语义背景 + 明亮文字色，确保 WCAG AA ≥ 4.5:1。
+
 ### Changed
 - 代码审查提醒 Issue（每 3 周自动生成）现自带体检报告：workflow 内自动执行 Bandit 安全扫描、pip-audit 依赖漏洞、迁移单 head 校验、前端构建体积，以及 DB 死索引/大表/慢查询 SQL 清单，并在模板补齐"🛡️ 安全"维度；每项体检步骤 `continue-on-error`，单项工具故障不阻断 Issue 创建。
 - `MessageRepository.get_user_conversation_samples` 由 per-session N+1 查询改为单次批量查询（`IN` 列表 + 应用层按 session 分组），保留逐 session `(agent_session_id = S OR conversation_id = S)` 语义与值域碰撞/双字段场景的等价性；批量失败时回退到原 per-session 循环。
