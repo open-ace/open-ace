@@ -24,7 +24,8 @@ class _FakeListDatabase:
             return self._visible_rows(query)
         if "FROM session_messages" in query and "role = 'user'" in query:
             return [
-                {"session_id": row["session_id"], "content": "first prompt"} for row in self.session_rows
+                {"session_id": row["session_id"], "content": "first prompt"}
+                for row in self.session_rows
             ]
         raise AssertionError(f"Unexpected fetch_all query: {query}")
 

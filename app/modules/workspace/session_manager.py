@@ -61,18 +61,23 @@ def _params(count: int) -> str:
     return ", ".join([p] * count)
 
 
-def _visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
+_AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = f"%{escape_like('\"workflow_id\"')}%"
+
+
+def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
     """Hide autonomous workflow tracking wrappers from user-facing listings."""
 
     prefix = f"{alias}." if alias else ""
     p = _param()
+    # escape_like is baked into _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN so the
+    # JSON-key substring match remains SQL003/SQL004-safe on SQLite and PG.
     return (
         "NOT ("
         f"{prefix}session_type = {p} "
         f"AND COALESCE({prefix}cli_session_id, '') != '' "
         f"AND COALESCE({prefix}context, '') LIKE {p} ESCAPE '\\'"
         ")",
-        [SessionType.WORKFLOW.value, '%"workflow_id"%'],
+        [SessionType.WORKFLOW.value, _AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN],
     )
 
 
@@ -1558,7 +1563,7 @@ class SessionManager:
             conditions.append(f"title LIKE {_param()} ESCAPE '\\'")
             params.append(f"%{escape_like(search)}%")
 
-        visible_clause, visible_params = _visible_session_clause()
+        visible_clause, visible_params = visible_session_clause()
         conditions.append(visible_clause)
         params.extend(visible_params)
 
@@ -1714,7 +1719,7 @@ class SessionManager:
         cursor = conn.cursor()
 
         if user_id:
-            visible_clause, visible_params = _visible_session_clause()
+            visible_clause, visible_params = visible_session_clause()
             cursor.execute(
                 f"""
                 SELECT
@@ -1729,7 +1734,7 @@ class SessionManager:
                 (user_id, *visible_params),
             )
         else:
-            visible_clause, visible_params = _visible_session_clause()
+            visible_clause, visible_params = visible_session_clause()
             cursor.execute(
                 f"""
                 SELECT

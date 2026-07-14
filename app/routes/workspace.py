@@ -20,7 +20,11 @@ from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.prompt_library import PromptCategory, PromptTemplate, get_prompt_library
-from app.modules.workspace.session_manager import SessionType, get_session_manager
+from app.modules.workspace.session_manager import (
+    SessionType,
+    get_session_manager,
+    visible_session_clause,
+)
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
@@ -55,25 +59,6 @@ def format_datetime(dt):
             iso_str += "+00:00"
         return iso_str
     return dt
-
-
-def _exclude_autonomous_tracking_session_clause(alias: str, placeholder: str) -> tuple[str, list[str]]:
-    """Hide autonomous workflow tracking wrappers from user-facing session lists.
-
-    Autonomous workflows maintain stable main/review/test tracking rows whose
-    real CLI session is stored in ``cli_session_id``. Showing both the tracking
-    row and the provider row duplicates the same conversation in Work mode.
-    """
-
-    prefix = f"{alias}." if alias else ""
-    return (
-        "NOT ("
-        f"{prefix}session_type = {placeholder} "
-        f"AND COALESCE({prefix}cli_session_id, '') != '' "
-        f"AND COALESCE({prefix}context, '') LIKE {placeholder} ESCAPE '\\'"
-        ")",
-        ["workflow", '%"workflow_id"%'],
-    )
 
 
 workspace_bp = Blueprint("workspace", __name__)
@@ -576,7 +561,7 @@ def list_sessions():
         # escape_like not needed: hard-coded pattern, no user input
         base_conditions.append(f"session_id NOT LIKE {p}")
         base_params.append("webui:%")
-        visible_clause, visible_params = _exclude_autonomous_tracking_session_clause("", p)
+        visible_clause, visible_params = visible_session_clause()
         base_conditions.append(visible_clause)
         base_params.extend(visible_params)
 
