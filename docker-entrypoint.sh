@@ -318,16 +318,16 @@ except Exception:
         echo "No application schema detected. Treating this as a fresh installation."
     else
         echo "WARNING: Could not determine whether application tables already exist."
-        echo "Proceeding with baseline cutover check and Alembic upgrade."
+        echo "Proceeding with minimum revision check and Alembic upgrade."
     fi
 
-    if [ -f "scripts/cutover_alembic_baseline.py" ]; then
-        echo "Preparing baseline Alembic lineage..."
-        python3 scripts/cutover_alembic_baseline.py
-        if [ $? -ne 0 ]; then
-            echo "ERROR: Baseline cutover failed."
-            exit 1
-        fi
+    # Verify the database is on the supported (>= baseline_2026_06_23) lineage
+    # before upgrading. Fresh databases (no alembic_version table) pass through;
+    # the schema is built from the baseline snapshot below.
+    if ! python3 scripts/check_min_revision.py; then
+        echo "ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23)."
+        echo "       Restore a known-healthy backup already on the baseline lineage, then restart the container."
+        exit 1
     fi
 
     echo "Running database migrations..."

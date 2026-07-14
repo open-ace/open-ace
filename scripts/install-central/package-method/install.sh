@@ -3534,14 +3534,20 @@ do_fresh_install() {
             fi
 
             if [ "$schema_exists" = "yes" ]; then
-                # Existing schema: run baseline cutover + alembic upgrade
-                print_info "Existing Open ACE schema detected, preparing baseline..."
-                if [ -f "scripts/cutover_alembic_baseline.py" ]; then
-                    if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-                        su - "$install_user" -c "cd '$target_path' && python3 scripts/cutover_alembic_baseline.py" || print_warning "Baseline cutover failed (may already be at baseline)"
-                    else
-                        python3 scripts/cutover_alembic_baseline.py || print_warning "Baseline cutover failed (may already be at baseline)"
-                    fi
+                # Existing schema: verify minimum supported revision, then upgrade
+                print_info "Existing Open ACE schema detected, verifying minimum supported revision..."
+                if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+                    su - "$install_user" -c "cd '$target_path' && python3 scripts/check_min_revision.py" || {
+                        print_error "Database revision is below the minimum supported starting point (baseline_2026_06_23)."
+                        print_info "Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade."
+                        exit 1
+                    }
+                else
+                    python3 scripts/check_min_revision.py || {
+                        print_error "Database revision is below the minimum supported starting point (baseline_2026_06_23)."
+                        print_info "Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade."
+                        exit 1
+                    }
                 fi
                 print_info "Running database migrations..."
                 if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
@@ -3913,25 +3919,21 @@ with open('$config_dir/config.json', 'w') as f:
 
     # Run database migrations (alembic upgrade head)
     print_info "Running database migrations..."
-    if [ -f "$target_path/scripts/cutover_alembic_baseline.py" ]; then
-        print_info "Preparing baseline Alembic lineage..."
-        if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-            if su - "$install_user" -c "cd '$target_path' && python3 scripts/cutover_alembic_baseline.py"; then
-                print_success "Baseline cutover check completed"
-            else
-                print_error "Baseline cutover failed."
-                exit 1
-            fi
-        else
-            cd "$target_path"
-            if python3 scripts/cutover_alembic_baseline.py; then
-                print_success "Baseline cutover check completed"
-            else
-                print_error "Baseline cutover failed."
-                exit 1
-            fi
+    if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
+        su - "$install_user" -c "cd '$target_path' && python3 scripts/check_min_revision.py" || {
+            print_error "Database revision is below the minimum supported starting point (baseline_2026_06_23)."
+            print_info "Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade."
+            exit 1
+        }
+    else
+        cd "$target_path"
+        python3 scripts/check_min_revision.py || {
+            print_error "Database revision is below the minimum supported starting point (baseline_2026_06_23)."
+            print_info "Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade."
             cd - > /dev/null
-        fi
+            exit 1
+        }
+        cd - > /dev/null
     fi
     if [ -f "$target_path/alembic.ini" ] && [ -d "$target_path/migrations" ]; then
         if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
@@ -4082,9 +4084,11 @@ print(f\"db_pass='{pw}'\")
 
                 if [ \"\$schema_exists\" = \"3\" ]; then
                     echo 'Existing Open ACE schema detected (3 sentinel tables found)'
-                    # Run baseline cutover + alembic upgrade
-                    if [ -f 'scripts/cutover_alembic_baseline.py' ]; then
-                        python3 scripts/cutover_alembic_baseline.py || echo 'Warning: Baseline cutover failed (may already be at baseline)'
+                    # Verify minimum supported revision, then upgrade
+                    if ! python3 scripts/check_min_revision.py; then
+                        echo 'ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23).'
+                        echo '       Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade.'
+                        exit 1
                     fi
                     echo 'Running database migrations...'
                     python3 -m alembic upgrade head || echo 'ERROR: alembic upgrade failed'
@@ -4282,13 +4286,10 @@ do_upgrade_remote() {
     print_info "Running database migrations on remote..."
     ssh "$remote" "
         cd '$target_path'
-        if [ -f 'scripts/cutover_alembic_baseline.py' ]; then
-            if python3 scripts/cutover_alembic_baseline.py; then
-                echo 'Baseline cutover check completed'
-            else
-                echo 'ERROR: Baseline cutover failed.'
-                exit 1
-            fi
+        if ! python3 scripts/check_min_revision.py; then
+            echo 'ERROR: database revision is below the minimum supported starting point (baseline_2026_06_23).'
+            echo '       Restore a known-healthy backup already on the baseline lineage, then re-run the upgrade.'
+            exit 1
         fi
         if [ -f 'alembic.ini' ] && [ -d 'migrations' ]; then
             if python3 -m alembic upgrade head; then

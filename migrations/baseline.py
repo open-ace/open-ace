@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 
-from migrations.version_table import VERSION_NUM_LENGTH
-
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
@@ -18,7 +16,6 @@ HEAD_REVISION = "20260714_001_add_ci_repair_fields_to_workflows"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _BASELINE_SCHEMA_DIR = _PROJECT_ROOT / "schema" / "baselines"
 ACTIVE_MIGRATIONS_DIR = _PROJECT_ROOT / "migrations" / "versions"
-LEGACY_MIGRATIONS_DIR = _PROJECT_ROOT / "migrations" / "legacy_versions"
 
 
 def baseline_schema_path(dialect_name: str) -> Path:
@@ -128,22 +125,3 @@ def read_current_revision(connection: Connection) -> str | None:
     if not result:
         return None
     return str(result[0])
-
-
-def stamp_revision(connection: Connection, revision: str) -> None:
-    """Directly write the Alembic revision table."""
-    if not version_table_exists(connection):
-        connection.exec_driver_sql(
-            f"""
-            CREATE TABLE alembic_version (
-                version_num VARCHAR({VERSION_NUM_LENGTH}) NOT NULL,
-                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-            )
-            """
-        )
-
-    connection.execute(sa.text("DELETE FROM alembic_version"))
-    connection.execute(
-        sa.text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
-        {"revision": revision},
-    )
