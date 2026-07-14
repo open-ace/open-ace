@@ -1470,35 +1470,62 @@ table .latency-row:hover td {
   gap: 10px;
 }
 
-/* Role Badge */
+/* Role Badge - Issue #1434: Compact design with icon */
 .message-role {
-  width: 100px;
-  text-align: center;
   flex-shrink: 0;
 }
 
 .role-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
+.role-badge .role-badge-text {
+  text-transform: capitalize;
+}
+
+/* Role badge variants - subtle colored backgrounds */
+.role-badge-user,
 .role-badge.user {
-  background-color: var(--color-primary);
-  color: white;
+  background-color: rgba(var(--color-primary-rgb, 13, 110, 253), 0.12);
+  color: var(--color-primary);
+  border: 1px solid rgba(var(--color-primary-rgb, 13, 110, 253), 0.25);
 }
 
+.role-badge-assistant,
 .role-badge.assistant {
-  background-color: var(--color-success);
-  color: white;
+  background-color: rgba(var(--color-success-rgb, 25, 135, 84), 0.12);
+  color: var(--color-success);
+  border: 1px solid rgba(var(--color-success-rgb, 25, 135, 84), 0.25);
 }
 
+.role-badge-system,
 .role-badge.system {
-  background-color: var(--color-secondary);
-  color: white;
+  background-color: rgba(var(--color-secondary-rgb, 108, 117, 125), 0.12);
+  color: var(--color-secondary);
+  border: 1px solid rgba(var(--color-secondary-rgb, 108, 117, 125), 0.25);
+}
+
+/* Role-based border colors - updated for new design */
+.message-border-user,
+.message-item.border-primary {
+  border-left: 3px solid var(--color-primary);
+}
+
+.message-border-assistant,
+.message-item.border-success {
+  border-left: 3px solid var(--color-success);
+}
+
+.message-border-system,
+.message-item.border-warning {
+  border-left: 3px solid var(--color-secondary);
 }
 
 /* Message Content */
@@ -4055,6 +4082,223 @@ table .latency-row:hover td {
 /* Thinking / reasoning blocks - ensure muted text is readable */
 [data-theme='dark'] .session-detail-content details .text-muted {
   color: var(--text-muted) !important;
+}
+
+/* ===== Messages Page Responsive Styles (Issue #1434) ===== */
+
+/* Filter Card - Responsive Layout */
+.messages-filter-card {
+  padding: var(--spacing-md);
+}
+
+.messages-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.messages-filter-row:last-child {
+  margin-bottom: 0;
+}
+
+.messages-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.messages-filter-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Date Range Filter */
+.messages-filter-dates {
+  flex: 0 0 auto;
+}
+
+.messages-filter-dates-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.messages-filter-dates-inputs .form-control {
+  width: 140px;
+}
+
+.messages-filter-dates-separator {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Sender Filter */
+.messages-filter-sender {
+  flex: 1;
+  min-width: 180px;
+}
+
+/* Role Checkboxes */
+.messages-filter-roles {
+  flex: 0 0 auto;
+}
+
+.messages-filter-roles-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.messages-filter-roles-checkboxes .form-check {
+  margin-bottom: 0;
+}
+
+.messages-filter-roles-checkboxes .form-check-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+/* Search Filter */
+.messages-filter-search {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+}
+
+/* Message Meta - Improved styling */
+.message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+}
+
+.message-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.message-meta-item i {
+  font-size: 0.7rem;
+}
+
+.message-meta-sender {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.message-meta-model {
+  color: var(--text-muted);
+  font-family: var(--font-family-monospace);
+}
+
+/* Message Source Badge - Compact style */
+.message-source {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+/* Message Footer Time */
+.message-footer-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 991.98px) {
+  .messages-filter-row {
+    flex-direction: column;
+  }
+
+  .messages-filter-group {
+    width: 100%;
+  }
+
+  .messages-filter-dates-inputs .form-control {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .messages-filter-sender,
+  .messages-filter-search {
+    max-width: none;
+  }
+
+  .messages-filter-roles-checkboxes {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .messages-filter-card {
+    padding: var(--spacing-sm);
+  }
+
+  .messages-filter-dates-inputs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .messages-filter-dates-separator {
+    display: none;
+  }
+
+  .messages-filter-dates-inputs .form-control {
+    width: 100%;
+  }
+
+  /* Hide message tokens on very small screens */
+  .message-tokens {
+    display: none;
+  }
+
+  /* Compact role badge on mobile */
+  .role-badge {
+    padding: 2px 6px;
+    font-size: 0.7rem;
+  }
+
+  .role-badge .role-badge-text {
+    display: none;
+  }
+
+  .role-badge i {
+    margin: 0 !important;
+  }
+}
+
+/* Dark mode adjustments for messages */
+[data-theme='dark'] .messages-filter-card {
+  background-color: var(--bg-secondary);
+}
+
+[data-theme='dark'] .messages-filter-label {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .message-meta-item {
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .message-meta-sender {
+  color: var(--color-primary-light, #60a5fa);
 }
 
 /* Alert warning - adapt to dark theme */
