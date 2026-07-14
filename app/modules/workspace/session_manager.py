@@ -61,7 +61,8 @@ def _params(count: int) -> str:
     return ", ".join([p] * count)
 
 
-_AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = f"%{escape_like('\"workflow_id\"')}%"
+_WORKFLOW_ID_CONTEXT_MARKER = '"workflow_id"'
+_AUTONOMOUS_WORKFLOW_CONTEXT_PATTERN = "%" + escape_like(_WORKFLOW_ID_CONTEXT_MARKER) + "%"
 
 
 def visible_session_clause(alias: str = "") -> tuple[str, list[Any]]:
