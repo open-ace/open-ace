@@ -936,6 +936,24 @@ class TestCIRoundTripPersistence:
         assert created["ci_repair_attempts"] == 1
         assert created["last_ci_failure_signature"] == "lint|failure|fail"
 
+    def test_worktree_and_preferred_paths_round_trip_together(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Worktree round trip",
+                "requirements_text": "Fix CI",
+                "cli_tool": "claude-code",
+                "project_path": "/repo",
+                "branch_strategy": "worktree",
+                "worktree_path": "/repo/.worktrees/wf",
+                "preferred_worktree_path": "/repo/.worktrees/wf",
+            }
+        )
+
+        assert created["worktree_path"] == "/repo/.worktrees/wf"
+        assert created["preferred_worktree_path"] == "/repo/.worktrees/wf"
+
 
 # Required import for TestAllowedFieldsFiltering
 from unittest.mock import MagicMock

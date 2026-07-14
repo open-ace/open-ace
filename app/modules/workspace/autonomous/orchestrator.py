@@ -2207,6 +2207,13 @@ class AutonomousOrchestrator:
         - Jump to the next phase after the fork milestone's phase
         """
         project_path = wf.get("project_path", "")
+        system_account = None
+        user_id = wf.get("user_id")
+        if user_id:
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            if user:
+                system_account = user.get("system_account")
 
         # --- Fork workflow fast path ---
         if self._is_fork_workflow(wf):
@@ -2304,14 +2311,6 @@ class AutonomousOrchestrator:
         # New project: create GitHub repo
         if wf.get("is_new_project"):
             try:
-                # Get system_account for multi-user permission isolation (Issue #1395)
-                system_account = None
-                user_id = wf.get("user_id")
-                if user_id:
-                    user_repo = UserRepository()
-                    user = user_repo.get_user_by_id(user_id)
-                    if user:
-                        system_account = user.get("system_account")
                 gh = GitHubOps(project_path or ".", system_account=system_account)
                 repo_data = gh.create_repo(
                     name=wf.get("project_repo_url", f"auto-project-{uuid.uuid4().hex[:8]}"),
@@ -2461,7 +2460,9 @@ class AutonomousOrchestrator:
                     # Use pre-generated worktree_path if available (Issue #1573)
                     # Format: {project_path}/.worktrees/{workflow_id}
                     # Fallback to legacy format for backwards compatibility
-                    pre_generated_worktree_path = wf.get("worktree_path", "")
+                    pre_generated_worktree_path = wf.get("worktree_path", "") or wf.get(
+                        "preferred_worktree_path", ""
+                    )
                     if pre_generated_worktree_path and pre_generated_worktree_path.startswith(
                         project_path
                     ):

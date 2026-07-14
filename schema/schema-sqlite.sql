@@ -290,7 +290,11 @@ CREATE TABLE autonomous_workflows (
  skip_retries integer DEFAULT 0,
  dev_retries_on_test_fail integer DEFAULT 0,
  system_account text DEFAULT '',
- base_commit_sha TEXT
+ base_commit_sha TEXT,
+ preferred_worktree_path text DEFAULT '',
+ ci_repair_context text DEFAULT '',
+ ci_repair_attempts integer DEFAULT 0,
+ last_ci_failure_signature text DEFAULT ''
 );
 
 CREATE TABLE compliance_reports (

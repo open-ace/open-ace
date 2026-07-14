@@ -441,7 +441,11 @@ CREATE TABLE autonomous_workflows (
     skip_retries integer DEFAULT 0,
     dev_retries_on_test_fail integer DEFAULT 0,
     system_account text DEFAULT ''::text,
-    base_commit_sha character varying(40)
+    base_commit_sha character varying(40),
+    preferred_worktree_path text DEFAULT ''::text,
+    ci_repair_context text DEFAULT ''::text,
+    ci_repair_attempts integer DEFAULT 0,
+    last_ci_failure_signature text DEFAULT ''::text
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
@@ -1070,22 +1074,22 @@ CREATE SEQUENCE session_messages_id_seq
 
 ALTER SEQUENCE session_messages_id_seq OWNED BY session_messages.id;
 CREATE MATERIALIZED VIEW session_stats AS
- SELECT daily_messages.agent_session_id AS session_id,
-    daily_messages.tool_name,
-    daily_messages.host_name,
-    daily_messages.sender_name,
-    max((daily_messages.sender_id)::text) AS sender_id,
-    max((daily_messages.date)::text) AS date,
+ SELECT agent_session_id AS session_id,
+    tool_name,
+    host_name,
+    sender_name,
+    max((sender_id)::text) AS sender_id,
+    max((date)::text) AS date,
     count(*) AS message_count,
-    sum(daily_messages.tokens_used) AS total_tokens,
-    sum(daily_messages.input_tokens) AS total_input_tokens,
-    sum(daily_messages.output_tokens) AS total_output_tokens,
-    min(daily_messages."timestamp") AS created_at,
-    max(daily_messages."timestamp") AS updated_at,
-    max(daily_messages.project_path) AS project_path
+    sum(tokens_used) AS total_tokens,
+    sum(input_tokens) AS total_input_tokens,
+    sum(output_tokens) AS total_output_tokens,
+    min("timestamp") AS created_at,
+    max("timestamp") AS updated_at,
+    max(project_path) AS project_path
    FROM daily_messages
-  WHERE (daily_messages.agent_session_id IS NOT NULL)
-  GROUP BY daily_messages.agent_session_id, daily_messages.tool_name, daily_messages.host_name, daily_messages.sender_name
+  WHERE (agent_session_id IS NOT NULL)
+  GROUP BY agent_session_id, tool_name, host_name, sender_name
   WITH NO DATA;
 
 CREATE TABLE sessions (

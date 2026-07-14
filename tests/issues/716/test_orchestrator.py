@@ -28,6 +28,7 @@ def _make_workflow(**overrides):
         "workspace_type": "local",
         "remote_machine_id": "",
         "worktree_path": "",
+        "preferred_worktree_path": "",
         "github_issue_number": None,
         "github_pr_number": None,
         "github_pr_url": "",
@@ -342,6 +343,7 @@ class TestOrchestratorPreparation:
             "worktree_path": "/tmp/wt-path",
             "branch": "auto-dev/test-wf",
         }
+        mock_gh.get_current_branch.return_value = "auto-dev/test-wf-"
         mock_gh_cls.return_value = mock_gh
 
         orch._do_preparation(wf)
@@ -351,6 +353,35 @@ class TestOrchestratorPreparation:
         update_calls = mock_repo.update_workflow.call_args_list
         wt_updates = [c for c in update_calls if c[0][1].get("worktree_path")]
         assert len(wt_updates) > 0
+
+    @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
+    def test_preparation_worktree_uses_preferred_path_when_live_path_empty(self, mock_gh_cls):
+        wf = _make_workflow(
+            current_phase="preparation",
+            branch_strategy="worktree",
+            branch_name="auto-dev/test-wf",
+            worktree_path="",
+            project_path="/tmp/project",
+            preferred_worktree_path="/tmp/project/.worktrees/test-wf",
+        )
+        orch, _ = self._make_orchestrator(wf)
+
+        mock_gh = MagicMock()
+        mock_gh.create_issue.return_value = {"number": 1, "url": ""}
+        mock_gh.create_worktree.return_value = {
+            "worktree_path": "/tmp/project/.worktrees/test-wf",
+            "branch": "auto-dev/test-wf",
+        }
+        mock_gh.get_current_branch.return_value = "auto-dev/test-wf"
+        mock_gh_cls.return_value = mock_gh
+
+        orch._do_preparation(wf)
+
+        mock_gh.create_worktree.assert_called_once_with(
+            path="/tmp/project/.worktrees/test-wf",
+            branch="auto-dev/test-wf",
+            base="origin/main",
+        )
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_preparation_current_branch_strategy(self, mock_gh_cls):

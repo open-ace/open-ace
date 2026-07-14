@@ -208,7 +208,7 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, preferred_worktree_path, github_issue_number, batch_id,
+                     remote_machine_id, worktree_path, preferred_worktree_path, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
@@ -216,7 +216,7 @@ class AutonomousWorkflowRepository:
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -237,6 +237,7 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("worktree_path", ""),
                     data.get("preferred_worktree_path", ""),
                     data.get("github_issue_number"),
                     data.get("batch_id"),
@@ -272,7 +273,7 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, preferred_worktree_path, github_issue_number, batch_id,
+                     remote_machine_id, worktree_path, preferred_worktree_path, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
@@ -280,7 +281,7 @@ class AutonomousWorkflowRepository:
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -300,6 +301,7 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("worktree_path", ""),
                     data.get("preferred_worktree_path", ""),
                     data.get("github_issue_number"),
                     data.get("batch_id"),
