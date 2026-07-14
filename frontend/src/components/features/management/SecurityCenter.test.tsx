@@ -303,11 +303,7 @@ vi.mock('@/components/common', () => ({
     value: string;
     onChange: (v: string) => void;
   }) => (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      data-testid="select"
-    >
+    <select value={value} onChange={(e) => onChange(e.target.value)} data-testid="select">
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
@@ -315,16 +311,8 @@ vi.mock('@/components/common', () => ({
       ))}
     </select>
   ),
-  Loading: ({ text }: { text?: string }) => (
-    <div data-testid="loading">{text || 'Loading...'}</div>
-  ),
-  Error: ({
-    message,
-    onRetry,
-  }: {
-    message: string;
-    onRetry?: () => void;
-  }) => (
+  Loading: ({ text }: { text?: string }) => <div data-testid="loading">{text || 'Loading...'}</div>,
+  Error: ({ message, onRetry }: { message: string; onRetry?: () => void }) => (
     <div data-testid="error">
       {message}
       {onRetry && (
@@ -334,16 +322,8 @@ vi.mock('@/components/common', () => ({
       )}
     </div>
   ),
-  EmptyState: ({ title }: { title: string }) => (
-    <div data-testid="empty-state">{title}</div>
-  ),
-  Badge: ({
-    children,
-    variant,
-  }: {
-    children: React.ReactNode;
-    variant: string;
-  }) => (
+  EmptyState: ({ title }: { title: string }) => <div data-testid="empty-state">{title}</div>,
+  Badge: ({ children, variant }: { children: React.ReactNode; variant: string }) => (
     <span data-testid="badge" data-variant={variant}>
       {children}
     </span>
@@ -387,19 +367,27 @@ function setFilterRulesHook(overrides: Record<string, unknown>) {
 }
 
 function setCreateRuleHook(overrides: Record<string, unknown>) {
-  vi.mocked(useCreateFilterRule).mockReturnValue(overrides as ReturnType<typeof useCreateFilterRule>);
+  vi.mocked(useCreateFilterRule).mockReturnValue(
+    overrides as ReturnType<typeof useCreateFilterRule>
+  );
 }
 
 function setUpdateRuleHook(overrides: Record<string, unknown>) {
-  vi.mocked(useUpdateFilterRule).mockReturnValue(overrides as ReturnType<typeof useUpdateFilterRule>);
+  vi.mocked(useUpdateFilterRule).mockReturnValue(
+    overrides as ReturnType<typeof useUpdateFilterRule>
+  );
 }
 
 function setDeleteRuleHook(overrides: Record<string, unknown>) {
-  vi.mocked(useDeleteFilterRule).mockReturnValue(overrides as ReturnType<typeof useDeleteFilterRule>);
+  vi.mocked(useDeleteFilterRule).mockReturnValue(
+    overrides as ReturnType<typeof useDeleteFilterRule>
+  );
 }
 
 function setSecuritySettingsHook(overrides: Record<string, unknown>) {
-  vi.mocked(useSecuritySettings).mockReturnValue(overrides as ReturnType<typeof useSecuritySettings>);
+  vi.mocked(useSecuritySettings).mockReturnValue(
+    overrides as ReturnType<typeof useSecuritySettings>
+  );
 }
 
 function setUpdateSettingsHook(overrides: Record<string, unknown>) {
@@ -602,7 +590,7 @@ describe('SecurityCenter', () => {
       const editButtons = screen.getAllByRole('button');
       const editBtn = editButtons.find((btn) => btn.querySelector('.bi-pencil'));
       expect(editBtn).toBeDefined();
-      fireEvent.click(editBtn!);
+      fireEvent.click(editBtn as HTMLElement);
       expect(screen.getByTestId('modal')).toBeInTheDocument();
     });
 
@@ -632,16 +620,14 @@ describe('SecurityCenter', () => {
 
       // Click edit button
       const editBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-pencil'));
-      fireEvent.click(editBtn!);
+      fireEvent.click(editBtn as HTMLElement);
 
       // Click save
       const saveButton = screen.getByText('Save');
       fireEvent.click(saveButton);
 
       await waitFor(() => {
-        expect(mockMutateAsyncUpdate).toHaveBeenCalledWith(
-          expect.objectContaining({ ruleId: 1 })
-        );
+        expect(mockMutateAsyncUpdate).toHaveBeenCalledWith(expect.objectContaining({ ruleId: 1 }));
       });
     });
 
@@ -658,15 +644,11 @@ describe('SecurityCenter', () => {
       mockMutateAsyncDelete.mockResolvedValue({});
       render(<SecurityCenter />);
 
-      const deleteBtn = screen
-        .getAllByRole('button')
-        .find((btn) => btn.querySelector('.bi-trash'));
-      fireEvent.click(deleteBtn!);
+      const deleteBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-trash'));
+      fireEvent.click(deleteBtn as HTMLElement);
 
       await waitFor(() => {
-        expect(mockConfirm).toHaveBeenCalledWith(
-          expect.objectContaining({ variant: 'danger' })
-        );
+        expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ variant: 'danger' }));
         expect(mockMutateAsyncDelete).toHaveBeenCalledWith(1);
       });
     });
@@ -675,10 +657,8 @@ describe('SecurityCenter', () => {
       mockConfirm.mockResolvedValue(false);
       render(<SecurityCenter />);
 
-      const deleteBtn = screen
-        .getAllByRole('button')
-        .find((btn) => btn.querySelector('.bi-trash'));
-      fireEvent.click(deleteBtn!);
+      const deleteBtn = screen.getAllByRole('button').find((btn) => btn.querySelector('.bi-trash'));
+      fireEvent.click(deleteBtn as HTMLElement);
 
       await waitFor(() => {
         expect(mockConfirm).toHaveBeenCalled();
@@ -789,7 +769,7 @@ describe('SecurityCenter', () => {
       // Click save
       const saveButtons = screen.getAllByText('Save');
       const settingsSaveBtn = saveButtons.find((btn) => btn.closest('.d-flex'));
-      fireEvent.click(settingsSaveBtn!);
+      fireEvent.click(settingsSaveBtn as HTMLElement);
 
       await waitFor(() => {
         expect(mockMutateAsyncUpdateSettings).toHaveBeenCalledWith(
@@ -851,7 +831,7 @@ describe('SecurityCenter', () => {
       expect(textarea).toHaveValue('192.168.1.1\n10.0.0.0/24');
 
       // Change IP whitelist
-      fireEvent.change(textarea!, {
+      fireEvent.change(textarea as HTMLElement, {
         target: { value: ' 192.168.1.1 \n\n10.0.0.0/24\n192.168.1.1\n ' },
       });
 
@@ -1007,9 +987,7 @@ describe('SecurityCenter', () => {
       // Wait for error to appear and save button to become disabled
       await waitFor(() => {
         const saveButtons = screen.getAllByText('Save');
-        const saveBtn = saveButtons.find(
-          (btn) => !btn.closest('[data-testid="modal-footer"]')
-        );
+        const saveBtn = saveButtons.find((btn) => !btn.closest('[data-testid="modal-footer"]'));
         expect(saveBtn).toBeDisabled();
       });
     });
@@ -1060,9 +1038,7 @@ describe('SecurityCenter', () => {
         expect(screen.getByText('Please enter a valid value')).toBeInTheDocument();
         // The save button is disabled when validation errors exist
         const saveButtons = screen.getAllByText('Save');
-        const saveBtn = saveButtons.find(
-          (btn) => !btn.closest('[data-testid="modal-footer"]')
-        );
+        const saveBtn = saveButtons.find((btn) => !btn.closest('[data-testid="modal-footer"]'));
         expect(saveBtn).toBeDisabled();
       });
 
