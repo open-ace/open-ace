@@ -1726,6 +1726,98 @@ table .latency-row:hover td {
   color: var(--text-primary);
 }
 
+/* ===== Project Management Page - Dark Theme (Issue #1666) ===== */
+
+/* Base table overrides */
+[data-theme='dark'] .project-management .table {
+  --bs-table-color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--border-color);
+  --bs-table-hover-color: var(--text-primary);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+  --bs-table-striped-color: var(--text-primary);
+  --bs-table-striped-bg: rgba(255, 255, 255, 0.02);
+  color: var(--text-primary);
+}
+
+/* Category row (normal) — subtle alternating background */
+.project-category-row {
+  background-color: transparent;
+}
+[data-theme='dark'] .project-category-row {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Category row (uncategorized/secondary) — slightly more prominent */
+.project-category-secondary {
+  background-color: #e2e3e5; /* Bootstrap table-secondary light */
+}
+[data-theme='dark'] .project-category-secondary {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+/* Expanded workspace container row */
+.project-workspace-expand {
+  background-color: #f8f9fa; /* Bootstrap table-light light */
+}
+[data-theme='dark'] .project-workspace-expand {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Inner expanded table */
+[data-theme='dark'] .project-workspace-expand .table {
+  --bs-table-color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: var(--border-color);
+  --bs-table-hover-color: var(--text-primary);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+/* Workspace detail modal — icon box */
+.project-detail-icon-box {
+  background-color: var(--bs-info-bg-subtle, #cff4fc);
+}
+[data-theme='dark'] .project-detail-icon-box {
+  background-color: rgba(59, 130, 246, 0.15);
+}
+
+/* Workspace detail modal — stat boxes (light mode) */
+.project-detail-stat-primary {
+  background-color: var(--bs-primary-bg-subtle, #cfe2ff);
+}
+.project-detail-stat-info {
+  background-color: var(--bs-info-bg-subtle, #cff4fc);
+}
+.project-detail-stat-success {
+  background-color: var(--bs-success-bg-subtle, #d1e7dd);
+}
+.project-detail-stat-warning {
+  background-color: var(--bs-warning-bg-subtle, #fff3cd);
+}
+
+/* Workspace detail modal — stat boxes (dark mode) */
+[data-theme='dark'] .project-detail-stat-primary {
+  background-color: rgba(56, 189, 248, 0.12);
+}
+[data-theme='dark'] .project-detail-stat-info {
+  background-color: rgba(59, 130, 246, 0.12);
+}
+[data-theme='dark'] .project-detail-stat-success {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+[data-theme='dark'] .project-detail-stat-warning {
+  background-color: rgba(245, 158, 11, 0.12);
+}
+
+/* Delete confirmation alert — dark mode */
+[data-theme='dark'] .project-management .alert-danger {
+  background-color: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: var(--color-danger);
+}
+
 /* Legacy message-content class for backward compatibility */
 .message-content {
   white-space: pre-wrap;
