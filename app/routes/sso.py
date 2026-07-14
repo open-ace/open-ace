@@ -170,6 +170,19 @@ def list_sso_providers():
 
     providers = get_sso_manager().list_providers(tenant_id=tenant_id)
 
+    # Transform provider fields to match frontend SSOProvider type:
+    # - provider_type -> type
+    # - is_active -> is_enabled
+    registered = [
+        {
+            "name": p.get("name"),
+            "type": p.get("provider_type"),
+            "is_enabled": p.get("is_active", True),
+            "tenant_id": p.get("tenant_id"),
+        }
+        for p in providers
+    ]
+
     # Also include predefined providers with full config (type, display_name, icon)
     predefined_names = list_providers()
     predefined = []
@@ -190,7 +203,7 @@ def list_sso_providers():
 
     return jsonify(
         {
-            "registered": providers,
+            "registered": registered,
             "predefined": predefined,
         }
     )
