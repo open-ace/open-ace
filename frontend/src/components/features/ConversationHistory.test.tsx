@@ -20,6 +20,7 @@ import {
   type LatencyMessage,
 } from './ConversationHistory';
 import type { ConversationMessage } from '@/api';
+import { t } from '@/i18n';
 
 // ---------------------------------------------------------------------------
 // Pure-function tests
@@ -326,5 +327,34 @@ describe('ConversationDetailModal latency linkage', () => {
     // both show their sequence-number badges.
     expect(screen.getByText('#1')).toBeInTheDocument();
     expect(screen.getByText('#2')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #1432: i18n tests for conversation history title
+// ---------------------------------------------------------------------------
+
+describe('Issue #1432: i18n keys for conversation history title', () => {
+  it('has conversationHistoryListCount key in all languages', () => {
+    const languages = ['en', 'zh', 'ja', 'ko'] as const;
+    for (const lang of languages) {
+      const result = t('conversationHistoryListCount', lang, { count: 25 });
+      expect(result).toContain('25');
+    }
+  });
+
+  it('has noConversationRecords key in all languages', () => {
+    const languages = ['en', 'zh', 'ja', 'ko'] as const;
+    for (const lang of languages) {
+      const result = t('noConversationRecords', lang);
+      expect(result.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('interpolates count correctly', () => {
+    expect(t('conversationHistoryListCount', 'en', { count: 100 })).toBe('100 conversations');
+    expect(t('conversationHistoryListCount', 'zh', { count: 100 })).toBe('100 个对话记录');
+    expect(t('conversationHistoryListCount', 'ja', { count: 100 })).toBe('100件の会話記録');
+    expect(t('conversationHistoryListCount', 'ko', { count: 100 })).toBe('100개 대화 기록');
   });
 });

@@ -137,6 +137,7 @@ interface ColumnDef {
   label: string;
   visible: boolean;
   sortable?: boolean;
+  align?: 'left' | 'right';
 }
 
 const defaultColumns: ColumnDef[] = [
@@ -145,8 +146,8 @@ const defaultColumns: ColumnDef[] = [
   { key: 'tool_name', label: 'tableTool', visible: true, sortable: true },
   { key: 'host_name', label: 'tableHost', visible: true, sortable: true },
   { key: 'sender_name', label: 'tableSender', visible: true, sortable: true },
-  { key: 'message_count', label: 'tableMessages', visible: true, sortable: true },
-  { key: 'total_tokens', label: 'tableTokens', visible: true, sortable: true },
+  { key: 'message_count', label: 'tableMessages', visible: true, sortable: true, align: 'right' },
+  { key: 'total_tokens', label: 'tableTokens', visible: true, sortable: true, align: 'right' },
   { key: 'last_message_time', label: 'lastMessageTime', visible: true, sortable: true },
   { key: 'actions', label: 'actions', visible: true, sortable: false },
 ];
@@ -484,7 +485,9 @@ export const ConversationHistory: React.FC = () => {
           {/* Table Header with Column Selector and Fullscreen */}
           <div className="d-flex justify-content-between align-items-center mb-3">
             <span className="text-muted">
-              {t('total', language)}: {data?.total ?? 0} {t('conversations', language)}
+              {(data?.total ?? 0) === 0
+                ? t('noConversationRecords', language)
+                : t('conversationHistoryListCount', language, { count: data?.total ?? 0 })}
             </span>
             <div className="d-flex gap-2">
               {/* Export Button */}
@@ -576,7 +579,11 @@ export const ConversationHistory: React.FC = () => {
         style={{ zIndex: 1050 }}
       >
         <div className="d-flex justify-content-between align-items-center mb-3">
-          <h4>{t('conversationHistory', language)}</h4>
+          <h4 className="text-muted">
+            {(data?.total ?? 0) === 0
+              ? t('noConversationRecords', language)
+              : t('conversationHistoryListCount', language, { count: data?.total ?? 0 })}
+          </h4>
           <Button variant="outline-secondary" size="sm" onClick={() => setIsFullscreen(false)}>
             <i className="bi bi-x-lg" /> {t('close', language)}
           </Button>
@@ -665,9 +672,9 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
       case 'sender_name':
         return conversation.sender_name ?? '-';
       case 'message_count':
-        return <span className="text-end d-block">{conversation.message_count}</span>;
+        return conversation.message_count;
       case 'total_tokens':
-        return <span className="text-end d-block">{formatTokens(conversation.total_tokens)}</span>;
+        return formatTokens(conversation.total_tokens);
       case 'last_message_time':
         return (
           <small className="text-muted">{formatDateTime(conversation.last_message_time)}</small>
@@ -686,7 +693,9 @@ const ConversationRow: React.FC<ConversationRowProps> = ({
   return (
     <tr>
       {visibleColumns.map((col) => (
-        <td key={col.key}>{renderCell(col.key)}</td>
+        <td key={col.key} className={col.align === 'right' ? 'text-end' : ''}>
+          {renderCell(col.key)}
+        </td>
       ))}
     </tr>
   );
