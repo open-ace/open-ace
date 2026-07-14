@@ -173,26 +173,13 @@ export const AuditAnalysis: React.FC = () => {
                 className={cn(
                   'security-score-circle',
                   securityScore.score >= 80
-                    ? 'text-success'
+                    ? 'security-score-good'
                     : securityScore.score >= 60
-                      ? 'text-warning'
-                      : 'text-danger'
+                      ? 'security-score-medium'
+                      : 'security-score-poor'
                 )}
               >
-                <div
-                  className="display-1 fw-bold"
-                  style={{
-                    fontSize: '4rem',
-                    color:
-                      securityScore.score >= 80
-                        ? '#198754'
-                        : securityScore.score >= 60
-                          ? '#ffc107'
-                          : '#dc3545',
-                  }}
-                >
-                  {securityScore.score}
-                </div>
+                <div className="display-1 fw-bold security-score-value">{securityScore.score}</div>
                 <div className="text-muted">
                   {t('overallScore', language)} ({securityScore.grade})
                 </div>
