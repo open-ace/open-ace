@@ -4419,3 +4419,31 @@ table .latency-row:hover td {
   border-color: rgba(245, 158, 11, 0.3);
   color: var(--color-warning);
 }
+
+/* Security score circle - audit center (Issue #1443) */
+.security-score-circle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 150px;
+  min-height: 150px;
+  padding: 1.5rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.2s ease;
+}
+
+.security-score-circle:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='dark'] .security-score-circle {
+  background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme='dark'] .security-score-circle:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
