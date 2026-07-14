@@ -203,6 +203,68 @@ def ensure_agent_sessions_cli_session_id(connection: sa.Connection) -> bool:
     return True
 
 
+def ensure_agent_sessions_project_columns(connection: sa.Connection) -> bool:
+    """Backfill agent_sessions project and workspace columns for legacy DBs.
+
+    These columns were added after the initial schema and are required by the
+    baseline snapshot. Missing them causes CREATE INDEX failures when
+    load_schema_from_file() tries to create indexes referencing these columns.
+
+    Issue #1663: Old SQLite databases missing these columns fail schema init.
+    """
+    if not table_exists(connection, "agent_sessions"):
+        return False
+
+    changed = False
+    is_postgres = connection.dialect.name == "postgresql"
+
+    # project_id - for project association
+    if not _column_exists(connection, "agent_sessions", "project_id"):
+        connection.exec_driver_sql("ALTER TABLE agent_sessions ADD COLUMN project_id INTEGER")
+        changed = True
+
+    # project_path - for quick reference
+    if not _column_exists(connection, "agent_sessions", "project_path"):
+        connection.exec_driver_sql("ALTER TABLE agent_sessions ADD COLUMN project_path TEXT")
+        changed = True
+
+    # request_count - number of API requests
+    if not _column_exists(connection, "agent_sessions", "request_count"):
+        connection.exec_driver_sql(
+            "ALTER TABLE agent_sessions ADD COLUMN request_count INTEGER DEFAULT 0"
+        )
+        changed = True
+
+    # workspace_type - local or remote
+    if not _column_exists(connection, "agent_sessions", "workspace_type"):
+        if is_postgres:
+            connection.exec_driver_sql(
+                "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'::text"
+            )
+        else:
+            connection.exec_driver_sql(
+                "ALTER TABLE agent_sessions ADD COLUMN workspace_type TEXT DEFAULT 'local'"
+            )
+        changed = True
+
+    # remote_machine_id - for remote workspace sessions
+    if not _column_exists(connection, "agent_sessions", "remote_machine_id"):
+        connection.exec_driver_sql("ALTER TABLE agent_sessions ADD COLUMN remote_machine_id TEXT")
+        changed = True
+
+    # paused_at - session pause tracking
+    if not _column_exists(connection, "agent_sessions", "paused_at"):
+        if is_postgres:
+            connection.exec_driver_sql(
+                "ALTER TABLE agent_sessions ADD COLUMN paused_at timestamp without time zone"
+            )
+        else:
+            connection.exec_driver_sql("ALTER TABLE agent_sessions ADD COLUMN paused_at TIMESTAMP")
+        changed = True
+
+    return changed
+
+
 def ensure_session_messages_transcript_columns(connection: sa.Connection) -> bool:
     """Add #1125/#1128 transcript columns to session_messages for legacy DBs.
 
@@ -239,6 +301,13 @@ def ensure_session_messages_transcript_columns(connection: sa.Connection) -> boo
 
     if not _column_exists(connection, "session_messages", "content_blocks"):
         connection.exec_driver_sql("ALTER TABLE session_messages ADD COLUMN content_blocks TEXT")
+        changed = True
+
+    # milestone_id - for milestone tracking (Issue #1663)
+    if not _column_exists(connection, "session_messages", "milestone_id"):
+        connection.exec_driver_sql(
+            "ALTER TABLE session_messages ADD COLUMN milestone_id TEXT DEFAULT ''"
+        )
         changed = True
 
     if is_postgres:
@@ -510,8 +579,29 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
             actions.append("would backfill session_messages.source")
         if not _column_exists(connection, "agent_sessions", "cli_session_id"):
             actions.append("would backfill agent_sessions.cli_session_id")
+        # Check agent_sessions project/workspace columns (Issue #1663)
+        agent_sessions_columns = [
+            "project_id",
+            "project_path",
+            "request_count",
+            "workspace_type",
+            "remote_machine_id",
+            "paused_at",
+        ]
+        missing_agent_sessions_cols = [
+            col
+            for col in agent_sessions_columns
+            if not _column_exists(connection, "agent_sessions", col)
+        ]
+        if missing_agent_sessions_cols:
+            actions.append(
+                f"would backfill agent_sessions columns: {', '.join(missing_agent_sessions_cols)}"
+            )
         if not _column_exists(connection, "session_messages", "external_message_id"):
             actions.append("would add session_messages transcript columns (#1125/#1128)")
+        # Check milestone_id column (Issue #1663)
+        if not _column_exists(connection, "session_messages", "milestone_id"):
+            actions.append("would backfill session_messages.milestone_id")
         if not _column_exists(connection, "users", "auto_mapping_enabled"):
             actions.append("would backfill users.auto_mapping_enabled")
         if not table_exists(connection, "tool_account_mapping_rules"):
@@ -538,6 +628,9 @@ def cutover_database(connection: sa.Connection, *, dry_run: bool = False) -> tup
         changed = True
     if ensure_agent_sessions_cli_session_id(connection):
         actions.append("backfilled agent_sessions.cli_session_id")
+        changed = True
+    if ensure_agent_sessions_project_columns(connection):
+        actions.append("backfilled agent_sessions project/workspace columns (#1663)")
         changed = True
     if ensure_session_messages_transcript_columns(connection):
         actions.append("added session_messages transcript columns (#1125/#1128)")

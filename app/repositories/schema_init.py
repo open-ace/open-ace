@@ -118,6 +118,12 @@ def load_schema_from_file(db_url: str | None = None, dialect: str | None = None)
     db = Database(db_url=db_url)
     conn = db.get_connection()
     try:
+        # Backfill missing columns before executing schema.sql (Issue #1663).
+        # CREATE TABLE IF NOT EXISTS won't add missing columns to existing tables,
+        # but CREATE INDEX statements may reference them. This backfill ensures
+        # legacy databases have all required columns before the schema runs.
+        _backfill_missing_columns(conn, dialect)
+
         if db.is_postgresql:
             # autocommit so each statement is independent: a pre-existing
             # SEQUENCE/VIEW/CONSTRAINT (not covered by IF NOT EXISTS) raising
@@ -185,3 +191,93 @@ def ensure_all_tables() -> None:
     """
     load_schema_from_file()
     logger.info("Schema initialization complete (loaded from authoritative schema.sql)")
+
+
+def _column_exists(conn, table_name: str, column_name: str, dialect: str) -> bool:
+    """Check if a column exists in a table."""
+    if dialect == "postgresql":
+        cursor = conn.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = %s AND column_name = %s
+            """,
+            (table_name, column_name),
+        )
+        return cursor.fetchone() is not None
+    else:
+        cursor = conn.execute(f"PRAGMA table_info({table_name})")
+        return any(row[1] == column_name for row in cursor.fetchall())
+
+
+def _table_exists(conn, table_name: str, dialect: str) -> bool:
+    """Check if a table exists."""
+    if dialect == "postgresql":
+        cursor = conn.execute(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return cursor.fetchone() is not None
+    else:
+        cursor = conn.execute(
+            f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+        )
+        return cursor.fetchone() is not None
+
+
+def _backfill_missing_columns(conn, dialect: str) -> None:
+    """Backfill missing columns that were added after the initial schema.
+
+    This is needed because CREATE TABLE IF NOT EXISTS won't add missing columns
+    to existing tables, but CREATE INDEX statements in schema.sql reference them.
+
+    Issue #1663: Old SQLite databases missing these columns fail schema init.
+    """
+    is_postgres = dialect == "postgresql"
+
+    # agent_sessions columns
+    if _table_exists(conn, "agent_sessions", dialect):
+        agent_sessions_columns = [
+            ("project_id", "INTEGER", None),
+            ("project_path", "TEXT", None),
+            ("request_count", "INTEGER", "0"),
+            ("workspace_type", "TEXT", "'local'"),
+            ("remote_machine_id", "TEXT", None),
+            ("paused_at", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+        ]
+        for col_name, col_type, default in agent_sessions_columns:
+            if not _column_exists(conn, "agent_sessions", col_name, dialect):
+                sql = f"ALTER TABLE agent_sessions ADD COLUMN {col_name} {col_type}"
+                if default is not None:
+                    if is_postgres and col_type == "TEXT":
+                        sql += f" DEFAULT {default}::text"
+                    else:
+                        sql += f" DEFAULT {default}"
+                conn.execute(sql)
+        conn.commit()
+
+    # session_messages columns
+    if _table_exists(conn, "session_messages", dialect):
+        session_messages_columns = [
+            ("source", "TEXT", "''"),
+            (
+                "source_timestamp",
+                "TIMESTAMP" if not is_postgres else "timestamp without time zone",
+                None,
+            ),
+            ("external_message_id", "TEXT", "''"),
+            ("content_blocks", "TEXT", None),
+            ("milestone_id", "TEXT", "''"),
+        ]
+        for col_name, col_type, default in session_messages_columns:
+            if not _column_exists(conn, "session_messages", col_name, dialect):
+                sql = f"ALTER TABLE session_messages ADD COLUMN {col_name} {col_type}"
+                if default is not None:
+                    if is_postgres and col_type == "TEXT":
+                        sql += f" DEFAULT {default}::text"
+                    else:
+                        sql += f" DEFAULT {default}"
+                conn.execute(sql)
+        conn.commit()
