@@ -811,6 +811,10 @@ class TestAllowedFieldsFiltering:
         assert "error_message" in repo.ALLOWED_WORKFLOW_FIELDS
         assert "current_phase" in repo.ALLOWED_WORKFLOW_FIELDS
         assert "branch_name" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "preferred_worktree_path" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "ci_repair_context" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "ci_repair_attempts" in repo.ALLOWED_WORKFLOW_FIELDS
+        assert "last_ci_failure_signature" in repo.ALLOWED_WORKFLOW_FIELDS
         # These should NOT be in the whitelist
         assert "user_id" not in repo.ALLOWED_WORKFLOW_FIELDS
         assert "workflow_id" not in repo.ALLOWED_WORKFLOW_FIELDS
@@ -908,6 +912,47 @@ class TestContentLanguagePersistence:
         repo = AutonomousWorkflowRepository(auto_db)
         created = repo.create_workflow(self._data(content_language=None))
         assert created["content_language"] == "en"
+
+
+class TestCIRoundTripPersistence:
+    def test_ci_repair_fields_round_trip(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "CI repair",
+                "requirements_text": "Fix CI",
+                "cli_tool": "claude-code",
+                "project_path": "/tmp/test-project",
+                "preferred_worktree_path": "/tmp/test-project/.worktrees/wf-1",
+                "ci_repair_context": "lint failed",
+                "ci_repair_attempts": 1,
+                "last_ci_failure_signature": "lint|failure|fail",
+            }
+        )
+
+        assert created["preferred_worktree_path"] == "/tmp/test-project/.worktrees/wf-1"
+        assert created["ci_repair_context"] == "lint failed"
+        assert created["ci_repair_attempts"] == 1
+        assert created["last_ci_failure_signature"] == "lint|failure|fail"
+
+    def test_worktree_and_preferred_paths_round_trip_together(self, auto_db):
+        repo = AutonomousWorkflowRepository(auto_db)
+        created = repo.create_workflow(
+            {
+                "user_id": 1,
+                "title": "Worktree round trip",
+                "requirements_text": "Fix CI",
+                "cli_tool": "claude-code",
+                "project_path": "/repo",
+                "branch_strategy": "worktree",
+                "worktree_path": "/repo/.worktrees/wf",
+                "preferred_worktree_path": "/repo/.worktrees/wf",
+            }
+        )
+
+        assert created["worktree_path"] == "/repo/.worktrees/wf"
+        assert created["preferred_worktree_path"] == "/repo/.worktrees/wf"
 
 
 # Required import for TestAllowedFieldsFiltering

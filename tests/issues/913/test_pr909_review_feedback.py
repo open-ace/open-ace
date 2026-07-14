@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.workspace.autonomous.github_ops import GitHubOps
+from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import (
     CI_POLL_INTERVAL,
     CI_POLL_MAX_WAIT,
@@ -51,13 +51,53 @@ class TestGetPRChecks:
         result = gh.get_pr_checks(42)
         assert result == []
 
-    def test_returns_empty_on_invalid_json(self):
-        gh = self._make_gh("not json at all")
+    def test_falls_back_to_api_when_pr_checks_json_unsupported(self):
+        gh = GitHubOps("/tmp/fake")
+        gh.get_repo_name = MagicMock(return_value="open-ace/open-ace")
+        gh._gh_api_args = MagicMock(side_effect=lambda extra: extra)
+        gh._run_gh = MagicMock(
+            side_effect=[
+                MagicMock(returncode=1, stdout="", stderr="unknown flag: --json"),
+                MagicMock(returncode=0, stdout='{"head": {"sha": "abc123"}}', stderr=""),
+                MagicMock(
+                    returncode=0,
+                    stdout=(
+                        '{"statuses": [{"context": "lint", "state": "success", '
+                        '"target_url": "https://example.com/lint"}]}'
+                    ),
+                    stderr="",
+                ),
+                MagicMock(
+                    returncode=0,
+                    stdout=(
+                        '{"check_runs": [{"name": "test", "status": "completed", '
+                        '"conclusion": "failure", "html_url": "https://example.com/test"}]}'
+                    ),
+                    stderr="",
+                ),
+            ]
+        )
+
         result = gh.get_pr_checks(42)
-        assert result == []
+
+        assert result == [
+            {
+                "name": "lint",
+                "state": "success",
+                "bucket": "pass",
+                "link": "https://example.com/lint",
+            },
+            {
+                "name": "test",
+                "state": "failure",
+                "bucket": "fail",
+                "link": "https://example.com/test",
+            },
+        ]
 
     def test_logs_warning_on_parse_failure(self, caplog):
         gh = self._make_gh("bad json")
+        gh._get_pr_checks_via_api = MagicMock(return_value=[])
         with caplog.at_level(logging.WARNING):
             gh.get_pr_checks(42)
         assert "Failed to parse CI checks" in caplog.text
@@ -67,6 +107,13 @@ class TestGetPRChecks:
         gh = self._make_gh(None)
         result = gh.get_pr_checks(42)
         assert result == []
+
+    def test_raises_when_primary_and_fallback_both_fail(self):
+        gh = self._make_gh("", returncode=1)
+        gh._get_pr_checks_via_api = MagicMock(side_effect=GitHubOpsError("api failed"))
+
+        with pytest.raises(GitHubOpsError, match="Failed to query CI checks for PR #42"):
+            gh.get_pr_checks(42)
 
 
 # ── Test _poll_ci_status ────────────────────────────────────────────────
@@ -138,6 +185,18 @@ class TestPollCIStatus:
         assert result == pending_checks
         assert gh.get_pr_checks.call_count == 1  # only one call before timeout
         assert mock_time.sleep.call_count == 0  # never slept — timed out immediately
+
+    @patch("app.modules.workspace.autonomous.orchestrator.time")
+    def test_raises_after_repeated_query_failures(self, mock_time):
+        """Repeated CI query failures must surface as an error, not empty checks."""
+        gh = MagicMock()
+        gh.get_pr_checks.side_effect = GitHubOpsError("bad credentials")
+        mock_time.monotonic.side_effect = [0, CI_POLL_MAX_WAIT + 1]
+        mock_time.sleep = MagicMock()
+
+        orchestrator = MagicMock(spec=AutonomousOrchestrator)
+        with pytest.raises(GitHubOpsError, match="Failed to query CI checks for PR #42"):
+            AutonomousOrchestrator._poll_ci_status(orchestrator, gh, 42)
 
 
 # ── Test _is_pre_existing_ci_failure ──────────────────────────────────────

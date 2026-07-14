@@ -70,6 +70,34 @@ def test_compare_postgres_schema_text_normalizes_line_endings():
     assert diff == []
 
 
+def test_compare_postgres_schema_text_ignores_session_stats_qualification_noise():
+    """PG15/PG16 pg_dump differences in session_stats should not cause drift."""
+    expected = """
+    CREATE MATERIALIZED VIEW session_stats AS
+     SELECT agent_session_id AS session_id,
+        tool_name,
+        sum(tokens_used) AS total_tokens
+       FROM daily_messages
+      WHERE (agent_session_id IS NOT NULL)
+      GROUP BY agent_session_id, tool_name
+      WITH NO DATA;
+    """
+    actual = """
+    CREATE MATERIALIZED VIEW session_stats AS
+     SELECT daily_messages.agent_session_id AS session_id,
+        daily_messages.tool_name,
+        sum(daily_messages.tokens_used) AS total_tokens
+       FROM daily_messages
+      WHERE (daily_messages.agent_session_id IS NOT NULL)
+      GROUP BY daily_messages.agent_session_id, daily_messages.tool_name
+      WITH NO DATA;
+    """
+
+    diff = schema_sync.compare_postgres_schema_text(actual, expected)
+
+    assert diff == []
+
+
 def test_compare_sqlite_snapshots_ignores_pk_notnull_and_boolean_default_noise():
     """SQLite PK/nullability quirks and boolean literals should not cause drift."""
     actual = schema_sync.sqlite_snapshot_from_sql(
