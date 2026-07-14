@@ -641,6 +641,7 @@ class TestGetTimeline:
         assert resp.status_code == 200
         data = resp.get_json()
         assert len(data["milestones"]) == 2
+        assert data["milestones"][0]["tracking_llm_session_id"] == "sess-plan"
         assert data["milestones"][0]["llm_session_id"] == "sess-plan"
         assert data["milestones"][0]["actual_llm_session_id"] == "sess-plan"
         assert data["milestones"][0]["llm_total_tokens"] == 1234
@@ -678,6 +679,7 @@ class TestGetTimeline:
 
         assert resp.status_code == 200
         data = resp.get_json()
+        assert data["milestones"][0]["tracking_llm_session_id"] == "track-1"
         assert data["milestones"][0]["llm_session_id"] == "track-1"
         assert data["milestones"][0]["actual_llm_session_id"] == "actual-claude-1"
 

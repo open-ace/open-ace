@@ -237,13 +237,16 @@ def _enrich_milestones_with_usage(
     for milestone in milestones:
         milestone_id = milestone.get("milestone_id", "")
         usage = usage_by_milestone.get(milestone_id, {})
-        llm_session_id = usage.get("llm_session_id") or _resolve_milestone_session_id(milestone)
+        tracking_llm_session_id = usage.get("llm_session_id") or _resolve_milestone_session_id(
+            milestone
+        )
         enriched.append(
             {
                 **milestone,
-                "llm_session_id": llm_session_id,
+                "tracking_llm_session_id": tracking_llm_session_id,
+                "llm_session_id": tracking_llm_session_id,
                 "actual_llm_session_id": _resolve_actual_session_id(
-                    llm_session_id, session_manager, session_cache
+                    tracking_llm_session_id, session_manager, session_cache
                 ),
                 "llm_total_tokens": usage.get("llm_total_tokens", 0),
                 "llm_request_count": usage.get("llm_request_count", 0),

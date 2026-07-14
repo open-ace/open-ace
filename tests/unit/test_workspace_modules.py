@@ -319,6 +319,26 @@ class TestSessionManager:
         result = session_manager.list_sessions(user_id=1)
         assert len(result["sessions"]) == 3
 
+    def test_list_sessions_hides_autonomous_tracking_wrappers(self, session_manager):
+        """Workflow tracking wrappers should not appear in user-facing lists."""
+        tracking = session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_type=SessionType.WORKFLOW.value,
+            title="Autonomous wrapper",
+            context={"workflow_id": "wf-1"},
+        )
+        session_manager.update_session_fields(tracking.session_id, {"cli_session_id": "actual-123"})
+        session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_id="actual-123",
+            title="Provider session",
+        )
+
+        result = session_manager.list_sessions(user_id=1)
+        assert [session.session_id for session in result["sessions"]] == ["actual-123"]
+
     def test_session_expiration(self, session_manager):
         """Test session expiration."""
         session = session_manager.create_session(tool_name="claude", expires_in_hours=1)
@@ -334,6 +354,27 @@ class TestSessionManager:
         stats = session_manager.get_session_stats(user_id=1)
         assert stats["total_sessions"] == 2
         assert stats["active_sessions"] == 2
+
+    def test_session_stats_ignore_autonomous_tracking_wrappers(self, session_manager):
+        """Summary counts should match the visible sessions list."""
+        tracking = session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_type=SessionType.WORKFLOW.value,
+            title="Autonomous wrapper",
+            context={"workflow_id": "wf-1"},
+        )
+        session_manager.update_session_fields(tracking.session_id, {"cli_session_id": "actual-456"})
+        session_manager.create_session(
+            tool_name="claude",
+            user_id=1,
+            session_id="actual-456",
+            title="Provider session",
+        )
+
+        stats = session_manager.get_session_stats(user_id=1)
+        assert stats["total_sessions"] == 1
+        assert stats["active_sessions"] == 1
 
 
 # ==================== Tool Connector Tests ====================
