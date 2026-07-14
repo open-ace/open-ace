@@ -159,8 +159,8 @@ export const Messages: React.FC = () => {
     });
     setFilters((prev) => {
       const newRoles = checked
-        ? [...(prev.role || []), role]
-        : (prev.role || []).filter((r) => r !== role);
+        ? [...(prev.role ?? []), role]
+        : (prev.role ?? []).filter((r) => r !== role);
       return { ...prev, role: newRoles.length > 0 ? newRoles : undefined };
     });
     setPage(1);
@@ -423,11 +423,7 @@ const MessageCard = React.memo<MessageCardProps>(({ message, language }) => {
 
   return (
     <div
-      className={cn(
-        'message-item',
-        config.borderClass,
-        expanded && 'expanded'
-      )}
+      className={cn('message-item', config.borderClass, expanded && 'expanded')}
       onClick={handleToggle}
       style={{ cursor: canExpand ? 'pointer' : 'default' }}
     >
