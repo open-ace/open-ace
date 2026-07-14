@@ -24,6 +24,7 @@ import {
   Badge,
   PageRefreshControl,
   useToast,
+  DatePicker,
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
 import { ReportPreviewModal } from './ReportPreviewModal';
@@ -531,20 +532,16 @@ export const ComplianceMgmt: React.FC = () => {
           <div className="row g-3">
             <div className="col-md-3">
               <label className="form-label">{t('startDate', language)}</label>
-              <input
-                type="date"
-                className="form-control"
+              <DatePicker
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={setStartDate}
               />
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('endDate', language)}</label>
-              <input
-                type="date"
-                className="form-control"
+              <DatePicker
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={setEndDate}
               />
             </div>
             <div className="col-md-3">

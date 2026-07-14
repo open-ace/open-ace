@@ -33,6 +33,7 @@ import {
   LineChart,
   Skeleton,
   PageRefreshControl,
+  DatePicker,
 } from '@/components/common';
 import { formatDateTime, formatTokens, formatToolName, copyToClipboard } from '@/utils';
 import type { ConversationHistory as ConversationHistoryType } from '@/api';
@@ -407,20 +408,16 @@ export const ConversationHistory: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={filters.startDate ?? ''}
-              onChange={(e) => handleFilterChange('startDate', e.target.value)}
+              onChange={(v) => handleFilterChange('startDate', v)}
             />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={filters.endDate ?? ''}
-              onChange={(e) => handleFilterChange('endDate', e.target.value)}
+              onChange={(v) => handleFilterChange('endDate', v)}
             />
           </div>
           <div className="col-md-3">

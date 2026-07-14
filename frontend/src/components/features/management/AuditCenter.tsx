@@ -24,6 +24,7 @@ import {
   PieChart,
   BarChart,
   PageRefreshControl,
+  DatePicker,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { formatDate, formatDateTime, createMatcherConfig } from '@/utils';
@@ -395,20 +396,16 @@ export const AuditCenter: React.FC = () => {
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('startDate', language)}</label>
-              <input
-                type="date"
-                className="form-control"
+              <DatePicker
                 value={filters.start_date ?? ''}
-                onChange={(e) => handleFilterChange('start_date', e.target.value)}
+                onChange={(v) => handleFilterChange('start_date', v)}
               />
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('endDate', language)}</label>
-              <input
-                type="date"
-                className="form-control"
+              <DatePicker
                 value={filters.end_date ?? ''}
-                onChange={(e) => handleFilterChange('end_date', e.target.value)}
+                onChange={(v) => handleFilterChange('end_date', v)}
               />
             </div>
           </div>

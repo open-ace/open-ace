@@ -58,8 +58,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const language = useLanguage();
 
   const selectedDate = value ? new Date(value + 'T00:00:00') : null;
-  const minDate = min ? new Date(min + 'T00:00:00') : undefined;
-  const maxDate = max ? new Date(max + 'T00:00:00') : undefined;
+  // Default year dropdown range: 2026–2060
+  const minDate = min ? new Date(min + 'T00:00:00') : new Date('2026-01-01T00:00:00');
+  const maxDate = max ? new Date(max + 'T00:00:00') : new Date('2060-12-31T00:00:00');
 
   const handleChange = useCallback(
     (date: Date | null) => {

@@ -12,7 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import { Card, Button, Select, Loading, Error, EmptyState, Badge } from '@/components/common';
+import { Card, Button, Select, Loading, Error, EmptyState, Badge, DatePicker } from '@/components/common';
 import { complianceApi, type ReportType, type SavedReport } from '@/api';
 import { formatDateTime } from '@/utils';
 import { getReportTypeName, getReportTypeDesc } from '@/utils/compliance';
@@ -168,20 +168,16 @@ export const ComplianceReport: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={setStartDate}
             />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={setEndDate}
             />
           </div>
           <div className="col-md-3">
