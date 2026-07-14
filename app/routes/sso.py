@@ -939,6 +939,7 @@ def start_login(provider_name: str):
     # Store frontend redirect URI in session for callback to use
     if frontend_redirect_uri:
         from flask import session as flask_session
+
         flask_session["sso_frontend_redirect"] = frontend_redirect_uri
         flask_session.permanent = True
 
