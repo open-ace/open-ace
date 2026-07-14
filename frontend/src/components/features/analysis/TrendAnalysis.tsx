@@ -314,6 +314,7 @@ export const TrendAnalysis: React.FC = () => {
                 setStartDate(v);
                 setQuickRange('all');
               }}
+              min="2020-01-01"
               placeholder={t('startDate', language)}
             />
           </div>
@@ -325,6 +326,7 @@ export const TrendAnalysis: React.FC = () => {
                 setEndDate(v);
                 setQuickRange('all');
               }}
+              min="2020-01-01"
               placeholder={t('endDate', language)}
             />
           </div>
