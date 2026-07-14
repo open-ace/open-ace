@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from migrations.baseline import BASELINE_REVISION, HEAD_REVISION
+from migrations.baseline import ACTIVE_MIGRATIONS_DIR, BASELINE_REVISION, HEAD_REVISION
 from scripts.check_min_revision import collect_active_revision_ids, is_supported_revision
 
 
@@ -52,9 +52,9 @@ def test_collect_covers_every_non_baseline_migration():
     collector would silently drop it and the guard would wrongly reject a DB
     stamped on that revision. This assertion surfaces such a regression in CI.
     """
-    from pathlib import Path
-
-    migration_files = list(Path("migrations/versions").glob("*.py"))
+    # Reuse the collector's own source (absolute, __file__-derived) so the
+    # assertion is cwd-independent rather than relying on pytest's working dir.
+    migration_files = list(ACTIVE_MIGRATIONS_DIR.glob("*.py"))
     # One file (baseline_2026_06_23.py) uses a symbol binding; all others must
     # contribute a literal revision id.
     assert len(collect_active_revision_ids()) == len(migration_files) - 1
