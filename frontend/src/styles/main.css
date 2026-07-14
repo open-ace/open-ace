@@ -26,12 +26,20 @@
   /* Accent Colors */
   --color-success: #10b981;
   --color-success-hover: #059669;
+  --color-success-bg: #d4edda;
+  --color-success-text: #155724;
   --color-warning: #f59e0b;
   --color-warning-hover: #d97706;
+  --color-warning-bg: #fff3cd;
+  --color-warning-text: #856404;
   --color-danger: #ef4444;
   --color-danger-hover: #dc2626;
+  --color-danger-bg: #f8d7da;
+  --color-danger-text: #721c24;
   --color-info: #3b82f6;
   --color-info-hover: #2563eb;
+  --color-info-bg: #d1ecf1;
+  --color-info-text: #0c5460;
 
   /* Purple Accent for special elements */
   --color-accent: #8b5cf6;
@@ -240,6 +248,18 @@
   --color-primary-rgb: 56, 189, 248;
   --color-primary-hover: #0ea5e9;
   --color-primary-light: rgba(14, 165, 233, 0.1);
+
+  /* Semantic background tints for dark mode (Issue: ModelGatewayConfig contrast)
+     Use low-opacity tints of the semantic color so that light text (--text-primary)
+     maintains WCAG AA contrast (≥4.5:1) on the dark card/page background. */
+  --color-success-bg: rgba(16, 185, 129, 0.15);
+  --color-success-text: #34d399; /* bright green — ≥4.5:1 on dark bg */
+  --color-warning-bg: rgba(245, 158, 11, 0.15);
+  --color-warning-text: #fbbf24; /* bright amber — ≥4.5:1 on dark bg */
+  --color-danger-bg: rgba(239, 68, 68, 0.15);
+  --color-danger-text: #f87171;
+  --color-info-bg: rgba(59, 130, 246, 0.15);
+  --color-info-text: #60a5fa;
 
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);

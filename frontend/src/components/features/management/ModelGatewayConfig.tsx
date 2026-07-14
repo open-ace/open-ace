@@ -176,11 +176,28 @@ export const ModelGatewayConfig: React.FC = () => {
           {statusInfo.variant === 'success' ? (
             <Badge variant="success">{statusInfo.text}</Badge>
           ) : (
-            <span style={{ fontWeight: 500 }}>{statusInfo.text}</span>
+            <span
+              style={{
+                fontWeight: 600,
+                color: 'var(--color-warning-text, #856404)',
+              }}
+            >
+              {statusInfo.text}
+            </span>
           )}
         </div>
         {statusInfo.showInstructions && (
-          <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9em' }}>
+          <p
+            style={{
+              marginTop: '0.5rem',
+              marginBottom: 0,
+              fontSize: '0.9em',
+              color:
+                statusInfo.variant === 'success'
+                  ? 'var(--color-success-text, #155724)'
+                  : 'var(--color-warning-text, #856404)',
+            }}
+          >
             {t('gatewayEnableInstructions', language)}
           </p>
         )}
