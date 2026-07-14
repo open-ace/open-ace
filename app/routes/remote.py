@@ -904,7 +904,11 @@ def stream_session_output(session_id):
                     if (
                         idle_count >= 50
                     ):  # ~10 seconds (50 * 0.2s), aligned with KEEPALIVE_INTERVAL_MS
-                        yield ": keepalive\n\n"
+                        # Emit as a `data:` event (not an SSE comment line) so the
+                        # browser fires onmessage and the frontend stall detector
+                        # can reset on every keepalive. Comment lines (`:` prefix)
+                        # are silently dropped by the browser and never reach JS.
+                        yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
                         idle_count = 0
 
                 # Check if session ended (in-memory, no DB query)
