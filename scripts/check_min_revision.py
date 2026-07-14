@@ -99,15 +99,24 @@ def main() -> int:
         )
         return 0
 
-    print(
-        f"ERROR: database revision '{current}' is below the minimum supported "
-        f"starting point '{BASELINE_REVISION}'.\n"
-        "This database predates the baseline cutover and cannot be upgraded "
-        "in place.\n"
-        "Recover by restoring a known-healthy backup that is already on the "
-        f"'{BASELINE_REVISION}' lineage, then re-run the upgrade.",
-        file=sys.stderr,
-    )
+    if current is None:
+        print(
+            "ERROR: the alembic_version table exists but has no revision row; "
+            "the database cannot be upgraded in this state.\n"
+            "Recover by restoring a known-healthy backup that is already on the "
+            f"'{BASELINE_REVISION}' lineage, then re-run the upgrade.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"ERROR: database revision '{current}' is below the minimum supported "
+            f"starting point '{BASELINE_REVISION}'.\n"
+            "This database predates the baseline cutover and cannot be upgraded "
+            "in place.\n"
+            "Recover by restoring a known-healthy backup that is already on the "
+            f"'{BASELINE_REVISION}' lineage, then re-run the upgrade.",
+            file=sys.stderr,
+        )
     return 1
 
 

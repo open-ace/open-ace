@@ -2685,12 +2685,12 @@ upgrade_deployment() {
         if [ "$alembic_fixed" = "1" ]; then
             print_success "alembic_version 表已自动创建"
         else
-            print_warning "alembic_version 表仍然缺失，尝试手动修复..."
+            print_warning "alembic_version 表仍然缺失，手动重跑最低 revision 校验与 Alembic upgrade..."
             docker compose exec -T open-ace sh -c \
                 "python3 scripts/check_min_revision.py && alembic upgrade head" 2>&1 || {
-                print_error "最低 revision 检查 / alembic upgrade 失败，请检查日志"
+                print_error "最低 revision 校验 / alembic upgrade 失败，请检查日志"
                 print_info "可能需要手动执行: docker compose exec open-ace sh -c 'python3 scripts/check_min_revision.py && alembic upgrade head'"
-                print_info "若数据库仍停留在 baseline_2026_06_23 之前的 revision，需先从已知健康备份恢复"
+                print_info "若数据库仍停留在 baseline_2026_06_23 之前的 revision，该命令无法修复，需先从已知健康备份恢复"
             }
         fi
     fi

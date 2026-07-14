@@ -42,6 +42,24 @@ def test_collect_active_revision_ids_includes_post_baseline_head():
     assert BASELINE_REVISION not in active_ids
 
 
+def test_collect_covers_every_non_baseline_migration():
+    """Completeness invariant: every migration file must contribute a literal id.
+
+    The baseline migration pins ``revision`` to the ``BASELINE_REVISION`` symbol,
+    so the regex collector intentionally skips it (the caller unions it back in).
+    Every *other* migration must use a literal revision id; if a future
+    post-baseline migration switches to a symbol/constant assignment, the
+    collector would silently drop it and the guard would wrongly reject a DB
+    stamped on that revision. This assertion surfaces such a regression in CI.
+    """
+    from pathlib import Path
+
+    migration_files = list(Path("migrations/versions").glob("*.py"))
+    # One file (baseline_2026_06_23.py) uses a symbol binding; all others must
+    # contribute a literal revision id.
+    assert len(collect_active_revision_ids()) == len(migration_files) - 1
+
+
 def test_is_supported_revision_accepts_baseline_and_successors():
     supported = collect_active_revision_ids() | {BASELINE_REVISION}
     assert is_supported_revision(BASELINE_REVISION, supported) is True
@@ -112,7 +130,7 @@ def test_main_allows_fresh_database_without_version_table(tmp_path, monkeypatch,
 
 
 def test_main_rejects_empty_version_table(tmp_path, monkeypatch, capsys):
-    """A version table with no rows is treated as unsupported, not fresh."""
+    """A version table with no rows reports a dedicated message (not 'None')."""
     import scripts.check_min_revision as mod
 
     db_path = tmp_path / "empty_rows.db"
@@ -120,4 +138,6 @@ def test_main_rejects_empty_version_table(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(mod, "_get_db_url", lambda: f"sqlite:///{db_path}")
 
     rc = mod.main()
+    err = capsys.readouterr().err
     assert rc == 1
+    assert "no revision row" in err

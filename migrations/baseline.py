@@ -112,9 +112,9 @@ def version_table_exists(connection: Connection) -> bool:
 def read_current_revision(connection: Connection) -> str | None:
     """Read the current Alembic revision directly from the database.
 
-    The baseline lineage is intentionally single-head. We read one ordered row
-    here so legacy databases with a single alembic_version entry remain cheap
-    to inspect during cutover.
+    The baseline lineage is intentionally single-head, so we read one ordered
+    row here. Used by the minimum-revision guard to decide whether a database
+    is on the supported (>= baseline) upgrade path.
     """
     if not version_table_exists(connection):
         return None
