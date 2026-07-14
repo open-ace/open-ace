@@ -230,6 +230,12 @@
 [data-theme='dark'],
 [data-bs-theme='dark'],
 .dark-theme {
+  /* Tell the browser to render native UI controls (date picker popups,
+     scrollbars, select dropdowns, etc.) in dark mode. Without this, native
+     widgets like <input type="date"> calendar popups stay white on dark
+     backgrounds. */
+  color-scheme: dark;
+
   --bg-primary: #0f172a;
   --bg-secondary: #1e293b;
   --bg-tertiary: #334155;
