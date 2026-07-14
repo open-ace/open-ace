@@ -90,6 +90,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         customInput={<DateInput disabled={disabled} placeholder={placeholder} />}
         popperPlacement="bottom-start"
         calendarClassName="open-ace-datepicker-calendar"
+        showMonthDropdown
+        showYearDropdown
+        dropdownMode="select"
+        yearDropdownItemNumber={20}
+        scrollableYearDropdown
       />
     </div>
   );

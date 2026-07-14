@@ -1277,6 +1277,48 @@ link[rel='dns-prefetch'] {
 [data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__navigation:hover *::before {
   border-color: var(--color-primary, #38bdf8);
 }
+/* Month / Year dropdowns in the header — dark mode */
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown-container,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown-container {
+  margin: 0 2px;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-read-view,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-read-view {
+  color: var(--text-primary, #f8fafc);
+  background-color: var(--bg-tertiary, #334155);
+  border: 1px solid var(--border-color, #475569);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown {
+  background-color: var(--bg-secondary, #1e293b);
+  border: 1px solid var(--border-color-dark, #475569);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option {
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option--selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option--selected {
+  background-color: #0369a1;
+  color: #fff;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option--selected::after,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option--selected::after {
+  left: 8px;
+  color: #fff;
+}
+/* Dropdown arrow in read-view */
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown-arrow svg,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown-arrow svg {
+  fill: var(--text-secondary, #cbd5e1);
+}
 [data-theme='dark'] .open-ace-datepicker .form-control {
   background-color: var(--bg-secondary, #1e293b);
   border-color: var(--border-color, #334155);
