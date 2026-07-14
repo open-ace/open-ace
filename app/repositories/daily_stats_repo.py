@@ -7,6 +7,7 @@ instead of scanning the large daily_messages table.
 """
 
 import logging
+import time
 import warnings
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -513,6 +514,8 @@ class DailyStatsRepository:
         Returns:
             Dict: Aggregate statistics.
         """
+        start_time = time.time()
+
         conditions = []
         params = []
 
@@ -585,6 +588,9 @@ class DailyStatsRepository:
 
         result = self.db.fetch_one(query, tuple(params))
 
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"get_batch_aggregates took {duration_ms:.2f}ms")
+
         if not result:
             return {
                 "total_messages": 0,
@@ -622,6 +628,7 @@ class DailyStatsRepository:
         Returns:
             bool: True if successful.
         """
+        start_time = time.time()
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -710,11 +717,13 @@ class DailyStatsRepository:
                     (now,) + params,
                 )
 
-            logger.info(f"Daily stats refreshed for {date or 'all dates'}")
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(f"refresh_stats took {duration_ms:.2f}ms for {date or 'all dates'}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to refresh daily stats: {e}")
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"Failed to refresh daily stats: {e} (took {duration_ms:.2f}ms)")
             return False
 
     def needs_refresh(self) -> bool:

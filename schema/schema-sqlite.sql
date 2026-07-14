@@ -1458,6 +1458,16 @@ CREATE INDEX idx_users_role ON users (role);
 
 CREATE INDEX idx_users_tenant ON users (tenant_id);
 
+--
+-- Indexes for user mapping optimization (Issue #1574)
+-- Optimize subqueries in get_batch_aggregates and refresh_stats
+-- that match sender_name to username or system_account
+--
+
+CREATE INDEX idx_users_username ON users (username);
+
+CREATE INDEX idx_users_system_account ON users (system_account);
+
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows (batch_id, batch_order);
 
 CREATE INDEX idx_workflows_parent ON autonomous_workflows (parent_workflow_id);

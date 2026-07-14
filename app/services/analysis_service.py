@@ -5,6 +5,7 @@ Business logic for usage analysis and reporting.
 """
 
 import logging
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -66,6 +67,7 @@ class AnalysisService:
         Returns:
             Dict: Combined analysis data.
         """
+        start_time = time.time()
         if not start_date:
             start_date = get_days_ago(30)
         if not end_date:
@@ -314,6 +316,9 @@ class AnalysisService:
                 segments["low"] += 1
 
         user_segmentation = segments
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"get_batch_analysis took {duration_ms:.2f}ms")
 
         return {
             "key_metrics": key_metrics,
