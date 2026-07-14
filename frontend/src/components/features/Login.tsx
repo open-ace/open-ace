@@ -205,7 +205,8 @@ export const Login: React.FC = () => {
 
   const handleSSOLogin = async (providerName: string) => {
     try {
-      const result = await ssoApi.startLogin(providerName);
+      const redirectUri = `${window.location.origin}/login`;
+      const result = await ssoApi.startLogin(providerName, redirectUri);
       window.location.href = result.authorization_url;
     } catch (err) {
       console.error('Failed to start SSO login:', err);

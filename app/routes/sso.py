@@ -920,18 +920,27 @@ def start_login(provider_name: str):
     Start SSO login flow.
 
     Returns the authorization URL to redirect the user.
+
+    Query Parameters:
+        redirect_uri: Frontend URL to redirect after successful SSO login.
+                      If not provided, falls back to FRONTEND_URL env var.
     """
-    # Get redirect URI from query params or use default
-    redirect_uri = request.args.get("redirect_uri")
+    # Get frontend redirect URI (for post-auth redirect)
+    frontend_redirect_uri = request.args.get("redirect_uri")
 
-    if not redirect_uri:
-        # Build default callback URL
-        redirect_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
+    # Build OAuth callback URL (this is where the provider redirects back to)
+    oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
-    result = get_sso_manager().start_authentication(provider_name, redirect_uri)
+    result = get_sso_manager().start_authentication(provider_name, oauth_callback_uri)
 
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
+
+    # Store frontend redirect URI in session for callback to use
+    if frontend_redirect_uri:
+        from flask import session as flask_session
+        flask_session["sso_frontend_redirect"] = frontend_redirect_uri
+        flask_session.permanent = True
 
     # For API clients, return the URL
     if request.args.get("json") or request.headers.get("Accept") == "application/json":
@@ -947,19 +956,25 @@ def callback(provider_name: str):
     Handle SSO callback.
 
     This endpoint receives the authorization code from the provider.
+    On success, redirects to frontend with session token.
     """
+    from flask import session as flask_session
+
     code = request.args.get("code")
     state = request.args.get("state")
     error = request.args.get("error")
     error_description = request.args.get("error_description")
 
-    frontend_url = _get_frontend_url()
+    # Get frontend redirect URI from session (set by start_login)
+    frontend_redirect_uri = flask_session.pop("sso_frontend_redirect", None)
+    # Fallback to environment variable
+    frontend_url = frontend_redirect_uri or _get_frontend_url()
 
     # Handle error from provider
     if error:
         logger.error(f"SSO error from {provider_name}: {error} - {error_description}")
         if frontend_url:
-            return redirect(f"{frontend_url}/login?sso_error=auth_failed")
+            return redirect(f"{frontend_url}?sso_error=auth_failed")
         return (
             jsonify(
                 {
@@ -972,26 +987,24 @@ def callback(provider_name: str):
 
     if not code or not state:
         if frontend_url:
-            return redirect(f"{frontend_url}/login?sso_error=invalid_request")
+            return redirect(f"{frontend_url}?sso_error=invalid_request")
         return jsonify({"error": "Missing code or state"}), 400
 
-    # Get redirect URI (should match what was used in start_login)
-    redirect_uri = request.args.get("redirect_uri") or url_for(
-        "sso.callback", provider_name=provider_name, _external=True
-    )
+    # Get OAuth callback URI (must match what was used in start_login)
+    oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
     # Complete authentication
     auth_result = get_sso_manager().complete_authentication(
         provider_name=provider_name,
         code=code,
         state=state,
-        redirect_uri=redirect_uri,
+        redirect_uri=oauth_callback_uri,
     )
 
     if not auth_result.success:
         if frontend_url:
             error_type = auth_result.error or "auth_failed"
-            return redirect(f"{frontend_url}/login?sso_error={error_type}")
+            return redirect(f"{frontend_url}?sso_error={error_type}")
         return (
             jsonify(
                 {
@@ -1055,7 +1068,7 @@ def callback(provider_name: str):
     # Redirect to frontend if configured, otherwise return JSON
     if frontend_url and session_token:
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
-        response = make_response(redirect(f"{frontend_url}/login?sso_success=1"))
+        response = make_response(redirect(f"{frontend_url}?sso_success=1"))
         response.set_cookie(
             "session_token",
             session_token,
