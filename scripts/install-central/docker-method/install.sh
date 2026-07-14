@@ -2626,7 +2626,8 @@ upgrade_deployment() {
     fi
 
     # 5.6. Check alembic_version table before recreating container (Issue #1192)
-    # This detects older databases that still need the baseline cutover path.
+    # Diagnostic: confirms migration metadata is present so the entrypoint's
+    # minimum-revision guard and alembic upgrade can run cleanly.
     print_info "检查数据库 migration 状态..."
     local alembic_exists=""
     alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
@@ -2637,7 +2638,7 @@ upgrade_deployment() {
         export ALEMBIC_VERSION_EXISTS="yes"
     else
         print_warning "alembic_version 表不存在"
-        print_info "数据库可能是旧版本升级，需要在容器重启后执行 baseline cutover 和 Alembic upgrade"
+        print_info "数据库可能是旧版本升级，容器重启后 entrypoint 将执行最低 revision 检查和 Alembic upgrade"
         export ALEMBIC_VERSION_EXISTS="no"
     fi
 
@@ -2671,11 +2672,12 @@ upgrade_deployment() {
     fi
 
     # 7. Fix alembic_version if missing (Issue #1192)
-    # For legacy databases, docker-entrypoint.sh now runs the baseline cutover
-    # helper before Alembic upgrade. We verify that the migration metadata
-    # exists after container restart and offer a manual recovery path if needed.
+    # docker-entrypoint.sh runs a minimum-revision check before Alembic
+    # upgrade. We verify that the migration metadata exists after container
+    # restart and offer a manual recovery path if the entrypoint did not
+    # create it (e.g. a pre-baseline database that the guard rejected).
     if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
-        print_info "验证 baseline cutover 是否已由 entrypoint 自动处理..."
+        print_info "验证最低 revision 检查与 Alembic upgrade 是否已由 entrypoint 自动处理..."
         local alembic_fixed=""
         alembic_fixed=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
             "SELECT 1 FROM information_schema.tables WHERE table_name = 'alembic_version';" 2>/dev/null | tr -d '[:space:]')
@@ -2683,11 +2685,12 @@ upgrade_deployment() {
         if [ "$alembic_fixed" = "1" ]; then
             print_success "alembic_version 表已自动创建"
         else
-            print_warning "alembic_version 表仍然缺失，尝试手动修复..."
+            print_warning "alembic_version 表仍然缺失，手动重跑最低 revision 校验与 Alembic upgrade..."
             docker compose exec -T open-ace sh -c \
-                "python3 scripts/cutover_alembic_baseline.py && alembic upgrade head" 2>&1 || {
-                print_error "baseline cutover / alembic upgrade 失败，请检查日志"
-                print_info "可能需要手动执行: docker compose exec open-ace sh -c 'python3 scripts/cutover_alembic_baseline.py && alembic upgrade head'"
+                "python3 scripts/check_min_revision.py && alembic upgrade head" 2>&1 || {
+                print_error "最低 revision 校验 / alembic upgrade 失败，请检查日志"
+                print_info "可能需要手动执行: docker compose exec open-ace sh -c 'python3 scripts/check_min_revision.py && alembic upgrade head'"
+                print_info "若数据库仍停留在 baseline_2026_06_23 之前的 revision，该命令无法修复，需先从已知健康备份恢复"
             }
         fi
     fi

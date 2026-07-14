@@ -29,27 +29,25 @@ docker compose up -d --build
 
 1. 等待 PostgreSQL 就绪
 2. 检查数据库是否已存在应用 schema
-3. 对历史数据库先运行 `scripts/cutover_alembic_baseline.py`，必要时补齐正式 schema 并统一切换到 `baseline_2026_06_23`
+3. 运行 `scripts/check_min_revision.py` 校验当前 revision 是否在受支持的迁移链上（全新库自动放行）
 4. 执行 `alembic upgrade head`
 5. 对全新数据库创建默认管理员账号
 
 无需手动执行 SQL 或迁移命令。
 
-### 旧库升级行为说明
+### 最低支持升级起点
 
-对基线前的历史数据库，`docker-entrypoint.sh` 现在优先选择“安全失败”而不是继续沿用旧的自动缺表修复逻辑：
+**最低支持升级起点为 `baseline_2026_06_23`。**
 
-- 如果数据库仅缺少 `compliance_reports`、`tool_account_mapping_rules` 或相关补齐列，`scripts/cutover_alembic_baseline.py` 会自动补齐并切到 `baseline_2026_06_23`
-- 如果还缺少更多正式产品表，cutover 会直接失败并阻止容器继续启动，避免在不完整 schema 上继续运行
+- 若数据库已处于 `baseline_2026_06_23` 或之后的任意 revision，容器启动时 `check_min_revision.py` 会放行并继续 `alembic upgrade head`
+- 若数据库仍停留在基线之前的 revision（如历史 hash），`check_min_revision.py` 会直接报错并阻止容器继续启动，避免在不支持的迁移路径上继续运行
 
-遇到这类失败时，建议先进入容器或应用目录执行：
+遇到这类失败时，说明该数据库已偏离受支持的迁移路径，需先从已知健康备份（已位于 `baseline_2026_06_23` 链上）恢复后再升级。
 
 ```bash
-python3 scripts/cutover_alembic_baseline.py
-python3 -m alembic upgrade head
+# 校验当前 revision 是否受支持
+docker compose exec open-ace sh -c 'python3 scripts/check_min_revision.py && alembic upgrade head'
 ```
-
-若 cutover 仍报 “Formal baseline tables are still missing”，说明该数据库已经偏离受支持的历史迁移路径，需要先人工核查缺失表和历史 revision，再决定是补齐 schema 还是从已知健康备份恢复。
 
 ## 生产环境部署
 

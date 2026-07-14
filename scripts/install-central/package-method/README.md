@@ -139,7 +139,7 @@ EOF
 1. **PostgreSQL**: 创建数据库用户和数据库，执行 `schema/schema-postgres.sql` 创建当前 head schema，然后使用 `alembic stamp head` 标记版本
 2. **SQLite**: 执行 `schema/schema-sqlite.sql` 创建当前 head schema
 
-已有数据库升级时，安装脚本会先运行 `scripts/cutover_alembic_baseline.py`。如果数据库还停留在基线之前的历史 revision，脚本会先补齐正式 schema，再统一切换到 `baseline_2026_06_23`。
+已有数据库升级时，安装脚本会先运行 `scripts/check_min_revision.py` 校验当前 revision 是否在受支持的迁移链上。**最低支持升级起点为 `baseline_2026_06_23`**；若数据库仍停留在基线之前的 revision，升级会直接报错终止，请先从已知健康备份恢复后再升级。
 
 ### psycopg2 安装
 
