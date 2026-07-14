@@ -38,6 +38,7 @@ export {
   useDeleteFilterRule,
   useSecuritySettings,
   useUpdateSecuritySettings,
+  usePasswordPolicy,
   useAuditThresholds,
   useUpdateAuditThresholds,
   useAiAgentSettings,

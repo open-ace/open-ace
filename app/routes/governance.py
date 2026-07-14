@@ -565,3 +565,29 @@ def api_update_security_settings():
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to update security settings"}), 500
+
+
+# ============================================================================
+# Password Policy (accessible to all authenticated users)
+# ============================================================================
+
+
+@governance_bp.route("/password-policy", methods=["GET"])
+@auth_required
+def api_get_password_policy():
+    """Get password policy settings.
+
+    Returns password policy fields for regular users to display
+    password requirements in UI. This endpoint is accessible to
+    all authenticated users, not just admins.
+
+    Returns:
+        JSON response with password policy fields:
+        - password_min_length: Minimum password length
+        - password_require_uppercase: Whether uppercase letters required
+        - password_require_lowercase: Whether lowercase letters required
+        - password_require_number: Whether numbers required
+        - password_require_special: Whether special characters required
+    """
+    policy = governance_repo.get_password_policy()
+    return jsonify(policy)

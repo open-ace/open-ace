@@ -79,6 +79,14 @@ export interface SecuritySettings {
   ip_whitelist: string[];
 }
 
+export interface PasswordPolicy {
+  password_min_length: number;
+  password_require_uppercase: boolean;
+  password_require_lowercase: boolean;
+  password_require_number: boolean;
+  password_require_special: boolean;
+}
+
 // API
 export const governanceApi = {
   // Audit Logs
@@ -131,5 +139,10 @@ export const governanceApi = {
 
   async updateSecuritySettings(data: Partial<SecuritySettings>): Promise<{ success: boolean }> {
     return apiClient.put<{ success: boolean }>('/api/security-settings', data);
+  },
+
+  // Password Policy (accessible to all authenticated users)
+  async getPasswordPolicy(): Promise<PasswordPolicy> {
+    return apiClient.get<PasswordPolicy>('/api/password-policy');
   },
 };

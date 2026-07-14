@@ -465,3 +465,86 @@ class TestSecuritySettings:
         with patch("app.repositories.governance_repo.CONFIG_DIR", "/nonexistent"):
             result = self.repo.update_security_settings({"key": "val"})
         assert result is False
+
+
+class TestPasswordPolicy:
+    """Tests for password policy retrieval (Issue #1647)."""
+
+    def setup_method(self):
+        self.db = MagicMock()
+        self.db.is_postgresql = False
+        self.repo = GovernanceRepository(db=self.db)
+
+    def test_get_password_policy_returns_subset_only(self):
+        """Verify password policy only returns password-related fields."""
+        self.db.fetch_all.return_value = [
+            {"setting_key": "password_min_length", "setting_value": "10"},
+            {"setting_key": "password_require_uppercase", "setting_value": "true"},
+            {"setting_key": "session_timeout", "setting_value": "60"},
+        ]
+        result = self.repo.get_password_policy()
+        assert "password_min_length" in result
+        assert "password_require_uppercase" in result
+        assert "session_timeout" not in result
+        assert len(result) == 5  # Only 5 password fields
+
+    def test_get_password_policy_excludes_non_password_fields(self):
+        """Verify system security fields are not returned."""
+        self.db.fetch_all.return_value = [
+            {"setting_key": "session_timeout", "setting_value": "60"},
+            {"setting_key": "max_login_attempts", "setting_value": "10"},
+            {"setting_key": "two_factor_enabled", "setting_value": "true"},
+            {"setting_key": "ip_whitelist", "setting_value": '["192.168.1.1"]'},
+            {"setting_key": "audit_failed_login_threshold", "setting_value": "5"},
+        ]
+        result = self.repo.get_password_policy()
+        assert "session_timeout" not in result
+        assert "max_login_attempts" not in result
+        assert "two_factor_enabled" not in result
+        assert "ip_whitelist" not in result
+        assert "audit_failed_login_threshold" not in result
+        # Should still have all 5 password fields
+        assert len(result) == 5
+
+    def test_get_password_policy_default_values(self):
+        """Verify default values when no database data."""
+        self.db.fetch_all.side_effect = Exception("Table not found")
+        with patch("app.repositories.governance_repo.SETTINGS_FILE", "/nonexistent/file.json"):
+            with patch("app.repositories.governance_repo.CONFIG_DIR", "/nonexistent"):
+                result = self.repo.get_password_policy()
+        assert result["password_min_length"] == 8
+        assert result["password_require_uppercase"] is True
+        assert result["password_require_lowercase"] is True
+        assert result["password_require_number"] is True
+        assert result["password_require_special"] is False
+
+    def test_get_password_policy_extracts_from_security_settings(self):
+        """Verify password policy is extracted from full security settings."""
+        self.db.fetch_all.return_value = [
+            {"setting_key": "password_min_length", "setting_value": "12"},
+            {"setting_key": "password_require_uppercase", "setting_value": "true"},
+            {"setting_key": "password_require_lowercase", "setting_value": "false"},
+            {"setting_key": "password_require_number", "setting_value": "true"},
+            {"setting_key": "password_require_special", "setting_value": "true"},
+        ]
+        result = self.repo.get_password_policy()
+        assert result["password_min_length"] == 12
+        assert result["password_require_uppercase"] is True
+        assert result["password_require_lowercase"] is False
+        assert result["password_require_number"] is True
+        assert result["password_require_special"] is True
+
+    def test_get_password_policy_all_fields_present(self):
+        """Verify all 5 password policy fields are always present."""
+        self.db.fetch_all.return_value = []
+        with patch("app.repositories.governance_repo.SETTINGS_FILE", "/nonexistent/file.json"):
+            with patch("app.repositories.governance_repo.CONFIG_DIR", "/nonexistent"):
+                result = self.repo.get_password_policy()
+        expected_keys = {
+            "password_min_length",
+            "password_require_uppercase",
+            "password_require_lowercase",
+            "password_require_number",
+            "password_require_special",
+        }
+        assert set(result.keys()) == expected_keys

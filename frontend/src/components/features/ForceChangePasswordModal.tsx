@@ -7,14 +7,14 @@
 
 import React, { useState } from 'react';
 import { Modal, Button, TextInput, PasswordPolicyHint } from '@/components/common';
-import { useAuth, useLanguage, useMustChangePassword, useSecuritySettings } from '@/hooks';
+import { useAuth, useLanguage, useMustChangePassword, usePasswordPolicy } from '@/hooks';
 import { t } from '@/i18n';
 
 export const ForceChangePasswordModal: React.FC = () => {
   const language = useLanguage();
   const mustChangePassword = useMustChangePassword();
   const { changePassword, isChangingPassword, changePasswordError } = useAuth();
-  const { data: securitySettings } = useSecuritySettings();
+  const { data: passwordPolicy } = usePasswordPolicy();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -39,7 +39,7 @@ export const ForceChangePasswordModal: React.FC = () => {
       return;
     }
 
-    const minLength = securitySettings?.password_min_length ?? 8;
+    const minLength = passwordPolicy?.password_min_length ?? 8;
     if (newPassword.length < minLength) {
       setError(
         t('passwordTooShort', language) ?? `Password must be at least ${minLength} characters`

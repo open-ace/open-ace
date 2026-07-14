@@ -42,6 +42,7 @@ export type {
   CreateFilterRuleRequest,
   FilterCheckResult,
   SecuritySettings,
+  PasswordPolicy,
 } from './governance';
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';
