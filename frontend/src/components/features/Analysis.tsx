@@ -19,7 +19,7 @@ import {
   DoughnutChart,
   SimpleTabs,
 } from '@/components/common';
-import { formatTokens, formatDate, formatToolName } from '@/utils';
+import { formatTokens, formatDate, formatToolName, formatHourRange } from '@/utils';
 import {
   useKeyMetrics,
   useDailyHourlyUsage,
@@ -406,17 +406,12 @@ export const Analysis: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {peakUsage.peak_hours.slice(0, 5).map((hour, index) => {
-                          const start = hour.hour.toString().padStart(2, '0') + ':00';
-                          const endHour = hour.hour === 23 ? 0 : hour.hour + 1;
-                          const end = endHour.toString().padStart(2, '0') + ':00';
-                          return (
-                            <tr key={index}>
-                              <td>{`${start}-${end}`}</td>
-                              <td>{formatTokens(hour.avg_tokens)}</td>
-                            </tr>
-                          );
-                        })}
+                        {peakUsage.peak_hours.slice(0, 5).map((hour, index) => (
+                          <tr key={index}>
+                            <td>{formatHourRange(hour.hour)}</td>
+                            <td>{formatTokens(hour.avg_tokens)}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

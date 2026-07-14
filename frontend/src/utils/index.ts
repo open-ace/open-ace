@@ -14,6 +14,7 @@ export {
   formatBytes,
   formatDuration,
   formatChartDate,
+  formatHourRange,
   displaySessionId,
 } from './format';
 export {

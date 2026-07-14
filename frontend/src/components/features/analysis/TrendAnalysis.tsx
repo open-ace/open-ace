@@ -32,7 +32,7 @@ import {
   Skeleton,
   PageRefreshControl,
 } from '@/components/common';
-import { formatTokens, formatToolName, createMatcherConfig } from '@/utils';
+import { formatTokens, formatToolName, createMatcherConfig, formatHourRange } from '@/utils';
 import { useBatchAnalysis, useHosts, useTools, usePageRefresh } from '@/hooks';
 import { SessionStatisticsCard, calculateHealthScore } from './SessionStatisticsCard';
 
@@ -446,18 +446,13 @@ export const TrendAnalysis: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {peakUsage.peak_hours.slice(0, 10).map((hour, index) => {
-                      const start = hour.hour.toString().padStart(2, '0') + ':00';
-                      const endHour = hour.hour === 23 ? 0 : hour.hour + 1;
-                      const end = endHour.toString().padStart(2, '0') + ':00';
-                      return (
-                        <tr key={index}>
-                          <td>{index + 1}</td>
-                          <td>{`${start}-${end}`}</td>
-                          <td className="text-end">{formatTokens(hour.avg_tokens)}</td>
-                        </tr>
-                      );
-                    })}
+                    {peakUsage.peak_hours.slice(0, 10).map((hour, index) => (
+                      <tr key={index}>
+                        <td>{index + 1}</td>
+                        <td>{formatHourRange(hour.hour)}</td>
+                        <td className="text-end">{formatTokens(hour.avg_tokens)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
