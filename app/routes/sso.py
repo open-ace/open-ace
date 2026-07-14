@@ -6,12 +6,13 @@ API endpoints for Single Sign-On authentication.
 
 import json
 import logging
+import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
-from flask import Blueprint, g, jsonify, redirect, request, url_for
+from flask import Blueprint, g, jsonify, make_response, redirect, request, url_for
 
 from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
@@ -19,6 +20,7 @@ from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
+from app.services.auth_service import _get_session_timeout_hours
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,11 @@ def get_audit_logger():
     if _audit_logger is None:
         _audit_logger = AuditLogger()
     return _audit_logger
+
+
+def _get_frontend_url() -> str:
+    """Get frontend URL from environment variable."""
+    return os.environ.get("FRONTEND_URL", "")
 
 
 user_repo = UserRepository()
@@ -946,9 +953,13 @@ def callback(provider_name: str):
     error = request.args.get("error")
     error_description = request.args.get("error_description")
 
+    frontend_url = _get_frontend_url()
+
     # Handle error from provider
     if error:
         logger.error(f"SSO error from {provider_name}: {error} - {error_description}")
+        if frontend_url:
+            return redirect(f"{frontend_url}/login?sso_error=auth_failed")
         return (
             jsonify(
                 {
@@ -960,6 +971,8 @@ def callback(provider_name: str):
         )
 
     if not code or not state:
+        if frontend_url:
+            return redirect(f"{frontend_url}/login?sso_error=invalid_request")
         return jsonify({"error": "Missing code or state"}), 400
 
     # Get redirect URI (should match what was used in start_login)
@@ -976,6 +989,9 @@ def callback(provider_name: str):
     )
 
     if not auth_result.success:
+        if frontend_url:
+            error_type = auth_result.error or "auth_failed"
+            return redirect(f"{frontend_url}/login?sso_error={error_type}")
         return (
             jsonify(
                 {
@@ -1025,14 +1041,32 @@ def callback(provider_name: str):
             expires_in=auth_result.token.expires_in,
         )
 
-        # Also create local session
+        # Also create local session with correct expiration time
+        timeout_hours = _get_session_timeout_hours()
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
         UserRepository().create_session(
             user_id=user_id,
             token=session_token,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            expires_at=expires_at,
         )
 
-    # Return result
+    # Redirect to frontend if configured, otherwise return JSON
+    if frontend_url and session_token:
+        timeout_seconds = int(_get_session_timeout_hours() * 3600)
+        response = make_response(redirect(f"{frontend_url}/login?sso_success=1"))
+        response.set_cookie(
+            "session_token",
+            session_token,
+            max_age=timeout_seconds,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure,
+        )
+        return response
+
+    # Return result (fallback for API calls or missing session_token)
     return jsonify(
         {
             "success": True,

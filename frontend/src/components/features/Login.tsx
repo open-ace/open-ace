@@ -30,6 +30,10 @@ const translations: Record<Language, Record<string, string>> = {
     copyright: '© 2026 Open ACE. All rights reserved.',
     orSignInWith: 'Or sign in with',
     signInWith: 'Sign in with',
+    ssoLoginSuccess: 'SSO login successful! Redirecting...',
+    ssoLoginFailed: 'SSO login failed. Please try again.',
+    ssoAuthFailed: 'SSO authentication failed.',
+    ssoInvalidRequest: 'Invalid SSO request.',
   },
   zh: {
     title: 'Open ACE',
@@ -48,6 +52,10 @@ const translations: Record<Language, Record<string, string>> = {
     copyright: '© 2026 Open ACE. 保留所有权利。',
     orSignInWith: '或使用以下方式登录',
     signInWith: '使用',
+    ssoLoginSuccess: 'SSO 登录成功！正在跳转...',
+    ssoLoginFailed: 'SSO 登录失败，请重试。',
+    ssoAuthFailed: 'SSO 认证失败。',
+    ssoInvalidRequest: '无效的 SSO 请求。',
   },
   ja: {
     title: 'Open ACE',
@@ -66,6 +74,10 @@ const translations: Record<Language, Record<string, string>> = {
     copyright: '© 2026 Open ACE. All rights reserved.',
     orSignInWith: 'または以下でサインイン',
     signInWith: 'サインイン',
+    ssoLoginSuccess: 'SSOログイン成功！リダイレクト中...',
+    ssoLoginFailed: 'SSOログインに失敗しました。もう一度お試しください。',
+    ssoAuthFailed: 'SSO認証に失敗しました。',
+    ssoInvalidRequest: '無効なSSOリクエストです。',
   },
   ko: {
     title: 'Open ACE',
@@ -84,6 +96,10 @@ const translations: Record<Language, Record<string, string>> = {
     copyright: '© 2026 Open ACE. All rights reserved.',
     orSignInWith: '또는 다음으로 로그인',
     signInWith: '로그인',
+    ssoLoginSuccess: 'SSO 로그인 성공! 리디렉션 중...',
+    ssoLoginFailed: 'SSO 로그인 실패. 다시 시도하세요.',
+    ssoAuthFailed: 'SSO 인증 실패.',
+    ssoInvalidRequest: '잘못된 SSO 요청.',
   },
 };
 
@@ -119,6 +135,39 @@ export const Login: React.FC = () => {
 
   // Check if already authenticated
   useEffect(() => {
+    // Handle SSO callback parameters
+    const params = new URLSearchParams(window.location.search);
+    const ssoSuccess = params.get('sso_success');
+    const ssoError = params.get('sso_error');
+
+    // Clean up URL parameters
+    if (ssoSuccess || ssoError) {
+      window.history.replaceState({}, '', '/login');
+    }
+
+    // Handle SSO success - session cookie is already set by backend
+    if (ssoSuccess === '1') {
+      setSuccess(getTranslation('ssoLoginSuccess', language));
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+      return;
+    }
+
+    // Handle SSO error
+    if (ssoError) {
+      switch (ssoError) {
+        case 'auth_failed':
+          setError(getTranslation('ssoAuthFailed', language));
+          break;
+        case 'invalid_request':
+          setError(getTranslation('ssoInvalidRequest', language));
+          break;
+        default:
+          setError(getTranslation('ssoLoginFailed', language));
+      }
+    }
+
     if (isAuthenticated) {
       navigate('/');
     }
@@ -126,7 +175,7 @@ export const Login: React.FC = () => {
     // Check if default credentials should be shown (development mode)
     const isDev = import.meta.env.DEV;
     setShowDefaultCredentials(isDev);
-  }, [navigate, isAuthenticated]);
+  }, [navigate, isAuthenticated, language]);
 
   // Fetch SSO configuration for default tenant (tenant_id = 1)
   useEffect(() => {
