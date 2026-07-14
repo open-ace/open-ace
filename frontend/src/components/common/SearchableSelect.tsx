@@ -21,9 +21,9 @@ interface SearchableSelectProps {
 }
 
 const sizeClasses: Record<string, string> = {
-  sm: 'form-select-sm',
+  sm: 'form-control-sm',
   md: '',
-  lg: 'form-select-lg',
+  lg: 'form-control-lg',
 };
 
 export const SearchableSelect: React.FC<SearchableSelectProps> = ({
@@ -100,7 +100,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       <button
         type="button"
         className={cn(
-          'form-select text-start d-flex justify-content-between align-items-center',
+          'form-control text-start d-flex justify-content-between align-items-center',
           sizeClasses[size],
           disabled && 'disabled'
         )}
