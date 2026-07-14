@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.2.0] - 2026-07-14
+
 ### Fixed
 - 管理-设置-模型网关配置页面深色模式对比度问题：状态提示框（"网关路由未启用"警告与"已启用"成功状态）文字与背景对比度不足，新增 `--color-{success,warning,danger,info}-{bg,text}` CSS 变量并在深色模式下使用低透明度语义背景 + 明亮文字色，确保 WCAG AA ≥ 4.5:1。
 
@@ -117,5 +119,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 [v1.1.0]: https://github.com/open-ace/open-ace/releases/tag/v1.1.0
-[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.1.0...HEAD
+[v1.2.0]: https://github.com/open-ace/open-ace/releases/tag/v1.2.0
+[Unreleased]: https://github.com/open-ace/open-ace/compare/v1.2.0...HEAD
 [1.0.0]: https://github.com/open-ace/open-ace/releases/tag/v1.0.0
