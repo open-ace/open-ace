@@ -303,6 +303,10 @@ class GovernanceRepository:
         This is used by the /api/password-policy endpoint which is accessible
         to all authenticated users (not just admins).
 
+        Defaults are owned by ``get_security_settings()`` (its
+        ``default_settings`` always contains these keys), so they are read
+        directly here without duplicating fallback values.
+
         Returns:
             Dict: Password policy settings with 5 fields:
                 - password_min_length: Minimum password length
@@ -312,13 +316,14 @@ class GovernanceRepository:
                 - password_require_special: Whether special characters required
         """
         settings = self.get_security_settings()
-        return {
-            "password_min_length": settings.get("password_min_length", 8),
-            "password_require_uppercase": settings.get("password_require_uppercase", True),
-            "password_require_lowercase": settings.get("password_require_lowercase", True),
-            "password_require_number": settings.get("password_require_number", True),
-            "password_require_special": settings.get("password_require_special", False),
-        }
+        password_keys = (
+            "password_min_length",
+            "password_require_uppercase",
+            "password_require_lowercase",
+            "password_require_number",
+            "password_require_special",
+        )
+        return {k: settings[k] for k in password_keys}
 
     def update_security_settings(self, settings: dict[str, Any]) -> bool:
         """

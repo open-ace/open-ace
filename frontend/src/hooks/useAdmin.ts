@@ -16,7 +16,6 @@ import type {
   AuditLogFilters,
   CreateFilterRuleRequest,
   SecuritySettings,
-
   AuditThresholds,
 } from '@/api';
 
