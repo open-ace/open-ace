@@ -508,7 +508,7 @@ export const ComplianceMgmt: React.FC = () => {
                 <div
                   className={cn(
                     'report-type-card p-3 border rounded cursor-pointer',
-                    selectedType === type.type && 'border-primary bg-light'
+                    selectedType === type.type && 'report-type-card-selected border-primary'
                   )}
                   onClick={() => setSelectedType(type.type)}
                   style={{ cursor: 'pointer' }}

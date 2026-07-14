@@ -1334,6 +1334,22 @@ link[rel='dns-prefetch'] {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
+/* Compliance report type card — theme-aware selected background (Issue #1660)
+   Replaces Bootstrap .bg-light which stays white (#f8f9fa) in dark mode. */
+.report-type-card-selected {
+  background-color: var(--bg-secondary);
+}
+[data-theme='dark'] .report-type-card-selected {
+  background-color: var(--bg-tertiary);
+}
+
+/* StatCard default variant (.bg-light) — darken in dark mode (Issue #1660)
+   The default StatCard uses Bootstrap .bg-light which stays #f8f9fa in dark mode. */
+[data-theme='dark'] .stat-card.bg-light {
+  background-color: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+}
+
 .dashboard-section h5 {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
