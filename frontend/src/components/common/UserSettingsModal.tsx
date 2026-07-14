@@ -14,7 +14,7 @@ import {
 import { authApi } from '@/api/auth';
 import { t } from '@/i18n';
 import { useToast } from './Toast';
-import { useAuth, useSecuritySettings } from '@/hooks';
+import { useAuth, usePasswordPolicy } from '@/hooks';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -26,7 +26,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
   const user = useUser();
   const toast = useToast();
   const { changePassword, isChangingPassword, changePasswordError } = useAuth();
-  const { data: securitySettings } = useSecuritySettings();
+  const { data: passwordPolicy } = usePasswordPolicy();
   const autoFullscreenOnEnterChat = useAutoFullscreenOnEnterChat();
   const enableTabNotifications = useEnableTabNotifications();
   const showFileChangesPanel = useShowFileChangesPanel();
@@ -58,7 +58,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
       return;
     }
 
-    const minLength = securitySettings?.password_min_length ?? 8;
+    const minLength = passwordPolicy?.password_min_length ?? 8;
     if (newPassword.length < minLength) {
       setPasswordError(
         t('passwordTooShort', language) ?? `Password must be at least ${minLength} characters`
@@ -92,7 +92,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({ isOpen, on
     newPassword,
     confirmPassword,
     changePassword,
-    securitySettings,
+    passwordPolicy,
     toast,
     language,
   ]);

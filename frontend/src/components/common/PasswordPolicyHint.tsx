@@ -4,12 +4,12 @@
 
 import React from 'react';
 import { useLanguage } from '@/store';
-import { useSecuritySettings } from '@/hooks';
+import { usePasswordPolicy } from '@/hooks';
 import { t } from '@/i18n';
 
 export const PasswordPolicyHint: React.FC = () => {
   const language = useLanguage();
-  const { data: policy } = useSecuritySettings();
+  const { data: policy } = usePasswordPolicy();
 
   if (!policy) return null;
 

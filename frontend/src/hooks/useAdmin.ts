@@ -16,6 +16,7 @@ import type {
   AuditLogFilters,
   CreateFilterRuleRequest,
   SecuritySettings,
+
   AuditThresholds,
 } from '@/api';
 
@@ -175,7 +176,17 @@ export function useUpdateSecuritySettings() {
     mutationFn: (data: Partial<SecuritySettings>) => governanceApi.updateSecuritySettings(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'security-settings'] });
+      // Also invalidate password policy cache so regular users see updated policy
+      queryClient.invalidateQueries({ queryKey: ['password-policy'] });
     },
+  });
+}
+
+// Password Policy Hooks (accessible to all authenticated users)
+export function usePasswordPolicy() {
+  return useQuery({
+    queryKey: ['password-policy'],
+    queryFn: () => governanceApi.getPasswordPolicy(),
   });
 }
 
