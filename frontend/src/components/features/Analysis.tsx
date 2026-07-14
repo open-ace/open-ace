@@ -18,6 +18,7 @@ import {
   LineChart,
   DoughnutChart,
   SimpleTabs,
+  DatePicker,
 } from '@/components/common';
 import { formatTokens, formatDate, formatToolName, formatHourRange } from '@/utils';
 import {
@@ -231,24 +232,20 @@ export const Analysis: React.FC = () => {
           {/* Date Range */}
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={startDate}
-              onChange={(e) => {
-                setStartDate(e.target.value);
+              onChange={(v) => {
+                setStartDate(v);
                 setQuickRange('all');
               }}
             />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
+            <DatePicker
               value={endDate}
-              onChange={(e) => {
-                setEndDate(e.target.value);
+              onChange={(v) => {
+                setEndDate(v);
                 setQuickRange('all');
               }}
             />

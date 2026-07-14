@@ -30,6 +30,7 @@ import {
   EmptyState,
   Pagination,
   PageRefreshControl,
+  DatePicker,
 } from '@/components/common';
 import {
   formatDateTime,
@@ -209,20 +210,16 @@ export const Messages: React.FC = () => {
               {t('dateRange', language)}
             </label>
             <div className="messages-filter-dates-inputs">
-              <input
-                type="date"
-                className="form-control form-control-sm"
+              <DatePicker
                 value={filters.startDate ?? ''}
-                aria-label={t('startDate', language)}
-                onChange={(e) => handleFilterChange('startDate', e.target.value)}
+                onChange={(v) => handleFilterChange('startDate', v)}
+                placeholder={t('startDate', language)}
               />
               <span className="messages-filter-dates-separator">~</span>
-              <input
-                type="date"
-                className="form-control form-control-sm"
+              <DatePicker
                 value={filters.endDate ?? ''}
-                aria-label={t('endDate', language)}
-                onChange={(e) => handleFilterChange('endDate', e.target.value)}
+                onChange={(v) => handleFilterChange('endDate', v)}
+                placeholder={t('endDate', language)}
               />
             </div>
           </div>

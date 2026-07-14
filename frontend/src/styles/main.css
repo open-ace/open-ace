@@ -230,6 +230,12 @@
 [data-theme='dark'],
 [data-bs-theme='dark'],
 .dark-theme {
+  /* Tell the browser to render native UI controls (date picker popups,
+     scrollbars, select dropdowns, etc.) in dark mode. Without this, native
+     widgets like <input type="date"> calendar popups stay white on dark
+     backgrounds. */
+  color-scheme: dark;
+
   --bg-primary: #0f172a;
   --bg-secondary: #1e293b;
   --bg-tertiary: #334155;
@@ -1166,6 +1172,157 @@ link[rel='dns-prefetch'] {
   .date-input-narrow
   .form-control::-webkit-calendar-picker-indicator {
   filter: var(--date-input-calendar-icon-filter, invert(1));
+}
+
+/* Dark theme — native date/time inputs
+   ──────────────────────────────────────────────────────────────────────────
+   Firefox renders the date-picker popup in a separate document that does
+   NOT inherit `color-scheme` from <html>. Setting `color-scheme: dark`
+   directly on the <input> forces the popup to use dark colours in Firefox
+   (118+) as well as Chromium.
+   We also style the input itself so it looks correct on dark backgrounds. */
+[data-theme='dark'] input[type='date'],
+[data-theme='dark'] input[type='datetime-local'],
+[data-theme='dark'] input[type='month'],
+[data-theme='dark'] input[type='week'],
+[data-theme='dark'] input[type='time'] {
+  color-scheme: dark;
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color, #334155);
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] input[type='date']:focus,
+[data-theme='dark'] input[type='datetime-local']:focus,
+[data-theme='dark'] input[type='month']:focus,
+[data-theme='dark'] input[type='week']:focus,
+[data-theme='dark'] input[type='time']:focus {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--color-primary, #38bdf8);
+  color: var(--text-primary, #f8fafc);
+}
+/* Invert the calendar-picker indicator so it is visible on dark backgrounds */
+[data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator,
+[data-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.7);
+  cursor: pointer;
+}
+
+/* ── Custom DatePicker — dark-mode popup ─────────────────────────────────── */
+/* react-datepicker renders its calendar in a portal. We theme it via the
+   calendarClassName "open-ace-datepicker-calendar" so it matches the app's
+   dark mode regardless of the browser's native date-picker behaviour. */
+
+/* Light-mode base — clean, neutral look */
+.open-ace-datepicker-calendar {
+  font-family: var(--font-family);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Trigger button — Bootstrap form-control look */
+.open-ace-datepicker .form-control {
+  background-color: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #dee2e6);
+  color: var(--text-primary, #212529);
+}
+.open-ace-datepicker .form-control:hover:not(:disabled) {
+  border-color: var(--color-primary, #0ea5e9);
+}
+
+/* Dark-mode popup */
+[data-theme='dark'] .open-ace-datepicker-calendar {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color-dark, #475569);
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__header {
+  background-color: var(--bg-tertiary, #334155);
+  border-bottom-color: var(--border-color, #334155);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__current-month,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day-name,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__time-name {
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-text:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__quarter-text:hover {
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #fff;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--selected:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected:hover {
+  background-color: #0369a1 !important;
+  color: #ffffff !important;
+  border-radius: 0.3rem;
+  font-weight: 600;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--today {
+  font-weight: 700;
+  color: var(--color-primary, #38bdf8);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--outside-month {
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.5;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__navigation-icon::before {
+  border-color: var(--text-secondary, #cbd5e1);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__navigation:hover *::before {
+  border-color: var(--color-primary, #38bdf8);
+}
+/* Month / Year dropdowns in the header — dark mode */
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown-container,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown-container {
+  margin: 0 2px;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-read-view,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-read-view {
+  color: var(--text-primary, #f8fafc);
+  background-color: var(--bg-tertiary, #334155);
+  border: 1px solid var(--border-color, #475569);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown {
+  background-color: var(--bg-secondary, #1e293b);
+  border: 1px solid var(--border-color-dark, #475569);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option {
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option--selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option--selected {
+  background-color: #0369a1;
+  color: #fff;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-option--selected::after,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-option--selected::after {
+  left: 8px;
+  color: #fff;
+}
+/* Dropdown arrow in read-view */
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-dropdown-arrow svg,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__year-dropdown-arrow svg {
+  fill: var(--text-secondary, #cbd5e1);
+}
+[data-theme='dark'] .open-ace-datepicker .form-control {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color, #334155);
+  color: var(--text-primary, #f8fafc);
 }
 
 .page-header-controls .btn {

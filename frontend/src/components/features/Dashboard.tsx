@@ -21,8 +21,8 @@ import {
   TokenTrendChart,
   TokenDistributionChart,
   DashboardSkeleton,
-  TextInput,
   StatCard,
+  DatePicker,
 } from '@/components/common';
 import { formatTokens, TOOL_DISPLAY_NAMES } from '@/utils';
 import type { ToolUsage, ToolSummary } from '@/types';
@@ -303,22 +303,20 @@ export const Dashboard: React.FC = () => {
               />
               {useCustomRange && (
                 <>
-                  <TextInput
-                    type="date"
+                  <DatePicker
                     value={customStartDate}
                     onChange={handleStartDateChange}
                     className="date-input-narrow"
-                    aria-label={t('startDate', language)}
+                    placeholder={t('startDate', language)}
                   />
                   <span className="text-muted" aria-hidden="true">
                     {t('dateRangeSeparator', language)}
                   </span>
-                  <TextInput
-                    type="date"
+                  <DatePicker
                     value={customEndDate}
                     onChange={handleEndDateChange}
                     className="date-input-narrow"
-                    aria-label={t('endDate', language)}
+                    placeholder={t('endDate', language)}
                   />
                   {dateError && (
                     <small className="text-danger" role="alert">

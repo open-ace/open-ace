@@ -29,6 +29,7 @@ import {
   Skeleton,
   SkeletonCard,
   PageRefreshControl,
+  DatePicker,
 } from '@/components/common';
 import {
   roiApi,
@@ -477,21 +478,11 @@ export const ROIAnalysis: React.FC = () => {
         <div className="row g-3">
           <div className="col-md-3">
             <label className="form-label">{t('startDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
+            <DatePicker value={startDate} onChange={setStartDate} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('endDate', language)}</label>
-            <input
-              type="date"
-              className="form-control"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+            <DatePicker value={endDate} onChange={setEndDate} />
           </div>
           <div className="col-md-3">
             <label className="form-label">{t('tableTool', language)}</label>

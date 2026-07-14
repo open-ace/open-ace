@@ -20,8 +20,8 @@ import {
   Error,
   EmptyState,
   Badge,
-  TextInput,
   PageRefreshControl,
+  DatePicker,
 } from '@/components/common';
 import { LazyLineChart, LazyBarChart } from '@/components/common/LazyCharts';
 import { getToolColor } from '@/components/common/chartColors';
@@ -321,15 +321,13 @@ export const RequestDashboard: React.FC = () => {
           </Button>
           {useCustomRange && (
             <div className="d-flex gap-2 align-items-center ms-2">
-              <TextInput
-                type="date"
+              <DatePicker
                 value={customStartDate}
                 onChange={setCustomStartDate}
                 placeholder={t('startDate', language)}
               />
               <span>-</span>
-              <TextInput
-                type="date"
+              <DatePicker
                 value={customEndDate}
                 onChange={setCustomEndDate}
                 placeholder={t('endDate', language)}
