@@ -35,6 +35,9 @@ vi.mock('@/i18n', () => ({
       invalidPageNumber: 'Please enter a valid page number (1-{total})',
       previousPage: 'Previous page',
       nextPage: 'Next page',
+      jumpButton: 'Go',
+      jumpButtonLabel: 'Go to specified page',
+      jumpInputGroupLabel: 'Page jump controls',
     };
     return translations[key] || key;
   },
@@ -307,6 +310,128 @@ describe('Pagination Component', () => {
         },
         { timeout: 3000 }
       );
+    });
+  });
+
+  describe('Jump button (Issue #1433)', () => {
+    it('should render jump button with correct aria-label', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      // Desktop version jump button
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      expect(jumpButtons.length).toBeGreaterThan(0);
+    });
+
+    it('should call onPageChange when clicking jump button', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '5' } });
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0]; // Desktop version
+      fireEvent.click(jumpButton);
+
+      expect(mockOnPageChange).toHaveBeenCalledWith(5);
+    });
+
+    it('should disable jump button when input is empty', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0]; // Desktop version
+      expect(jumpButton).toBeDisabled();
+    });
+
+    it('should disable jump button for invalid input (non-number)', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: 'abc' } });
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0];
+      expect(jumpButton).toBeDisabled();
+    });
+
+    it('should disable jump button when input exceeds max page', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '15' } });
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0];
+      expect(jumpButton).toBeDisabled();
+    });
+
+    it('should disable jump button when input equals current page', () => {
+      render(<Pagination currentPage={5} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '5' } });
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0];
+      expect(jumpButton).toBeDisabled();
+    });
+
+    it('should enable jump button for valid page number', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '5' } });
+
+      const jumpButtons = screen.getAllByRole('button', { name: /Go to specified page/i });
+      const jumpButton = jumpButtons[0];
+      expect(jumpButton).not.toBeDisabled();
+    });
+
+    it('should have pagination-jump-input class on input', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      expect(input).toHaveClass('pagination-jump-input');
+    });
+
+    it('should have role="group" on jump input container', () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      // Find the group by aria-label
+      const groups = screen.getAllByRole('group', { name: /Page jump controls/i });
+      expect(groups.length).toBeGreaterThan(0);
+    });
+
+    it('should have aria-describedby on input when error exists', async () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '15' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(input).toHaveAttribute('aria-describedby', 'pagination-error');
+      });
+    });
+
+    it('should have aria-invalid on input when error exists', async () => {
+      render(<Pagination currentPage={1} totalPages={10} onPageChange={mockOnPageChange} />);
+
+      const inputs = screen.getAllByRole('spinbutton', { name: /Go to page/i });
+      const input = inputs[0]; // Desktop version input
+      fireEvent.change(input, { target: { value: '15' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      await waitFor(() => {
+        expect(input).toHaveAttribute('aria-invalid', 'true');
+      });
     });
   });
 

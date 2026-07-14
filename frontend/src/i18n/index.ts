@@ -623,6 +623,9 @@ export const translations: Record<Language, Translations> = {
     invalidPageNumber: 'Please enter a valid page number (1-{total})',
     previousPage: 'Previous page',
     nextPage: 'Next page',
+    jumpButton: 'Go',
+    jumpButtonLabel: 'Go to specified page',
+    jumpInputGroupLabel: 'Page jump controls',
 
     // Prompts
     addPrompt: 'Add Prompt',
@@ -2254,6 +2257,9 @@ export const translations: Record<Language, Translations> = {
     invalidPageNumber: '请输入有效的页码 (1-{total})',
     previousPage: '上一页',
     nextPage: '下一页',
+    jumpButton: '跳转',
+    jumpButtonLabel: '跳转到指定页',
+    jumpInputGroupLabel: '页码跳转控制',
 
     // Prompts
     addPrompt: '添加提示词',
@@ -4066,6 +4072,9 @@ export const translations: Record<Language, Translations> = {
     invalidPageNumber: '有効なページ番号を入力してください (1-{total})',
     previousPage: '前のページ',
     nextPage: '次のページ',
+    jumpButton: '移動',
+    jumpButtonLabel: '指定ページに移動',
+    jumpInputGroupLabel: 'ページ移動コントロール',
 
     // Prompts
     addPrompt: 'プロンプト追加',
@@ -5537,6 +5546,9 @@ export const translations: Record<Language, Translations> = {
     lastPage: '마지막 페이지',
     previousPage: '이전 페이지',
     nextPage: '다음 페이지',
+    jumpButton: '이동',
+    jumpButtonLabel: '지정 페이지로 이동',
+    jumpInputGroupLabel: '페이지 이동 컨트롤',
 
     // Prompts
     addPrompt: '프롬프트 추가',
