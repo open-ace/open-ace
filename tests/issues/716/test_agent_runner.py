@@ -315,8 +315,16 @@ class TestAgentRunnerRunTask:
             for call in self.sm.update_session_fields.call_args_list
             if len(call.args) >= 2 and isinstance(call.args[1], dict) and "context" in call.args[1]
         ]
+        field_updates = [
+            call.args[1]
+            for call in self.sm.update_session_fields.call_args_list
+            if len(call.args) >= 2 and isinstance(call.args[1], dict)
+        ]
         assert any(
             (ctx or {}).get("cli_session_id") == "real-claude-session" for ctx in context_updates
+        )
+        assert any(
+            update.get("cli_session_id") == "real-claude-session" for update in field_updates
         )
 
     def test_local_claude_waits_for_late_session_detection(self):

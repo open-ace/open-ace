@@ -20,7 +20,11 @@ from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
 from app.modules.workspace.prompt_library import PromptCategory, PromptTemplate, get_prompt_library
-from app.modules.workspace.session_manager import SessionType, get_session_manager
+from app.modules.workspace.session_manager import (
+    SessionType,
+    get_session_manager,
+    visible_session_clause,
+)
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
@@ -557,6 +561,9 @@ def list_sessions():
         # escape_like not needed: hard-coded pattern, no user input
         base_conditions.append(f"session_id NOT LIKE {p}")
         base_params.append("webui:%")
+        visible_clause, visible_params = visible_session_clause()
+        base_conditions.append(visible_clause)
+        base_params.extend(visible_params)
 
         if user_id:
             base_conditions.append(f"user_id = {p}")

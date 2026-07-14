@@ -1,13 +1,9 @@
-"""Tests for milestone card session-id linking (issue #723, group D).
+"""Tests for milestone session identity on autonomous session lines.
 
-The milestone card's "view session" should point to the REAL claude session id,
-not the per-call wrapper uuid. Without this, all milestones sharing a session
-line (e.g. plan_created/plan_refined/dev on the "main" line) showed DIFFERENT
-ids (each call's wrapper uuid) even though they ran in the same claude session,
-and the card pointed to a session with no transcript.
-
-The fix: _run_agent links the milestone via result.source_session_id (the real
-cli session) with fallback to result.session_id (wrapper).
+Milestones should persist the stable workflow tracking session id for the
+main/review/test line. The UI resolves the real provider transcript later via
+agent_sessions.cli_session_id, so workflow_milestones never mixes tracking ids
+with provider ids.
 """
 
 from unittest.mock import MagicMock, patch
@@ -66,17 +62,17 @@ def _make_orchestrator(wf_data, milestones=None):
         return orch, mock_repo
 
 
-class TestMilestoneLinksRealCliSession:
-    def test_card_links_to_source_session_id_when_available(self):
-        """When result.source_session_id (real cli session) is set, the milestone
-        card is linked to it, not the wrapper uuid."""
+class TestMilestoneTracksWorkflowSession:
+    def test_sidebar_sessions_link_milestone_to_tracking_id(self):
+        """Claude workflow milestones keep the stable tracking session id."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
         wf = _make_workflow()
         orch, mock_repo = _make_orchestrator(wf)
         orch._runner = MagicMock()
         orch._runner._uses_sidebar_session_source.return_value = True
-        # result carries BOTH: session_id (wrapper) and source_session_id (real cli)
+        # result carries BOTH: session_id (tracking wrapper) and
+        # source_session_id (real provider session)
         orch._runner.run_agent_task.return_value = AgentTaskResult(
             session_id="wrapper-uuid-1",
             tracking_session_id="wrapper-uuid-1",
@@ -115,13 +111,10 @@ class TestMilestoneLinksRealCliSession:
         linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get(
             "review_session_id"
         )
-        assert (
-            linked_id == "real-cli-session-4448"
-        ), "card must link to the real cli session id, not the wrapper uuid"
+        assert linked_id == "wrapper-uuid-1"
 
-    def test_card_falls_back_to_wrapper_when_no_source(self):
-        """When source_session_id is empty (e.g. session not yet resolved),
-        fall back to the wrapper uuid so the card still links somewhere."""
+    def test_sidebar_sessions_keep_tracking_id_when_provider_not_resolved(self):
+        """If provider resolution is missing, milestone still keeps tracking id."""
         from app.modules.workspace.autonomous.models import AgentTaskResult
 
         wf = _make_workflow()
@@ -163,4 +156,4 @@ class TestMilestoneLinksRealCliSession:
         linked_id = link_calls[0][0][1].get("session_id") or link_calls[0][0][1].get(
             "review_session_id"
         )
-        assert linked_id == "wrapper-uuid-2", "fallback to wrapper uuid when no real cli session"
+        assert linked_id == "wrapper-uuid-2"

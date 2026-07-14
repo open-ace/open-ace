@@ -1836,12 +1836,19 @@ class AutonomousOrchestrator:
 
         result = self._runner.run_agent_task(**kwargs)
         if result.session_id:
-            # Link the milestone card to the REAL claude session id (not the
-            # per-call wrapper uuid), so all milestones sharing a session line
-            # (e.g. plan_created/plan_refined/dev on the "main" line) show the
-            # SAME id and the card's "view session" points to the right transcript.
-            # Falls back to the wrapper uuid when the real id isn't resolved yet.
-            link_session_id = result.source_session_id or result.session_id
+            # Workflow milestones must keep the stable session-line tracking id
+            # (main/review/test), not the provider's real CLI id. The timeline
+            # resolves the actual transcript session at read time via
+            # agent_sessions.cli_session_id, which keeps DB identity stable
+            # while still letting the UI open the real transcript.
+            link_session_id = (
+                (result.tracking_session_id or result.session_id)
+                if self._runner._uses_sidebar_session_source(
+                    kwargs.get("cli_tool", ""),
+                    kwargs.get("workspace_type", "local"),
+                )
+                else result.session_id
+            )
             self._link_session_to_current_milestone(link_session_id)
             # Persist the stable tracking id for this line. Fresh lines write
             # their first tracking id here; established lines keep reusing the

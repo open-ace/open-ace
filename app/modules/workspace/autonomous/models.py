@@ -366,6 +366,9 @@ class AgentTaskResult:
 
     session_id: str = ""
     tracking_session_id: str = ""
+    # The real provider transcript session (Claude sidebar / app-server session).
+    # Milestones now persist tracking_session_id instead; read paths use this
+    # field to resolve the actual transcript when available.
     source_session_id: str = ""
     prompt: str = ""
     response_text: str = ""
