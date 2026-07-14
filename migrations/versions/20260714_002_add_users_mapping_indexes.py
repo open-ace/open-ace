@@ -1,7 +1,7 @@
 """Add indexes for user mapping optimization
 
-Revision ID: 20260714_001_add_users_mapping_indexes
-Revises: 20260709_001_add_base_commit_sha
+Revision ID: 20260714_002_add_users_mapping_indexes
+Revises: 20260714_001_add_ci_repair_fields_to_workflows
 Create Date: 2026-07-14
 
 Issue: #1574
@@ -31,8 +31,8 @@ from app.repositories.database import is_postgresql
 
 log = logging.getLogger(__name__)
 
-revision: str = "20260714_001_add_users_mapping_indexes"
-down_revision: Union[str, None] = "20260709_001_add_base_commit_sha"
+revision: str = "20260714_002_add_users_mapping_indexes"
+down_revision: Union[str, None] = "20260714_001_add_ci_repair_fields_to_workflows"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 
