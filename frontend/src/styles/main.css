@@ -1209,6 +1209,76 @@ link[rel='dns-prefetch'] {
   cursor: pointer;
 }
 
+/* ── Custom DatePicker — dark-mode popup ─────────────────────────────────── */
+/* react-datepicker renders its calendar in a portal. We theme it via the
+   calendarClassName "open-ace-datepicker-calendar" so it matches the app's
+   dark mode regardless of the browser's native date-picker behaviour. */
+
+/* Light-mode base — clean, neutral look */
+.open-ace-datepicker-calendar {
+  font-family: var(--font-family);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Trigger button — Bootstrap form-control look */
+.open-ace-datepicker .form-control {
+  background-color: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #dee2e6);
+  color: var(--text-primary, #212529);
+}
+.open-ace-datepicker .form-control:hover:not(:disabled) {
+  border-color: var(--color-primary, #0ea5e9);
+}
+
+/* Dark-mode popup */
+[data-theme='dark'] .open-ace-datepicker-calendar {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color-dark, #475569);
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__header {
+  background-color: var(--bg-tertiary, #334155);
+  border-bottom-color: var(--border-color, #334155);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__current-month,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day-name,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__time-name {
+  color: var(--text-primary, #f8fafc);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__month-text:hover,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__quarter-text:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--selected,
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--keyboard-selected {
+  background-color: var(--color-primary, #38bdf8);
+  color: #0f172a;
+  border-radius: 0.3rem;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--today {
+  font-weight: 700;
+  color: var(--color-primary, #38bdf8);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__day--outside-month {
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.5;
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__navigation-icon::before {
+  border-color: var(--text-secondary, #cbd5e1);
+}
+[data-theme='dark'] .open-ace-datepicker-calendar .react-datepicker__navigation:hover *::before {
+  border-color: var(--color-primary, #38bdf8);
+}
+[data-theme='dark'] .open-ace-datepicker .form-control {
+  background-color: var(--bg-secondary, #1e293b);
+  border-color: var(--border-color, #334155);
+  color: var(--text-primary, #f8fafc);
+}
+
 .page-header-controls .btn {
   white-space: nowrap;
   flex-shrink: 0;

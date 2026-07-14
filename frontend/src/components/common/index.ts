@@ -31,6 +31,7 @@ export {
   WorkPageSkeleton,
 } from './DashboardSkeleton';
 export { TextInput, Textarea, Checkbox, RadioGroup, Switch } from './Input';
+export { DatePicker } from './DatePicker';
 export { Avatar, AvatarGroup } from './Avatar';
 export { Dropdown, SplitButton } from './Dropdown';
 export { Divider } from './Divider';
