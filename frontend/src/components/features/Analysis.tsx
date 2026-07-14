@@ -396,22 +396,27 @@ export const Analysis: React.FC = () => {
             {/* Peak Usage Periods */}
             <div className="col-md-6">
               <Card title={t('peakUsagePeriods', language)}>
-                {peakUsage?.peak_days && peakUsage.peak_days.length > 0 ? (
+                {peakUsage?.peak_hours && peakUsage.peak_hours.length > 0 ? (
                   <div className="table-responsive">
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>{t('tableDate', language)}</th>
+                          <th>{t('tableTimePeriod', language)}</th>
                           <th>{t('tableTokens', language)}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {peakUsage.peak_days.slice(0, 5).map((day, index) => (
-                          <tr key={index}>
-                            <td>{day.date}</td>
-                            <td>{formatTokens(day.tokens)}</td>
-                          </tr>
-                        ))}
+                        {peakUsage.peak_hours.slice(0, 5).map((hour, index) => {
+                          const start = hour.hour.toString().padStart(2, '0') + ':00';
+                          const endHour = hour.hour === 23 ? 0 : hour.hour + 1;
+                          const end = endHour.toString().padStart(2, '0') + ':00';
+                          return (
+                            <tr key={index}>
+                              <td>{`${start}-${end}`}</td>
+                              <td>{formatTokens(hour.avg_tokens)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
