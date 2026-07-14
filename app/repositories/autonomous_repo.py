@@ -42,6 +42,7 @@ class AutonomousWorkflowRepository:
         "workspace_type",
         "remote_machine_id",
         "worktree_path",
+        "preferred_worktree_path",
         "github_issue_number",
         "github_pr_number",
         "github_pr_url",
@@ -85,6 +86,9 @@ class AutonomousWorkflowRepository:
         "skip_retries",
         "dev_retries_on_test_fail",
         "system_account",
+        "ci_repair_context",
+        "ci_repair_attempts",
+        "last_ci_failure_signature",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -204,14 +208,15 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, github_issue_number, batch_id,
+                     remote_machine_id, preferred_worktree_path, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
+                     ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -232,6 +237,7 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("preferred_worktree_path", ""),
                     data.get("github_issue_number"),
                     data.get("batch_id"),
                     data.get("batch_order"),
@@ -249,6 +255,9 @@ class AutonomousWorkflowRepository:
                     data.get("original_branch_name", ""),
                     data.get("content_language", "en"),
                     data.get("system_account", ""),
+                    data.get("ci_repair_context", ""),
+                    data.get("ci_repair_attempts", 0),
+                    data.get("last_ci_failure_signature", ""),
                     now,
                     now,
                 ),
@@ -263,14 +272,15 @@ class AutonomousWorkflowRepository:
                      requirements_issue_url, project_path, project_repo_url,
                      is_new_project, is_private, cli_tool, model, permission_mode,
                      branch_name, branch_strategy, workspace_type,
-                     remote_machine_id, github_issue_number, batch_id,
+                     remote_machine_id, preferred_worktree_path, github_issue_number, batch_id,
                      batch_order, batch_total, auto_merge, definition_snapshot,
                      current_phase, dev_round,
                      max_plan_rounds, max_pr_review_rounds, require_full_review_rounds,
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
+                     ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -290,6 +300,7 @@ class AutonomousWorkflowRepository:
                     data.get("branch_strategy", "new-branch"),
                     data.get("workspace_type", "local"),
                     data.get("remote_machine_id", ""),
+                    data.get("preferred_worktree_path", ""),
                     data.get("github_issue_number"),
                     data.get("batch_id"),
                     data.get("batch_order"),
@@ -307,6 +318,9 @@ class AutonomousWorkflowRepository:
                     data.get("original_branch_name", ""),
                     data.get("content_language", "en"),
                     data.get("system_account", ""),
+                    data.get("ci_repair_context", ""),
+                    data.get("ci_repair_attempts", 0),
+                    data.get("last_ci_failure_signature", ""),
                     now,
                     now,
                 ),

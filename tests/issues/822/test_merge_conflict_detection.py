@@ -28,6 +28,7 @@ def _make_workflow(**overrides):
         "branch_strategy": "worktree",
         "branch_name": "auto-dev/fc82f22a",
         "worktree_path": "",
+        "preferred_worktree_path": "/srv/repo/.worktrees/wf-822",
         "project_path": "/srv/repo",
         "workspace_type": "local",
         "current_phase": "merge",
@@ -202,20 +203,20 @@ class TestDoMergeDeferredRetry:
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_rejection_with_ci_fail_raises(self, mock_gh_cls):
-        """Policy rejection WITH CI failures is a hard error, not a deferral."""
-        import pytest
-
+        """Failed CI at merge time should restart development instead of failing."""
         o, _ = _make_orchestrator(_make_workflow())
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         o._gh = mock_gh
+        o._start_ci_repair_round = MagicMock()
         mock_gh.get_pr_checks.return_value = [
             {"name": "test (3.9)", "bucket": "fail"},
         ]
-        mock_gh.merge_pr.side_effect = GitHubOpsError("base branch policy prohibits the merge")
 
-        with pytest.raises(GitHubOpsError, match="CI failed"):
-            o._do_merge(_make_workflow())
+        o._do_merge(_make_workflow())
+
+        mock_gh.merge_pr.assert_not_called()
+        o._start_ci_repair_round.assert_called_once()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_clean_conflict_goes_straight_to_resolve(self, mock_gh_cls):
@@ -288,6 +289,43 @@ class TestDoMergeDeferredRetry:
 
         # Merge succeeded → cleanup ran → branch deleted.
         mock_gh.delete_branch.assert_called_once_with("auto-dev/fc82f22a")
+
+    def test_start_ci_repair_round_restores_preferred_worktree(self):
+        """CI repair loop should restore the preferred worktree path for worktree strategy."""
+        wf = _make_workflow(worktree_path="", preferred_worktree_path="/srv/repo/.worktrees/wf-822")
+        o, _ = _make_orchestrator(wf)
+
+        o._start_ci_repair_round(
+            wf,
+            1103,
+            [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+        )
+
+        update_payload = o._update_workflow.call_args.args[0]
+        assert update_payload["current_phase"] == "development"
+        assert update_payload["status"] == "developing"
+        assert update_payload["dev_round"] == 2
+        assert update_payload["ci_repair_attempts"] == 1
+        assert update_payload["worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        assert update_payload["preferred_worktree_path"] == "/srv/repo/.worktrees/wf-822"
+
+    def test_start_ci_repair_round_fails_when_signature_repeats(self):
+        """A repeated failed-check signature should stop the auto-repair loop."""
+        wf = _make_workflow(
+            ci_repair_attempts=1,
+            last_ci_failure_signature="test (3.9)|failure|fail",
+        )
+        o, _ = _make_orchestrator(wf)
+
+        o._start_ci_repair_round(
+            wf,
+            1103,
+            [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+        )
+
+        failure_update = o._update_workflow.call_args.args[0]
+        assert failure_update["status"] == "failed"
+        assert "仍未变化" in failure_update["error_message"]
 
 
 # ── github_ops.merge_pr --auto flag ──────────────────────────────────────

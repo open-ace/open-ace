@@ -745,6 +745,7 @@ def create_workflow():
                         # Pre-generated values for scheduler conflict checks (Issue #1573)
                         "branch_name": branch_name,
                         "worktree_path": worktree_path,
+                        "preferred_worktree_path": worktree_path,
                         "branch_strategy": "worktree",  # Force worktree for batch workflows
                         "original_branch_name": user_branch_name,  # Preserve user's original input
                     }
@@ -794,6 +795,7 @@ def create_workflow():
             )
             base_workflow_data["branch_name"] = branch_name
             base_workflow_data["worktree_path"] = worktree_path
+            base_workflow_data["preferred_worktree_path"] = worktree_path
             base_workflow_data["original_branch_name"] = user_branch_name  # Preserve user's input
             logger.info(
                 "Pre-generated branch_name=%s, worktree_path=%s for workflow %s",

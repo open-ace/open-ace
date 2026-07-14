@@ -41,6 +41,7 @@ class AutonomousWorkflow:
     workspace_type: str = "local"  # local|remote
     remote_machine_id: str = ""
     worktree_path: str = ""
+    preferred_worktree_path: str = ""
     github_issue_number: Optional[int] = None
     github_pr_number: Optional[int] = None
     github_pr_url: str = ""
@@ -63,6 +64,9 @@ class AutonomousWorkflow:
     total_output_tokens: int = 0
     total_requests: int = 0
     error_message: str = ""
+    ci_repair_context: str = ""
+    ci_repair_attempts: int = 0
+    last_ci_failure_signature: str = ""
     # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
     # at creation; persisted content is generated in this language and rendered
     # verbatim (it does NOT switch per viewer). System-authored structured
@@ -112,6 +116,7 @@ class AutonomousWorkflow:
             "workspace_type": self.workspace_type,
             "remote_machine_id": self.remote_machine_id,
             "worktree_path": self.worktree_path,
+            "preferred_worktree_path": self.preferred_worktree_path,
             "github_issue_number": self.github_issue_number,
             "github_pr_number": self.github_pr_number,
             "github_pr_url": self.github_pr_url,
@@ -132,6 +137,9 @@ class AutonomousWorkflow:
             "total_output_tokens": self.total_output_tokens,
             "total_requests": self.total_requests,
             "error_message": self.error_message,
+            "ci_repair_context": self.ci_repair_context,
+            "ci_repair_attempts": self.ci_repair_attempts,
+            "last_ci_failure_signature": self.last_ci_failure_signature,
             "content_language": self.content_language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -163,6 +171,7 @@ class AutonomousWorkflow:
             workspace_type=data.get("workspace_type", "local"),
             remote_machine_id=data.get("remote_machine_id", ""),
             worktree_path=data.get("worktree_path", ""),
+            preferred_worktree_path=data.get("preferred_worktree_path", ""),
             github_issue_number=data.get("github_issue_number"),
             github_pr_number=data.get("github_pr_number"),
             github_pr_url=data.get("github_pr_url", ""),
@@ -183,6 +192,9 @@ class AutonomousWorkflow:
             total_output_tokens=data.get("total_output_tokens", 0),
             total_requests=data.get("total_requests", 0),
             error_message=data.get("error_message", ""),
+            ci_repair_context=data.get("ci_repair_context", ""),
+            ci_repair_attempts=data.get("ci_repair_attempts", 0),
+            last_ci_failure_signature=data.get("last_ci_failure_signature", ""),
             content_language=data.get("content_language", "en"),
             created_at=(
                 datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None

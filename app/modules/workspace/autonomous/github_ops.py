@@ -776,6 +776,88 @@ class GitHubOps:
         data = json.loads(result.stdout.strip())
         return data.get("commits", [])
 
+    @staticmethod
+    def _bucket_from_status_state(state: str) -> str:
+        state = (state or "").strip().lower()
+        if state in {"queued", "in_progress", "pending", "waiting", "requested"}:
+            return "pending"
+        if state in {"success", "passed", "pass"}:
+            return "pass"
+        if state in {"neutral", "skipped"}:
+            return "skipping"
+        if state in {"failure", "failed", "error", "cancelled", "timed_out", "action_required"}:
+            return "fail"
+        return "pending" if not state else "fail"
+
+    @classmethod
+    def _bucket_from_check_run(cls, status: str, conclusion: str) -> str:
+        normalized_status = (status or "").strip().lower()
+        if normalized_status and normalized_status != "completed":
+            return "pending"
+        return cls._bucket_from_status_state(conclusion or normalized_status)
+
+    @staticmethod
+    def _is_pr_checks_json_unsupported(output: str) -> bool:
+        lowered = (output or "").lower()
+        return "--json" in lowered and (
+            "unknown flag" in lowered
+            or "accepts 1 arg" in lowered
+            or "unknown shorthand flag" in lowered
+        )
+
+    def _get_pr_head_sha(self, pr_number: int) -> str:
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/pulls/{pr_number}"]),
+            repo_scoped=False,
+        )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        return ((data.get("head") or {}).get("sha") or "").strip()
+
+    def _get_pr_checks_via_api(self, pr_number: int) -> list:
+        repo = self.get_repo_name()
+        head_sha = self._get_pr_head_sha(pr_number)
+        if not head_sha:
+            raise GitHubOpsError(f"Unable to resolve head SHA for PR #{pr_number}")
+
+        status_result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/commits/{head_sha}/status"]),
+            repo_scoped=False,
+        )
+        check_runs_result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/commits/{head_sha}/check-runs"]),
+            repo_scoped=False,
+        )
+
+        status_payload = json.loads((status_result.stdout or "").strip() or "{}")
+        check_runs_payload = json.loads((check_runs_result.stdout or "").strip() or "{}")
+
+        checks: list[dict] = []
+        for status in status_payload.get("statuses", []) or []:
+            state = (status.get("state") or "").strip().lower()
+            checks.append(
+                {
+                    "name": status.get("context") or "status",
+                    "state": state or "unknown",
+                    "bucket": self._bucket_from_status_state(state),
+                    "link": status.get("target_url") or "",
+                }
+            )
+
+        for check_run in check_runs_payload.get("check_runs", []) or []:
+            status = (check_run.get("status") or "").strip().lower()
+            conclusion = (check_run.get("conclusion") or "").strip().lower()
+            checks.append(
+                {
+                    "name": check_run.get("name") or "check-run",
+                    "state": conclusion or status or "unknown",
+                    "bucket": self._bucket_from_check_run(status, conclusion),
+                    "link": check_run.get("html_url") or "",
+                }
+            )
+
+        return checks
+
     def get_pr_checks(self, pr_number: int) -> list:
         """Get CI check status for a PR.
 
@@ -787,11 +869,43 @@ class GitHubOps:
             check=False,
         )
         try:
-            return json.loads(result.stdout)
+            if result.returncode == 0:
+                raw = result.stdout if result.stdout else ""
+                if not raw.strip():
+                    return []
+                return json.loads(raw)
         except (json.JSONDecodeError, AttributeError, TypeError):
             raw = result.stdout if result.stdout else ""
             logger.warning("Failed to parse CI checks for PR #%s: %s", pr_number, raw[:200])
-            return []
+
+        primary_parts = []
+        for part in (getattr(result, "stderr", ""), getattr(result, "stdout", "")):
+            if not isinstance(part, str):
+                continue
+            stripped = part.strip()
+            if stripped:
+                primary_parts.append(stripped)
+        primary_output = "\n".join(primary_parts)
+        if result.returncode != 0 and not self._is_pr_checks_json_unsupported(primary_output):
+            logger.warning(
+                "gh pr checks --json failed for PR #%s, falling back to REST API: %s",
+                pr_number,
+                primary_output[:200],
+            )
+        elif self._is_pr_checks_json_unsupported(primary_output):
+            logger.info(
+                "gh pr checks --json unsupported for PR #%s, falling back to REST API",
+                pr_number,
+            )
+
+        try:
+            return self._get_pr_checks_via_api(pr_number)
+        except Exception as api_err:
+            detail = primary_output[:200] if primary_output else "empty response"
+            raise GitHubOpsError(
+                f"Failed to query CI checks for PR #{pr_number}: {detail}; "
+                f"REST fallback error: {api_err}"
+            ) from api_err
 
     def get_pr_diff(self, number: int) -> str:
         """Get the full diff of a PR (head vs base) via `gh pr diff`.

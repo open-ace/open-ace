@@ -658,6 +658,7 @@ _TRANSIENT_API_ERROR_RE = re.compile(
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
+MAX_CI_REPAIR_ATTEMPTS = 2  # max automatic dev-round retries for merge-phase CI failures
 
 
 def _next_phase(current_phase: str) -> str:
@@ -1112,6 +1113,70 @@ class AutonomousOrchestrator:
         )
 
     @staticmethod
+    def _ci_failure_signature(checks: list[dict]) -> str:
+        """Build a stable signature for the current set of failed CI checks."""
+        parts = []
+        for check in checks or []:
+            if check.get("bucket") != "fail":
+                continue
+            parts.append(
+                "|".join(
+                    [
+                        str(check.get("name") or "").strip(),
+                        str(check.get("state") or "").strip(),
+                        str(check.get("bucket") or "").strip(),
+                    ]
+                )
+            )
+        return "\n".join(sorted(parts))
+
+    def _get_preferred_worktree_path(self, wf: dict) -> str:
+        """Return the canonical worktree path the workflow should reuse."""
+        preferred = (wf.get("preferred_worktree_path") or "").strip()
+        if preferred:
+            return preferred
+        current = (wf.get("worktree_path") or "").strip()
+        if current:
+            return current
+        project_path = (wf.get("project_path") or "").strip()
+        workflow_id = (wf.get("workflow_id") or self._workflow_id or "").strip()
+        if not project_path or not workflow_id:
+            return ""
+        return os.path.join(project_path, ".worktrees", workflow_id)
+
+    @staticmethod
+    def _build_ci_repair_context(pr_number: int, failed_checks: list[dict]) -> str:
+        """Summarize failed CI checks for the next development round prompt."""
+        lines = [f"PR #{pr_number} 在合并前检测到以下 CI 失败：", ""]
+        for check in failed_checks or []:
+            if check.get("bucket") != "fail":
+                continue
+            state = check.get("state") or "unknown"
+            link = check.get("link") or ""
+            bullet = f"- {check.get('name') or 'unknown'}: {state}"
+            if link:
+                bullet += f" ({link})"
+            lines.append(bullet)
+        lines.extend(
+            [
+                "",
+                "请优先分析这些失败是否由当前分支引入，修复后重新运行相关测试，并确保修改已推送到当前工作分支。",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _get_ci_repair_prompt(self, wf: dict) -> str:
+        """Return merge-phase CI repair context for development, or empty."""
+        context = wf.get("ci_repair_context", "")
+        if not context or not context.strip():
+            return ""
+        return (
+            "\n\n## ⚠️ Merge 阶段 CI 修复上下文\n"
+            "当前轮次是因为 PR 在合并阶段检测到 CI 失败而回流，请优先处理以下问题：\n"
+            f"{context}\n\n"
+        )
+
+    @staticmethod
     def _clean_agent_text(text: str) -> str:
         return clean_agent_text(text)
 
@@ -1376,17 +1441,22 @@ class AutonomousOrchestrator:
         items if the timeout was reached).
         """
         deadline = time.monotonic() + CI_POLL_MAX_WAIT
+        last_error = ""
         while True:
             try:
                 checks = gh.get_pr_checks(pr_number)
-            except Exception:
+            except Exception as e:
+                last_error = str(e)
                 logger.warning("CI check query failed for PR #%s, will retry...", pr_number)
                 if time.monotonic() >= deadline:
-                    return []
+                    raise GitHubOpsError(
+                        f"Failed to query CI checks for PR #{pr_number} within "
+                        f"{CI_POLL_MAX_WAIT}s: {last_error}"
+                    ) from e
                 time.sleep(CI_POLL_INTERVAL)
                 continue
             if not checks:
-                # No checks configured or parse failure — nothing to wait for.
+                # No checks configured — nothing to wait for.
                 return checks
             pending = [c for c in checks if c.get("bucket") == "pending"]
             if not pending:
@@ -1406,6 +1476,80 @@ class AutonomousOrchestrator:
                 CI_POLL_INTERVAL,
             )
             time.sleep(CI_POLL_INTERVAL)
+
+    def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
+        """Route merge-phase CI failures back into a new development round."""
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        previous_attempts = int(wf.get("ci_repair_attempts", 0) or 0)
+        next_attempt = previous_attempts + 1
+        signature = self._ci_failure_signature(failed_checks)
+        previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
+        failure_names = ", ".join(
+            check.get("name") or "unknown"
+            for check in failed_checks
+            if check.get("bucket") == "fail"
+        )
+        preferred_worktree_path = self._get_preferred_worktree_path(wf)
+
+        if previous_signature and signature and previous_signature == signature:
+            message = f"PR #{pr_number} CI 失败在自动修复后仍未变化: {failure_names or signature}"
+            self._create_milestone(
+                phase="merge",
+                dev_round=dev_round,
+                milestone_type="ci_repair_exhausted",
+                status="failed",
+                title="CI failures unchanged after automatic repair",
+                error_message=message,
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        if next_attempt > MAX_CI_REPAIR_ATTEMPTS:
+            message = (
+                f"PR #{pr_number} CI failed after {MAX_CI_REPAIR_ATTEMPTS} automatic repair rounds: "
+                f"{failure_names or signature}"
+            )
+            self._create_milestone(
+                phase="merge",
+                dev_round=dev_round,
+                milestone_type="ci_repair_exhausted",
+                status="failed",
+                title="CI automatic repair limit reached",
+                error_message=message,
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        next_dev_round = dev_round + 1
+        context = self._build_ci_repair_context(pr_number, failed_checks)
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            milestone_type="ci_repair_started",
+            status="completed",
+            title=f"CI failed for PR #{pr_number}, restarting development round {next_dev_round}",
+            result_summary=context[:200],
+        )
+        updates = {
+            "current_phase": "development",
+            "status": "developing",
+            "current_round": 0,
+            "dev_round": next_dev_round,
+            "agent_pid": None,
+            "agent_session_id": "",
+            "test_retries": 0,
+            "skip_retries": 0,
+            "dev_retries_on_test_fail": 0,
+            "error_message": "",
+            "ci_repair_attempts": next_attempt,
+            "ci_repair_context": context,
+            "last_ci_failure_signature": signature,
+        }
+        if wf.get("branch_strategy") == "worktree" and preferred_worktree_path:
+            updates["preferred_worktree_path"] = preferred_worktree_path
+            updates["worktree_path"] = preferred_worktree_path
+        self._update_workflow(updates)
+        self._emit("phase_change", {"phase": "development"})
 
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
@@ -2431,6 +2575,7 @@ class AutonomousOrchestrator:
                     self._update_workflow(
                         {
                             "worktree_path": actual_worktree_path,
+                            "preferred_worktree_path": actual_worktree_path,
                             "branch_name": branch_name,
                         }
                     )
@@ -3063,6 +3208,7 @@ class AutonomousOrchestrator:
             f"5. 遵循项目现有的代码风格和约定\n"
             f"6. 所有修改完成后，提交 git commit"
         )
+        dev_prompt += self._get_ci_repair_prompt(wf)
         dev_prompt += self._get_user_feedback_prompt(wf)
 
         result = self._run_agent(
@@ -3886,7 +4032,14 @@ class AutonomousOrchestrator:
                 return
 
         # Tests passed — clear retry counters
-        self._update_workflow({"test_retries": 0, "dev_retries_on_test_fail": 0, "skip_retries": 0})
+        self._update_workflow(
+            {
+                "test_retries": 0,
+                "dev_retries_on_test_fail": 0,
+                "skip_retries": 0,
+                "ci_repair_context": "",
+            }
+        )
 
         # Dev completed milestone
         self._create_milestone(
@@ -4741,13 +4894,19 @@ class AutonomousOrchestrator:
         branch_name = wf.get("branch_name", "")
 
         if pr_number:
+            try:
+                checks = gh.get_pr_checks(pr_number)
+            except Exception as e:
+                raise GitHubOpsError(
+                    f"Unable to query CI checks before merging PR #{pr_number}: {e}"
+                ) from e
+            failed = [c for c in checks if c.get("bucket") == "fail"]
+            if failed:
+                self._start_ci_repair_round(wf, pr_number, failed)
+                return
             # If CI is still running, defer this merge to the next scheduler
             # cycle instead of blocking (synchronous poll) or failing. The
             # scheduler re-enters _do_merge every ~10s.
-            try:
-                checks = gh.get_pr_checks(pr_number)
-            except Exception:
-                checks = []
             pending = [c for c in checks if c.get("bucket") == "pending"]
             if pending:
                 logger.info(
@@ -4773,10 +4932,8 @@ class AutonomousOrchestrator:
                     # if so, this is a real failure, not a transient deferral.
                     failed = [c for c in checks if c.get("bucket") == "fail"]
                     if failed:
-                        failed_names = ", ".join(c.get("name", "?") for c in failed)
-                        raise GitHubOpsError(
-                            f"PR #{pr_number} CI failed ({failed_names}), cannot merge"
-                        )
+                        self._start_ci_repair_round(wf, pr_number, failed)
+                        return
                     # No failures, just policy lag — defer to next cycle.
                     logger.info(
                         "PR #%s: policy prohibits (CI not failed), deferring merge", pr_number
@@ -4994,7 +5151,7 @@ class AutonomousOrchestrator:
             # at the top and defers until checks are green).
             # P1 修复（Issue #1611）：Conflict 解决后检查分支一致性
             current_branch = wt_gh.get_current_branch()
-            if current_branch != branch_name:
+            if isinstance(current_branch, str) and current_branch and current_branch != branch_name:
                 logger.warning(
                     "Conflict resolution branch mismatch: expected=%s, actual=%s",
                     branch_name,
