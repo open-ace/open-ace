@@ -4447,3 +4447,13 @@ table .latency-row:hover td {
 [data-theme='dark'] .security-score-circle:hover {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
+
+/* Pagination jump input - hide spin buttons (Issue #1433) */
+.pagination-jump-input::-webkit-inner-spin-button,
+.pagination-jump-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pagination-jump-input[type='number'] {
+  -moz-appearance: textfield;
+}

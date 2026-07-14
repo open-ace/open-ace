@@ -127,6 +127,16 @@ export const Pagination: React.FC<PaginationProps> = ({
     [currentPage, totalPages, maxVisiblePages]
   );
 
+  // Calculate jump button disabled state (Issue #1433)
+  const isJumpDisabled = useMemo(() => {
+    if (!inputValue.trim()) return true;
+    const page = parseInt(inputValue, 10);
+    if (isNaN(page)) return true;
+    if (page < 1 || page > totalPages) return true;
+    if (page === currentPage) return true;
+    return false;
+  }, [inputValue, currentPage, totalPages]);
+
   // Handle page change
   const handlePageChange = useCallback(
     (page: number) => {
@@ -287,25 +297,41 @@ export const Pagination: React.FC<PaginationProps> = ({
 
         {/* Jump input */}
         {showPageInput && (
-          <div className="d-flex align-items-center gap-1">
+          <div
+            className="d-flex align-items-center gap-1"
+            role="group"
+            aria-label={t('jumpInputGroupLabel', language)}
+          >
             <span className="text-muted small">{t('goToPageLabel', language)}:</span>
             <input
               type="number"
-              className="form-control form-control-sm"
-              style={{ width: '60px' }}
+              className="form-control form-control-sm pagination-jump-input"
+              style={{ width: '70px' }}
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               min={1}
               max={totalPages}
               aria-label={t('goToPageLabel', language)}
+              aria-describedby={error ? 'pagination-error' : undefined}
+              aria-invalid={!!error}
             />
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleJumpSubmit}
+              disabled={isJumpDisabled}
+              aria-label={t('jumpButtonLabel', language)}
+            >
+              {t('jumpButton', language)}
+            </button>
           </div>
         )}
 
         {/* Error message */}
         {error && (
           <span
+            id="pagination-error"
             className="text-danger small"
             role="alert"
             aria-live="polite"
@@ -356,21 +382,41 @@ export const Pagination: React.FC<PaginationProps> = ({
 
         {/* Mobile jump input */}
         {showPageInput && (
-          <div className="d-flex align-items-center gap-1">
+          <div
+            className="d-flex align-items-center gap-1"
+            role="group"
+            aria-label={t('jumpInputGroupLabel', language)}
+          >
             <small className="text-muted">{t('goToPageLabel', language)}:</small>
             <input
               type="number"
-              className="form-control form-control-sm"
-              style={{ width: '50px' }}
+              className="form-control form-control-sm pagination-jump-input"
+              style={{ width: '60px' }}
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               min={1}
               max={totalPages}
               aria-label={t('goToPageLabel', language)}
+              aria-describedby={error ? 'pagination-error-mobile' : undefined}
+              aria-invalid={!!error}
             />
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleJumpSubmit}
+              disabled={isJumpDisabled}
+              aria-label={t('jumpButtonLabel', language)}
+            >
+              <i className="bi bi-arrow-right" />
+            </button>
             {error && (
-              <span className="text-danger small" role="alert" aria-live="polite">
+              <span
+                id="pagination-error-mobile"
+                className="text-danger small"
+                role="alert"
+                aria-live="polite"
+              >
                 {error}
               </span>
             )}
