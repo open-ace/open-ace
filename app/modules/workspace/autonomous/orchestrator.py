@@ -1627,8 +1627,6 @@ class AutonomousOrchestrator:
                     if suffix.strip():
                         capture.append(suffix.strip())
                     continue
-                if capture and active_mode == "numbered":
-                    break
 
             if capture or active_mode:
                 if active_mode == "markdown" and re.match(r"^\s{0,3}#{1,6}\s+", line):
