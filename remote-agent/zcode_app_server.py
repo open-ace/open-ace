@@ -90,6 +90,8 @@ class ZCodeAppServerSession:
         # Request/response correlation: id -> (Event, result holder).
         self._lock = threading.Lock()
         self._pending: dict[str | int, dict[str, Any]] = {}
+        # Pending server requests waiting for user response (interaction/requestUserInput, interaction/requestPermission)
+        self._pending_server_requests: dict[str | int, str] = {}
 
         # Event polling state: last consumed event seq per session.
         self._last_event_seq = 0
@@ -812,7 +814,55 @@ class ZCodeAppServerSession:
             self._forward_one_event({"type": "state.updated", "payload": msg.get("params", {})})
 
     def _handle_server_request(self, msg_id: str, method: str, params: dict[str, Any]) -> None:
-        """Auto-respond to server→client requests in unattended mode."""
+        """Handle server→client requests.
+
+        In user-interactive mode (permission_callback set), forward requests
+        to the frontend for human decision. In unattended mode, auto-respond.
+        """
+        # User-interactive mode: forward to frontend for human decision
+        if method == "interaction/requestUserInput" and self.permission_callback:
+            logger.info(
+                "ZCode interaction/requestUserInput forwarded to frontend for %s",
+                self.session_id[:8],
+            )
+            # Store pending request for later response
+            with self._lock:
+                self._pending_server_requests[msg_id] = method
+            # Forward to frontend via permission_callback
+            self.permission_callback(
+                self.session_id,
+                {
+                    "type": "interaction_request",
+                    "method": method,
+                    "id": msg_id,
+                    "params": params,
+                },
+            )
+            return
+
+        if method == "interaction/requestPermission" and self.permission_callback:
+            tool_name = params.get("toolName", "?")
+            logger.info(
+                "ZCode interaction/requestPermission forwarded to frontend for %s (tool=%s)",
+                self.session_id[:8],
+                tool_name,
+            )
+            # Store pending request for later response
+            with self._lock:
+                self._pending_server_requests[msg_id] = method
+            # Forward to frontend via permission_callback
+            self.permission_callback(
+                self.session_id,
+                {
+                    "type": "interaction_request",
+                    "method": method,
+                    "id": msg_id,
+                    "params": params,
+                },
+            )
+            return
+
+        # Unattended mode: auto-respond
         if method == "interaction/requestUserInput":
             # AskUserQuestion (or similar) is waiting for a human answer.
             # Decline so the agent knows to proceed with its own judgment.
@@ -859,6 +909,34 @@ class ZCodeAppServerSession:
                 "message": f"Unhandled server request: {method}",
             },
         )
+
+    def send_interaction_response(self, msg_id: str, response: dict[str, Any]) -> bool:
+        """Send a user's response back to the ZCode app-server.
+
+        Args:
+            msg_id: The message ID from the original interaction request.
+            response: The user's response (action: answer/decline or decision: allow/deny).
+
+        Returns:
+            True if the response was sent successfully, False otherwise.
+        """
+        with self._lock:
+            if msg_id not in self._pending_server_requests:
+                logger.warning(
+                    "Unknown interaction request %s for %s",
+                    msg_id[:8] if msg_id else "N/A",
+                    self.session_id[:8],
+                )
+                return False
+            del self._pending_server_requests[msg_id]
+
+        logger.info(
+            "Sending interaction response for %s, msg_id=%s",
+            self.session_id[:8],
+            msg_id[:8] if msg_id else "N/A",
+        )
+        self._send_response(msg_id, response)
+        return True
 
     def _send_response(self, msg_id: str, result: Any, error: dict[str, Any] | None = None) -> None:
         """Write a server→client response back to the app-server stdin."""

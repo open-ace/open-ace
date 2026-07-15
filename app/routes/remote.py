@@ -829,6 +829,52 @@ def send_permission_response(session_id):
     return jsonify({"success": True})
 
 
+@remote_bp.route("/sessions/<session_id>/interaction", methods=["POST"])
+def send_interaction_response(session_id):
+    """
+    Send an interaction response from the frontend to the remote agent.
+
+    This handles responses for interaction/requestUserInput and
+    interaction/requestPermission server requests that were forwarded
+    to the frontend for user decision.
+
+    Expected JSON body:
+        {
+            "msg_id": "...",
+            "response": {
+                "action": "answer" | "decline",
+                "response": "user input"  // for answer
+            }
+            // OR
+            "response": {
+                "decision": "allow" | "deny",
+                "reason": "optional deny reason"
+            }
+        }
+    """
+    session_info, access_error = _check_session_access(session_id)
+    if access_error:
+        return access_error
+
+    data = request.get_json() or {}
+    msg_id = data.get("msg_id")
+    response = data.get("response", {})
+
+    if not msg_id:
+        return jsonify({"success": False, "error": "Missing msg_id"}), 400
+
+    session_mgr = get_remote_session_manager()
+    success = session_mgr.respond_to_interaction(
+        session_id,
+        msg_id,
+        response,
+        decided_by=g.user.get("id") if g.get("user") else None,
+        decided_by_name=g.user.get("username") if g.get("user") else None,
+    )
+
+    return jsonify({"success": success})
+
+
 @remote_bp.route("/sessions/<session_id>/stream")
 def stream_session_output(session_id):
     """SSE: real-time stream of remote session output, formatted as claude_json."""

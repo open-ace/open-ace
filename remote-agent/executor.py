@@ -1591,6 +1591,35 @@ class ProcessExecutor:
             return {"success": True}
         return {"success": False, "error": "Failed to write permission response to stdin"}
 
+    def send_interaction_response(
+        self, session_id: str, msg_id: str, response: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Send an interaction response to a ZCode session.
+
+        Args:
+            session_id: Session identifier.
+            msg_id: The message ID from the original interaction request.
+            response: The user's response (action: answer/decline or decision: allow/deny).
+
+        Returns:
+            Dict with 'success' and optionally 'error'.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+
+        if not session:
+            return {"success": False, "error": f"Session {session_id[:8]} not found"}
+
+        # ZCodeAppServerSession has send_interaction_response method
+        if hasattr(session, "send_interaction_response"):
+            ok = session.send_interaction_response(msg_id, response)
+            if ok:
+                return {"success": True}
+            return {"success": False, "error": "Failed to send interaction response"}
+
+        return {"success": False, "error": "Session does not support interaction response"}
+
     def pause_session(self, session_id: str) -> dict[str, Any]:
         """Pause a session by suspending its subprocess."""
         with self._lock:

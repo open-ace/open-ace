@@ -495,6 +495,8 @@ class RemoteAgent:
             self._cmd_stop_session(data)
         elif command == "permission_response":
             self._cmd_permission_response(data)
+        elif command == "interaction_response":
+            self._cmd_interaction_response(data)
         elif command == "update_permission_mode":
             self._cmd_update_permission_mode(data)
         elif command == "update_model":
@@ -696,6 +698,30 @@ class RemoteAgent:
         if not result["success"]:
             logger.warning(
                 "Failed to handle permission response: %s",
+                result.get("error"),
+            )
+
+    def _cmd_interaction_response(self, data: dict[str, Any]) -> None:
+        """Handle an interaction_response command from the frontend.
+
+        Sends a user's response back to the ZCode app-server for
+        interaction/requestUserInput or interaction/requestPermission requests.
+        """
+        session_id = data.get("session_id", "")
+        msg_id = data.get("msg_id", "")
+        response = data.get("response", {})
+
+        logger.info(
+            "Interaction response for session %s: msg_id=%s",
+            session_id[:8],
+            msg_id[:8] if msg_id else "N/A",
+        )
+
+        result = self._executor.send_interaction_response(session_id, msg_id, response)
+
+        if not result["success"]:
+            logger.warning(
+                "Failed to handle interaction response: %s",
                 result.get("error"),
             )
 
