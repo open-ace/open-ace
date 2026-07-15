@@ -188,12 +188,13 @@ export const AnomalyDetection: React.FC = () => {
     return [spikes, drops];
   }, [anomalies]);
 
-  // Anomaly trend data from API
+  // Anomaly trend data from API - split by type for color coding
   const anomalyTrendData = useMemo(() => {
     const trend = trendData?.trend ?? [];
     return {
       labels: trend.map((t) => t.date),
-      data: trend.map((t) => t.count),
+      spikes: trend.map((t) => t.spikes),
+      drops: trend.map((t) => t.drops),
     };
   }, [trendData]);
 
@@ -336,10 +337,16 @@ export const AnomalyDetection: React.FC = () => {
                     labels={anomalyTrendData.labels}
                     datasets={[
                       {
-                        label: t('anomalies', language),
-                        data: anomalyTrendData.data,
+                        label: t('usageSpike', language),
+                        data: anomalyTrendData.spikes,
                         borderColor: 'rgba(255, 99, 132, 1)',
                         backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                      },
+                      {
+                        label: t('usageDrop', language),
+                        data: anomalyTrendData.drops,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
                       },
                     ]}
                     height={300}
