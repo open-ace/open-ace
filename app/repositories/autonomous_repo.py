@@ -454,6 +454,23 @@ class AutonomousWorkflowRepository:
             """
         )
 
+    def count_active_workflows_by_user(self, user_id: int) -> int:
+        """Count active workflows for a specific user.
+
+        Active statuses match ACTIVE_WORKFLOW_STATUSES in autonomous_scheduler.py.
+        Used for enforcing max_sessions_per_user concurrent limit.
+        """
+        result = self.db.fetch_one(
+            """
+            SELECT COUNT(*) as count FROM autonomous_workflows
+            WHERE user_id = ? AND status IN ('pending', 'preparing', 'planning',
+                                              'developing', 'pr_review', 'reporting',
+                                              'waiting', 'merging')
+            """,
+            (user_id,),
+        )
+        return int(result["count"]) if result else 0
+
     def get_paused_workflows(self, quota_prefix: str = "") -> list:
         """Get paused workflows, optionally filtered to a quota-pause reason.
 
