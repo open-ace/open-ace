@@ -219,6 +219,55 @@ def _enforce_quota_gate(user_id: int) -> Response | None:
     return None
 
 
+def _check_user_concurrent_limit(user_id: int) -> Response | None:
+    """Check if user has reached max_sessions_per_user limit.
+
+    Returns a 429 Response to short-circuit when the user has too many active
+    workflows; returns None to proceed.
+    """
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+    from app.repositories.tenant_repo import TenantRepository
+
+    DEFAULT_MAX_SESSIONS = 5
+
+    try:
+        # Get user's tenant quota
+        user = user_repo.get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        tenant_id = user.get("tenant_id")
+        max_sessions = DEFAULT_MAX_SESSIONS
+
+        if tenant_id:
+            tenant_repo = TenantRepository()
+            tenant = tenant_repo.get_tenant_by_id(tenant_id)
+            if tenant:
+                quota = tenant.get("quota", {})
+                max_sessions = quota.get("max_sessions_per_user", DEFAULT_MAX_SESSIONS)
+
+        # Count user's active workflows
+        auto_repo = _get_repo()
+        active_count = auto_repo.count_active_workflows_by_user(user_id)
+
+        if active_count >= max_sessions:
+            return (
+                jsonify(
+                    {
+                        "error": f"User has reached maximum concurrent workflows limit ({max_sessions})"
+                    }
+                ),
+                429,
+            )
+
+    except Exception as exc:
+        logger.error("Concurrent limit check failed: %s", exc)
+        # Fail-open: allow creation if check fails (less disruptive than blocking everyone)
+        return None
+
+    return None
+
+
 def _enrich_milestones_with_usage(
     workflow_id: str, milestones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -539,6 +588,11 @@ def create_workflow():
     quota_rejection = _enforce_quota_gate(user_id)
     if quota_rejection is not None:
         return quota_rejection
+
+    # Concurrent limit: check max_sessions_per_user
+    concurrent_rejection = _check_user_concurrent_limit(user_id)
+    if concurrent_rejection is not None:
+        return concurrent_rejection
 
     # Validate remote machine admin permission
     workspace_type = data.get("workspace_type", "local")

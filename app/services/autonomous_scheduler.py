@@ -26,6 +26,20 @@ logger = logging.getLogger(__name__)
 
 # Maximum concurrent workflow executions
 MAX_CONCURRENT_WORKFLOWS = 3
+
+# Active workflow statuses for user concurrent limit check.
+# Includes 'waiting' because waiting workflows still occupy user's active slots.
+ACTIVE_WORKFLOW_STATUSES = {
+    "pending",
+    "preparing",
+    "planning",
+    "developing",
+    "pr_review",
+    "reporting",
+    "waiting",
+    "merging",
+}
+
 RUNNING_BATCH_STATUSES = {
     "pending",
     "preparing",
