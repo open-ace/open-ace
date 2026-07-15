@@ -28,6 +28,7 @@ import {
   useMilestoneSession,
   useMilestoneDiff,
   useWorkflowPrDiff,
+  useWorkflowPrStats,
   useWorkflowForks,
   useWorkflow,
 } from '@/hooks/useAutonomous';
@@ -174,6 +175,10 @@ function getDiffLineClass(line: string): string {
   return '';
 }
 
+function formatDiffSummaryCount(value: number): string {
+  return value.toLocaleString();
+}
+
 function getActivityStableKey(activity: {
   session_id: string;
   type: 'assistant' | 'tool_use' | 'usage' | 'system';
@@ -247,6 +252,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
+  const hasPr = !!workflow.github_pr_number;
 
   // Session detail query
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
@@ -262,7 +268,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     !!viewingDiff
   );
 
-  // Cumulative PR diff (head vs base) for the header "Final Code Changes" button
+  // Fetch lightweight PR stats eagerly for the header summary, but keep the
+  // full cumulative diff lazy so timeline mounts stay cheap.
+  const { data: prStatsData } = useWorkflowPrStats(workflow.workflow_id, hasPr);
   const { data: prDiffData, isLoading: prDiffLoading } = useWorkflowPrDiff(
     workflow.workflow_id,
     viewingPrDiff
@@ -293,8 +301,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     if (!candidates.length) return undefined;
     return candidates.reduce((best, m) => ((m.dev_round || 0) > (best.dev_round || 0) ? m : best));
   }, [milestones]);
-
-  const hasPr = !!workflow.github_pr_number;
 
   const definitionSnapshot = workflow.definition_snapshot;
   const normalizeGithubRepoUrl = useCallback((value: string) => {
@@ -1078,8 +1084,8 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     [truncatedDiff.content]
   );
   const parsedPrDiffFiles = useMemo(
-    () => parseDiffFiles(truncatedPrDiff.content),
-    [truncatedPrDiff.content]
+    () => parseDiffFiles(prDiffData?.diff ?? ''),
+    [prDiffData?.diff]
   );
   const latestMilestoneSignature =
     milestones.length > 0
@@ -1193,6 +1199,33 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       null,
     [parsedPrDiffFiles, selectedPrDiffFileId]
   );
+  const truncatedSelectedPrDiffPatch = useMemo(
+    () => truncateDiffText(selectedPrDiffFile?.patch ?? ''),
+    [selectedPrDiffFile?.patch]
+  );
+  const hasPrSummary =
+    typeof prStatsData?.additions === 'number' &&
+    typeof prStatsData?.deletions === 'number' &&
+    typeof prStatsData?.changed_files === 'number' &&
+    (prStatsData.changed_files > 0 || prStatsData.additions > 0 || prStatsData.deletions > 0);
+  const prSummaryStats = hasPrSummary
+    ? {
+        additions: prStatsData.additions as number,
+        deletions: prStatsData.deletions as number,
+        changedFiles: prStatsData.changed_files as number,
+      }
+    : null;
+  const prSummaryText = prSummaryStats
+    ? `+${formatDiffSummaryCount(prSummaryStats.additions)} / -${formatDiffSummaryCount(
+        prSummaryStats.deletions
+      )} / ${formatDiffSummaryCount(prSummaryStats.changedFiles)}`
+    : '';
+  const prSummaryAriaLabel = prSummaryStats
+    ? t('autoDiffSummaryAria', language)
+        .replace('{additions}', formatDiffSummaryCount(prSummaryStats.additions))
+        .replace('{deletions}', formatDiffSummaryCount(prSummaryStats.deletions))
+        .replace('{files}', formatDiffSummaryCount(prSummaryStats.changedFiles))
+    : '';
   const renderDiffLines = useCallback(
     (content: string, keyPrefix: string, isTruncated = false) => {
       const lines = content.split('\n');
@@ -2008,9 +2041,20 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               className="timeline-output-btn"
               disabled={!hasPr}
               onClick={() => setViewingPrDiff(true)}
+              title={hasPrSummary ? prSummaryAriaLabel : undefined}
+              aria-label={
+                hasPrSummary
+                  ? `${t('autoFinalCodeChanges', language)}. ${prSummaryAriaLabel}`
+                  : undefined
+              }
             >
               <i className="bi bi-file-diff me-1"></i>
               {t('autoFinalCodeChanges', language)}
+              {hasPrSummary && (
+                <span className="timeline-output-btn__summary" aria-hidden="true">
+                  {prSummaryText}
+                </span>
+              )}
             </Button>
           </div>
         </div>
@@ -2409,9 +2453,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </div>
                 <div className="workflow-timeline-diff-code">
                   {renderDiffLines(
-                    selectedPrDiffFile.patch,
+                    truncatedSelectedPrDiffPatch.content,
                     selectedPrDiffFile.id,
-                    truncatedPrDiff.isTruncated
+                    truncatedSelectedPrDiffPatch.isTruncated
                   )}
                 </div>
               </div>

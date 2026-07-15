@@ -1612,6 +1612,63 @@ def get_workflow_pr_diff(workflow_id):
     return jsonify({"success": True, "diff": diff, "pr_number": int(pr_number)})
 
 
+@autonomous_bp.route("/workflows/<workflow_id>/pr-stats", methods=["GET"])
+@auth_required
+def get_workflow_pr_stats(workflow_id):
+    """Get lightweight cumulative PR stats for a workflow."""
+    workflow = _get_repo().get_workflow(workflow_id)
+    if not workflow:
+        return jsonify({"error": "Workflow not found"}), 404
+    if g.user_role != "admin" and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
+    pr_number = workflow.get("github_pr_number")
+    if not pr_number:
+        return jsonify(
+            {
+                "success": True,
+                "pr_number": None,
+                "additions": None,
+                "deletions": None,
+                "changed_files": None,
+            }
+        )
+
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.repositories.user_repo import UserRepository
+
+    project_path = workflow.get("worktree_path") or workflow.get("project_path", "")
+    system_account = workflow.get("system_account")
+    if not system_account:
+        user = UserRepository().get_user_by_id(workflow.get("user_id"))
+        system_account = user.get("system_account") if user else None
+
+    gh = GitHubOps(project_path, system_account=system_account)
+    try:
+        pr = gh.get_pr(int(pr_number))
+    except Exception as e:
+        logger.warning("Failed to get PR stats for #%s: %s", pr_number, e)
+        return jsonify(
+            {
+                "success": True,
+                "pr_number": int(pr_number),
+                "additions": None,
+                "deletions": None,
+                "changed_files": None,
+            }
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "pr_number": int(pr_number),
+            "additions": int(pr.get("additions", 0) or 0),
+            "deletions": int(pr.get("deletions", 0) or 0),
+            "changed_files": int(pr.get("changedFiles", 0) or 0),
+        }
+    )
+
+
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
 
 
