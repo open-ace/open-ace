@@ -719,9 +719,9 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
   return (
     <>
       {/* Status Filter Tabs */}
-      <div className="px-2 py-2 border-bottom">
+      <div className="px-2 py-2 border-bottom auto-workflow-search">
         <div className="input-group input-group-sm">
-          <span className="input-group-text bg-white">
+          <span className="input-group-text">
             <i className="bi bi-search"></i>
           </span>
           <input

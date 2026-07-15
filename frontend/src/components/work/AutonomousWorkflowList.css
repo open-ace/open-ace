@@ -8,6 +8,33 @@
     background-color 180ms ease;
 }
 
+[data-theme='dark'] .auto-workflow-search .input-group {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+[data-theme='dark'] .auto-workflow-search .input-group-text {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+}
+
+[data-theme='dark'] .auto-workflow-search .form-control {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+}
+
+[data-theme='dark'] .auto-workflow-search .form-control:focus {
+  box-shadow: none;
+}
+
+[data-theme='dark'] .auto-workflow-search .form-control::placeholder {
+  color: var(--text-muted);
+}
+
 .auto-workflow-item {
   cursor: pointer;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06) !important;
