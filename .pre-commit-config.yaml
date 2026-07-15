@@ -29,6 +29,20 @@ repos:
         files: ^migrations/versions/.*\.py$
         pass_filenames: false
 
+      # Enforce migration authoring rules (Issue #1704):
+      #   MIG001 — no runtime app.* imports (breaks the synthetic-tree
+      #            migration-graph load with an opaque ImportError)
+      #   MIG002 — CONCURRENTLY index ops must use the approved
+      #            autocommit_block() + postgresql_concurrently=True pattern
+      # This sees only the current working tree; the migration-graph CI job runs
+      # the authoritative check against the pre-merged tree (see that workflow).
+      - id: check-migration-rules
+        name: Check migration authoring rules (MIG001/MIG002)
+        entry: python3 scripts/lint/check_migration_rules.py
+        language: system
+        files: ^migrations/versions/.*\.py$
+        pass_filenames: false
+
       # Validate PostgreSQL schema for boolean field consistency
       - id: validate-schema
         name: Validate PostgreSQL schema boolean fields
