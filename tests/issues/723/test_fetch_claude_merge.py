@@ -36,9 +36,11 @@ class TestMergeMessagesById:
             "message_id": "msg_1",
             "content": "[]",  # thinking-only line extracts no text
             "content_blocks": [{"type": "thinking", "thinking": "Let me think..."}],
-            "tokens_used": 100,
+            "tokens_used": 300,
             "input_tokens": 80,
             "output_tokens": 20,
+            "cache_read_tokens": 200,
+            "cache_creation_tokens": 0,
             "timestamp": "2026-06-24T12:37:00Z",
         }
         text = {
@@ -47,9 +49,11 @@ class TestMergeMessagesById:
             "message_id": "msg_1",
             "content": json.dumps(["## 审查结论 方案核心架构成立"], ensure_ascii=False),
             "content_blocks": [{"type": "text", "text": "## 审查结论 方案核心架构成立"}],
-            "tokens_used": 100,  # claude repeats usage on each block-line
+            "tokens_used": 300,  # claude repeats usage on each block-line
             "input_tokens": 80,
             "output_tokens": 20,
+            "cache_read_tokens": 200,
+            "cache_creation_tokens": 0,
             "timestamp": "2026-06-24T12:39:00Z",
         }
         merged = _merge_messages_by_id([thinking, text])
@@ -63,8 +67,9 @@ class TestMergeMessagesById:
         # content is the text line, not the empty thinking line
         assert "审查结论" in m["content"]
         # tokens: max within group (not summed) to avoid double counting
-        assert m["tokens_used"] == 100
+        assert m["tokens_used"] == 300
         assert m["input_tokens"] == 80
+        assert m["cache_read_tokens"] == 200
 
     def test_distinct_message_ids_stay_separate(self):
         """Different message_ids are NOT merged."""
@@ -179,3 +184,72 @@ class TestProcessJsonlFileMerge:
         # Both blocks present.
         block_types = [b["type"] for b in (m.get("content_blocks") or [])]
         assert "thinking" in block_types and "text" in block_types
+
+    def test_daily_usage_dedups_repeated_claude_lines_and_keeps_cache(self, tmp_path):
+        """Daily stats should count one logical assistant reply once, including cache."""
+        mid = "msg_20260624203902ff56c7472512449f"
+        entries = [
+            {
+                "type": "assistant",
+                "uuid": "u-thinking",
+                "timestamp": "2026-06-24T12:39:00.000Z",
+                "sessionId": "s-jsonl",
+                "message": {
+                    "id": mid,
+                    "role": "assistant",
+                    "model": "claude-sonnet",
+                    "content": [{"type": "thinking", "thinking": "I now have enough context."}],
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cache_read_input_tokens": 200,
+                    },
+                },
+            },
+            {
+                "type": "assistant",
+                "uuid": "u-text",
+                "timestamp": "2026-06-24T12:39:05.000Z",
+                "sessionId": "s-jsonl",
+                "message": {
+                    "id": mid,
+                    "role": "assistant",
+                    "model": "claude-sonnet",
+                    "content": [{"type": "text", "text": "final answer"}],
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cache_read_input_tokens": 200,
+                    },
+                },
+            },
+            {
+                "type": "assistant",
+                "uuid": "u-tool",
+                "timestamp": "2026-06-24T12:39:06.000Z",
+                "sessionId": "s-jsonl",
+                "message": {
+                    "id": mid,
+                    "role": "assistant",
+                    "model": "claude-sonnet",
+                    "content": [{"type": "tool_use", "id": "tool-1", "name": "Read"}],
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "cache_read_input_tokens": 200,
+                    },
+                },
+            },
+        ]
+        jsonl = _write_jsonl(tmp_path / "s-jsonl.jsonl", entries)
+
+        daily, messages = process_jsonl_file(jsonl)
+
+        assert daily["2026-06-24"]["input_tokens"] == 100
+        assert daily["2026-06-24"]["output_tokens"] == 50
+        assert daily["2026-06-24"]["cache_read_tokens"] == 200
+        assert daily["2026-06-24"]["request_count"] == 1
+        assert daily["2026-06-24"]["models_used"] == {"claude-sonnet"}
+
+        assert len(messages) == 1
+        assert messages[0]["tokens_used"] == 350

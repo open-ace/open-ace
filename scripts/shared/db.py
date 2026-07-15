@@ -1032,6 +1032,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 tokens_used = msg.get("tokens_used", 0)
                 input_tokens = msg.get("input_tokens", 0)
                 output_tokens = msg.get("output_tokens", 0)
+                overwrite_zero_tokens = bool(msg.get("overwrite_zero_tokens"))
                 sender_id = msg.get("sender_id")
                 sender_name = msg.get("sender_name")
                 model = msg.get("model")
@@ -1049,11 +1050,23 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 if key in existing_map:
                     existing = existing_map[key]
                     # Preserve existing token values if new values are 0
-                    if tokens_used == 0 and existing.get("tokens_used", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and tokens_used == 0
+                        and existing.get("tokens_used", 0) > 0
+                    ):
                         tokens_used = existing["tokens_used"]
-                    if input_tokens == 0 and existing.get("input_tokens", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and input_tokens == 0
+                        and existing.get("input_tokens", 0) > 0
+                    ):
                         input_tokens = existing["input_tokens"]
-                    if output_tokens == 0 and existing.get("output_tokens", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and output_tokens == 0
+                        and existing.get("output_tokens", 0) > 0
+                    ):
                         output_tokens = existing["output_tokens"]
                     # Preserve sender info if new values are None
                     if sender_id is None and existing.get("sender_id"):

@@ -214,19 +214,20 @@ def extract_tokens_from_entry(entry: dict) -> dict:
         result["candidates_tokens"] = usage.get("candidatesTokenCount", 0)
         result["thoughts_tokens"] = usage.get("thoughtsTokenCount", 0)
         result["cached_tokens"] = usage.get("cachedContentTokenCount", 0)
-        result["total_tokens"] = usage.get("totalTokenCount", 0)
+        result["total_tokens"] = usage.get(
+            "totalTokenCount",
+            result["prompt_tokens"] + result["candidates_tokens"],
+        )
 
-        # Calculate actual new input tokens (excluding cached history)
-        # promptTokenCount includes full history, cachedContentTokenCount is the cached portion
+        # ``promptTokenCount`` includes cached context; store the non-cached
+        # prompt delta separately so ``input_tokens`` stays compatible with the
+        # Claude/ZCode schema while ``total_tokens`` matches provider totals.
         if result["cached_tokens"] > 0:
             result["actual_input_tokens"] = max(
                 0, result["prompt_tokens"] - result["cached_tokens"]
             )
         else:
-            # No cache info, estimate: total - output
-            result["actual_input_tokens"] = max(
-                0, result["total_tokens"] - result["candidates_tokens"] - result["thoughts_tokens"]
-            )
+            result["actual_input_tokens"] = max(0, result["prompt_tokens"])
 
     return result
 
@@ -555,12 +556,12 @@ def process_jsonl_file(
                             # Get content
                             content = extract_content_from_entry(entry)
 
-                            # Get token counts - use actual_input_tokens to avoid inflation
-                            input_tokens = tokens.get("actual_input_tokens", 0) + tokens.get(
-                                "thoughts_tokens", 0
-                            )
+                            # Keep ``input_tokens`` as non-cached input while
+                            # ``tokens_used`` tracks the provider total (which
+                            # already includes cached prompt tokens).
+                            input_tokens = tokens.get("actual_input_tokens", 0)
                             output_tokens = tokens.get("candidates_tokens", 0)
-                            total_tokens = input_tokens + output_tokens
+                            total_tokens = tokens.get("total_tokens", 0)
 
                             # Get model info
                             model = entry.get("model")
@@ -641,16 +642,14 @@ def process_jsonl_file(
                             daily[date_key]["request_count"] += 1
                     continue
 
-                # Use actual_input_tokens (excluding cached history) to avoid inflation
+                # ``totalTokenCount`` already includes cached prompt tokens.
+                # Persist provider-style totals while keeping non-cached input
+                # in ``input_tokens`` and cache in its own column.
                 daily[date_key]["prompt_tokens"] += tokens["actual_input_tokens"]
                 daily[date_key]["candidates_tokens"] += tokens["candidates_tokens"]
                 daily[date_key]["thoughts_tokens"] += tokens["thoughts_tokens"]
                 daily[date_key]["cached_tokens"] += tokens["cached_tokens"]
-                daily[date_key]["total_tokens"] += (
-                    tokens["actual_input_tokens"]
-                    + tokens["candidates_tokens"]
-                    + tokens["thoughts_tokens"]
-                )
+                daily[date_key]["total_tokens"] += tokens["total_tokens"]
 
                 if tokens["is_assistant_message"]:
                     if assistant_message_id:
