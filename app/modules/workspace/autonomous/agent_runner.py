@@ -168,6 +168,7 @@ class _LocalSession:
     request_count: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
+    # Runtime-only classification mirroring AgentTaskResult.error_code.
     error_code: str | None = None
     last_stderr: str = ""
     _stopped: threading.Event = field(default_factory=threading.Event)
@@ -435,11 +436,7 @@ def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str 
     if "no conversation found with session id" in normalized:
         return "resume_session_not_found", message
 
-    if (
-        "not logged in" in normalized
-        or "/login" in normalized
-        or subtype == "authentication_failed"
-    ):
+    if "not logged in" in normalized or "/login" in normalized:
         return "cli_auth_failed", message or "Not logged in · Please run /login"
 
     if message:

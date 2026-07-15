@@ -677,10 +677,10 @@ class TestStdoutParsing:
         )
         assert session.error_code == "resume_session_not_found"
 
-    def test_extract_cli_result_error_uses_authentication_subtype_and_stderr(self):
+    def test_extract_cli_result_error_uses_logged_out_message(self):
         """Authentication failures should be classified from observed CLI output."""
         error_code, error_message = _extract_cli_result_error(
-            {"type": "result", "is_error": True, "subtype": "authentication_failed"},
+            {"type": "result", "is_error": True},
             "Not logged in · Please run /login",
         )
         assert error_code == "cli_auth_failed"
