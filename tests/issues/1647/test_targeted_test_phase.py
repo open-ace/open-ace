@@ -81,7 +81,9 @@ def _seed_repo_layout(repo_root: Path) -> None:
     (repo_root / "tests").mkdir(parents=True, exist_ok=True)
     (repo_root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     (repo_root / "frontend" / "package.json").write_text('{"scripts":{"test":"vitest --run"}}')
-    (repo_root / "tests" / "README.md").write_text("pytest tests/unit/\npytest tests/integration/\n")
+    (repo_root / "tests" / "README.md").write_text(
+        "pytest tests/unit/\npytest tests/integration/\n"
+    )
     (repo_root / "pytest.ini").write_text("[pytest]\n")
 
 

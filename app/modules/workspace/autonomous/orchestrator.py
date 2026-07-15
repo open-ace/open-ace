@@ -1644,8 +1644,10 @@ class AutonomousOrchestrator:
 
         for path in normalized:
             lower = path.lower()
-            is_doc = lower.endswith((".md", ".rst", ".txt")) or "/docs/" in lower or lower.startswith(
-                "docs/"
+            is_doc = (
+                lower.endswith((".md", ".rst", ".txt"))
+                or "/docs/" in lower
+                or lower.startswith("docs/")
             )
             docs_only = docs_only and is_doc
 
@@ -1712,11 +1714,15 @@ class AutonomousOrchestrator:
         scopes: list[tuple[str, str]] = []
 
         if analysis["docs_only"]:
-            scopes.append(("最小化验证", "当前改动看起来是文档/说明变更，优先做语法或引用一致性检查。"))
+            scopes.append(
+                ("最小化验证", "当前改动看起来是文档/说明变更，优先做语法或引用一致性检查。")
+            )
             return scopes
 
         if "frontend" in tags:
-            scopes.append(("前端相关验证", "改动涉及 frontend 目录，应优先覆盖前端组件、页面或样式行为。"))
+            scopes.append(
+                ("前端相关验证", "改动涉及 frontend 目录，应优先覆盖前端组件、页面或样式行为。")
+            )
         if "backend" in tags:
             scopes.append(("后端单元验证", "改动涉及 Python/服务端目录，应优先验证对应单元测试。"))
         if "shared-backend" in tags:
@@ -1731,15 +1737,24 @@ class AutonomousOrchestrator:
         if "migration" in tags:
             scopes.append(("数据迁移验证", "改动涉及 migration/schema，需要验证迁移和持久层行为。"))
         if "issue-regression" in tags:
-            scopes.append(("问题回归验证", "改动触达 issue/regression 测试目录，应复用对应回归用例。"))
+            scopes.append(
+                ("问题回归验证", "改动触达 issue/regression 测试目录，应复用对应回归用例。")
+            )
         if "e2e" in tags:
-            scopes.append(("端到端/Smoke 验证", "改动触达 E2E 相关代码，应补充对应 smoke 或端到端验证。"))
+            scopes.append(
+                ("端到端/Smoke 验证", "改动触达 E2E 相关代码，应补充对应 smoke 或端到端验证。")
+            )
         if "tooling" in tags:
-            scopes.append(("仓库脚本/CI 验证", "改动涉及工作流、依赖或构建脚本，应对照仓库真实命令验证。"))
+            scopes.append(
+                ("仓库脚本/CI 验证", "改动涉及工作流、依赖或构建脚本，应对照仓库真实命令验证。")
+            )
 
         if not scopes:
             fallback = {
-                "python": ("后端定向验证", "当前仓库以 Python 为主，先从最接近改动模块的 pytest 子集开始。"),
+                "python": (
+                    "后端定向验证",
+                    "当前仓库以 Python 为主，先从最接近改动模块的 pytest 子集开始。",
+                ),
                 "javascript": (
                     "前端定向验证",
                     "当前仓库以 JavaScript 为主，先从 package.json 中的测试脚本开始。",
@@ -1752,7 +1767,10 @@ class AutonomousOrchestrator:
             scopes.append(
                 fallback.get(
                     framework_type,
-                    ("定向验证", "未识别明确改动类型，请先阅读仓库测试约定并选择最小必要验证范围。"),
+                    (
+                        "定向验证",
+                        "未识别明确改动类型，请先阅读仓库测试约定并选择最小必要验证范围。",
+                    ),
                 )
             )
 
@@ -1799,13 +1817,9 @@ class AutonomousOrchestrator:
         if analysis["docs_only"]:
             guardrail = "当前更像文档/说明类改动，只做最小必要验证，不要升级为大范围回归。"
         elif "frontend" in analysis["tags"] and "backend" not in analysis["tags"]:
-            guardrail = (
-                "当前改动主要在前端。先验证前端相关测试/构建；没有跨层证据前，不要先跑后端全树 pytest。"
-            )
+            guardrail = "当前改动主要在前端。先验证前端相关测试/构建；没有跨层证据前，不要先跑后端全树 pytest。"
         elif "backend" in analysis["tags"] and "frontend" not in analysis["tags"]:
-            guardrail = (
-                "当前改动主要在后端。先验证最接近改动模块的后端测试；不要一上来跑整个仓库的所有测试。"
-            )
+            guardrail = "当前改动主要在后端。先验证最接近改动模块的后端测试；不要一上来跑整个仓库的所有测试。"
         if "shared-backend" in analysis["tags"]:
             guardrail += " 若改动触及共享后端模块，还应补上直接依赖方或相关调用链测试。"
 
@@ -1828,12 +1842,18 @@ class AutonomousOrchestrator:
                     "仓库包含 `pytest.ini`，选择 pytest 命令前先确认默认收集范围和配置。"
                 )
 
-        changed_lines = "\n".join(f"- `{path}`" for path in changed_files[:20]) or "- 未能自动获取改动文件，请先自行确认本轮变更范围。"
+        changed_lines = (
+            "\n".join(f"- `{path}`" for path in changed_files[:20])
+            or "- 未能自动获取改动文件，请先自行确认本轮变更范围。"
+        )
         if len(changed_files) > 20:
             changed_lines += f"\n- 其余 {len(changed_files) - 20} 个文件省略"
 
         scope_lines = "\n".join(f"- **{name}**：{reason}" for name, reason in scopes)
-        repo_lines = "\n".join(f"- {line}" for line in repo_guidance) or "- 未发现额外仓库约定文件，请先检查项目根目录中的测试/构建配置。"
+        repo_lines = (
+            "\n".join(f"- {line}" for line in repo_guidance)
+            or "- 未发现额外仓库约定文件，请先检查项目根目录中的测试/构建配置。"
+        )
 
         context = [
             "## 本轮定向验证上下文",
@@ -4135,7 +4155,11 @@ class AutonomousOrchestrator:
         try:
             targeted_test_context = self._build_test_execution_context(wf, gh)
         except Exception as exc:
-            logger.warning("Failed to build targeted test context for workflow %s: %s", self._workflow_id[:8], exc)
+            logger.warning(
+                "Failed to build targeted test context for workflow %s: %s",
+                self._workflow_id[:8],
+                exc,
+            )
             targeted_test_context = (
                 "## 本轮定向验证上下文\n"
                 "- 自动构建验证上下文失败，请先自行检查最终方案、改动文件和仓库测试约定，"
@@ -4143,8 +4167,7 @@ class AutonomousOrchestrator:
             )
 
         test_prompt = (
-            AUTONOMOUS_CONTEXT
-            + "请基于最终方案和本轮实际改动，设计并执行一份定向验证矩阵。"
+            AUTONOMOUS_CONTEXT + "请基于最终方案和本轮实际改动，设计并执行一份定向验证矩阵。"
             "如果有失败，修复问题并重新测试。确保必测项全部通过后再结束。\n\n"
         )
         if issue_number:
