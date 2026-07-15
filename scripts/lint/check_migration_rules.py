@@ -58,6 +58,7 @@ Exit code: 1 if any violation is found, 0 otherwise.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,9 +81,18 @@ _CONCURRENT_KWARG = "postgresql_concurrently"
 # regardless of how the receiver is imported/aliased.
 _RAW_DDL_CALLS = {"execute", "text"}
 
-# Substrings that indicate a raw concurrent DDL statement. ``CREATE/DROP/REINDEX
-# ... CONCURRENTLY`` and the bare ``CONCURRENTLY`` keyword are the signals.
+# The CONCURRENTLY keyword signals a raw concurrent DDL statement
+# (``CREATE/DROP/REINDEX ... CONCURRENTLY``). We anchor it to a preceding DDL
+# verb rather than matching the bare word: a bare ``\bCONCURRENTLY\b`` still
+# matches the token inside a data predicate (``%`` is a non-word char, so
+# ``WHERE note LIKE '%concurrently%'`` is bounded by word boundaries on both
+# sides). Requiring a leading ``CREATE|DROP|REINDEX`` in the same literal keeps
+# the match on actual DDL while leaving data backfills alone.
 _CONCURRENTLY_TOKEN = "CONCURRENTLY"
+_CONCURRENTLY_DDL_RE = re.compile(
+    r"\b(?:CREATE|DROP|REINDEX)\b.*\b" + re.escape(_CONCURRENTLY_TOKEN) + r"\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -230,7 +240,7 @@ def _check_mig002(
         if name in _RAW_DDL_CALLS:
             for arg in node.args:
                 text = _string_literal(arg)
-                if text and _CONCURRENTLY_TOKEN in text.upper():
+                if text and _CONCURRENTLY_DDL_RE.search(text):
                     violations.append(
                         Violation(
                             rule="MIG002",

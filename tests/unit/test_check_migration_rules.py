@@ -260,8 +260,15 @@ class TestMig002ConcurrentlyPolicy:
         assert len(violations) == 1
         assert violations[0].rule == "MIG002"
 
-    def test_concurrently_nested_deeply_in_autocommit_passes(self, tmp_path: Path):
-        """autocommit_block may wrap helper calls that create the index."""
+    def test_concurrently_in_sibling_helper_is_flagged(self, tmp_path: Path):
+        """A create_index delegated to a sibling helper is flagged.
+
+        ``_do_create`` is a sibling function — its ``create_index`` node is NOT
+        lexically nested inside the ``with`` block. MIG002(b) is a lexical
+        (structural) check, so it cannot see the runtime call relationship and
+        flags this: authors must inline the ``op.create_index`` call directly
+        under ``autocommit_block()`` rather than delegating to a helper.
+        """
         path = _write_migration(
             tmp_path,
             """
@@ -279,10 +286,6 @@ class TestMig002ConcurrentlyPolicy:
                 op.create_index("idx", "t", ["c"], postgresql_concurrently=True)
             """,
         )
-        # Note: _do_create is a sibling function — its create_index node is NOT
-        # lexically nested inside the with-block. This documents that the check
-        # is lexical (structural), as designed: it catches the direct misuse
-        # pattern. Authors must inline the call under autocommit_block().
         violations = rules.check_file(path)
         assert len(violations) == 1
         assert violations[0].rule == "MIG002"
@@ -313,6 +316,27 @@ class TestMig002ConcurrentlyPolicy:
 
             def upgrade():
                 op.execute("CREATE INDEX idx ON t (c)")
+            """,
+        )
+        assert rules.check_file(path) == []
+
+    def test_concurrently_as_data_substring_not_flagged(self, tmp_path: Path):
+        """MIG002(a) matches the CONCURRENTLY keyword, not a bare substring.
+
+        A data backfill whose SQL happens to contain the word "concurrently" in
+        a value/predicate must not be a false positive — only the DDL keyword
+        (CREATE/DROP/REINDEX ... CONCURRENTLY) is the signal.
+        """
+        path = _write_migration(
+            tmp_path,
+            """
+            from alembic import op
+
+            revision = "rev_test"
+            down_revision = None
+
+            def upgrade():
+                op.execute("UPDATE t SET flagged=1 WHERE note LIKE '%concurrently%'")
             """,
         )
         assert rules.check_file(path) == []
