@@ -50,9 +50,9 @@ test.describe('Report Page', () => {
     await page.goto('/report');
     await waitForApp(page);
 
-    // Look for date inputs
-    const dateInput = page.locator('input[type="date"]').first();
-    await expect(dateInput).toBeVisible({ timeout: 5000 });
+    // Look for DatePicker components (rendered as button.form-control, not input[type="date"])
+    const datePicker = page.locator('.open-ace-datepicker button.form-control').first();
+    await expect(datePicker).toBeVisible({ timeout: 5000 });
   });
 
   test('should display usage table', async ({ page }) => {

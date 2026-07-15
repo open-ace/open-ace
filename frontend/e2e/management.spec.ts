@@ -187,6 +187,10 @@ test.describe('Audit Center', () => {
     await page.goto('/manage/audit');
     await waitForApp(page);
 
+    // Wait for loading to complete (spinner may or may not appear)
+    const loading = page.locator('.audit-center .spinner-border');
+    await loading.waitFor({ state: 'hidden', timeout: 10000 }).catch(() => {});
+
     // Log tab should show filters card and table, or error alert, or empty state
     const table = page.locator('.audit-center table.table');
     const card = page.locator('.audit-center .card');
