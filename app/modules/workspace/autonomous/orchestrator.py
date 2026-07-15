@@ -1273,8 +1273,7 @@ class AutonomousOrchestrator:
             milestone_id=repair_ms.get("milestone_id", ""),
         )
 
-        if not hasattr(self._gh, "mock_calls"):
-            self._gh = None
+        self._gh = None
         gh = self._get_gh()
 
         try:
@@ -3469,8 +3468,7 @@ class AutonomousOrchestrator:
         )
 
         # P2 修复（Issue #1611）：开发完成后重置 gh 缓存，重新绑定到正确路径
-        if not hasattr(self._gh, "mock_calls"):
-            self._gh = None
+        self._gh = None
         gh = self._get_gh()
 
         # 严格校验：自主开发不能悄悄切到其他分支
@@ -5129,6 +5127,11 @@ class AutonomousOrchestrator:
         scheduler retries in ~10s. This avoids hogging a workflow thread for
         the full CI duration (10+ min for Python 3.9) and naturally adapts
         to variable CI times without --admin bypass or long polls.
+
+        Note: an automatic CI repair attempt runs synchronously in this phase
+        on the existing PR branch. That intentionally spends one merge worker
+        for the repair task, but avoids bouncing the workflow back through the
+        full development/test/review/report loop.
         """
         gh = self._get_gh()
         pr_number = wf.get("github_pr_number")
