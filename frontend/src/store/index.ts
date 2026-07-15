@@ -58,6 +58,7 @@ interface AppState {
   // Workspace tabs state (Issue #65: Persist workspace state)
   workspaceTabs: WorkspaceTab[];
   workspaceActiveTabId: string;
+  workspaceTabsOrder: string[]; // Visual order of tabs (Issue #1470)
 
   // Tab notification settings
   enableTabNotifications: boolean;
@@ -101,6 +102,7 @@ interface AppState {
   removeWorkspaceTab: (tabId: string) => void;
   clearWorkspaceTabs: () => void;
   reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => void;
+  setWorkspaceTabsOrder: (order: string[] | ((prev: string[]) => string[])) => void; // Issue #1470
 
   // Tab notification actions
   setEnableTabNotifications: (enabled: boolean) => void;
@@ -143,6 +145,7 @@ export const useAppStore = create<AppState>()(
       // Workspace tabs state (Issue #65)
       workspaceTabs: [],
       workspaceActiveTabId: '',
+      workspaceTabsOrder: [], // Issue #1470
 
       // Tab notification settings
       enableTabNotifications: true,
@@ -255,6 +258,10 @@ export const useAppStore = create<AppState>()(
           tabs.splice(toIndex, 0, removed);
           return { workspaceTabs: tabs };
         }),
+      setWorkspaceTabsOrder: (order) =>
+        set((state) => ({
+          workspaceTabsOrder: typeof order === 'function' ? order(state.workspaceTabsOrder) : order,
+        })),
 
       // Tab notification actions
       setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
@@ -294,6 +301,7 @@ export const useAppStore = create<AppState>()(
           ({ terminalToken, terminalWsUrl, waitingForUser, waitingType, ...rest }) => rest
         ),
         workspaceActiveTabId: state.workspaceActiveTabId,
+        workspaceTabsOrder: state.workspaceTabsOrder, // Issue #1470
       }),
     }
   )
@@ -324,6 +332,7 @@ export const usePreviousPanelState = () =>
 // Workspace tabs selectors (Issue #65)
 export const useWorkspaceTabs = () => useAppStore((state) => state.workspaceTabs);
 export const useWorkspaceActiveTabId = () => useAppStore((state) => state.workspaceActiveTabId);
+export const useWorkspaceTabsOrder = () => useAppStore((state) => state.workspaceTabsOrder); // Issue #1470
 
 // Separate action selectors for stable references (fixes infinite loop)
 export const useSetWorkspaceTabs = () => useAppStore((state) => state.setWorkspaceTabs);
@@ -334,6 +343,7 @@ export const useUpdateWorkspaceTab = () => useAppStore((state) => state.updateWo
 export const useRemoveWorkspaceTab = () => useAppStore((state) => state.removeWorkspaceTab);
 export const useClearWorkspaceTabs = () => useAppStore((state) => state.clearWorkspaceTabs);
 export const useReorderWorkspaceTabs = () => useAppStore((state) => state.reorderWorkspaceTabs);
+export const useSetWorkspaceTabsOrder = () => useAppStore((state) => state.setWorkspaceTabsOrder); // Issue #1470
 
 // Legacy selector - DEPRECATED: Use individual action selectors instead for stable references
 export const useWorkspaceTabsActions = () =>

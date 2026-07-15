@@ -12,7 +12,7 @@
  *   and restored when returning to workspace after navigating away
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   workspaceApi,
@@ -34,7 +34,8 @@ import {
   useAddWorkspaceTab,
   useUpdateWorkspaceTab,
   useRemoveWorkspaceTab,
-  useReorderWorkspaceTabs,
+  useWorkspaceTabsOrder,
+  useSetWorkspaceTabsOrder,
   type WorkspaceTab as StoreWorkspaceTab,
 } from '@/store';
 import { t } from '@/i18n';
@@ -79,6 +80,7 @@ export const Workspace: React.FC = () => {
 
   // Local state for tabs with runtime-generated URL (extended from store state)
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [tabsOrder, setTabsOrder] = useState<string[]>([]); // Visual order for drag sort (Issue #1470)
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
   const [renameTabId, setRenameTabId] = useState<string | null>(null);
@@ -114,13 +116,28 @@ export const Workspace: React.FC = () => {
   // Workspace tabs state from store (Issue #65)
   const storedTabs = useWorkspaceTabs();
   const storedActiveTabId = useWorkspaceActiveTabId();
+  const storedTabsOrder = useWorkspaceTabsOrder(); // Issue #1470
 
   // Use stable action selectors (fixes infinite loop)
   const setStoredActiveTabId = useSetWorkspaceActiveTabId();
   const addStoredTab = useAddWorkspaceTab();
   const updateStoredTab = useUpdateWorkspaceTab();
   const removeStoredTab = useRemoveWorkspaceTab();
-  const reorderStoredTabs = useReorderWorkspaceTabs();
+  const setStoredTabsOrder = useSetWorkspaceTabsOrder(); // Issue #1470
+
+  // Issue #1470: Compute ordered tabs for visual display (Tab Bar only)
+  // Tab Content uses original tabs order to prevent iframe re-creation
+  const orderedTabs = useMemo(() => {
+    if (tabsOrder.length === 0) return tabs;
+    // Sort tabs by tabsOrder, then append any tabs not in order (new tabs)
+    const ordered = tabsOrder
+      .map((id) => tabs.find((t) => t.id === id))
+      .filter((tab): tab is WorkspaceTab => tab !== undefined);
+    // Add any new tabs that aren't in tabsOrder yet
+    const orderedIds = new Set(tabsOrder);
+    const newTabs = tabs.filter((t) => !orderedIds.has(t.id));
+    return [...ordered, ...newTabs];
+  }, [tabs, tabsOrder]);
 
   // Shared terminal proxy polling helper
   const pollTerminalProxy = useCallback(
@@ -311,6 +328,13 @@ export const Workspace: React.FC = () => {
       waitingType: null,
     });
   }, []);
+
+  // Issue #1470: Sync tabsOrder to store for persistence
+  useEffect(() => {
+    if (tabsOrder.length > 0 && tabsInitialized) {
+      setStoredTabsOrder(tabsOrder);
+    }
+  }, [tabsOrder, tabsInitialized, setStoredTabsOrder]);
 
   // Listen for fullscreen request from iframe (when user selects project and enters chat)
   // Also listen for session ID update from iframe (Issue #65)
@@ -916,6 +940,19 @@ export const Workspace: React.FC = () => {
       // Mark as loading
       setLoadingTabs(new Set(initialTabs.map((t) => t.id)));
 
+      // Issue #1470: Initialize tabsOrder from store or use default order
+      if (storedTabsOrder.length > 0) {
+        // Filter storedTabsOrder to only include existing tabs
+        const validOrder = storedTabsOrder.filter((id) => initialTabs.some((t) => t.id === id));
+        // Add any new tabs that aren't in the order
+        const orderedIds = new Set(validOrder);
+        const newTabIds = initialTabs.filter((t) => !orderedIds.has(t.id)).map((t) => t.id);
+        setTabsOrder([...validOrder, ...newTabIds]);
+      } else {
+        // Default order: all tabs in their initial order
+        setTabsOrder(initialTabs.map((t) => t.id));
+      }
+
       setTabsInitialized(true);
     }
   }, [
@@ -925,6 +962,7 @@ export const Workspace: React.FC = () => {
     tabsInitialized,
     storedTabs,
     storedActiveTabId,
+    storedTabsOrder, // Issue #1470
     language,
     getEffectiveUrl,
     searchParams,
@@ -1282,6 +1320,7 @@ export const Workspace: React.FC = () => {
 
       // Update local state
       setTabs((prev) => [...prev, newTab]);
+      setTabsOrder((prev) => [...prev, newTab.id]); // Issue #1470: Add new tab to order
       setActiveTabId(newTab.id);
 
       // Update store (Issue #65)
@@ -1299,11 +1338,21 @@ export const Workspace: React.FC = () => {
         machineName: newTab.machineName,
       });
       setStoredActiveTabId(newTab.id);
+      // Issue #1470: Update tabsOrder in store
+      setStoredTabsOrder((prev) => [...prev, newTab.id]);
 
       // Mark as loading
       setLoadingTabs((prev) => new Set(prev).add(newTab.id));
     },
-    [getEffectiveUrl, userWebUI, language, addStoredTab, setStoredActiveTabId, clearTabNotification]
+    [
+      getEffectiveUrl,
+      userWebUI,
+      language,
+      addStoredTab,
+      setStoredActiveTabId,
+      clearTabNotification,
+      setStoredTabsOrder,
+    ]
   );
 
   // Handle switch project request from iframe (Issue #229)
@@ -1333,6 +1382,8 @@ export const Workspace: React.FC = () => {
         }
         return newTabs;
       });
+      // Issue #1470: Remove from tabsOrder
+      setTabsOrder((prev) => prev.filter((id) => id !== tabId));
       removeStoredTab(tabId);
       if (isLastTab) {
         createNewTab();
@@ -1475,24 +1526,26 @@ export const Workspace: React.FC = () => {
     (tabId: string) => {
       if (!draggedTabId || draggedTabId === tabId) return;
 
-      const fromIndex = tabs.findIndex((t) => t.id === draggedTabId);
-      const toIndex = tabs.findIndex((t) => t.id === tabId);
+      // Issue #1470: Use tabsOrder for visual sorting, don't modify tabs array
+      // This prevents iframe re-creation when tab order changes
+      const fromIndex = tabsOrder.indexOf(draggedTabId);
+      const toIndex = tabsOrder.indexOf(tabId);
 
       if (fromIndex !== -1 && toIndex !== -1) {
-        // Update local state
-        const newTabs = [...tabs];
-        const [removed] = newTabs.splice(fromIndex, 1);
-        newTabs.splice(toIndex, 0, removed);
-        setTabs(newTabs);
+        // Update visual order only
+        const newOrder = [...tabsOrder];
+        const [removed] = newOrder.splice(fromIndex, 1);
+        newOrder.splice(toIndex, 0, removed);
+        setTabsOrder(newOrder);
 
-        // Update store
-        reorderStoredTabs(fromIndex, toIndex);
+        // Update store for persistence
+        setStoredTabsOrder(newOrder);
       }
 
       setDraggedTabId(null);
       setDragOverTabId(null);
     },
-    [draggedTabId, tabs, reorderStoredTabs]
+    [draggedTabId, tabsOrder, setStoredTabsOrder]
   );
 
   const handleDragEnd = useCallback(() => {
@@ -1892,7 +1945,7 @@ export const Workspace: React.FC = () => {
         >
           {/* Tabs */}
           <div className="d-flex flex-grow-1" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-            {tabs.map((tab) => {
+            {orderedTabs.map((tab) => {
               const tabWidth = tabWidths[tab.id] || 180;
               return (
                 <div
