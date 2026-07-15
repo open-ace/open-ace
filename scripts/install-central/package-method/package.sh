@@ -465,32 +465,25 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download packages compatible with Python 3.9+ (minimum supported version)
-        # This ensures vendor wheels work on target systems with Python 3.9, 3.10, 3.11, 3.12, etc.
-        echo -e "${YELLOW}Downloading packages compatible with Python 3.9+...${NC}"
+        # Download packages for the current Python version.
+        # Note: If target system has a different Python version, install.sh will automatically
+        # fallback to online installation to download compatible wheels from PyPI.
+        echo -e "${YELLOW}Downloading Python dependencies...${NC}"
 
         # Use --prefer-binary only if pip version >= 20
         if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
-            # Try downloading for Python 3.9 (minimum version) to ensure compatibility
-            # --python-version 3.9 ensures wheels work on Python 3.9+
-            # --platform and --implementation target Linux x86_64 systems
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --python-version 3.9 \
-                --platform manylinux2014_x86_64 \
-                --platform manylinux_2_17_x86_64 \
-                --platform manylinux_2_28_x86_64 \
-                --implementation cp \
-                --abi cp39 \
-                --only-binary=:all: \
-                --prefer-binary 2>/dev/null || \
-            # Fallback: download for current Python version (may not be compatible with 3.9)
-            echo -e "${YELLOW}Note: Could not download Python 3.9 compatible wheels, using current Python version...${NC}" && \
+            # Download wheels for current Python version
+            # Note: Wheels will match the packaging machine's Python version.
+            # If target system has a different Python version, install.sh will automatically
+            # fallback to online installation (downloading compatible wheels from PyPI).
+            echo -e "${YELLOW}Downloading packages for Python $(python3 --version 2>&1 | awk '{print $2}')...${NC}"
+
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
                 --only-binary=:all: \
                 --prefer-binary || \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
                 --only-binary=:all: || \
-            # Final fallback: download without constraints (for packages without pure wheels)
+            # Fallback: download without constraints (for packages without pure wheels)
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
                 $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
