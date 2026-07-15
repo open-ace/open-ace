@@ -2713,6 +2713,24 @@ class AutonomousAgentRunner:
                     elif msg_type in {"system", "initialized"}:
                         if msg_type == "initialized" or parsed.get("subtype") == "initialized":
                             self._capture_cli_session_id(session, parsed, "system.initialized")
+                        # Forward key system events to the UI so the workflow
+                        # detail shows progress during long LLM waits.
+                        # Without this, an agent stuck in api_retry (upstream
+                        # overload / transient auth) emits only `system` events
+                        # — which never triggered _activity_callback — so the
+                        # UI showed "no AI activity" for minutes until the
+                        # first `assistant` event finally arrived.
+                        subtype = parsed.get("subtype", "")
+                        if self._activity_callback and subtype:
+                            activity: dict[str, Any] = {
+                                "type": "system",
+                                "subtype": subtype,
+                            }
+                            if subtype == "thinking_tokens":
+                                activity["estimated_tokens"] = parsed.get("estimated_tokens", 0)
+                            elif subtype == "api_retry":
+                                activity["attempt"] = parsed.get("attempt", 0)
+                            self._activity_callback(session.session_id, activity)
 
                     elif msg_type == "control_response":
                         # Capture the real Claude session_id from the SDK
