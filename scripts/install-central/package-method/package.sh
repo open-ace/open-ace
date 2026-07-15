@@ -465,34 +465,56 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download packages for the current Python version.
-        # Note: If target system has a different Python version, install.sh will automatically
-        # fallback to online installation to download compatible wheels from PyPI.
-        echo -e "${YELLOW}Downloading Python dependencies...${NC}"
+        # Download wheels for Python 3.9/3.10/3.11/3.12 to support all target versions.
+        # pip install will automatically select the matching wheel during installation.
+        # Note: This increases vendor directory size but ensures offline compatibility.
+        echo -e "${YELLOW}Downloading packages for Python 3.9/3.10/3.11/3.12...${NC}"
 
-        # Use --prefer-binary only if pip version >= 20
-        if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
-            # Download wheels for current Python version
-            # Note: Wheels will match the packaging machine's Python version.
-            # If target system has a different Python version, install.sh will automatically
-            # fallback to online installation (downloading compatible wheels from PyPI).
-            echo -e "${YELLOW}Downloading packages for Python $(python3 --version 2>&1 | awk '{print $2}')...${NC}"
+        # Supported Python versions (ABI tags)
+        PYTHON_VERSIONS=("3.9" "3.10" "3.11" "3.12")
+        ABI_TAGS=("cp39" "cp310" "cp311" "cp312")
 
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: \
-                --prefer-binary || \
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: || \
-            # Fallback: download without constraints (for packages without pure wheels)
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
-                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
-                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
-        else
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: || \
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
-                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
-        fi
+        download_failed=false
+
+        for i in "${!PYTHON_VERSIONS[@]}"; do
+            py_ver="${PYTHON_VERSIONS[$i]}"
+            abi="${ABI_TAGS[$i]}"
+
+            echo -e "${YELLOW}Downloading wheels for Python ${py_ver} (${abi})...${NC}"
+
+            # Try downloading with specific Python version and ABI
+            # Use manylinux platform for broad Linux compatibility
+            if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --platform manylinux2014_x86_64 \
+                    --platform manylinux_2_17_x86_64 \
+                    --implementation cp \
+                    --abi "$abi" \
+                    --only-binary=:all: \
+                    --prefer-binary 2>/dev/null || \
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --implementation cp \
+                    --abi "$abi" \
+                    --only-binary=:all: 2>/dev/null || \
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --prefer-binary 2>/dev/null || \
+                echo -e "${YELLOW}Warning: Could not download ${abi} wheels for some packages${NC}"
+            else
+                # Older pip: just try with python-version flag
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --prefer-binary 2>/dev/null || \
+                echo -e "${YELLOW}Warning: Could not download ${abi} wheels for some packages${NC}"
+            fi
+        done
+
+        # Final fallback: download pure Python / universal wheels
+        echo -e "${YELLOW}Downloading universal wheels...${NC}"
+        $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+            --prefer-binary 2>/dev/null || true
     else
         echo -e "${YELLOW}Warning: pip/pip3 not found. Install will require network.${NC}"
     fi
