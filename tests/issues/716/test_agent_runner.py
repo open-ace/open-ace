@@ -11,8 +11,8 @@ import pytest
 
 from app.modules.workspace.autonomous.agent_runner import (
     AutonomousAgentRunner,
-    _LocalSession,
     _extract_cli_result_error,
+    _LocalSession,
 )
 
 
@@ -672,9 +672,7 @@ class TestStdoutParsing:
             ]
         )
         assert session.completed.is_set()
-        assert (
-            session.error == "No conversation found with session ID: dead-session"
-        )
+        assert session.error == "No conversation found with session ID: dead-session"
         assert session.error_code == "resume_session_not_found"
 
     def test_extract_cli_result_error_uses_logged_out_message(self):
