@@ -725,15 +725,6 @@ def _process_sessions_dir(
                 aggregated[date][key] += stats[key]
             aggregated[date]["models_used"].update(stats["models_used"])
 
-        # Inject session-level tokens into the first assistant message for agent_sessions stats
-        if session_tokens["total_tokens"] > 0 and messages:
-            for msg in messages:
-                if msg.get("role") == "assistant":
-                    msg["tokens_used"] = session_tokens["total_tokens"]
-                    msg["input_tokens"] = session_tokens["input_tokens"]
-                    msg["output_tokens"] = session_tokens["output_tokens"]
-                    break
-
         # Collect messages for batch insert
         all_messages.extend(messages)
 
@@ -1225,6 +1216,18 @@ def fetch_and_save(
 
     # Save messages (idempotent UPSERT)
     if all_messages:
+        session_ids = sorted(
+            {
+                str(msg.get("agent_session_id")).strip()
+                for msg in all_messages
+                if msg.get("agent_session_id")
+            }
+        )
+        if session_ids:
+            print(f"Replacing existing message rows for {len(session_ids)} Codex sessions...")
+            deleted = db.delete_messages_for_agent_sessions("codex", hostname, session_ids)
+            if deleted > 0:
+                print(f"Deleted {deleted} stale Codex message rows")
         print("Saving messages to database...")
         saved_count = db_mod.save_messages_batch(all_messages, batch_size=500)
         print(f"Saved {saved_count} messages")
