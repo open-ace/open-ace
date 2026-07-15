@@ -51,9 +51,96 @@ def get_audit_logger():
     return _audit_logger
 
 
-def _get_frontend_url() -> str:
-    """Get frontend URL from environment variable."""
-    return os.environ.get("FRONTEND_URL", "")
+def _encode_state(original_state: str, redirect_uri: str) -> str:
+    """Encode redirect_uri into state parameter.
+
+    Args:
+        original_state: Original state for CSRF verification.
+        redirect_uri: Frontend redirect URI.
+
+    Returns:
+        str: Base64 encoded state containing both values.
+    """
+    import base64
+
+    state_data = {
+        "s": original_state,  # 原始 state 用于验证
+        "r": redirect_uri,  # 前端重定向地址
+    }
+    return base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
+
+
+def _decode_state(encoded_state: str) -> tuple[str, Optional[str]]:
+    """Decode state parameter to get original state and redirect_uri.
+
+    Args:
+        encoded_state: Base64 encoded state parameter.
+
+    Returns:
+        tuple: (original_state, redirect_uri or None)
+    """
+    import base64
+
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(encoded_state).decode())
+        return state_data.get("s", encoded_state), state_data.get("r")
+    except (json.JSONDecodeError, Exception):
+        # 兼容旧格式（纯 state 字符串）
+        return encoded_state, None
+
+
+def _get_allowed_redirect_domains() -> list[str]:
+    """Get allowed redirect domains from environment variable.
+
+    Returns:
+        list: List of allowed domains.
+    """
+    domains = os.environ.get("SSO_ALLOWED_REDIRECT_DOMAINS", "")
+    if domains:
+        return [d.strip() for d in domains.split(",") if d.strip()]
+    return []
+
+
+def _validate_redirect_uri(redirect_uri: str) -> bool:
+    """Validate redirect_uri against domain whitelist.
+
+    Security: Prevent open redirect attacks.
+
+    Args:
+        redirect_uri: The frontend redirect URI to validate.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    from urllib.parse import urlparse
+
+    if not redirect_uri:
+        return False
+
+    try:
+        parsed = urlparse(redirect_uri)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+
+        # 只允许 https（生产环境）或 http（开发环境 localhost）
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        allowed_domains = _get_allowed_redirect_domains()
+
+        # 如果没有配置白名单，只允许 localhost（开发环境）
+        if not allowed_domains:
+            hostname = parsed.netloc.split(":")[0]
+            return hostname in ("localhost", "127.0.0.1", "[::1]")
+
+        # 检查域名是否在白名单中
+        for domain in allowed_domains:
+            if parsed.netloc == domain or parsed.netloc.endswith(f".{domain}"):
+                return True
+
+        return False
+    except Exception:
+        return False
 
 
 user_repo = UserRepository()
@@ -923,8 +1010,10 @@ def start_login(provider_name: str):
 
     Query Parameters:
         redirect_uri: Frontend URL to redirect after successful SSO login.
-                      If not provided, falls back to FRONTEND_URL env var.
+                      Encoded into OAuth state parameter for reliability.
     """
+    import urllib.parse
+
     # Get frontend redirect URI (for post-auth redirect)
     frontend_redirect_uri = request.args.get("redirect_uri")
 
@@ -936,12 +1025,22 @@ def start_login(provider_name: str):
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
 
-    # Store frontend redirect URI in session for callback to use
-    if frontend_redirect_uri:
-        from flask import session as flask_session
+    # Encode redirect_uri into state parameter (more reliable than session)
+    if frontend_redirect_uri and _validate_redirect_uri(frontend_redirect_uri):
+        encoded_state = _encode_state(result["state"], frontend_redirect_uri)
 
-        flask_session["sso_frontend_redirect"] = frontend_redirect_uri
-        flask_session.permanent = True
+        # Update authorization_url with new state
+        parsed = urllib.parse.urlparse(result["authorization_url"])
+        query_params = urllib.parse.parse_qs(parsed.query)
+        query_params["state"] = [encoded_state]
+        new_query = urllib.parse.urlencode(query_params, doseq=True)
+        result["authorization_url"] = urllib.parse.urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
+        )
+        result["state"] = encoded_state
+    elif frontend_redirect_uri:
+        # 域名验证失败，记录警告但不阻止登录
+        logger.warning(f"Invalid redirect_uri domain rejected: {frontend_redirect_uri}")
 
     # For API clients, return the URL
     if request.args.get("json") or request.headers.get("Accept") == "application/json":
@@ -959,22 +1058,18 @@ def callback(provider_name: str):
     This endpoint receives the authorization code from the provider.
     On success, redirects to frontend with session token.
     """
-    from flask import session as flask_session
-
     code = request.args.get("code")
     state = request.args.get("state")
     error = request.args.get("error")
     error_description = request.args.get("error_description")
 
-    # Get frontend redirect URI from session (set by start_login)
-    frontend_redirect_uri = flask_session.pop("sso_frontend_redirect", None)
-    # Fallback to environment variable
-    frontend_url = frontend_redirect_uri or _get_frontend_url()
+    # Decode redirect_uri from state parameter
+    original_state, frontend_url = _decode_state(state)
 
     # Handle error from provider
     if error:
         logger.error(f"SSO error from {provider_name}: {error} - {error_description}")
-        if frontend_url:
+        if frontend_url and _validate_redirect_uri(frontend_url):
             return redirect(f"{frontend_url}?sso_error=auth_failed")
         return (
             jsonify(
@@ -986,24 +1081,24 @@ def callback(provider_name: str):
             400,
         )
 
-    if not code or not state:
-        if frontend_url:
+    if not code or not original_state:
+        if frontend_url and _validate_redirect_uri(frontend_url):
             return redirect(f"{frontend_url}?sso_error=invalid_request")
         return jsonify({"error": "Missing code or state"}), 400
 
     # Get OAuth callback URI (must match what was used in start_login)
     oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
-    # Complete authentication
+    # Complete authentication (use original_state for verification)
     auth_result = get_sso_manager().complete_authentication(
         provider_name=provider_name,
         code=code,
-        state=state,
+        state=original_state,
         redirect_uri=oauth_callback_uri,
     )
 
     if not auth_result.success:
-        if frontend_url:
+        if frontend_url and _validate_redirect_uri(frontend_url):
             error_type = auth_result.error or "auth_failed"
             return redirect(f"{frontend_url}?sso_error={error_type}")
         return (
@@ -1067,7 +1162,7 @@ def callback(provider_name: str):
         )
 
     # Redirect to frontend if configured, otherwise return JSON
-    if frontend_url and session_token:
+    if frontend_url and session_token and _validate_redirect_uri(frontend_url):
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
         response = make_response(redirect(f"{frontend_url}?sso_success=1"))
         response.set_cookie(
