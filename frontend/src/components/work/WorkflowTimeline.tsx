@@ -176,10 +176,12 @@ function getDiffLineClass(line: string): string {
 
 function getActivityStableKey(activity: {
   session_id: string;
-  type: 'assistant' | 'tool_use' | 'usage';
+  type: 'assistant' | 'tool_use' | 'usage' | 'system';
   timestamp?: string;
   text?: string;
   tool_name?: string;
+  subtype?: string;
+  attempt?: number;
 }): string {
   return [
     activity.session_id,
@@ -187,6 +189,10 @@ function getActivityStableKey(activity: {
     activity.timestamp ?? '',
     activity.tool_name ?? '',
     (activity.text ?? '').slice(0, 40),
+    // Include subtype/attempt so same-millisecond system events (e.g.
+    // consecutive api_retry bursts) don't collide and get deduped.
+    activity.subtype ?? '',
+    activity.attempt?.toString() ?? '',
   ].join(':');
 }
 
