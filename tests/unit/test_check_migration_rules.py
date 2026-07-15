@@ -260,6 +260,30 @@ class TestMig002ConcurrentlyPolicy:
         assert len(violations) == 1
         assert violations[0].rule == "MIG002"
 
+    def test_refresh_materialized_view_concurrently_flagged(self, tmp_path: Path):
+        """REFRESH MATERIALIZED VIEW CONCURRENTLY is caught.
+
+        This statement cannot run inside a transaction and has no Alembic
+        ``op.*`` helper, so it can only be issued via raw ``op.execute()`` —
+        exactly the pattern MIG002(a) targets. The DDL-verb-anchored regex must
+        include REFRESH in its verb set.
+        """
+        path = _write_migration(
+            tmp_path,
+            """
+            from alembic import op
+
+            revision = "rev_test"
+            down_revision = None
+
+            def upgrade():
+                op.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_summary")
+            """,
+        )
+        violations = rules.check_file(path)
+        assert len(violations) == 1
+        assert violations[0].rule == "MIG002"
+
     def test_concurrently_in_sibling_helper_is_flagged(self, tmp_path: Path):
         """A create_index delegated to a sibling helper is flagged.
 

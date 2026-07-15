@@ -201,7 +201,11 @@ def upgrade() -> None:
 
 - **通过原始 SQL 发出并发 DDL**：`op.execute(...)` / `conn.execute(...)` /
   `sa.text(...)` 的字符串字面量包含 `CONCURRENTLY`。原始 SQL 绕过了 Alembic 的
-  autocommit 处理，应改用 `op.create_index`/`op.drop_index`。
+  autocommit 处理。检查器匹配由带 `CONCURRENTLY` 的 DDL 动词
+  （`CREATE`/`DROP`/`REINDEX`/`REFRESH`，覆盖 `CREATE/DROP INDEX`、`REINDEX` 与
+  `REFRESH MATERIALIZED VIEW`）引导的语句；应改用（按上文包裹的）
+  `op.create_index`/`op.drop_index`。`REFRESH MATERIALIZED VIEW CONCURRENTLY`
+  没有 Alembic helper——若确需使用，请在 Alembic 之外（如部署后脚本）运行，不要写进迁移。
 - **`postgresql_concurrently=True` 不在 `autocommit_block()` 内**。该参数正是
   发出 `... CONCURRENTLY` 的开关；它仅在事务外有效，因此调用必须在词法上嵌套在
   `with op.get_context().autocommit_block():` 语句内（将 `op.create_index` 调用

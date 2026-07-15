@@ -204,7 +204,12 @@ inside its own `autocommit_block()`. The check rejects two mistakes:
 
 - **Raw concurrent DDL** via `op.execute(...)` / `conn.execute(...)` /
   `sa.text(...)` with a string literal containing `CONCURRENTLY`. Raw SQL bypasses
-  Alembic's autocommit handling. Use `op.create_index`/`op.drop_index` instead.
+  Alembic's autocommit handling. The check matches any statement led by a
+  `CONCURRENTLY`-bearing DDL verb (`CREATE`/`DROP`/`REINDEX`/`REFRESH`, covering
+  `CREATE/DROP INDEX`, `REINDEX`, and `REFRESH MATERIALIZED VIEW`); use
+  `op.create_index`/`op.drop_index` (wrapped as above) instead. `REFRESH
+  MATERIALIZED VIEW CONCURRENTLY` has no Alembic helper — if you genuinely need
+  it, run it outside Alembic (e.g. a post-deploy script), not in a migration.
 - **`postgresql_concurrently=True` outside an `autocommit_block()`**. The kwarg
   is what issues `... CONCURRENTLY`; it is only valid outside a transaction, so
   the call must be lexically nested inside the `with op.get_context().autocommit_block():`

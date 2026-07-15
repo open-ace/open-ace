@@ -82,15 +82,20 @@ _CONCURRENT_KWARG = "postgresql_concurrently"
 _RAW_DDL_CALLS = {"execute", "text"}
 
 # The CONCURRENTLY keyword signals a raw concurrent DDL statement
-# (``CREATE/DROP/REINDEX ... CONCURRENTLY``). We anchor it to a preceding DDL
-# verb rather than matching the bare word: a bare ``\bCONCURRENTLY\b`` still
-# matches the token inside a data predicate (``%`` is a non-word char, so
-# ``WHERE note LIKE '%concurrently%'`` is bounded by word boundaries on both
-# sides). Requiring a leading ``CREATE|DROP|REINDEX`` in the same literal keeps
-# the match on actual DDL while leaving data backfills alone.
+# (``CREATE/DROP/REINDEX/REFRESH ... CONCURRENTLY``). We anchor it to a
+# preceding DDL verb rather than matching the bare word: a bare
+# ``\bCONCURRENTLY\b`` still matches the token inside a data predicate (``%`` is
+# a non-word char, so ``WHERE note LIKE '%concurrently%'`` is bounded by word
+# boundaries on both sides). Requiring a leading DDL verb in the same literal
+# keeps the match on actual DDL while leaving data backfills alone.
+#
+# The verb set covers every PostgreSQL statement that takes CONCURRENTLY and
+# cannot run inside a transaction: CREATE/DROP INDEX, REINDEX, and REFRESH
+# MATERIALIZED VIEW. The last has no Alembic ``op.*`` helper, so it can only be
+# issued via raw ``op.execute()`` — exactly what MIG002(a) is meant to catch.
 _CONCURRENTLY_TOKEN = "CONCURRENTLY"
 _CONCURRENTLY_DDL_RE = re.compile(
-    r"\b(?:CREATE|DROP|REINDEX)\b.*\b" + re.escape(_CONCURRENTLY_TOKEN) + r"\b",
+    r"\b(?:CREATE|DROP|REINDEX|REFRESH)\b.*\b" + re.escape(_CONCURRENTLY_TOKEN) + r"\b",
     re.IGNORECASE | re.DOTALL,
 )
 
