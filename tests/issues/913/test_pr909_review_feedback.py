@@ -116,6 +116,59 @@ class TestGetPRChecks:
             gh.get_pr_checks(42)
 
 
+class TestGetCheckFailureExcerpt:
+    """Test GitHub Actions failed-log excerpt extraction."""
+
+    def test_parses_actions_job_url(self):
+        parsed = GitHubOps._parse_github_actions_job_url(
+            "https://github.com/open-ace/open-ace/actions/runs/123/job/456"
+        )
+        assert parsed == ("123", "456")
+
+    def test_returns_empty_for_non_actions_url(self):
+        gh = GitHubOps("/tmp/fake")
+        assert gh.get_check_failure_excerpt({"link": "https://example.com/build/42"}) == ""
+
+    def test_fetches_failed_log_excerpt(self):
+        gh = GitHubOps("/tmp/fake")
+        gh._run_gh = MagicMock(
+            return_value=MagicMock(
+                returncode=0,
+                stdout=(
+                    "lint\tSTEP\t\x1b[31mblack....................................................................Failed\x1b[0m\n"
+                    "lint\tSTEP\tfiles were modified by this hook\n"
+                ),
+                stderr="",
+            )
+        )
+
+        excerpt = gh.get_check_failure_excerpt(
+            {
+                "name": "lint",
+                "link": "https://github.com/open-ace/open-ace/actions/runs/123/job/456",
+            }
+        )
+
+        assert "black" in excerpt
+        assert "\x1b" not in excerpt
+
+    def test_ci_repair_context_skips_excerpt_failure(self):
+        gh = MagicMock()
+        gh.get_check_failure_excerpt.side_effect = RuntimeError("timeout")
+        orch = MagicMock()
+
+        context = AutonomousOrchestrator._build_ci_repair_context(
+            orch,
+            {"project_path": "/tmp/repo", "worktree_path": "/tmp/repo"},
+            gh,
+            42,
+            [{"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}],
+        )
+
+        assert "### lint" in context
+        assert "失败摘录" not in context
+
+
 # ── Test _poll_ci_status ────────────────────────────────────────────────
 
 

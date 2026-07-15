@@ -18,6 +18,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_GITHUB_ACTIONS_JOB_URL_RE = re.compile(
+    r"https://github\.com/[^/]+/[^/]+/actions/runs/(?P<run_id>\d+)/job/(?P<job_id>\d+)"
+)
+_ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
 # Transient git/gh error retry — network blips (TLS, DNS, connection reset)
 # are common and recover within seconds. Fixed-interval retry is sufficient
 # because git operations are lightweight and idempotent; exponential backoff
@@ -906,6 +911,61 @@ class GitHubOps:
                 f"Failed to query CI checks for PR #{pr_number}: {detail}; "
                 f"REST fallback error: {api_err}"
             ) from api_err
+
+    @staticmethod
+    def _parse_github_actions_job_url(url: str) -> Optional[tuple[str, str]]:
+        """Extract GitHub Actions run/job ids from a check details URL."""
+        if not url:
+            return None
+        match = _GITHUB_ACTIONS_JOB_URL_RE.match(url.strip())
+        if not match:
+            return None
+        return match.group("run_id"), match.group("job_id")
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        """Remove ANSI escape sequences from GitHub Actions logs."""
+        return _ANSI_ESCAPE_RE.sub("", text or "")
+
+    def get_check_failure_excerpt(
+        self, check: dict, max_lines: int = 80, max_chars: int = 4000
+    ) -> str:
+        """Fetch a concise failed-log excerpt for a CI check when available.
+
+        Currently supports GitHub Actions job URLs. Non-Actions URLs return an
+        empty string so callers can degrade gracefully for other CI providers.
+        """
+        parsed = self._parse_github_actions_job_url(str(check.get("link") or ""))
+        if not parsed:
+            return ""
+
+        run_id, job_id = parsed
+        result = self._run_gh(
+            ["run", "view", run_id, "--job", job_id, "--log-failed"],
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to fetch failed log excerpt for check '%s' (run=%s job=%s): %s",
+                check.get("name") or "unknown",
+                run_id,
+                job_id,
+                (result.stderr or result.stdout or "").strip()[:200],
+            )
+            return ""
+
+        cleaned = self._strip_ansi(result.stdout or "").strip()
+        if not cleaned:
+            return ""
+
+        lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
+        if not lines:
+            return ""
+
+        excerpt = "\n".join(lines[-max_lines:]).strip()
+        if len(excerpt) > max_chars:
+            excerpt = excerpt[-max_chars:].lstrip()
+        return excerpt
 
     def get_pr_diff(self, number: int) -> str:
         """Get the full diff of a PR (head vs base) via `gh pr diff`.
