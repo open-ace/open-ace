@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { findForkMilestoneIndex, parseDiffFiles, parseDiffStats } from './WorkflowTimeline.utils';
+import {
+  findForkMilestoneIndex,
+  parseDiffFiles,
+  parseDiffStats,
+  summarizeDiffFiles,
+} from './WorkflowTimeline.utils';
 
 describe('WorkflowTimeline.utils', () => {
   it('parses diff stats json', () => {
@@ -57,6 +62,27 @@ describe('WorkflowTimeline.utils', () => {
       status: 'modified',
       additions: 1,
       deletions: 1,
+    });
+  });
+
+  it('summarizes parsed diff files into cumulative stats', () => {
+    const diff = [
+      'diff --git a/src/first.ts b/src/first.ts',
+      '@@ -1 +1,2 @@',
+      '-before();',
+      '+after();',
+      '+extra();',
+      'diff --git a/src/second.ts b/src/second.ts',
+      '@@ -1 +1 @@',
+      '-legacy();',
+    ].join('\n');
+
+    const summary = summarizeDiffFiles(parseDiffFiles(diff));
+
+    expect(summary).toEqual({
+      additions: 2,
+      deletions: 2,
+      files: 2,
     });
   });
 

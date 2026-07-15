@@ -50,6 +50,7 @@ import {
   formatTokens,
   parseDiffFiles,
   parseDiffStats,
+  summarizeDiffFiles,
   type ParsedDiffFileStatus,
 } from './WorkflowTimeline.utils';
 import './WorkflowTimeline.css';
@@ -247,6 +248,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const markDoneMutation = useMarkDone();
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
+  const hasPr = !!workflow.github_pr_number;
 
   // Session detail query
   const { data: sessionData, isLoading: sessionLoading } = useMilestoneSession(
@@ -262,10 +264,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     !!viewingDiff
   );
 
-  // Cumulative PR diff (head vs base) for the header "Final Code Changes" button
+  // Cumulative PR diff (PR head vs base) for the whole workflow. The header
+  // button summary and modal intentionally share this one data source so they
+  // both reflect the workflow's final net code changes, including later PR
+  // review follow-up edits.
   const { data: prDiffData, isLoading: prDiffLoading } = useWorkflowPrDiff(
     workflow.workflow_id,
-    viewingPrDiff
+    hasPr
   );
 
   // Real-time agent activity (only when workflow is active)
@@ -293,8 +298,6 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     if (!candidates.length) return undefined;
     return candidates.reduce((best, m) => ((m.dev_round || 0) > (best.dev_round || 0) ? m : best));
   }, [milestones]);
-
-  const hasPr = !!workflow.github_pr_number;
 
   const definitionSnapshot = workflow.definition_snapshot;
   const normalizeGithubRepoUrl = useCallback((value: string) => {
@@ -1069,18 +1072,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   );
 
   const truncatedDiff = useMemo(() => truncateDiffText(diffData?.diff ?? ''), [diffData?.diff]);
-  const truncatedPrDiff = useMemo(
-    () => truncateDiffText(prDiffData?.diff ?? ''),
-    [prDiffData?.diff]
-  );
   const parsedDiffFiles = useMemo(
     () => parseDiffFiles(truncatedDiff.content),
     [truncatedDiff.content]
   );
   const parsedPrDiffFiles = useMemo(
-    () => parseDiffFiles(truncatedPrDiff.content),
-    [truncatedPrDiff.content]
+    () => parseDiffFiles(prDiffData?.diff ?? ''),
+    [prDiffData?.diff]
   );
+  const prDiffSummary = useMemo(() => summarizeDiffFiles(parsedPrDiffFiles), [parsedPrDiffFiles]);
   const latestMilestoneSignature =
     milestones.length > 0
       ? [
@@ -2011,6 +2011,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             >
               <i className="bi bi-file-diff me-1"></i>
               {t('autoFinalCodeChanges', language)}
+              {prDiffData && (
+                <span className="timeline-output-btn__summary">
+                  +{prDiffSummary.additions} / -{prDiffSummary.deletions} / {prDiffSummary.files}
+                </span>
+              )}
             </Button>
           </div>
         </div>
@@ -2408,11 +2413,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </button>
                 </div>
                 <div className="workflow-timeline-diff-code">
-                  {renderDiffLines(
-                    selectedPrDiffFile.patch,
-                    selectedPrDiffFile.id,
-                    truncatedPrDiff.isTruncated
-                  )}
+                  {renderDiffLines(selectedPrDiffFile.patch, selectedPrDiffFile.id)}
                 </div>
               </div>
             </div>
@@ -2420,11 +2421,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
             <div className="workflow-timeline-diff-shell">
               <div className="workflow-timeline-diff-viewer">
                 <div className="workflow-timeline-diff-code">
-                  {renderDiffLines(
-                    truncatedPrDiff.content,
-                    'pr-diff-fallback',
-                    truncatedPrDiff.isTruncated
-                  )}
+                  {renderDiffLines(prDiffData.diff, 'pr-diff-fallback')}
                 </div>
               </div>
             </div>

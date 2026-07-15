@@ -345,10 +345,19 @@
 }
 
 .timeline-output-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   min-height: 38px;
   padding-inline: 0.9rem;
   border-radius: 999px;
   font-size: var(--font-size-note);
+}
+
+.timeline-output-btn__summary {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .timeline-state-banner {
