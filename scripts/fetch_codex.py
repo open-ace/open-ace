@@ -203,18 +203,47 @@ def process_jsonl_file(
     messages = []
     session_meta = None
     session_id = None
-    accumulated_tokens = {
-        "input_tokens": 0,
-        "cached_input_tokens": 0,
-        "output_tokens": 0,
-        "reasoning_output_tokens": 0,
-        "total_tokens": 0,
-    }
     current_model = None
-    # Track turn_id -> duration/timing from task_started/task_complete
-    turn_timings: dict[str, dict] = {}
+    active_turn_id: Optional[str] = None
+    synthetic_turn_index = 0
+    turn_stats: dict[str, dict[str, Any]] = {}
+    turn_order: list[str] = []
 
-    # First pass: read all events and collect session_meta, token counts, turn context
+    def _fallback_date() -> str:
+        return file_date or "unknown"
+
+    def _ensure_turn(turn_id: Optional[str], ts: str = "") -> dict[str, Any]:
+        nonlocal synthetic_turn_index
+        if not turn_id:
+            synthetic_turn_index += 1
+            turn_id = f"orphan-turn-{synthetic_turn_index}"
+        if turn_id not in turn_stats:
+            turn_stats[turn_id] = {
+                "date": parse_timestamp(ts) if ts else _fallback_date(),
+                "input_tokens": 0,
+                "cached_tokens": 0,
+                "output_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "user_message_id": None,
+                "user_message_date": None,
+                "first_assistant_message_id": None,
+                "counts_as_request": False,
+                "saw_assistant_output": False,
+                "model": None,
+            }
+            turn_order.append(turn_id)
+        turn = turn_stats[turn_id]
+        if ts:
+            parsed_date = parse_timestamp(ts)
+            if parsed_date != "unknown":
+                turn["date"] = parsed_date
+        if current_model and not turn.get("model"):
+            turn["model"] = current_model
+        return turn
+
+    # First pass: read all events so we can derive stable ids and per-turn stats
+    # without reparsing the file multiple times.
     events = []
     with open(filepath, encoding="utf-8") as f:
         for line in f:
@@ -247,42 +276,6 @@ def process_jsonl_file(
             if turn_model:
                 current_model = turn_model
 
-        # ---- event_msg: token_count ----
-        elif event_type == "event_msg" and payload.get("type") == "token_count":
-            info = payload.get("info", {})
-            if isinstance(info, dict):
-                last_usage = info.get("last_token_usage", {})
-                if isinstance(last_usage, dict):
-                    accumulated_tokens["input_tokens"] += last_usage.get("input_tokens", 0)
-                    accumulated_tokens["cached_input_tokens"] += last_usage.get(
-                        "cached_input_tokens", 0
-                    )
-                    accumulated_tokens["output_tokens"] += last_usage.get("output_tokens", 0)
-                    accumulated_tokens["reasoning_output_tokens"] += last_usage.get(
-                        "reasoning_output_tokens", 0
-                    )
-                    accumulated_tokens["total_tokens"] += last_usage.get("total_tokens", 0)
-
-        # ---- event_msg: task_started ----
-        elif event_type == "event_msg" and payload.get("type") == "task_started":
-            turn_id = payload.get("turn_id")
-            if turn_id:
-                turn_timings[turn_id] = {
-                    "started_at": payload.get("started_at"),
-                    "model_context_window": payload.get("model_context_window"),
-                }
-
-        # ---- event_msg: task_complete ----
-        elif event_type == "event_msg" and payload.get("type") == "task_complete":
-            turn_id = payload.get("turn_id")
-            if turn_id and turn_id in turn_timings:
-                turn_timings[turn_id]["completed_at"] = payload.get("completed_at")
-                turn_timings[turn_id]["duration_ms"] = payload.get("duration_ms")
-                turn_timings[turn_id]["time_to_first_token_ms"] = payload.get(
-                    "time_to_first_token_ms"
-                )
-                turn_timings[turn_id]["last_agent_message"] = payload.get("last_agent_message")
-
     # Determine session date
     if session_meta and session_meta.get("id"):
         session_id = session_meta["id"]
@@ -309,7 +302,15 @@ def process_jsonl_file(
         if parsed_date != "unknown":
             date_key = parsed_date
 
-    # Second pass: process response_item events into messages
+    # Rebuild turn state in event order so token_count rows can be attributed
+    # to the correct task_started span and message timestamp.
+    current_model = None
+    active_turn_id = None
+    synthetic_turn_index = 0
+    turn_stats = {}
+    turn_order = []
+
+    # Second pass: build messages and attribute token_count events to turns.
     for event in events:
         event_type = event.get("type", "")
         payload = event.get("payload", {})
@@ -318,11 +319,27 @@ def process_jsonl_file(
         ts = event.get("timestamp", "")
         payload_type = payload.get("type", "")
 
+        if event_type == "turn_context":
+            turn_model = payload.get("model")
+            if turn_model:
+                current_model = turn_model
+                if active_turn_id:
+                    _ensure_turn(active_turn_id, ts)["model"] = turn_model
+            continue
+
+        if event_type == "event_msg" and payload_type == "task_started":
+            active_turn_id = payload.get("turn_id") or active_turn_id
+            _ensure_turn(active_turn_id, ts)["counts_as_request"] = True
+            continue
+
         # ---- response_item: user/assistant messages and tool calls ----
         if event_type == "response_item":
             role = None
             message_id = payload.get("call_id")  # For tool calls
             model = current_model
+            message_date = parse_timestamp(ts) if ts else date_key
+            if message_date == "unknown":
+                message_date = date_key
 
             if payload_type == "message":
                 msg_role = payload.get("role", "")
@@ -330,8 +347,6 @@ def process_jsonl_file(
                     role = "user"
                 elif msg_role == "assistant":
                     role = "assistant"
-                    # Count assistant messages as requests
-                    daily[date_key]["request_count"] += 1
                 else:
                     continue  # Skip unknown roles
 
@@ -391,13 +406,9 @@ def process_jsonl_file(
             # Save full entry as JSON
             full_entry_json = json.dumps(event, ensure_ascii=False)
 
-            # Token attribution: for user messages, tokens=0; for assistant messages,
-            # we don't have per-message tokens in Codex (only per-turn via token_count events).
-            # We'll attribute accumulated tokens at the session level via daily_usage.
-
             messages.append(
                 {
-                    "date": date_key,
+                    "date": message_date,
                     "tool_name": "codex",
                     "host_name": hostname,
                     "message_id": message_id,
@@ -406,7 +417,7 @@ def process_jsonl_file(
                     "content": content or "",
                     "content_blocks": content_blocks,
                     "full_entry": full_entry_json,
-                    "tokens_used": 0,  # Per-message tokens not available in Codex
+                    "tokens_used": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
                     "model": model,
@@ -420,8 +431,20 @@ def process_jsonl_file(
                     "agent_session_id": session_id,
                     "conversation_id": None,
                     "project_path": session_meta.get("cwd") if session_meta else None,
+                    "overwrite_zero_tokens": True,
+                    "counts_as_request": False,
                 }
             )
+
+            if active_turn_id:
+                turn = _ensure_turn(active_turn_id, ts)
+                if role == "user" and not turn["saw_assistant_output"]:
+                    turn["user_message_id"] = message_id
+                    turn["user_message_date"] = message_date
+                elif role == "assistant":
+                    turn["saw_assistant_output"] = True
+                    if not turn["first_assistant_message_id"]:
+                        turn["first_assistant_message_id"] = message_id
 
         # ---- event_msg: patch_apply_end -> file_change content_block ----
         elif event_type == "event_msg" and payload.get("type") == "patch_apply_end":
@@ -455,7 +478,7 @@ def process_jsonl_file(
 
                 messages.append(
                     {
-                        "date": date_key,
+                        "date": parse_timestamp(ts) if ts else date_key,
                         "tool_name": "codex",
                         "host_name": hostname,
                         "message_id": f"patch-{call_id}",
@@ -484,8 +507,29 @@ def process_jsonl_file(
                         "agent_session_id": session_id,
                         "conversation_id": None,
                         "project_path": session_meta.get("cwd") if session_meta else None,
+                        "overwrite_zero_tokens": True,
+                        "counts_as_request": False,
                     }
                 )
+
+        # ---- event_msg: token_count ----
+        elif event_type == "event_msg" and payload.get("type") == "token_count":
+            info = payload.get("info", {})
+            if isinstance(info, dict):
+                last_usage = info.get("last_token_usage", {})
+                if isinstance(last_usage, dict):
+                    turn = _ensure_turn(active_turn_id, ts)
+                    turn["input_tokens"] += int(last_usage.get("input_tokens", 0) or 0)
+                    turn["cached_tokens"] += int(last_usage.get("cached_input_tokens", 0) or 0)
+                    turn["output_tokens"] += int(last_usage.get("output_tokens", 0) or 0)
+                    turn["reasoning_tokens"] += int(
+                        last_usage.get("reasoning_output_tokens", 0) or 0
+                    )
+                    # Source semantics observed in Codex logs:
+                    # total_tokens == input_tokens + output_tokens, and cached
+                    # input is already part of input_tokens. Preserve that
+                    # provider total rather than subtracting cache locally.
+                    turn["total_tokens"] += int(last_usage.get("total_tokens", 0) or 0)
 
         # ---- event_msg: task_complete -> task_summary content_block ----
         elif event_type == "event_msg" and payload.get("type") == "task_complete":
@@ -506,7 +550,7 @@ def process_jsonl_file(
 
                 messages.append(
                     {
-                        "date": date_key,
+                        "date": parse_timestamp(ts) if ts else date_key,
                         "tool_name": "codex",
                         "host_name": hostname,
                         "message_id": f"task-complete-{turn_id}",
@@ -529,25 +573,55 @@ def process_jsonl_file(
                         "agent_session_id": session_id,
                         "conversation_id": None,
                         "project_path": session_meta.get("cwd") if session_meta else None,
+                        "overwrite_zero_tokens": True,
+                        "counts_as_request": False,
                     }
                 )
+            if active_turn_id and turn_id == active_turn_id:
+                active_turn_id = None
 
-    # Aggregate token usage for daily stats from accumulated token_count events
-    input_tokens = accumulated_tokens["input_tokens"]
-    cached_tokens = accumulated_tokens["cached_input_tokens"]
-    output_tokens = accumulated_tokens["output_tokens"]
-    reasoning_tokens = accumulated_tokens["reasoning_output_tokens"]
+    message_by_id = {msg.get("message_id"): msg for msg in messages if msg.get("message_id")}
+    session_total = 0
+    session_input = 0
+    session_output = 0
+    turns_assigned = 0
 
-    # Calculate actual input tokens (excluding cached)
-    actual_input = max(0, input_tokens - cached_tokens)
+    for turn_id in turn_order:
+        turn = turn_stats[turn_id]
+        turn_total = int(turn["total_tokens"] or 0)
+        turn_cached = int(turn["cached_tokens"] or 0)
+        turn_input = int(turn["input_tokens"] or 0)
+        turn_output = int(turn["output_tokens"] or 0)
+        turn_reasoning = int(turn["reasoning_tokens"] or 0)
+        actual_input = max(0, turn_input - turn_cached)
+        turn_date = turn["user_message_date"] or turn["date"] or date_key
 
-    daily[date_key]["prompt_tokens"] += actual_input
-    daily[date_key]["candidates_tokens"] += output_tokens
-    daily[date_key]["thoughts_tokens"] += reasoning_tokens
-    daily[date_key]["cached_tokens"] += cached_tokens
-    daily[date_key]["total_tokens"] += actual_input + output_tokens + reasoning_tokens
+        daily[turn_date]["prompt_tokens"] += actual_input
+        daily[turn_date]["candidates_tokens"] += turn_output
+        daily[turn_date]["thoughts_tokens"] += turn_reasoning
+        daily[turn_date]["cached_tokens"] += turn_cached
+        daily[turn_date]["total_tokens"] += turn_total
+        if turn["counts_as_request"]:
+            daily[turn_date]["request_count"] += 1
 
-    if current_model:
+        turn_model = turn.get("model")
+        if turn_model:
+            daily[turn_date]["models_used"].add(turn_model)
+
+        session_total += turn_total
+        session_input += actual_input
+        session_output += turn_output
+
+        target_id = turn.get("user_message_id") or turn.get("first_assistant_message_id")
+        target_msg = message_by_id.get(target_id) if target_id else None
+        if target_msg and turn_total > 0:
+            target_msg["tokens_used"] = turn_total
+            target_msg["input_tokens"] = actual_input
+            target_msg["output_tokens"] = turn_output
+            target_msg["counts_as_request"] = bool(turn["counts_as_request"])
+            turns_assigned += 1
+
+    if current_model and not turn_order:
         daily[date_key]["models_used"].add(current_model)
     if session_meta:
         # Also check git info for additional context
@@ -555,10 +629,14 @@ def process_jsonl_file(
         if isinstance(git_info, dict):
             _repo_url = git_info.get("repository_url", "")
 
-    # Attach session-level token totals to messages for agent_sessions stats
-    session_total = actual_input + output_tokens + reasoning_tokens
-    session_input = actual_input
-    session_output = output_tokens
+    if session_total > 0 and turns_assigned == 0 and messages:
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                msg["tokens_used"] = session_total
+                msg["input_tokens"] = session_input
+                msg["output_tokens"] = session_output
+                msg["counts_as_request"] = True
+                break
 
     return (
         dict(daily),
@@ -646,15 +724,6 @@ def _process_sessions_dir(
             ]:
                 aggregated[date][key] += stats[key]
             aggregated[date]["models_used"].update(stats["models_used"])
-
-        # Inject session-level tokens into the first assistant message for agent_sessions stats
-        if session_tokens["total_tokens"] > 0 and messages:
-            for msg in messages:
-                if msg.get("role") == "assistant":
-                    msg["tokens_used"] = session_tokens["total_tokens"]
-                    msg["input_tokens"] = session_tokens["input_tokens"]
-                    msg["output_tokens"] = session_tokens["output_tokens"]
-                    break
 
         # Collect messages for batch insert
         all_messages.extend(messages)
@@ -751,6 +820,7 @@ def update_agent_sessions_stats(messages: list) -> int:
         role = msg.get("role", "")
         tokens = msg.get("tokens_used", 0) or 0
         model = msg.get("model")
+        counts_as_request = bool(msg.get("counts_as_request"))
         message_id = msg.get("message_id")
         message_identity = f"{role}:{message_id}" if message_id else f"message_row:{sid}:{index}"
         if message_identity not in session_stats[sid]["seen_message_ids"]:
@@ -758,7 +828,7 @@ def update_agent_sessions_stats(messages: list) -> int:
             session_stats[sid]["message_count"] += 1
             session_stats[sid]["total_tokens"] += tokens
 
-        if role == "assistant":
+        if counts_as_request:
             request_identity = (
                 f"message_id:{message_id}" if message_id else f"assistant_row:{sid}:{index}"
             )
@@ -1146,6 +1216,18 @@ def fetch_and_save(
 
     # Save messages (idempotent UPSERT)
     if all_messages:
+        session_ids = sorted(
+            {
+                str(msg.get("agent_session_id")).strip()
+                for msg in all_messages
+                if msg.get("agent_session_id")
+            }
+        )
+        if session_ids:
+            print(f"Replacing existing message rows for {len(session_ids)} Codex sessions...")
+            deleted = db.delete_messages_for_agent_sessions("codex", hostname, session_ids)
+            if deleted > 0:
+                print(f"Deleted {deleted} stale Codex message rows")
         print("Saving messages to database...")
         saved_count = db_mod.save_messages_batch(all_messages, batch_size=500)
         print(f"Saved {saved_count} messages")

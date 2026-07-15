@@ -5,9 +5,15 @@ This is imported by scripts/shared/db.py
 """
 
 import logging
+import os
+import sys
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 
 def _refresh_user_daily_stats_for_dates(dates: set[str]) -> None:

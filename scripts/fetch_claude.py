@@ -309,10 +309,11 @@ def _merge_messages_by_id(messages: list[dict]) -> list[dict]:
         last non-empty content. For assistant messages ``content`` is
         ``json.dumps([text,...])`` so we prefer the line whose text is non-empty
         over a ``[]`` thinking-only line.
-      * ``tokens_used`` / ``input_tokens`` / ``output_tokens``: summed (each
-        usage-bearing line reports the message's tokens; claude writes usage on
-        every block-line of a message, so dedup by taking the MAX across lines
-        within the group rather than summing, to avoid over-counting).
+      * ``tokens_used`` / ``input_tokens`` / ``output_tokens`` /
+        ``cache_read_tokens`` / ``cache_creation_tokens``:
+        claude repeats usage on every block-line of a message, so dedup by
+        taking the MAX across lines within the group rather than summing, to
+        avoid over-counting.
       * ``timestamp`` / ``full_entry`` / ``model``: keep the first occurrence.
     """
     if not messages:
@@ -350,12 +351,49 @@ def _merge_messages_by_id(messages: list[dict]) -> list[dict]:
                 g["content"] = msg.get("content", "")
         # tokens: claude repeats the message's usage on every block-line, so
         # take the max within the group (not the sum) to avoid double counting.
-        for tok_field in ("tokens_used", "input_tokens", "output_tokens"):
+        for tok_field in (
+            "tokens_used",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_creation_tokens",
+        ):
             cur = grouped[key].get(tok_field, 0) or 0
             new = msg.get(tok_field, 0) or 0
             grouped[key][tok_field] = max(cur, new)
 
     return [grouped[k] for k in order]
+
+
+def _build_daily_stats_from_messages(messages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Build per-day Claude usage from already-merged logical messages."""
+    daily: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "request_count": 0,
+            "models_used": set(),
+        }
+    )
+
+    for msg in messages:
+        date_key = msg.get("date")
+        if not date_key:
+            continue
+
+        daily[date_key]["input_tokens"] += msg.get("input_tokens", 0) or 0
+        daily[date_key]["output_tokens"] += msg.get("output_tokens", 0) or 0
+        daily[date_key]["cache_read_tokens"] += msg.get("cache_read_tokens", 0) or 0
+        daily[date_key]["cache_creation_tokens"] += msg.get("cache_creation_tokens", 0) or 0
+
+        if msg.get("role") == "assistant":
+            daily[date_key]["request_count"] += 1
+            if msg.get("model"):
+                daily[date_key]["models_used"].add(msg["model"])
+
+    return dict(daily)
 
 
 def process_jsonl_file(
@@ -393,19 +431,7 @@ def process_jsonl_file(
     # Extract session_id from JSONL filename (e.g. 2675a43d-7920-4450-8983-a4b8363786ef.jsonl)
     file_session_id = filepath.stem if filepath.suffix == ".jsonl" else None
 
-    daily: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_creation_tokens": 0,
-            "request_count": 0,
-            "models_used": set(),
-        }
-    )
     messages: list[dict[str, Any]] = []
-    # Track seen message_ids per date to deduplicate request_count
-    seen_msg_ids: dict[str, set[str]] = defaultdict(set)
 
     # First pass: build message tree for conversation_id tracking
     # Key: message uuid, Value: (entry, parent_uuid)
@@ -503,7 +529,14 @@ def process_jsonl_file(
                             if tokens:
                                 input_tokens = tokens.get("input_tokens", 0)
                                 output_tokens = tokens.get("output_tokens", 0)
-                            total_tokens = input_tokens + output_tokens
+                            cache_read_tokens = tokens.get("cache_read_tokens", 0)
+                            cache_creation_tokens = tokens.get("cache_creation_tokens", 0)
+                            total_tokens = (
+                                input_tokens
+                                + output_tokens
+                                + cache_read_tokens
+                                + cache_creation_tokens
+                            )
 
                             # Get model info
                             model = msg.get("model") if entry_type == "assistant" else None
@@ -542,6 +575,8 @@ def process_jsonl_file(
                                     "tokens_used": total_tokens,
                                     "input_tokens": input_tokens,
                                     "output_tokens": output_tokens,
+                                    "cache_read_tokens": cache_read_tokens,
+                                    "cache_creation_tokens": cache_creation_tokens,
                                     "model": model,
                                     "timestamp": ts,
                                     "sender_id": "claude_user",
@@ -555,50 +590,6 @@ def process_jsonl_file(
                                     "project_path": project_path,
                                 }
                             )
-
-                if (
-                    sum(
-                        [
-                            tokens["input_tokens"],
-                            tokens["output_tokens"],
-                            tokens["cache_read_tokens"],
-                            tokens["cache_creation_tokens"],
-                        ]
-                    )
-                    == 0
-                ):
-                    # Still count requests even if tokens are 0 (e.g., cache hits)
-                    if tokens["is_assistant_message"]:
-                        msg = entry.get("message", {})
-                        mid = (
-                            (msg.get("id") if isinstance(msg, dict) else None)
-                            or entry.get("id")
-                            or entry.get("uuid")
-                        )
-                        if mid and mid not in seen_msg_ids[date_key]:
-                            seen_msg_ids[date_key].add(mid)
-                            daily[date_key]["request_count"] += 1
-                    continue
-
-                daily[date_key]["input_tokens"] += tokens["input_tokens"]
-                daily[date_key]["output_tokens"] += tokens["output_tokens"]
-                daily[date_key]["cache_read_tokens"] += tokens["cache_read_tokens"]
-                daily[date_key]["cache_creation_tokens"] += tokens["cache_creation_tokens"]
-
-                if tokens["is_assistant_message"]:
-                    msg = entry.get("message", {})
-                    mid = (
-                        (msg.get("id") if isinstance(msg, dict) else None)
-                        or entry.get("id")
-                        or entry.get("uuid")
-                    )
-                    if mid and mid not in seen_msg_ids[date_key]:
-                        seen_msg_ids[date_key].add(mid)
-                        daily[date_key]["request_count"] += 1
-
-                if tokens["model"]:
-                    daily[date_key]["models_used"].add(tokens["model"])
-
             except (json.JSONDecodeError, KeyError, TypeError):
                 # Silently skip problematic entries
                 continue
@@ -607,7 +598,8 @@ def process_jsonl_file(
     # into one logical message before insert, so the per-message_id dedup keeps
     # the full content (incl. the final assistant text) instead of just thinking.
     messages = _merge_messages_by_id(messages)
-    return dict(daily), messages
+    daily = _build_daily_stats_from_messages(messages)
+    return daily, messages
 
 
 def find_all_claude_project_dirs() -> list:
@@ -1246,9 +1238,12 @@ def fetch_and_save(
     saved = 0
     for date, stats in aggregated.items():
         if start_date <= date <= today:
-            # tokens_used should only include actual input + output
-            # cache_read is much cheaper (90% discount) and should not be counted as full tokens
-            total = stats["input_tokens"] + stats["output_tokens"]
+            total = (
+                stats["input_tokens"]
+                + stats["output_tokens"]
+                + stats["cache_read_tokens"]
+                + stats["cache_creation_tokens"]
+            )
 
             if db.save_usage(
                 date=date,

@@ -124,6 +124,122 @@ def _ms_to_date(ms: Optional[int]) -> str:
         return "unknown"
 
 
+def _get_turn_usage_by_date(session_id: str, db_path: Path) -> dict[str, dict[str, int]]:
+    """Return authoritative turn_usage totals grouped by local calendar date.
+
+    ZCode stores token accounting per turn in ``turn_usage``. A single session
+    may span multiple days, so attributing the whole session total to one
+    "dominant" message date skews daily/hourly usage. Grouping by
+    ``turn_usage.started_at`` preserves the source-of-truth date split while
+    keeping messages/session metadata parsing in ``ZcodeSession``.
+    """
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                date(datetime(started_at / 1000, 'unixepoch', 'localtime')) AS usage_date,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_tokens,
+                COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(computed_total_tokens), 0) AS computed_total_tokens
+            FROM turn_usage
+            WHERE session_id = ?
+            GROUP BY usage_date
+            """,
+            (session_id,),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    finally:
+        conn.close()
+
+    usage_by_date: dict[str, dict[str, int]] = {}
+    for usage_date, input_t, output_t, cache_create_t, cache_read_t, computed_total_t in rows:
+        if not usage_date:
+            continue
+        total_t = computed_total_t or ((input_t or 0) + (output_t or 0))
+        usage_by_date[str(usage_date)] = {
+            "prompt_tokens": int(input_t or 0),
+            "candidates_tokens": int(output_t or 0),
+            "cached_tokens": int(cache_create_t or 0) + int(cache_read_t or 0),
+            "total_tokens": int(total_t),
+        }
+
+    return usage_by_date
+
+
+def _get_turn_usage_rows(session_id: str, db_path: Path) -> list[dict[str, Any]]:
+    """Return per-turn usage rows keyed by the source ``user_message_id``.
+
+    ``daily_messages`` has no separate turn table, so the closest faithful
+    representation is to attach each turn's authoritative totals to the user
+    message that initiated it. That keeps hourly rollups aligned with the
+    provider's turn-start timestamp and avoids dumping a session total onto one
+    assistant row.
+    """
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                turn_id,
+                user_message_id,
+                started_at,
+                COALESCE(input_tokens, 0) AS input_tokens,
+                COALESCE(output_tokens, 0) AS output_tokens,
+                COALESCE(cache_creation_input_tokens, 0) AS cache_creation_tokens,
+                COALESCE(cache_read_input_tokens, 0) AS cache_read_tokens,
+                COALESCE(computed_total_tokens, 0) AS computed_total_tokens
+            FROM turn_usage
+            WHERE session_id = ?
+            ORDER BY started_at, turn_id
+            """,
+            (session_id,),
+        ).fetchall()
+    except sqlite3.DatabaseError:
+        return []
+    finally:
+        conn.close()
+
+    result: list[dict[str, Any]] = []
+    for (
+        turn_id,
+        user_message_id,
+        started_at,
+        input_t,
+        output_t,
+        cache_create_t,
+        cache_read_t,
+        total_t,
+    ) in rows:
+        result.append(
+            {
+                "turn_id": turn_id,
+                "user_message_id": user_message_id,
+                "started_at": int(started_at or 0),
+                "input_tokens": int(input_t or 0),
+                "output_tokens": int(output_t or 0),
+                "cache_tokens": int(cache_create_t or 0) + int(cache_read_t or 0),
+                "tokens_used": int(total_t or ((input_t or 0) + (output_t or 0))),
+            }
+        )
+    return result
+
+
 def process_zcode_session(
     session_id: str,
     db_path: Path,
@@ -170,9 +286,7 @@ def process_zcode_session(
     # Token totals are authoritative session-level values from the turn_usage
     # table (session.total_input_tokens / total_output_tokens); per-message
     # ``data.tokens`` is sparse, so we do NOT sum it (see review feedback —
-    # that path under-counts). Tokens are attributed to the session's dominant
-    # date below and injected into the first assistant message for
-    # agent_sessions (codex pattern).
+    # that path under-counts). Tokens are attributed by turn/date below.
     session_dates: set[str] = set()
     for msg in session.messages:
         ts = msg.get("timestamp")
@@ -201,8 +315,8 @@ def process_zcode_session(
                     {"session_id": session_id, "role": role, "model": model},
                     ensure_ascii=False,
                 ),
-                # Per-message tokens left at 0; session totals are injected
-                # into the first assistant message below.
+                # Per-message tokens default to 0; matched turn_usage rows will
+                # overwrite the initiating user message below.
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -213,28 +327,77 @@ def process_zcode_session(
                 "agent_session_id": session_id,
                 "conversation_id": None,
                 "project_path": session.project_path,
+                # Explicit zeroes are authoritative for ZCode rows because
+                # older fetches attached session totals to assistant messages.
+                # New turn-based attribution must be able to clear those
+                # stale token values during UPSERT.
+                "overwrite_zero_tokens": True,
             }
         )
 
-    # Attribute the authoritative session-level token totals to the dominant
-    # date (the date with the most messages; ties broken by recency). This
-    # keeps daily_usage aligned with the session totals rather than fragmenting
-    # sparse per-message numbers.
+    # Attribute per-turn totals to the initiating user message so downstream
+    # hourly rollups reflect the source turn timestamp rather than one
+    # session-level assistant row.
+    message_by_id = {msg.get("message_id"): msg for msg in messages}
+    turn_rows = _get_turn_usage_rows(session_id, db_path)
+    matched_turns = 0
+    unmatched_turns: list[dict[str, Any]] = []
+    for turn in turn_rows:
+        target = message_by_id.get(turn["user_message_id"])
+        if target is None:
+            unmatched_turns.append(turn)
+            continue
+        target["tokens_used"] = turn["tokens_used"]
+        target["input_tokens"] = turn["input_tokens"]
+        target["output_tokens"] = turn["output_tokens"]
+        matched_turns += 1
+
+    # Attribute authoritative token totals by each turn's local date so
+    # long-lived sessions do not dump an entire day's usage onto the session's
+    # creation/majority-message date.
+    usage_by_date = _get_turn_usage_by_date(session_id, db_path)
     total_input = int(getattr(session, "total_input_tokens", 0) or 0)
     total_output = int(getattr(session, "total_output_tokens", 0) or 0)
     total_tokens = total_input + total_output
-    dominant_date = _dominant_date(session_dates, messages)
-    daily[dominant_date]["prompt_tokens"] += total_input
-    daily[dominant_date]["candidates_tokens"] += total_output
-    daily[dominant_date]["total_tokens"] += total_tokens
+    if usage_by_date:
+        for date_key, usage in usage_by_date.items():
+            daily[date_key]["prompt_tokens"] += usage["prompt_tokens"]
+            daily[date_key]["candidates_tokens"] += usage["candidates_tokens"]
+            daily[date_key]["cached_tokens"] += usage["cached_tokens"]
+            daily[date_key]["total_tokens"] += usage["total_tokens"]
+    else:
+        # Fallback for older/partial source DBs with missing turn_usage data.
+        dominant_date = _dominant_date(session_dates, messages)
+        daily[dominant_date]["prompt_tokens"] += total_input
+        daily[dominant_date]["candidates_tokens"] += total_output
+        daily[dominant_date]["total_tokens"] += total_tokens
     # NOTE: request_count is NOT added here — it is incremented per assistant
     # message on its own date in the loop above (matches fetch_codex.py), so a
     # session reports its real assistant-turn count rather than collapsing to 1.
 
-    # Inject session-level totals into the first assistant message so
-    # update_agent_sessions_stats records the real total_tokens (codex pattern,
-    # fetch_codex.py:648-654).
-    if total_tokens > 0:
+    if unmatched_turns:
+        print(
+            "fetch_zcode: turn_usage rows could not be matched to a user message for "
+            f"session={session_id} ({matched_turns}/{len(turn_rows)} matched, "
+            f"{len(unmatched_turns)} unmatched). daily_usage remains authoritative, "
+            "but message/session attribution may be incomplete."
+        )
+
+    # Fallback for older source DBs where turn_usage lacks user_message_id rows:
+    # keep the previous "inject once" behavior so agent_sessions still sees the
+    # full session token total.
+    if total_tokens > 0 and matched_turns == 0:
+        if turn_rows:
+            print(
+                "fetch_zcode: falling back to session-level assistant token attribution for "
+                f"session={session_id} because 0/{len(turn_rows)} turn_usage rows matched "
+                "a user message."
+            )
+        else:
+            print(
+                "fetch_zcode: falling back to session-level assistant token attribution for "
+                f"session={session_id} because no turn_usage rows were found."
+            )
         for msg in messages:
             if msg.get("role") == "assistant":
                 msg["tokens_used"] = total_tokens
@@ -760,6 +923,7 @@ def fetch_and_save(
             for date, stats in daily.items():
                 aggregated[date]["prompt_tokens"] += stats["prompt_tokens"]
                 aggregated[date]["candidates_tokens"] += stats["candidates_tokens"]
+                aggregated[date]["cached_tokens"] += stats["cached_tokens"]
                 aggregated[date]["total_tokens"] += stats["total_tokens"]
                 aggregated[date]["request_count"] += stats["request_count"]
                 aggregated[date]["models_used"].update(stats["models_used"])

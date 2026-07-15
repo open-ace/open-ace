@@ -1032,6 +1032,7 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 tokens_used = msg.get("tokens_used", 0)
                 input_tokens = msg.get("input_tokens", 0)
                 output_tokens = msg.get("output_tokens", 0)
+                overwrite_zero_tokens = bool(msg.get("overwrite_zero_tokens"))
                 sender_id = msg.get("sender_id")
                 sender_name = msg.get("sender_name")
                 model = msg.get("model")
@@ -1049,11 +1050,23 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
                 if key in existing_map:
                     existing = existing_map[key]
                     # Preserve existing token values if new values are 0
-                    if tokens_used == 0 and existing.get("tokens_used", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and tokens_used == 0
+                        and existing.get("tokens_used", 0) > 0
+                    ):
                         tokens_used = existing["tokens_used"]
-                    if input_tokens == 0 and existing.get("input_tokens", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and input_tokens == 0
+                        and existing.get("input_tokens", 0) > 0
+                    ):
                         input_tokens = existing["input_tokens"]
-                    if output_tokens == 0 and existing.get("output_tokens", 0) > 0:
+                    if (
+                        not overwrite_zero_tokens
+                        and output_tokens == 0
+                        and existing.get("output_tokens", 0) > 0
+                    ):
                         output_tokens = existing["output_tokens"]
                     # Preserve sender info if new values are None
                     if sender_id is None and existing.get("sender_id"):
@@ -1167,6 +1180,59 @@ def save_messages_batch(messages: list[dict], batch_size: int = 1000) -> int:
             print(f"Warning: Failed to refresh daily_stats: {e}")
 
     return saved
+
+
+def delete_messages_for_agent_sessions(
+    tool_name: str, host_name: str, agent_session_ids: list[str], batch_size: int = 500
+) -> int:
+    """Delete existing daily_messages rows for a set of agent sessions.
+
+    Fetchers that re-import an authoritative whole-session snapshot can change
+    which message carries a turn's token attribution. Deleting the old rows for
+    those session ids before inserting the fresh snapshot prevents stale
+    token-bearing rows from surviving across parser changes.
+    """
+    unique_session_ids = []
+    seen = set()
+    for session_id in agent_session_ids:
+        cleaned = (session_id or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        unique_session_ids.append(cleaned)
+
+    if not unique_session_ids:
+        return 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    deleted = 0
+
+    try:
+        tool_placeholder = _placeholder()
+        host_placeholder = _placeholder()
+        for i in range(0, len(unique_session_ids), batch_size):
+            chunk = unique_session_ids[i : i + batch_size]
+            placeholders = ", ".join([_placeholder()] * len(chunk))
+            _execute(
+                cursor,
+                f"""
+                DELETE FROM daily_messages
+                WHERE tool_name = {tool_placeholder}
+                  AND host_name = {host_placeholder}
+                  AND agent_session_id IN ({placeholders})
+            """,
+                [tool_name, host_name, *chunk],
+            )
+            deleted += max(cursor.rowcount or 0, 0)
+
+        conn.commit()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_messages_by_date(
@@ -4197,7 +4263,7 @@ def _refresh_daily_stats_for_messages(messages: list[dict]) -> None:
 
     # Also refresh user_daily_stats for affected dates
     try:
-        from scripts.shared.user_stats_helper import _refresh_user_daily_stats_for_dates
+        from shared.user_stats_helper import _refresh_user_daily_stats_for_dates
 
         _refresh_user_daily_stats_for_dates(dates)
     except Exception as e:

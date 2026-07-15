@@ -89,8 +89,14 @@ def _build_zcode_source_db(db_path: Path) -> None:
         CREATE TABLE turn_usage (
             session_id text not null,
             turn_id text not null,
+            user_message_id text,
+            status text not null default 'completed',
+            started_at integer not null default 0,
             input_tokens integer not null default 0,
             output_tokens integer not null default 0,
+            cache_creation_input_tokens integer not null default 0,
+            cache_read_input_tokens integer not null default 0,
+            computed_total_tokens integer not null default 0,
             PRIMARY KEY (session_id, turn_id)
         );
         """
@@ -123,13 +129,50 @@ def _insert_zcode_message(
 
 
 def _insert_turn_usage(
-    db_path: Path, session_id: str, turn_id: str, input_t: int, output_t: int
+    db_path: Path,
+    session_id: str,
+    turn_id: str,
+    input_t: int,
+    output_t: int,
+    *,
+    user_message_id: str | None = None,
+    started_at: int | None = None,
+    cache_creation_t: int = 0,
+    cache_read_t: int = 0,
+    computed_total_t: int | None = None,
 ) -> None:
     conn = sqlite3.connect(str(db_path))
+    if started_at is None:
+        started_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if computed_total_t is None:
+        computed_total_t = input_t + output_t
     conn.execute(
-        "INSERT INTO turn_usage (session_id, turn_id, input_tokens, output_tokens) "
-        "VALUES (?, ?, ?, ?)",
-        (session_id, turn_id, input_t, output_t),
+        """
+        INSERT INTO turn_usage (
+            session_id,
+            turn_id,
+            user_message_id,
+            status,
+            started_at,
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
+            computed_total_tokens
+        )
+        VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            session_id,
+            turn_id,
+            user_message_id,
+            started_at,
+            input_t,
+            output_t,
+            cache_creation_t,
+            cache_read_t,
+            computed_total_t,
+        ),
     )
     conn.commit()
     conn.close()
@@ -192,16 +235,26 @@ def _init_dest_schema(db_path: Path) -> None:
             tool_name TEXT,
             host_name TEXT,
             message_id TEXT,
+            parent_id TEXT,
             role TEXT,
             content TEXT,
+            full_entry TEXT,
             tokens_used INTEGER DEFAULT 0,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
             model TEXT,
+            message_source TEXT,
+            feishu_conversation_id TEXT,
+            group_subject TEXT,
+            is_group_chat INTEGER,
             sender_id TEXT,
             sender_name TEXT,
-            timestamp TEXT
+            timestamp TEXT,
+            agent_session_id TEXT,
+            conversation_id TEXT
         );
+        CREATE UNIQUE INDEX idx_daily_messages_unique
+        ON daily_messages (date, tool_name, host_name, message_id);
         """
     )
     conn.commit()
@@ -263,7 +316,16 @@ def test_process_zcode_session_returns_messages_and_project(fetch_mod, tmp_path)
     # Authoritative session-level tokens come from turn_usage, NOT the sparse
     # per-message data.tokens above. Seed a turn_usage row with different
     # numbers to prove the session totals win.
-    _insert_turn_usage(src_db, sid, "turn_1", input_t=250, output_t=30)
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_1",
+        input_t=250,
+        output_t=30,
+        user_message_id="msg_1",
+        started_at=1700000000200,
+        computed_total_t=280,
+    )
 
     daily, messages, project = fetch_mod.process_zcode_session(sid, src_db, "localhost", None)
 
@@ -273,12 +335,13 @@ def test_process_zcode_session_returns_messages_and_project(fetch_mod, tmp_path)
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "hello world"
     assert messages[0]["agent_session_id"] == sid
-    # Per-message tokens are 0; session totals injected into first assistant msg.
-    assert messages[0]["tokens_used"] == 0
+    # Per-turn tokens are attached to the initiating user message so hourly
+    # rollups align with turn start time.
+    assert messages[0]["tokens_used"] == 280
+    assert messages[0]["input_tokens"] == 250
+    assert messages[0]["output_tokens"] == 30
     assert messages[1]["role"] == "assistant"
-    assert messages[1]["input_tokens"] == 250
-    assert messages[1]["output_tokens"] == 30
-    assert messages[1]["tokens_used"] == 280
+    assert messages[1]["tokens_used"] == 0
     # daily aggregates use session totals (250 input + 30 output = 280)
     assert len(daily) == 1
     only_date = next(iter(daily))
@@ -332,6 +395,80 @@ def test_process_zcode_session_request_count_counts_assistant_messages(fetch_mod
     assert len(messages) == 4
     only_date = next(iter(daily))
     assert daily[only_date]["request_count"] == 2
+
+
+def test_process_zcode_session_splits_tokens_by_turn_date_and_tracks_cache(fetch_mod, tmp_path):
+    src_db = tmp_path / "zcode.sqlite"
+    _build_zcode_source_db(src_db)
+    sid = "sess_cross_day"
+    day1_ms = int(datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    day2_ms = int(datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", day1_ms, day2_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, day1_ms, {"role": "user"}, parts=[{"type": "text", "text": "q1"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        day1_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "a1"}],
+    )
+    _insert_zcode_message(
+        src_db, "m3", sid, day2_ms, {"role": "user"}, parts=[{"type": "text", "text": "q2"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m4",
+        sid,
+        day2_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "a2"}],
+    )
+    _insert_turn_usage(
+        src_db, sid, "turn_1", 120, 20, user_message_id="m1", started_at=day1_ms, cache_read_t=80
+    )
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_2",
+        220,
+        30,
+        user_message_id="m3",
+        started_at=day2_ms,
+        cache_creation_t=10,
+    )
+
+    daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, "localhost", None)
+
+    assert len(messages) == 4
+    date1 = fetch_mod._ms_to_date(day1_ms)
+    date2 = fetch_mod._ms_to_date(day2_ms)
+    assert daily[date1]["prompt_tokens"] == 120
+    assert daily[date1]["candidates_tokens"] == 20
+    assert daily[date1]["cached_tokens"] == 80
+    assert daily[date1]["total_tokens"] == 140
+    assert daily[date1]["request_count"] == 1
+    assert daily[date2]["prompt_tokens"] == 220
+    assert daily[date2]["candidates_tokens"] == 30
+    assert daily[date2]["cached_tokens"] == 10
+    assert daily[date2]["total_tokens"] == 250
+    assert daily[date2]["request_count"] == 1
+    # Per-turn totals land on the initiating user messages for each day.
+    assert messages[0]["tokens_used"] == 140
+    assert messages[0]["input_tokens"] == 120
+    assert messages[0]["output_tokens"] == 20
+    assert messages[2]["tokens_used"] == 250
+    assert messages[2]["input_tokens"] == 220
+    assert messages[2]["output_tokens"] == 30
 
 
 def test_process_zcode_session_skips_empty(fetch_mod, tmp_path):
@@ -558,3 +695,229 @@ def test_iter_candidate_sessions_days_filter(fetch_mod, tmp_path):
     candidates = fetch_mod._iter_candidate_sessions(src_db, days=7, recent=False)
     ids = {sid for sid, _ in candidates}
     assert ids == {"sess_recent"}
+
+
+def test_fetch_and_save_persists_zcode_cache_tokens(fetch_mod, tmp_path, monkeypatch):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_cache"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db, sid, "turn_1", 200, 25, user_message_id="m1", started_at=now_ms, cache_read_t=75
+    )
+
+    monkeypatch.setattr(fetch_mod, "find_zcode_db_path", lambda: src_db)
+
+    assert fetch_mod.fetch_and_save(days=7, hostname="localhost") is True
+
+    dest_db = tmp_path / "dest.sqlite"
+    conn = sqlite3.connect(str(dest_db))
+    row = conn.execute(
+        "SELECT tokens_used, input_tokens, output_tokens, cache_tokens FROM daily_usage "
+        "WHERE tool_name = 'zcode'"
+    ).fetchone()
+    msg_row = conn.execute(
+        "SELECT role, tokens_used, input_tokens, output_tokens FROM daily_messages "
+        "WHERE tool_name = 'zcode' ORDER BY id LIMIT 2"
+    ).fetchall()
+    conn.close()
+    assert row == (225, 200, 25, 75)
+    assert msg_row[0] == ("user", 225, 200, 25)
+    assert msg_row[1] == ("assistant", 0, 0, 0)
+
+
+def test_fetch_and_save_clears_stale_assistant_tokens(fetch_mod, tmp_path, monkeypatch):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_stale"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db, sid, "turn_1", 200, 25, user_message_id="m1", started_at=now_ms, cache_read_t=75
+    )
+
+    dest_db = tmp_path / "dest.sqlite"
+    msg_date = fetch_mod._ms_to_date(now_ms)
+    pre = sqlite3.connect(str(dest_db))
+    pre.execute(
+        """
+        INSERT INTO daily_messages (
+            date, tool_name, host_name, message_id, parent_id, role, content, full_entry,
+            tokens_used, input_tokens, output_tokens, model, timestamp, message_source,
+            feishu_conversation_id, group_subject, is_group_chat, sender_id, sender_name,
+            agent_session_id, conversation_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            msg_date,
+            "zcode",
+            "localhost",
+            "m2",
+            None,
+            "assistant",
+            "world",
+            "{}",
+            999,
+            900,
+            99,
+            "GLM-5.2",
+            datetime.now(timezone.utc).isoformat(),
+            None,
+            None,
+            None,
+            None,
+            "zcode_user",
+            "rhuang-host-zcode",
+            sid,
+            None,
+        ),
+    )
+    pre.commit()
+    pre.close()
+
+    monkeypatch.setattr(fetch_mod, "find_zcode_db_path", lambda: src_db)
+
+    assert fetch_mod.fetch_and_save(days=7, hostname="localhost") is True
+
+    conn = sqlite3.connect(str(dest_db))
+    rows = conn.execute(
+        "SELECT message_id, role, tokens_used, input_tokens, output_tokens "
+        "FROM daily_messages WHERE tool_name = 'zcode' ORDER BY message_id"
+    ).fetchall()
+    conn.close()
+    assert rows == [
+        ("m1", "user", 225, 200, 25),
+        ("m2", "assistant", 0, 0, 0),
+    ]
+
+
+def test_process_zcode_session_warns_on_partial_turn_match(fetch_mod, tmp_path, capsys):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_partial_warn"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db, sid, "turn_1", 200, 25, user_message_id="m1", started_at=now_ms, cache_read_t=75
+    )
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_2",
+        100,
+        10,
+        user_message_id="missing-user",
+        started_at=now_ms + 60000,
+        cache_read_t=25,
+    )
+
+    daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, hostname="localhost")
+    out = capsys.readouterr().out
+
+    assert "turn_usage rows could not be matched" in out
+    assert f"session={sid}" in out
+    user_row = next(msg for msg in messages if msg["message_id"] == "m1")
+    assistant_row = next(msg for msg in messages if msg["message_id"] == "m2")
+    assert user_row["tokens_used"] == 225
+    assert assistant_row["tokens_used"] == 0
+    msg_date = fetch_mod._ms_to_date(now_ms)
+    assert daily[msg_date]["total_tokens"] == 335
+
+
+def test_process_zcode_session_warns_when_falling_back_to_assistant(fetch_mod, tmp_path, capsys):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_fallback_warn"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_1",
+        200,
+        25,
+        user_message_id="missing-user",
+        started_at=now_ms,
+        cache_read_t=75,
+    )
+
+    _daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, hostname="localhost")
+    out = capsys.readouterr().out
+
+    assert "falling back to session-level assistant token attribution" in out
+    assistant_row = next(msg for msg in messages if msg["message_id"] == "m2")
+    assert assistant_row["tokens_used"] == 225
