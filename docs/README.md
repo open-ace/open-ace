@@ -27,7 +27,7 @@ Documentation files are in the [en/](en/) directory.
 | [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
-| [**TOKEN-ACCOUNTING (CN)**](cn/token-accounting.md) | Chinese-only deep dive into Claude / Codex / ZCode / Qwen token collection, storage, and downstream usage |
+| [**TOKEN-ACCOUNTING**](en/token-accounting.md) | Deep dive into Claude / Codex / ZCode / Qwen token collection, computation, storage, and downstream usage |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist |
 | [**MARKETING**](marketing/README.md) | Launch kit, early adopter discussion, and technical article drafts |
 
@@ -89,7 +89,7 @@ Documentation files are in the [en/](en/) directory.
 ```
 docs/
 ├── README.md          ← You are here / 你在这里
-├── en/                # English documentation (15 files)
+├── en/                # English documentation (16 files)
 ├── cn/                # 中文文档（16 个文件）
 ├── marketing/         # Launch and outreach materials / 发布传播材料
 └── images/            # Documentation images / 文档图片
