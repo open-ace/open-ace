@@ -116,6 +116,43 @@ class TestGetPRChecks:
             gh.get_pr_checks(42)
 
 
+class TestGetCheckFailureExcerpt:
+    """Test GitHub Actions failed-log excerpt extraction."""
+
+    def test_parses_actions_job_url(self):
+        parsed = GitHubOps._parse_github_actions_job_url(
+            "https://github.com/open-ace/open-ace/actions/runs/123/job/456"
+        )
+        assert parsed == ("123", "456")
+
+    def test_returns_empty_for_non_actions_url(self):
+        gh = GitHubOps("/tmp/fake")
+        assert gh.get_check_failure_excerpt({"link": "https://example.com/build/42"}) == ""
+
+    def test_fetches_failed_log_excerpt(self):
+        gh = GitHubOps("/tmp/fake")
+        gh._run_gh = MagicMock(
+            return_value=MagicMock(
+                returncode=0,
+                stdout=(
+                    "lint\tSTEP\t\\x1b[31mblack....................................................................Failed\\x1b[0m\n"
+                    "lint\tSTEP\tfiles were modified by this hook\n"
+                ),
+                stderr="",
+            )
+        )
+
+        excerpt = gh.get_check_failure_excerpt(
+            {
+                "name": "lint",
+                "link": "https://github.com/open-ace/open-ace/actions/runs/123/job/456",
+            }
+        )
+
+        assert "black" in excerpt
+        assert "\x1b" not in excerpt
+
+
 # ── Test _poll_ci_status ────────────────────────────────────────────────
 
 

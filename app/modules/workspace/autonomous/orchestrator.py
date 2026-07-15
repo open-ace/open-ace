@@ -1144,23 +1144,42 @@ class AutonomousOrchestrator:
             return ""
         return os.path.join(project_path, ".worktrees", workflow_id)
 
-    @staticmethod
-    def _build_ci_repair_context(pr_number: int, failed_checks: list[dict]) -> str:
-        """Summarize failed CI checks for the next development round prompt."""
-        lines = [f"PR #{pr_number} 在合并前检测到以下 CI 失败：", ""]
+    def _build_ci_repair_context(
+        self, wf: dict, gh: GitHubOps, pr_number: int, failed_checks: list[dict]
+    ) -> str:
+        """Summarize failed CI checks and require evidence-driven local investigation."""
+        lines = [
+            f"PR #{pr_number} 在合并前检测到以下 CI 失败。",
+            "请先根据失败日志复现问题，再修复；不能只跑“相关测试”就宣布已解决。",
+            "如果本轮没有产生新的代码改动，就不能视为修复完成。",
+            "请优先自行调查仓库中的 CI 定义与脚本来源，而不是依赖人工预先配置的规则。",
+            "",
+        ]
         for check in failed_checks or []:
             if check.get("bucket") != "fail":
                 continue
             state = check.get("state") or "unknown"
             link = check.get("link") or ""
-            bullet = f"- {check.get('name') or 'unknown'}: {state}"
+            name = check.get("name") or "unknown"
+            lines.append(f"### {name}")
+            lines.append(f"- 状态: {state}")
             if link:
-                bullet += f" ({link})"
-            lines.append(bullet)
+                lines.append(f"- 链接: {link}")
+
+            excerpt = gh.get_check_failure_excerpt(check)
+            if excerpt:
+                lines.append("- 失败摘录:")
+                lines.append("```text")
+                lines.append(excerpt)
+                lines.append("```")
+            lines.append("")
         lines.extend(
             [
-                "",
-                "请优先分析这些失败是否由当前分支引入，修复后重新运行相关测试，并确保修改已推送到当前工作分支。",
+                "调查要求：",
+                "1. 先查看 `.github/workflows/`、`package.json`、`Makefile`、`tox.ini`、`pytest.ini`、`scripts/` 等，确认失败 check 在仓库中对应哪条本地命令或脚本。",
+                "2. 优先用 CI 工作流里真实执行的命令在本地复现，而不是只挑选你认为“相关”的部分测试。",
+                "3. 修复后重新运行对应命令，以及你新增/修改代码的相关测试。",
+                "4. 只有在确实产生新代码提交后，才能宣布 CI 修复完成；如果没有代码改动，必须明确说明为什么 CI 会自动恢复。",
             ]
         )
         return "\n".join(lines).strip()
@@ -1521,7 +1540,7 @@ class AutonomousOrchestrator:
             return
 
         next_dev_round = dev_round + 1
-        context = self._build_ci_repair_context(pr_number, failed_checks)
+        context = self._build_ci_repair_context(wf, self._get_gh(), pr_number, failed_checks)
         self._create_milestone(
             phase="merge",
             dev_round=dev_round,
@@ -3077,11 +3096,18 @@ class AutonomousOrchestrator:
             )
         else:
             self._run_development_agent(wf, dev_round, gh)
+            wf = self.workflow or {}
+            if wf.get("status") == "failed":
+                logger.info(
+                    "Development round %d failed, skipping test phase for workflow %s",
+                    dev_round,
+                    self._workflow_id[:8],
+                )
+                return
             # Post development completion comment — but only if dev succeeded.
             # _run_development_agent sets status="failed" on failure; without
             # this guard, a "✅ Completed" comment is posted with a stale
             # commit that isn't the agent's work (#525).
-            wf = self.workflow or {}
             if wf.get("status") != "failed":
                 self._post_dev_completion_comment(wf, dev_round, gh)
 
