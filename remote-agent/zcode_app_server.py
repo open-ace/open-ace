@@ -829,12 +829,15 @@ class ZCodeAppServerSession:
             with self._lock:
                 self._pending_server_requests[msg_id] = method
             # Forward to frontend via permission_callback
-            self.permission_callback(self.session_id, {
-                "type": "interaction_request",
-                "method": method,
-                "id": msg_id,
-                "params": params,
-            })
+            self.permission_callback(
+                self.session_id,
+                {
+                    "type": "interaction_request",
+                    "method": method,
+                    "id": msg_id,
+                    "params": params,
+                },
+            )
             return
 
         if method == "interaction/requestPermission" and self.permission_callback:
@@ -848,12 +851,15 @@ class ZCodeAppServerSession:
             with self._lock:
                 self._pending_server_requests[msg_id] = method
             # Forward to frontend via permission_callback
-            self.permission_callback(self.session_id, {
-                "type": "interaction_request",
-                "method": method,
-                "id": msg_id,
-                "params": params,
-            })
+            self.permission_callback(
+                self.session_id,
+                {
+                    "type": "interaction_request",
+                    "method": method,
+                    "id": msg_id,
+                    "params": params,
+                },
+            )
             return
 
         # Unattended mode: auto-respond
