@@ -100,7 +100,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       <button
         type="button"
         className={cn(
-          'form-control text-start d-flex justify-content-between align-items-center',
+          'form-control searchable-select-trigger text-start d-flex justify-content-between align-items-center',
           sizeClasses[size],
           disabled && 'disabled'
         )}

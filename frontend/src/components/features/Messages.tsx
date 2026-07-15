@@ -202,30 +202,7 @@ export const Messages: React.FC = () => {
 
       {/* Filters - Responsive layout */}
       <Card className="mb-3 messages-filter-card">
-        {/* Filter Row 1: Date Range */}
-        <div className="messages-filter-row">
-          <div className="messages-filter-group messages-filter-dates">
-            <label className="messages-filter-label">
-              <i className="bi bi-calendar-range me-1" />
-              {t('dateRange', language)}
-            </label>
-            <div className="messages-filter-dates-inputs">
-              <DatePicker
-                value={filters.startDate ?? ''}
-                onChange={(v) => handleFilterChange('startDate', v)}
-                placeholder={t('startDate', language)}
-              />
-              <span className="messages-filter-dates-separator">~</span>
-              <DatePicker
-                value={filters.endDate ?? ''}
-                onChange={(v) => handleFilterChange('endDate', v)}
-                placeholder={t('endDate', language)}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Filter Row 2: Host + Tool + Sender */}
+        {/* Filter Row 1: Host + Tool + Sender + Date Range */}
         <div className="messages-filter-row">
           <div className="messages-filter-group">
             <label className="messages-filter-label">
@@ -265,9 +242,28 @@ export const Messages: React.FC = () => {
               size="sm"
             />
           </div>
+          <div className="messages-filter-group messages-filter-dates">
+            <label className="messages-filter-label">
+              <i className="bi bi-calendar-range me-1" />
+              {t('dateRange', language)}
+            </label>
+            <div className="messages-filter-dates-inputs">
+              <DatePicker
+                value={filters.startDate ?? ''}
+                onChange={(v) => handleFilterChange('startDate', v)}
+                placeholder={t('startDate', language)}
+              />
+              <span className="messages-filter-dates-separator">~</span>
+              <DatePicker
+                value={filters.endDate ?? ''}
+                onChange={(v) => handleFilterChange('endDate', v)}
+                placeholder={t('endDate', language)}
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Filter Row 3: Role + Search */}
+        {/* Filter Row 2: Role + Search */}
         <div className="messages-filter-row">
           <div className="messages-filter-group messages-filter-roles">
             <label className="messages-filter-label">

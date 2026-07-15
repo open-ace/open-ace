@@ -2564,16 +2564,21 @@ table .latency-row:hover td {
   padding-right: 2.5rem;
 }
 
-/* Messages page filter controls -统一高度 */
-.messages-header .form-control-sm,
-.messages-header .form-select-sm,
-.messages .card .form-control-sm,
-.messages .card .form-select-sm {
-  padding-top: 0.375rem;
-  padding-bottom: 0.375rem;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  height: 2.25rem;
+/* Messages page filter controls - 统一所有筛选框高度 */
+.messages .card .messages-filter-row .form-select-sm,
+.messages .card .messages-filter-row .form-control-sm,
+.messages .card .messages-filter-row input,
+.messages .card .messages-filter-row select,
+.messages .card .messages-filter-row button.form-control {
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+  border-radius: var(--border-radius-sm) !important;
+  box-sizing: border-box !important;
 }
 
 .messages-header .form-check-inline,
@@ -4433,6 +4438,7 @@ table .latency-row:hover td {
 .messages-filter-sender {
   flex: 1;
   min-width: 180px;
+  max-width: 300px;
 }
 
 /* Role Checkboxes */
