@@ -465,21 +465,32 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download packages for current Python version
-        # Wheels will match the packaging machine's Python version
-        # Use --only-binary=:all: to avoid source builds that may fail on older systems
-        # Warning: If target system has different Python version, vendor wheels will not install.
-        #          Ensure packaging and target systems use the same Python version.
-        echo -e "${YELLOW}Downloading packages for current Python version...${NC}"
+        # Download packages compatible with Python 3.9+ (minimum supported version)
+        # This ensures vendor wheels work on target systems with Python 3.9, 3.10, 3.11, 3.12, etc.
+        echo -e "${YELLOW}Downloading packages compatible with Python 3.9+...${NC}"
 
         # Use --prefer-binary only if pip version >= 20
         if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
+            # Try downloading for Python 3.9 (minimum version) to ensure compatibility
+            # --python-version 3.9 ensures wheels work on Python 3.9+
+            # --platform and --implementation target Linux x86_64 systems
+            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                --python-version 3.9 \
+                --platform manylinux2014_x86_64 \
+                --platform manylinux_2_17_x86_64 \
+                --platform manylinux_2_28_x86_64 \
+                --implementation cp \
+                --abi cp39 \
+                --only-binary=:all: \
+                --prefer-binary 2>/dev/null || \
+            # Fallback: download for current Python version (may not be compatible with 3.9)
+            echo -e "${YELLOW}Note: Could not download Python 3.9 compatible wheels, using current Python version...${NC}" && \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
                 --only-binary=:all: \
                 --prefer-binary || \
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
                 --only-binary=:all: || \
-            # Fallback: download without constraints (for packages without pure wheels)
+            # Final fallback: download without constraints (for packages without pure wheels)
             $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
                 $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
                 echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"

@@ -579,6 +579,18 @@ init_deploy_user() {
 # Check if DEPLOY_PATH is dangerously set to user's home directory.
 # Returns 0 if safe (or user confirmed), 1 if cancelled.
 check_deploy_path_safety() {
+    # Validate that DEPLOY_PATH is a non-empty absolute path
+    if [ -z "$DEPLOY_PATH" ]; then
+        print_error "Deployment path cannot be empty"
+        return 1
+    fi
+
+    if [[ "$DEPLOY_PATH" != /* ]]; then
+        print_error "Deployment path must be an absolute path (starting with /): $DEPLOY_PATH"
+        print_info "Example: /home/$DEPLOY_USER/open-ace"
+        return 1
+    fi
+
     local user_home
     user_home=$(eval echo "~$DEPLOY_USER")
 
@@ -1469,6 +1481,36 @@ prompt_yesno() {
     else
         eval "$var_name='no'"
     fi
+}
+
+# Prompt for deployment path with validation.
+# Ensures the path is a non-empty absolute path, re-prompting on invalid input.
+# Usage: prompt_deploy_path <prompt_text> <default_value>
+prompt_deploy_path() {
+    local prompt_text="$1"
+    local default_value="$2"
+
+    while true; do
+        prompt_input "$prompt_text" "$default_value" DEPLOY_PATH
+        # Remove trailing slash
+        DEPLOY_PATH="${DEPLOY_PATH%/}"
+
+        if [ -z "$DEPLOY_PATH" ]; then
+            print_error "Deployment path cannot be empty. Please enter an absolute path."
+            continue
+        fi
+
+        if [[ "$DEPLOY_PATH" != /* ]]; then
+            print_error "Deployment path must be an absolute path (starting with /): $DEPLOY_PATH"
+            print_info "Example: /home/$DEPLOY_USER/open-ace"
+            # Use the suggested default for next iteration
+            default_value="/home/$DEPLOY_USER/open-ace"
+            continue
+        fi
+
+        # Valid absolute path
+        break
+    done
 }
 
 # ============================================================================
@@ -2769,7 +2811,7 @@ interactive_config() {
                 exit 1
             fi
             prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
-            prompt_input "Deployment path" "/home/$DEPLOY_USER/open-ace" DEPLOY_PATH
+            prompt_deploy_path "Deployment path" "/home/$DEPLOY_USER/open-ace"
 
             # Safety check: warn if deploying to home directory
             if ! check_deploy_path_safety; then
@@ -2830,13 +2872,13 @@ configure_local() {
             local suggested_path="$user_home/open-ace"
             print_info "User changed from '$original_user' to '$DEPLOY_USER'"
             print_info "Current path ($original_path) does not match new user's home ($user_home)"
-            prompt_input "Deployment path" "$suggested_path" DEPLOY_PATH
+            prompt_deploy_path "Deployment path" "$suggested_path"
         else
             # Path might still be valid, just confirm it
-            prompt_input "Deployment path" "$original_path" DEPLOY_PATH
+            prompt_deploy_path "Deployment path" "$original_path"
         fi
     else
-        prompt_input "Deployment path" "$DEPLOY_PATH" DEPLOY_PATH
+        prompt_deploy_path "Deployment path" "$DEPLOY_PATH"
     fi
 
     # Remove trailing slash from path to avoid double slashes
@@ -2913,7 +2955,7 @@ configure_deploy() {
     fi
 
     prompt_input "Remote user" "$DEPLOY_USER" DEPLOY_USER
-    prompt_input "Deployment path" "/home/$DEPLOY_USER/open-ace" DEPLOY_PATH
+    prompt_deploy_path "Deployment path" "/home/$DEPLOY_USER/open-ace"
 
     # Ask about systemd service
     echo ""
@@ -3459,46 +3501,62 @@ do_fresh_install() {
         grep -v -e "psycopg2-binary" -e "psycogreen" "$target_path/requirements.txt" > "$TEMP_REQ" || true
         chmod 644 "$TEMP_REQ"  # Make readable for non-root users
 
-        # Install dependencies (prefer vendor directory for offline install)
+        # Install dependencies (prefer vendor directory for offline install, fallback to network)
+        local _pip_cmd=""
+        if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
+        local offline_install_failed=false
+
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
-                local _pip_cmd=""
-                if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
                     # Install setuptools first (needed for setup.py based packages)
                     run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools 2>/dev/null || true
                     # Install wheel separately (needed for bdist_wheel command)
-                    # If not in vendor, try from network (non-critical, only needed for building wheels)
                     if ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                         run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" wheel 2>/dev/null || true
                     fi
                 fi
             fi
-            if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
-            elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+            # Try offline installation from vendor directory
+            if [ -n "$_pip_cmd" ]; then
+                if run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" 2>&1; then
+                    print_success "Dependencies installed from vendor"
+                else
+                    offline_install_failed=true
+                    print_warning "Vendor directory installation failed (wheels may be incompatible with Python $(python3 --version 2>&1 | awk '{print $2}'))"
+                    print_info "Falling back to online installation..."
+                fi
             fi
-            # Install psycogreen separately (source dist, needs build tools)
-            if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+            # Install psycogreen separately (source dist, needs build tools) - only if offline succeeded
+            if [ "$offline_install_failed" = false ] && [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
                 print_info "Installing psycogreen..."
-                if command -v pip3 &>/dev/null; then
-                    run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
-                        print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
-                elif command -v pip &>/dev/null; then
-                    run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                if [ -n "$_pip_cmd" ]; then
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
                         print_warning "psycogreen install failed (non-critical, PostgreSQL connection pooling may not work optimally)"
                 fi
             fi
-        else
-            # Install from network
-            if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
-            elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
+        fi
+
+        # Fallback to online installation if vendor install failed or vendor directory doesn't exist
+        if [ "$offline_install_failed" = true ] || [ ! -d "$target_path/vendor" ] || [ ! "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
+            if [ -n "$_pip_cmd" ]; then
+                print_info "Installing dependencies from network..."
+                if run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location -r "$TEMP_REQ" 2>&1; then
+                    print_success "Dependencies installed from network"
+                else
+                    print_error "Failed to install dependencies. Please check network connectivity and requirements.txt"
+                fi
+                # Install psycogreen from network
+                if [ "$DB_INSTALL_METHOD" != "sqlite" ]; then
+                    print_info "Installing psycogreen..."
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || \
+                        print_warning "psycogreen install failed (non-critical)"
+                fi
+            else
+                print_error "pip not found. Cannot install dependencies."
             fi
         fi
         rm -f "$TEMP_REQ"
@@ -3847,43 +3905,59 @@ with open('$config_dir/config.json', 'w') as f:
         grep -v -e "psycopg2-binary" -e "psycogreen" "$target_path/requirements.txt" > "$TEMP_REQ" || true
         chmod 644 "$TEMP_REQ"  # Make readable for non-root users
 
+        local _pip_cmd=""
+        if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
+        local offline_install_failed=false
+
         if [ -d "$target_path/vendor" ] && [ "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
             print_info "Installing from vendor directory (offline mode)..."
             # Pre-install setuptools + wheel for building source distributions
             if ls "$target_path/vendor"/setuptools*.whl 1>/dev/null 2>&1 || ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                 print_info "Installing build tools (setuptools, wheel)..."
-                local _pip_cmd=""
-                if command -v pip3 &>/dev/null; then _pip_cmd="pip3"; elif command -v pip &>/dev/null; then _pip_cmd="pip"; fi
                 if [ -n "$_pip_cmd" ]; then
                     # Install setuptools first (needed for setup.py based packages)
                     run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" setuptools 2>/dev/null || true
                     # Install wheel separately (needed for bdist_wheel command)
-                    # If not in vendor, try from network (non-critical, only needed for building wheels)
                     if ls "$target_path/vendor"/wheel*.whl 1>/dev/null 2>&1; then
                         run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" wheel 2>/dev/null || true
                     fi
                 fi
             fi
-            if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
-            elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" && print_success "Dependencies installed from vendor"
+            # Try offline installation from vendor directory
+            if [ -n "$_pip_cmd" ]; then
+                if run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-index --find-links="$target_path/vendor" -r "$TEMP_REQ" 2>&1; then
+                    print_success "Dependencies installed from vendor"
+                else
+                    offline_install_failed=true
+                    print_warning "Vendor directory installation failed (wheels may be incompatible with Python $(python3 --version 2>&1 | awk '{print $2}'))"
+                    print_info "Falling back to online installation..."
+                fi
             fi
-            # Install psycogreen separately (source dist, needs build tools)
-            print_info "Installing psycogreen..."
-            if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
-                    print_warning "psycogreen install failed (non-critical)"
-            elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
-                    print_warning "psycogreen install failed (non-critical)"
+            # Install psycogreen separately (source dist, needs build tools) - only if offline succeeded
+            if [ "$offline_install_failed" = false ]; then
+                print_info "Installing psycogreen..."
+                if [ -n "$_pip_cmd" ]; then
+                    run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-build-isolation --no-index --find-links="$target_path/vendor" psycogreen 2>/dev/null || \
+                        print_warning "psycogreen install failed (non-critical)"
+                fi
             fi
-        else
-            # Install from network
-            if command -v pip3 &>/dev/null; then
-                run_pip_as_user "$install_user" pip3 install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip3"
-            elif command -v pip &>/dev/null; then
-                run_pip_as_user "$install_user" pip install --user --no-warn-script-location -r "$TEMP_REQ" && print_success "Dependencies installed with pip"
+        fi
+
+        # Fallback to online installation if vendor install failed or vendor directory doesn't exist
+        if [ "$offline_install_failed" = true ] || [ ! -d "$target_path/vendor" ] || [ ! "$(ls -A "$target_path/vendor" 2>/dev/null)" ]; then
+            if [ -n "$_pip_cmd" ]; then
+                print_info "Installing dependencies from network..."
+                if run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location -r "$TEMP_REQ" 2>&1; then
+                    print_success "Dependencies installed from network"
+                else
+                    print_error "Failed to install dependencies. Please check network connectivity and requirements.txt"
+                fi
+                # Install psycogreen from network
+                print_info "Installing psycogreen..."
+                run_pip_as_user "$install_user" $_pip_cmd install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || \
+                    print_warning "psycogreen install failed (non-critical)"
+            else
+                print_error "pip not found. Cannot install dependencies."
             fi
         fi
         rm -f "$TEMP_REQ"
@@ -4006,6 +4080,7 @@ do_fresh_install_remote() {
         # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=\$(mktemp)
         grep -v -e 'psycopg2-binary' -e 'psycogreen' requirements.txt > \$TEMP_REQ || true
+        offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             # Pre-install setuptools + wheel for building source distributions
@@ -4023,23 +4098,44 @@ do_fresh_install_remote() {
                     fi
                 fi
             fi
+            # Try offline installation from vendor directory
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
+                if ! pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ 2>&1; then
+                    offline_install_failed=true
+                    echo 'Warning: Vendor directory installation failed (wheels may be incompatible with current Python version)'
+                    echo 'Falling back to online installation...'
+                fi
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
+                if ! pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ 2>&1; then
+                    offline_install_failed=true
+                    echo 'Warning: Vendor directory installation failed (wheels may be incompatible with current Python version)'
+                    echo 'Falling back to online installation...'
+                fi
             fi
-            # Install psycogreen separately (source dist, needs build tools)
+            # Install psycogreen separately (source dist, needs build tools) - only if offline succeeded
+            if [ \"\$offline_install_failed\" = false ]; then
+                echo 'Installing psycogreen...'
+                if command -v pip3 >/dev/null 2>&1; then
+                    pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                elif command -v pip >/dev/null 2>&1; then
+                    pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                fi
+            fi
+        fi
+        # Fallback to online installation if vendor install failed or vendor directory doesn't exist
+        if [ \"\$offline_install_failed\" = true ] || [ ! -d 'vendor' ] || [ ! \"\$(ls -A vendor 2>/dev/null)\" ]; then
+            echo 'Installing dependencies from network...'
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user --no-warn-script-location -r \$TEMP_REQ || echo 'ERROR: Failed to install dependencies'
+            elif command -v pip >/dev/null 2>&1; then
+                pip install --user --no-warn-script-location -r \$TEMP_REQ || echo 'ERROR: Failed to install dependencies'
+            fi
+            # Install psycogreen from network
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
-            fi
-        else
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location -r \$TEMP_REQ
-            elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location -r \$TEMP_REQ
+                pip install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         fi
         rm -f \$TEMP_REQ
@@ -4224,6 +4320,7 @@ do_upgrade_remote() {
         # Exclude psycopg2-binary (use system package instead) and psycogreen (source dist, handled separately)
         TEMP_REQ=\$(mktemp)
         grep -v -e 'psycopg2-binary' -e 'psycogreen' requirements.txt > \$TEMP_REQ || true
+        offline_install_failed=false
         if [ -d 'vendor' ] && [ \"\$(ls -A vendor 2>/dev/null)\" ]; then
             echo 'Installing from vendor directory (offline mode)...'
             # Pre-install setuptools + wheel for building source distributions
@@ -4241,23 +4338,44 @@ do_upgrade_remote() {
                     fi
                 fi
             fi
+            # Try offline installation from vendor directory
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
+                if ! pip3 install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ 2>&1; then
+                    offline_install_failed=true
+                    echo 'Warning: Vendor directory installation failed (wheels may be incompatible with current Python version)'
+                    echo 'Falling back to online installation...'
+                fi
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ
+                if ! pip install --user --no-warn-script-location --no-index --find-links=vendor -r \$TEMP_REQ 2>&1; then
+                    offline_install_failed=true
+                    echo 'Warning: Vendor directory installation failed (wheels may be incompatible with current Python version)'
+                    echo 'Falling back to online installation...'
+                fi
             fi
-            # Install psycogreen separately (source dist, needs build tools)
+            # Install psycogreen separately (source dist, needs build tools) - only if offline succeeded
+            if [ \"\$offline_install_failed\" = false ]; then
+                echo 'Installing psycogreen...'
+                if command -v pip3 >/dev/null 2>&1; then
+                    pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                elif command -v pip >/dev/null 2>&1; then
+                    pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                fi
+            fi
+        fi
+        # Fallback to online installation if vendor install failed or vendor directory doesn't exist
+        if [ \"\$offline_install_failed\" = true ] || [ ! -d 'vendor' ] || [ ! \"\$(ls -A vendor 2>/dev/null)\" ]; then
+            echo 'Installing dependencies from network...'
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user --no-warn-script-location -r \$TEMP_REQ || echo 'ERROR: Failed to install dependencies'
+            elif command -v pip >/dev/null 2>&1; then
+                pip install --user --no-warn-script-location -r \$TEMP_REQ || echo 'ERROR: Failed to install dependencies'
+            fi
+            # Install psycogreen from network
             echo 'Installing psycogreen...'
             if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
+                pip3 install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location --no-build-isolation --no-index --find-links=vendor psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
-            fi
-        else
-            if command -v pip3 >/dev/null 2>&1; then
-                pip3 install --user --no-warn-script-location -r \$TEMP_REQ
-            elif command -v pip >/dev/null 2>&1; then
-                pip install --user --no-warn-script-location -r \$TEMP_REQ
+                pip install --user --no-warn-script-location --no-build-isolation psycogreen 2>/dev/null || echo 'Warning: psycogreen install failed (non-critical)'
             fi
         fi
         rm -f \$TEMP_REQ
