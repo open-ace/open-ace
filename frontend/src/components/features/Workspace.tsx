@@ -1339,7 +1339,7 @@ export const Workspace: React.FC = () => {
       });
       setStoredActiveTabId(newTab.id);
       // Issue #1470: Update tabsOrder in store
-      setStoredTabsOrder([...storedTabsOrder, newTab.id]);
+      setStoredTabsOrder((prev) => [...prev, newTab.id]);
 
       // Mark as loading
       setLoadingTabs((prev) => new Set(prev).add(newTab.id));
@@ -1352,7 +1352,6 @@ export const Workspace: React.FC = () => {
       setStoredActiveTabId,
       clearTabNotification,
       setStoredTabsOrder,
-      storedTabsOrder,
     ]
   );
 

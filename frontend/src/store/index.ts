@@ -102,7 +102,7 @@ interface AppState {
   removeWorkspaceTab: (tabId: string) => void;
   clearWorkspaceTabs: () => void;
   reorderWorkspaceTabs: (fromIndex: number, toIndex: number) => void;
-  setWorkspaceTabsOrder: (order: string[]) => void; // Issue #1470
+  setWorkspaceTabsOrder: (order: string[] | ((prev: string[]) => string[])) => void; // Issue #1470
 
   // Tab notification actions
   setEnableTabNotifications: (enabled: boolean) => void;
@@ -258,7 +258,10 @@ export const useAppStore = create<AppState>()(
           tabs.splice(toIndex, 0, removed);
           return { workspaceTabs: tabs };
         }),
-      setWorkspaceTabsOrder: (order) => set({ workspaceTabsOrder: order }),
+      setWorkspaceTabsOrder: (order) =>
+        set((state) => ({
+          workspaceTabsOrder: typeof order === 'function' ? order(state.workspaceTabsOrder) : order,
+        })),
 
       // Tab notification actions
       setEnableTabNotifications: (enabled) => set({ enableTabNotifications: enabled }),
