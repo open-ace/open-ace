@@ -385,5 +385,8 @@ class AgentTaskResult:
     tool_calls: list = field(default_factory=list)
     success: bool = False
     error: Optional[str] = None
+    # Runtime-only classification for logs/tests; not persisted or used for
+    # retry/control-flow decisions yet.
+    error_code: Optional[str] = None
     # Ordered event log preserving actual message interleaving
     event_log: list = field(default_factory=list)
