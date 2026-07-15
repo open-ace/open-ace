@@ -1138,6 +1138,39 @@ class TestOrchestratorDevelopment:
             for f in fields_list
         )
 
+    def test_development_preserves_primary_error_before_no_code_change_fallback(self):
+        """A runner error must win over the SHA-unchanged fallback diagnosis."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            branch_name="auto-dev/test-wf",
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._runner.run_agent_task.return_value = _make_agent_result(
+            success=False,
+            error="No conversation found with session ID: dead-session",
+        )
+        orch._gh.get_current_commit.side_effect = ["abc1234", "abc1234"]
+        orch._gh.get_commit_diff_stats.return_value = {"files": 0, "additions": 0, "deletions": 0}
+        orch._gh.get_diff_stats.return_value = {"commits": 1, "files": 3}
+        orch._gh.has_uncommitted_changes.return_value = False
+
+        orch._do_development(wf)
+
+        milestone_updates = [c[0][1] for c in mock_repo.update_milestone.call_args_list]
+        assert any(
+            update.get("error_message") == "No conversation found with session ID: dead-session"
+            for update in milestone_updates
+        )
+        workflow_updates = [c[0][1] for c in mock_repo.update_workflow.call_args_list]
+        assert any(
+            update.get("status") == "failed"
+            and update.get("error_message")
+            == "Development failed: No conversation found with session ID: dead-session"
+            for update in workflow_updates
+        )
+
     def test_development_test_failure_sets_error(self):
         """When tests fail past max retries, workflow status becomes failed."""
         from app.modules.workspace.autonomous.orchestrator import MAX_TEST_RETRIES
@@ -1166,6 +1199,50 @@ class TestOrchestratorDevelopment:
             for f in fields_list
         )
 
+    def test_test_phase_preserves_primary_error_before_skipped_fallback(self):
+        """A failing test session should not be rewritten to 'tests not actually run'."""
+        wf = _make_workflow(
+            current_phase="development",
+            status="developing",
+            github_issue_number=42,
+        )
+        orch, mock_repo = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        dev_result = _make_agent_result(
+            success=True,
+            text="Development complete",
+        )
+        test_result = AgentTaskResult(
+            session_id="sess-test",
+            response_text="TEST_STATUS: skipped",
+            structured_tags={"test_status": "skipped"},
+            total_tokens=50,
+            total_input_tokens=25,
+            total_output_tokens=25,
+            success=False,
+            error="No conversation found with session ID: dead-test-session",
+        )
+        orch._runner.run_agent_task.side_effect = [dev_result, test_result]
+        orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
+        orch._gh.get_commit_diff_stats.return_value = {"files": 1, "additions": 10, "deletions": 0}
+        orch._gh.get_diff_stats.return_value = {"files": 1, "additions": 10, "deletions": 0}
+
+        orch._do_development(wf)
+
+        milestone_updates = [c[0][1] for c in mock_repo.update_milestone.call_args_list]
+        assert any(
+            update.get("error_message")
+            == "No conversation found with session ID: dead-test-session"
+            for update in milestone_updates
+        )
+        workflow_updates = [c[0][1] for c in mock_repo.update_workflow.call_args_list]
+        assert any(
+            update.get("status") == "failed"
+            and update.get("error_message")
+            == "Testing failed: No conversation found with session ID: dead-test-session"
+            for update in workflow_updates
+        )
+
     def test_development_posts_to_issue(self):
         """Development completion posts status to GitHub issue."""
         wf = _make_workflow(
@@ -1175,6 +1252,7 @@ class TestOrchestratorDevelopment:
         )
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
+        orch._post_github_comment = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result(
             text="Dev done\nAll tests passed"
         )
@@ -1185,10 +1263,10 @@ class TestOrchestratorDevelopment:
 
         # Dev flow posts several comments (dev progress, test results, all-checks);
         # verify the development-completion comment landed on the issue.
-        calls = orch._gh.add_issue_comment.call_args_list
-        dev_comments = [c for c in calls if "Development Round 1 Completed" in c[0][1]]
+        calls = orch._post_github_comment.call_args_list
+        dev_comments = [c for c in calls if "Development Round 1 Completed" in c[0][2]]
         assert len(dev_comments) == 1
-        assert dev_comments[0][0][0] == 42
+        assert dev_comments[0][0][1] == 42
 
     def test_development_no_issue_no_comment(self):
         """No issue comment when github_issue_number is not set."""
@@ -1199,13 +1277,14 @@ class TestOrchestratorDevelopment:
         )
         orch, _ = self._make_orchestrator(wf)
         orch._runner = MagicMock()
+        orch._post_github_comment = MagicMock()
         orch._runner.run_agent_task.return_value = _make_agent_result()
         orch._gh.get_current_commit.side_effect = ["abc1234", "def5678"]
         orch._gh.get_diff_stats.return_value = {}
 
         orch._do_development(wf)
 
-        orch._gh.add_issue_comment.assert_not_called()
+        orch._post_github_comment.assert_not_called()
 
     def test_development_fallback_to_requirements(self):
         """When no plan exists, requirements_text is used as the plan."""

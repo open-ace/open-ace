@@ -168,6 +168,8 @@ class _LocalSession:
     request_count: int = 0
     completed: threading.Event = field(default_factory=threading.Event)
     error: str | None = None
+    error_code: str | None = None
+    last_stderr: str = ""
     _stopped: threading.Event = field(default_factory=threading.Event)
     _stdout_thread: threading.Thread | None = None
     _stderr_thread: threading.Thread | None = None
@@ -382,6 +384,7 @@ def _build_agent_task_result(
     tool_calls: list | None = None,
     success: bool = False,
     error: str | None = None,
+    error_code: str | None = None,
     messages: list | None = None,
 ) -> AgentTaskResult:
     """Build a task result with both final-output and visible-text views."""
@@ -403,8 +406,47 @@ def _build_agent_task_result(
         tool_calls=tool_calls or [],
         success=success,
         error=error,
+        error_code=error_code,
         event_log=normalized_event_log,
     )
+
+
+def _extract_cli_result_error(parsed: dict, stderr_hint: str = "") -> tuple[str | None, str | None]:
+    """Classify an error-bearing CLI ``result`` payload using observed failures only."""
+    if not parsed.get("is_error"):
+        return None, None
+
+    candidates: list[str] = []
+    errors = parsed.get("errors")
+    if isinstance(errors, list):
+        candidates.extend(str(item).strip() for item in errors if str(item).strip())
+
+    error_value = parsed.get("error")
+    if isinstance(error_value, str) and error_value.strip():
+        candidates.append(error_value.strip())
+
+    if stderr_hint.strip():
+        candidates.append(stderr_hint.strip())
+
+    subtype = str(parsed.get("subtype") or "").strip()
+    message = next((item for item in candidates if item), "")
+    normalized = message.lower()
+
+    if "no conversation found with session id" in normalized:
+        return "resume_session_not_found", message
+
+    if (
+        "not logged in" in normalized
+        or "/login" in normalized
+        or subtype == "authentication_failed"
+    ):
+        return "cli_auth_failed", message or "Not logged in · Please run /login"
+
+    if message:
+        return "unknown_cli_error", message
+    if subtype:
+        return "unknown_cli_error", subtype
+    return "unknown_cli_error", "CLI execution failed"
 
 
 class _ZcodeResultCollector:
@@ -1738,6 +1780,7 @@ class AutonomousAgentRunner:
                 tool_calls=session.tool_calls,
                 success=False,
                 error=f"Agent task timed out after {timeout}s",
+                error_code=session.error_code,
             )
 
         return _build_agent_task_result(
@@ -1753,6 +1796,7 @@ class AutonomousAgentRunner:
             tool_calls=session.tool_calls,
             success=session.error is None,
             error=session.error,
+            error_code=session.error_code,
         )
 
     def _create_workflow_session(
@@ -2695,7 +2739,20 @@ class AutonomousAgentRunner:
                         # bump (it summarizes the whole --print run).
                         if not session._counted_message_ids and session.request_count == 0:
                             session.request_count += 1
-                        self._sync_sidebar_session_totals(session, status="active")
+                        error_code, error_message = _extract_cli_result_error(
+                            parsed, session.last_stderr
+                        )
+                        if error_message:
+                            session.error_code = error_code
+                            session.error = error_message
+                            logger.warning(
+                                "Agent CLI result reported error (%s): %s",
+                                error_code or "unknown_cli_error",
+                                error_message,
+                            )
+                        self._sync_sidebar_session_totals(
+                            session, status="error" if session.error else "active"
+                        )
                         session.completed.set()
                         # Emit usage activity for real-time token display
                         if self._activity_callback:
@@ -2815,6 +2872,9 @@ class AutonomousAgentRunner:
                     break
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
+                stripped = line.strip()
+                if stripped:
+                    session.last_stderr = stripped
                 logger.debug("[%s/stderr] %s", session.session_id[:8], line.strip())
         except (OSError, ValueError):
             pass

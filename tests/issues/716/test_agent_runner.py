@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
+from app.modules.workspace.autonomous.agent_runner import (
+    AutonomousAgentRunner,
+    _LocalSession,
+    _extract_cli_result_error,
+)
 
 
 class TestAgentRunnerInit:
@@ -652,6 +656,35 @@ class TestStdoutParsing:
         assert session.total_tokens == 150
         assert session.total_input_tokens == 100
         assert session.total_output_tokens == 50
+
+    def test_parse_error_result_marks_session_failed(self):
+        """Claude ``result.is_error`` must become a failed local session."""
+        session = self._run_read_stdout(
+            [
+                json.dumps(
+                    {
+                        "type": "result",
+                        "is_error": True,
+                        "errors": ["No conversation found with session ID: dead-session"],
+                    }
+                ),
+                "",
+            ]
+        )
+        assert session.completed.is_set()
+        assert (
+            session.error == "No conversation found with session ID: dead-session"
+        )
+        assert session.error_code == "resume_session_not_found"
+
+    def test_extract_cli_result_error_uses_authentication_subtype_and_stderr(self):
+        """Authentication failures should be classified from observed CLI output."""
+        error_code, error_message = _extract_cli_result_error(
+            {"type": "result", "is_error": True, "subtype": "authentication_failed"},
+            "Not logged in · Please run /login",
+        )
+        assert error_code == "cli_auth_failed"
+        assert error_message == "Not logged in · Please run /login"
 
     def test_parse_control_request_auto_approve(self):
         """_read_stdout auto-approves control_request by writing a response to stdin."""

@@ -1539,6 +1539,14 @@ class AutonomousOrchestrator:
         return value.strip() if isinstance(value, str) else ""
 
     @staticmethod
+    def _primary_result_error(result: Optional[AgentTaskResult]) -> str:
+        """Return the first-class runner error that should win over heuristics."""
+        if not result or result.success:
+            return ""
+        error = getattr(result, "error", None)
+        return error.strip() if isinstance(error, str) else ""
+
+    @staticmethod
     def _build_dev_result_summary(
         artifact_text: str, diff_stats: dict, commit_sha: str, success: bool
     ) -> str:
@@ -3530,6 +3538,7 @@ class AutonomousOrchestrator:
         # Verify agent actually produced code changes (Issue #776 Bug 2)
         sha_changed = commit_before and commit_sha and commit_before != commit_sha
         has_uncommitted = False
+        primary_error = self._primary_result_error(result)
 
         if not sha_changed:
             # SHA unchanged (or unavailable) — check for uncommitted changes
@@ -3600,7 +3609,25 @@ class AutonomousOrchestrator:
                     "this session (commit_sha == commit_before) — not agent work",
                     base_diff_stats.get("commits", 0),
                 )
-                logger.warning("Agent reported success but no new commits detected (SHA unchanged)")
+                if primary_error:
+                    logger.warning(
+                        "Agent failed before producing a new commit; preserving primary error: %s",
+                        primary_error,
+                    )
+                else:
+                    logger.warning(
+                        "Agent reported success but no new commits detected (SHA unchanged)"
+                    )
+                milestone_error = (
+                    primary_error
+                    if primary_error
+                    else "Agent produced no code changes (commit SHA unchanged)"
+                )
+                workflow_error = (
+                    f"Development failed: {primary_error}"
+                    if primary_error
+                    else "Development failed: agent produced no code changes"
+                )
                 self.repo.update_milestone(
                     ms.get("milestone_id", ""),
                     {
@@ -3608,13 +3635,13 @@ class AutonomousOrchestrator:
                         "session_id": result.session_id,
                         "result_summary": self._artifact_text(result)[:300],
                         "tldr": self._artifact_tldr(result),
-                        "error_message": "Agent produced no code changes (commit SHA unchanged)",
+                        "error_message": milestone_error,
                     },
                 )
                 self._update_workflow(
                     {
                         "status": "failed",
-                        "error_message": "Development failed: agent produced no code changes",
+                        "error_message": workflow_error,
                     }
                 )
                 return
@@ -4131,6 +4158,22 @@ class AutonomousOrchestrator:
         # Treat skipped tests as failure — tests must actually run.
         # Allow 1 retry in case of transient environment issues.
         if tests_actually_skipped:
+            primary_error = self._primary_result_error(test_result)
+            if primary_error:
+                self.repo.update_milestone(
+                    test_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "error_message": primary_error,
+                    },
+                )
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": f"Testing failed: {primary_error}",
+                    }
+                )
+                return
             # Correct the milestone status: it was optimistically set to
             # "completed" above based on session success alone, but tests
             # were not actually executed. Without this correction, the
