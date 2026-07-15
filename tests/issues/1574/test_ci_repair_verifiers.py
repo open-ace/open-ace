@@ -37,6 +37,7 @@ def _make_workflow(**overrides):
         "total_output_tokens": 0,
         "total_requests": 0,
         "error_message": "",
+        "last_ci_failure_head_sha": "",
     }
     base.update(overrides)
     return base
@@ -105,3 +106,94 @@ def test_do_development_skips_test_phase_when_dev_failed():
 
     orch._post_dev_completion_comment.assert_not_called()
     orch._run_test_phase.assert_not_called()
+
+
+def test_start_ci_repair_round_stays_in_merge_and_runs_merge_repair():
+    wf = _make_workflow(status="merging", current_phase="merge", ci_repair_attempts=0)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-old"
+    gh.get_check_failure_excerpt.return_value = "black failed\nfiles were modified"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    failed_checks = [
+        {"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}
+    ]
+    orch._start_ci_repair_round(wf, 1697, failed_checks)
+
+    orch._run_merge_ci_repair.assert_called_once_with(wf, gh, 1697, failed_checks)
+    updates = mock_repo.update_workflow.call_args.args[1]
+    assert updates["current_phase"] == "merge"
+    assert updates["status"] == "merging"
+    assert updates["ci_repair_attempts"] == 1
+    assert updates["last_ci_failure_head_sha"] == "sha-old"
+    assert "dev_round" not in updates
+    assert "current_round" not in updates
+
+
+def test_start_ci_repair_round_fails_when_signature_unchanged_after_new_head():
+    failed_checks = [
+        {"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}
+    ]
+    wf = _make_workflow(
+        status="merging",
+        current_phase="merge",
+        ci_repair_attempts=1,
+        last_ci_failure_signature="lint|failure|fail",
+        last_ci_failure_head_sha="sha-old",
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1697, failed_checks)
+
+    orch._run_merge_ci_repair.assert_not_called()
+    updates = mock_repo.update_workflow.call_args.args[1]
+    assert updates["status"] == "failed"
+    assert "CI 失败在自动修复后仍未变化" in updates["error_message"]
+
+
+def test_run_merge_ci_repair_pushes_commit_and_stays_in_merge():
+    from app.modules.workspace.autonomous.models import AgentTaskResult
+
+    wf = _make_workflow(
+        status="merging",
+        current_phase="merge",
+        ci_repair_attempts=1,
+        ci_repair_context="### lint\n- 状态: failure",
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_current_commit.side_effect = ["sha-old", "sha-new"]
+    gh.get_current_branch.return_value = wf["branch_name"]
+    gh.get_commit_diff_stats.return_value = {"files": 1, "additions": 3, "deletions": 1}
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._accumulate_tokens = MagicMock()
+    orch._post_github_comment = MagicMock()
+    orch._run_agent = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            session_id="sess-1",
+            response_text="Reproduced lint command and fixed formatting.",
+            visible_response_text="Reproduced lint command and fixed formatting.",
+            error="",
+        )
+    )
+
+    orch._run_merge_ci_repair(
+        wf,
+        gh,
+        1697,
+        [{"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}],
+    )
+
+    gh.git_push.assert_called_once_with(branch=wf["branch_name"])
+    updates = mock_repo.update_workflow.call_args.args[1]
+    assert updates["current_phase"] == "merge"
+    assert updates["status"] == "merging"
+    assert updates["error_message"] == ""
+    orch._post_github_comment.assert_called_once()

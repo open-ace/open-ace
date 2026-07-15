@@ -33,8 +33,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-NEW_REVISION = "20260704_001_session_messages_pagination_index"
-PARENT_REVISION = "20260704_001_add_test_retry_columns"
+HEAD_REVISION = "20260715_001_add_last_ci_failure_head_sha"
+HEAD_PARENT_REVISION = "20260714_001_add_ci_repair_fields_to_workflows"
+ISSUE241_REVISION = "20260704_001_session_messages_pagination_index"
+ISSUE241_PARENT_REVISION = "20260704_001_add_test_retry_columns"
 
 
 def _alembic_config() -> Config:
@@ -58,17 +60,18 @@ def test_single_migration_head():
         "A forked/stale head usually means main advanced and a migration needs "
         "re-parenting onto the current head."
     )
-    assert heads[0] == NEW_REVISION
+    assert heads[0] == HEAD_REVISION
 
 
 def test_new_migration_parents_off_current_head():
     """The new migration must chain directly under the prior head, not branch."""
     cfg = _alembic_config()
     script_dir = ScriptDirectory.from_config(cfg)
-    revision = script_dir.get_revision(NEW_REVISION)
-    assert revision is not None, f"migration {NEW_REVISION} not found in script directory"
-    assert revision.down_revision == PARENT_REVISION, (
-        f"new migration down_revision={revision.down_revision!r}, " f"expected {PARENT_REVISION!r}"
+    revision = script_dir.get_revision(HEAD_REVISION)
+    assert revision is not None, f"migration {HEAD_REVISION} not found in script directory"
+    assert revision.down_revision == HEAD_PARENT_REVISION, (
+        f"new migration down_revision={revision.down_revision!r}, "
+        f"expected {HEAD_PARENT_REVISION!r}"
     )
 
 
@@ -103,7 +106,7 @@ def test_upgrade_makes_timestamp_not_null(tmp_path, monkeypatch):
 
     shared_db._db_url_cache = None
     cfg = _alembic_config()
-    command.upgrade(cfg, PARENT_REVISION)
+    command.upgrade(cfg, ISSUE241_PARENT_REVISION)
 
     conn = sqlite3.connect(db_path)
     # Ensure a session exists for the FK-ish insert.

@@ -89,6 +89,7 @@ class AutonomousWorkflowRepository:
         "ci_repair_context",
         "ci_repair_attempts",
         "last_ci_failure_signature",
+        "last_ci_failure_head_sha",
     }
     ALLOWED_MILESTONE_FIELDS = {
         "phase",
@@ -215,8 +216,8 @@ class AutonomousWorkflowRepository:
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_ci_failure_head_sha, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -259,6 +260,7 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
                     data.get("last_ci_failure_signature", ""),
+                    data.get("last_ci_failure_head_sha", ""),
                     now,
                     now,
                 ),
@@ -280,8 +282,8 @@ class AutonomousWorkflowRepository:
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, last_ci_failure_signature,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_ci_failure_head_sha, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -323,6 +325,7 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_context", ""),
                     data.get("ci_repair_attempts", 0),
                     data.get("last_ci_failure_signature", ""),
+                    data.get("last_ci_failure_head_sha", ""),
                     now,
                     now,
                 ),

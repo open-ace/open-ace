@@ -96,7 +96,8 @@ def get_ddl_statements():
             system_account TEXT DEFAULT '',
             ci_repair_context TEXT DEFAULT '',
             ci_repair_attempts INTEGER DEFAULT 0,
-            last_ci_failure_signature TEXT DEFAULT ''
+            last_ci_failure_signature TEXT DEFAULT '',
+            last_ci_failure_head_sha TEXT DEFAULT ''
         )
         """,
     ]
@@ -142,6 +143,9 @@ def get_ddl_statements():
     )
     statements.append(
         "ALTER TABLE autonomous_workflows ADD COLUMN last_ci_failure_signature TEXT DEFAULT ''"
+    )
+    statements.append(
+        "ALTER TABLE autonomous_workflows ADD COLUMN last_ci_failure_head_sha TEXT DEFAULT ''"
     )
     statements.extend(
         [

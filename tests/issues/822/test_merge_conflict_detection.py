@@ -294,6 +294,11 @@ class TestDoMergeDeferredRetry:
         """CI repair loop should restore the preferred worktree path for worktree strategy."""
         wf = _make_workflow(worktree_path="", preferred_worktree_path="/srv/repo/.worktrees/wf-822")
         o, _ = _make_orchestrator(wf)
+        mock_gh = MagicMock()
+        mock_gh.get_pr_head_sha.return_value = "sha-old"
+        mock_gh.get_check_failure_excerpt.return_value = "pytest failed"
+        o._get_gh = MagicMock(return_value=mock_gh)
+        o._run_merge_ci_repair = MagicMock()
 
         o._start_ci_repair_round(
             wf,
@@ -302,20 +307,30 @@ class TestDoMergeDeferredRetry:
         )
 
         update_payload = o._update_workflow.call_args.args[0]
-        assert update_payload["current_phase"] == "development"
-        assert update_payload["status"] == "developing"
-        assert update_payload["dev_round"] == 2
+        assert update_payload["current_phase"] == "merge"
+        assert update_payload["status"] == "merging"
+        assert "dev_round" not in update_payload
         assert update_payload["ci_repair_attempts"] == 1
         assert update_payload["worktree_path"] == "/srv/repo/.worktrees/wf-822"
         assert update_payload["preferred_worktree_path"] == "/srv/repo/.worktrees/wf-822"
+        o._run_merge_ci_repair.assert_called_once_with(
+            wf,
+            mock_gh,
+            1103,
+            [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+        )
 
     def test_start_ci_repair_round_fails_when_signature_repeats(self):
         """A repeated failed-check signature should stop the auto-repair loop."""
         wf = _make_workflow(
             ci_repair_attempts=1,
             last_ci_failure_signature="test (3.9)|failure|fail",
+            last_ci_failure_head_sha="sha-old",
         )
         o, _ = _make_orchestrator(wf)
+        mock_gh = MagicMock()
+        mock_gh.get_pr_head_sha.return_value = "sha-new"
+        o._get_gh = MagicMock(return_value=mock_gh)
 
         o._start_ci_repair_round(
             wf,
