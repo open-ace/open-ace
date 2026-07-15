@@ -1566,6 +1566,242 @@ class AutonomousOrchestrator:
             )
         return "; ".join(parts)
 
+    def _get_latest_final_plan(self, wf: dict) -> str:
+        """Return the latest finalized plan, or fall back to requirements."""
+        milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
+        final_plan = ""
+        for ms in reversed(milestones):
+            if ms.get("milestone_type") == "plan_finalized" and ms.get("plan_content"):
+                final_plan = ms["plan_content"]
+                break
+        if not final_plan:
+            for ms in reversed(milestones):
+                if ms.get("plan_content"):
+                    final_plan = ms["plan_content"]
+                    break
+        return final_plan or wf.get("requirements_text", "No plan available")
+
+    @staticmethod
+    def _extract_markdown_section(text: str, headings: tuple[str, ...]) -> str:
+        """Extract a markdown section by heading name."""
+        if not text or not headings:
+            return ""
+        names = "|".join(re.escape(h) for h in headings)
+        pattern = re.compile(
+            rf"(?ims)^#{{1,6}}\s*(?:{names})\s*$\n?(.*?)(?=^#{{1,6}}\s|\Z)"
+        )
+        match = pattern.search(text)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _analyze_changed_files(changed_files: list[str]) -> dict:
+        """Classify changed files into validation-relevant buckets."""
+        normalized = [path.strip() for path in changed_files if path and path.strip()]
+        tags: set[str] = set()
+        docs_only = bool(normalized)
+
+        for path in normalized:
+            lower = path.lower()
+            is_doc = lower.endswith((".md", ".rst", ".txt")) or "/docs/" in lower or lower.startswith(
+                "docs/"
+            )
+            docs_only = docs_only and is_doc
+
+            if path.startswith("frontend/"):
+                tags.add("frontend")
+            if path.startswith(("app/", "backend/", "tests/unit/", "tests/integration/")):
+                tags.add("backend")
+            if path.startswith(("app/routes/", "app/api/", "app/schemas/", "frontend/src/api/")):
+                tags.add("contracts")
+            if path.startswith("tests/issues/"):
+                tags.add("issue-regression")
+            if path.startswith("tests/e2e/") or "playwright" in lower:
+                tags.add("e2e")
+            if path.startswith(".github/workflows/") or path in (
+                "package.json",
+                "pyproject.toml",
+                "requirements.txt",
+                "requirements-dev.txt",
+                "poetry.lock",
+                "pnpm-lock.yaml",
+                "package-lock.json",
+                "yarn.lock",
+                "Makefile",
+                "tox.ini",
+            ):
+                tags.add("tooling")
+            if (
+                "alembic" in lower
+                or "/migrations/" in lower
+                or lower.startswith("migrations/")
+                or "migration" in lower
+            ):
+                tags.add("migration")
+
+        broaden_scope = bool(
+            {"migration", "contracts", "tooling"} & tags
+            or ("frontend" in tags and "backend" in tags)
+            or len({path.split("/", 1)[0] for path in normalized if "/" in path or path}) >= 3
+        )
+
+        return {
+            "tags": sorted(tags),
+            "docs_only": docs_only,
+            "broaden_scope": broaden_scope,
+        }
+
+    @classmethod
+    def _build_targeted_validation_scopes(
+        cls, changed_files: list[str], framework_type: str
+    ) -> list[tuple[str, str]]:
+        """Derive validation scopes from concrete file changes."""
+        analysis = cls._analyze_changed_files(changed_files)
+        tags = set(analysis["tags"])
+        scopes: list[tuple[str, str]] = []
+
+        if analysis["docs_only"]:
+            scopes.append(("最小化验证", "当前改动看起来是文档/说明变更，优先做语法或引用一致性检查。"))
+            return scopes
+
+        if "frontend" in tags:
+            scopes.append(("前端相关验证", "改动涉及 frontend 目录，应优先覆盖前端组件、页面或样式行为。"))
+        if "backend" in tags:
+            scopes.append(("后端单元验证", "改动涉及 Python/服务端目录，应优先验证对应单元测试。"))
+        if "contracts" in tags:
+            scopes.append(("接口/契约验证", "改动涉及路由、API 或前后端契约，需确认调用链兼容。"))
+        if "migration" in tags:
+            scopes.append(("数据迁移验证", "改动涉及 migration/schema，需要验证迁移和持久层行为。"))
+        if "issue-regression" in tags:
+            scopes.append(("问题回归验证", "改动触达 issue/regression 测试目录，应复用对应回归用例。"))
+        if "e2e" in tags:
+            scopes.append(("端到端/Smoke 验证", "改动触达 E2E 相关代码，应补充对应 smoke 或端到端验证。"))
+        if "tooling" in tags:
+            scopes.append(("仓库脚本/CI 验证", "改动涉及工作流、依赖或构建脚本，应对照仓库真实命令验证。"))
+
+        if not scopes:
+            fallback = {
+                "python": ("后端定向验证", "当前仓库以 Python 为主，先从最接近改动模块的 pytest 子集开始。"),
+                "javascript": (
+                    "前端定向验证",
+                    "当前仓库以 JavaScript 为主，先从 package.json 中的测试脚本开始。",
+                ),
+                "mixed": (
+                    "混合仓库定向验证",
+                    "当前仓库同时包含多种栈，先按改动所在子目录选择最小必要测试范围。",
+                ),
+            }
+            scopes.append(
+                fallback.get(
+                    framework_type,
+                    ("定向验证", "未识别明确改动类型，请先阅读仓库测试约定并选择最小必要验证范围。"),
+                )
+            )
+
+        return scopes
+
+    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> str:
+        """Build a targeted validation brief for the test phase."""
+        project_path = wf.get("worktree_path") or wf.get("project_path", "")
+        framework_type = _infer_test_framework(project_path, wf.get("cli_tool", ""))
+        final_plan = self._get_latest_final_plan(wf)
+        verification_plan = self._extract_markdown_section(
+            final_plan,
+            (
+                "验证计划",
+                "测试策略",
+                "Validation Plan",
+                "Validation Strategy",
+                "Test Strategy",
+                "Testing Strategy",
+            ),
+        )
+
+        changed_files: list[str] = []
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            commit_sha = ""
+        try:
+            changed_files = (
+                gh.get_commit_changed_files(commit_sha)
+                if commit_sha
+                else gh.get_changed_files("HEAD~1", "HEAD")
+            )
+        except Exception:
+            changed_files = []
+
+        analysis = self._analyze_changed_files(changed_files)
+        scopes = self._build_targeted_validation_scopes(changed_files, framework_type)
+
+        guardrail = (
+            "除非下面的验证范围、仓库约定文件或实际失败证据明确要求，否则不要从裸 "
+            "`python -m pytest`、`pytest tests/`、全仓库扫描式命令开始。"
+        )
+        if analysis["docs_only"]:
+            guardrail = "当前更像文档/说明类改动，只做最小必要验证，不要升级为大范围回归。"
+        elif "frontend" in analysis["tags"] and "backend" not in analysis["tags"]:
+            guardrail = (
+                "当前改动主要在前端。先验证前端相关测试/构建；没有跨层证据前，不要先跑后端全树 pytest。"
+            )
+        elif "backend" in analysis["tags"] and "frontend" not in analysis["tags"]:
+            guardrail = (
+                "当前改动主要在后端。先验证最接近改动模块的后端测试；不要一上来跑整个仓库的所有测试。"
+            )
+
+        repo_guidance: list[str] = []
+        if project_path:
+            if os.path.exists(os.path.join(project_path, "tests", "README.md")):
+                repo_guidance.append(
+                    "仓库包含 `tests/README.md`，Python 测试范围请优先遵循其中的 unit/integration/e2e 分层。"
+                )
+            if os.path.exists(os.path.join(project_path, "frontend", "package.json")):
+                repo_guidance.append(
+                    "仓库包含 `frontend/package.json`，前端测试请优先使用其中已有脚本，不要临时发明命令。"
+                )
+            if os.path.exists(os.path.join(project_path, ".github", "workflows")):
+                repo_guidance.append(
+                    "如果改动涉及依赖、构建或工作流，请对照 `.github/workflows/` 中真实 job 的本地命令。"
+                )
+            if os.path.exists(os.path.join(project_path, "pytest.ini")):
+                repo_guidance.append(
+                    "仓库包含 `pytest.ini`，选择 pytest 命令前先确认默认收集范围和配置。"
+                )
+
+        changed_lines = "\n".join(f"- `{path}`" for path in changed_files[:20]) or "- 未能自动获取改动文件，请先自行确认本轮变更范围。"
+        if len(changed_files) > 20:
+            changed_lines += f"\n- 其余 {len(changed_files) - 20} 个文件省略"
+
+        scope_lines = "\n".join(f"- **{name}**：{reason}" for name, reason in scopes)
+        repo_lines = "\n".join(f"- {line}" for line in repo_guidance) or "- 未发现额外仓库约定文件，请先检查项目根目录中的测试/构建配置。"
+
+        context = [
+            "## 本轮定向验证上下文",
+            f"- 推断框架类型：`{framework_type}`",
+            f"- 是否建议扩大测试范围：{'是' if analysis['broaden_scope'] else '否'}",
+            "",
+            "### 最终方案",
+            final_plan[:4000],
+            "",
+        ]
+        if verification_plan:
+            context.extend(["### 方案中的验证计划", verification_plan[:2000], ""])
+        context.extend(
+            [
+                "### 本轮改动文件",
+                changed_lines,
+                "",
+                "### 建议优先验证的方面",
+                scope_lines,
+                "",
+                "### 仓库测试约定",
+                repo_lines,
+                "",
+                "### 范围护栏",
+                guardrail,
+            ]
+        )
+        return "\n".join(context).strip()
+
     def _post_github_comment(
         self,
         gh: GitHubOps,
@@ -2919,7 +3155,8 @@ class AutonomousOrchestrator:
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
-                f"请输出完善后的完整实现方案。\n\n"
+                f"请输出完善后的完整实现方案，并保留/完善其中的“验证计划”章节，"
+                f"明确本次改动完成后必须验证哪些方面。\n\n"
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
@@ -2944,7 +3181,8 @@ class AutonomousOrchestrator:
                 f"2. 技术方案和架构设计\n"
                 f"3. 实现步骤（按优先级排序）\n"
                 f"4. 测试策略\n"
-                f"5. 潜在风险和缓解措施\n\n"
+                f"5. 潜在风险和缓解措施\n"
+                f"6. 验证计划：按影响面列出必须验证的方面、建议测试范围、何时需要扩大到更广测试\n\n"
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
@@ -3043,7 +3281,8 @@ class AutonomousOrchestrator:
             "1. 遗漏的需求\n"
             "2. 架构风险\n"
             "3. 实现难度估计\n"
-            "4. 改进建议\n\n"
+            "4. 改进建议\n"
+            "5. 验证计划是否足够覆盖方案中的行为变化、风险点和受影响模块\n\n"
         )
         if issue_number:
             review_prompt += (
@@ -3180,6 +3419,8 @@ class AutonomousOrchestrator:
                 refine_prompt += (
                     f"## 当前方案\n{final_plan}\n\n"
                     f"## 审查意见\n{last_review}\n\n"
+                    "请保留并完善方案中的“验证计划”章节，明确本次实现完成后必须验证哪些方面，"
+                    "以及什么情况下需要扩大测试范围。\n\n"
                     "重要约束：只输出高层设计方案和实现步骤描述，"
                     "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
                 )
@@ -3406,22 +3647,7 @@ class AutonomousOrchestrator:
         except GitHubOpsError as e:
             logger.warning("Branch verification failed: %s", e)
 
-        # Get the finalized plan — prefer the explicit plan_finalized milestone
-        # (authoritative final plan), then fall back to the latest plan_content.
-        milestones = self.repo.list_milestones(self._workflow_id, phase="planning")
-        final_plan = ""
-        for ms in reversed(milestones):
-            if ms.get("milestone_type") == "plan_finalized" and ms.get("plan_content"):
-                final_plan = ms["plan_content"]
-                break
-        if not final_plan:
-            for ms in reversed(milestones):
-                if ms.get("plan_content"):
-                    final_plan = ms["plan_content"]
-                    break
-
-        if not final_plan:
-            final_plan = wf.get("requirements_text", "No plan available")
+        final_plan = self._get_latest_final_plan(wf)
 
         # Development
         ms = self._create_milestone(
@@ -3845,11 +4071,12 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"Running tests round {dev_round}",
         )
+        targeted_test_context = self._build_test_execution_context(wf, gh)
 
         test_prompt = (
             AUTONOMOUS_CONTEXT
-            + "运行项目的完整测试套件并报告结果。如果有失败，修复问题并重新测试。"
-            "确保所有测试通过后再结束。\n\n"
+            + "请基于最终方案和本轮实际改动，设计并执行一份定向验证矩阵。"
+            "如果有失败，修复问题并重新测试。确保必测项全部通过后再结束。\n\n"
         )
         if issue_number:
             test_prompt += (
@@ -3857,17 +4084,24 @@ class AutonomousOrchestrator:
                 f"本任务关联 GitHub Issue #{issue_number}。\n"
                 f"测试验证需确保修改满足 Issue #{issue_number} 的所有需求。\n\n"
             )
+        test_prompt += f"{targeted_test_context}\n\n"
         test_prompt += (
             "## 重要：测试执行策略\n"
-            "测试是必须执行的步骤，不能跳过。请按以下顺序尝试：\n"
-            "1. 首先尝试 `python -m pytest` 或 `python3 -m pytest`（项目自带 pytest 依赖）\n"
-            "2. 如果 pytest 不可用，尝试 `python -m unittest discover -s tests`\n"
-            "3. 对于前端项目，尝试 `npm test` 或 `npx vitest run`\n"
-            "4. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            "测试是必须执行的步骤，不能跳过。请严格遵循以下原则：\n"
+            "1. 先根据“最终方案/验证计划 + 实际改动文件 + 仓库测试约定”设计验证矩阵，再执行命令。\n"
+            "2. 必须优先覆盖上面列出的必测方面；只有在发现跨层影响、契约变化、迁移/依赖/CI 改动等证据时，才扩大到更广范围。\n"
+            "3. 除非验证矩阵或仓库文档明确要求，否则不要从裸 `python -m pytest`、`pytest tests/`、全仓库扫描式命令开始。\n"
+            "4. 具体命令必须优先从 `.github/workflows/`、`package.json`、`frontend/package.json`、`pytest.ini`、`tests/README.md`、`Makefile`、`tox.ini`、`scripts/` 等仓库事实中映射出来，不要凭空假设。\n"
+            "5. 结果汇总时必须交代：验证方面、执行命令、结果、是否已覆盖方案要求；如果某一项不跑，必须说明理由。\n"
+            "6. 如果仓库中完全没有明确约定，再按框架后备顺序尝试：\n"
+            "   - Python：`python -m pytest` 或 `python3 -m pytest`\n"
+            "   - Python 兜底：`python -m unittest discover -s tests`\n"
+            "   - 前端项目：`npm test` 或 `npx vitest run`\n"
+            "7. 如果所有测试框架都不可用，至少执行以下验证：\n"
             '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
             "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
             "   - 手动验证核心功能逻辑\n"
-            "5. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
+            "8. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
             "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
             "测试结果报告必须严格遵循以下标准格式之一：\n"
             '- Python pytest: "X passed, Y failed, Z skipped" 或 "X passed in Y.Zs"\n'

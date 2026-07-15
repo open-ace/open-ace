@@ -1021,6 +1021,11 @@ class GitHubOps:
             "commits": commits,
         }
 
+    def get_changed_files(self, base: str = "HEAD~1", head: str = "HEAD") -> list[str]:
+        """Get changed file paths between two refs."""
+        result = self._run_git(["diff", "--name-only", base, head])
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
     def get_commit_diff(self, sha: str) -> str:
         """Get the diff for a specific commit."""
         result = self._run_git(["show", "--format=", sha])
@@ -1046,6 +1051,11 @@ class GitHubOps:
             "files": files,
             "commits": 1 if files or total_additions or total_deletions else 0,
         }
+
+    def get_commit_changed_files(self, sha: str) -> list[str]:
+        """Get changed file paths for a specific commit."""
+        result = self._run_git(["show", "--name-only", "--format=", sha])
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     # ── Git Operations ──────────────────────────────────────────────
 
