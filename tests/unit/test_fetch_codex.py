@@ -43,91 +43,92 @@ def _temporary_timezone(tz_name: str):
 
 
 def test_process_jsonl_file_keeps_provider_total_and_attributes_turn_to_user(tmp_path):
-    jsonl = _write_jsonl(
-        tmp_path / "rollout-test-codex.jsonl",
-        [
-            {
-                "timestamp": "2026-07-15T01:00:00Z",
-                "type": "event_msg",
-                "payload": {"type": "task_started", "turn_id": "turn-1"},
-            },
-            {
-                "timestamp": "2026-07-15T01:00:01Z",
-                "type": "turn_context",
-                "payload": {"model": "codex-mini"},
-            },
-            {
-                "timestamp": "2026-07-15T01:00:02Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "hello"}],
+    with _temporary_timezone("Asia/Shanghai"):
+        jsonl = _write_jsonl(
+            tmp_path / "rollout-test-codex.jsonl",
+            [
+                {
+                    "timestamp": "2026-07-15T01:00:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-1"},
                 },
-            },
-            {
-                "timestamp": "2026-07-15T01:00:03Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "world"}],
+                {
+                    "timestamp": "2026-07-15T01:00:01Z",
+                    "type": "turn_context",
+                    "payload": {"model": "codex-mini"},
                 },
-            },
-            {
-                "timestamp": "2026-07-15T01:00:04Z",
-                "type": "event_msg",
-                "payload": {
-                    "type": "token_count",
-                    "info": {
-                        "last_token_usage": {
-                            "input_tokens": 1000,
-                            "cached_input_tokens": 800,
-                            "output_tokens": 50,
-                            "reasoning_output_tokens": 20,
-                            "total_tokens": 1050,
-                        }
+                {
+                    "timestamp": "2026-07-15T01:00:02Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "hello"}],
                     },
                 },
-            },
-            {
-                "timestamp": "2026-07-15T01:00:05Z",
-                "type": "event_msg",
-                "payload": {
-                    "type": "task_complete",
-                    "turn_id": "turn-1",
-                    "last_agent_message": "done",
+                {
+                    "timestamp": "2026-07-15T01:00:03Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "world"}],
+                    },
                 },
-            },
-        ],
-    )
+                {
+                    "timestamp": "2026-07-15T01:00:04Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 1000,
+                                "cached_input_tokens": 800,
+                                "output_tokens": 50,
+                                "reasoning_output_tokens": 20,
+                                "total_tokens": 1050,
+                            }
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-15T01:00:05Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "task_complete",
+                        "turn_id": "turn-1",
+                        "last_agent_message": "done",
+                    },
+                },
+            ],
+        )
 
-    daily, messages, _session_meta, session_tokens = process_jsonl_file(
-        jsonl, "localhost", "rhuang"
-    )
+        daily, messages, _session_meta, session_tokens = process_jsonl_file(
+            jsonl, "localhost", "rhuang"
+        )
 
-    assert daily["2026-07-15"]["prompt_tokens"] == 200
-    assert daily["2026-07-15"]["candidates_tokens"] == 50
-    assert daily["2026-07-15"]["thoughts_tokens"] == 20
-    assert daily["2026-07-15"]["cached_tokens"] == 800
-    assert daily["2026-07-15"]["total_tokens"] == 1050
-    assert daily["2026-07-15"]["request_count"] == 1
+        assert daily["2026-07-15"]["prompt_tokens"] == 200
+        assert daily["2026-07-15"]["candidates_tokens"] == 50
+        assert daily["2026-07-15"]["thoughts_tokens"] == 20
+        assert daily["2026-07-15"]["cached_tokens"] == 800
+        assert daily["2026-07-15"]["total_tokens"] == 1050
+        assert daily["2026-07-15"]["request_count"] == 1
 
-    user_msg = next(msg for msg in messages if msg["role"] == "user")
-    assistant_msg = next(
-        msg
-        for msg in messages
-        if msg["role"] == "assistant" and msg["message_id"] != user_msg["message_id"]
-    )
-    assert user_msg["tokens_used"] == 1050
-    assert user_msg["input_tokens"] == 200
-    assert user_msg["output_tokens"] == 50
-    assert user_msg["counts_as_request"] is True
-    assert assistant_msg["tokens_used"] == 0
+        user_msg = next(msg for msg in messages if msg["role"] == "user")
+        assistant_msg = next(
+            msg
+            for msg in messages
+            if msg["role"] == "assistant" and msg["message_id"] != user_msg["message_id"]
+        )
+        assert user_msg["tokens_used"] == 1050
+        assert user_msg["input_tokens"] == 200
+        assert user_msg["output_tokens"] == 50
+        assert user_msg["counts_as_request"] is True
+        assert assistant_msg["tokens_used"] == 0
 
-    assert session_tokens["total_tokens"] == 1050
-    assert session_tokens["input_tokens"] == 200
-    assert session_tokens["output_tokens"] == 50
+        assert session_tokens["total_tokens"] == 1050
+        assert session_tokens["input_tokens"] == 200
+        assert session_tokens["output_tokens"] == 50
 
 
 def test_process_jsonl_file_splits_turns_by_local_date_and_counts_requests_once(tmp_path):
