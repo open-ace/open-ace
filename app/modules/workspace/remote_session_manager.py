@@ -679,6 +679,53 @@ class RemoteSessionManager:
         self._agent_manager.send_command(machine_id, command)
         return True
 
+    def respond_to_interaction(
+        self,
+        session_id: str,
+        msg_id: str,
+        response: dict[str, Any],
+        *,
+        decided_by: Optional[int] = None,
+        decided_by_name: Optional[str] = None,
+    ) -> bool:
+        """Send an interaction response to the remote agent.
+
+        This handles responses for interaction/requestUserInput and
+        interaction/requestPermission server requests that were forwarded
+        to the frontend for user decision.
+
+        Args:
+            session_id: Session identifier.
+            msg_id: The message ID from the original interaction request.
+            response: The user's response (action: answer/decline or decision: allow/deny).
+            decided_by: User ID who made the decision.
+            decided_by_name: Username who made the decision.
+
+        Returns:
+            True if the response was sent successfully, False otherwise.
+        """
+        machine_id = self._get_machine_id(session_id)
+        if not machine_id:
+            return False
+
+        logger.info(
+            "Sending interaction response for session %s, msg_id=%s, decided_by=%s",
+            session_id[:8],
+            msg_id[:8] if msg_id else "N/A",
+            decided_by_name or decided_by or "unknown",
+        )
+
+        command: dict[str, Any] = {
+            "type": "command",
+            "command": "interaction_response",
+            "session_id": session_id,
+            "msg_id": msg_id,
+            "response": response,
+        }
+
+        self._agent_manager.send_command(machine_id, command)
+        return True
+
     def _enforce_policy_consume(
         self,
         session_id: str,
