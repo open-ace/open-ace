@@ -225,7 +225,6 @@ def _check_user_concurrent_limit(user_id: int) -> Response | None:
     Returns a 429 Response to short-circuit when the user has too many active
     workflows; returns None to proceed.
     """
-    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
     from app.repositories.tenant_repo import TenantRepository
 
     DEFAULT_MAX_SESSIONS = 5
@@ -241,10 +240,9 @@ def _check_user_concurrent_limit(user_id: int) -> Response | None:
 
         if tenant_id:
             tenant_repo = TenantRepository()
-            tenant = tenant_repo.get_tenant_by_id(tenant_id)
+            tenant = tenant_repo.get_by_id(tenant_id)
             if tenant:
-                quota = tenant.get("quota", {})
-                max_sessions = quota.get("max_sessions_per_user", DEFAULT_MAX_SESSIONS)
+                max_sessions = tenant.quota.max_sessions_per_user
 
         # Count user's active workflows
         auto_repo = _get_repo()

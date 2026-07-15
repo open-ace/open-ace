@@ -469,7 +469,7 @@ class AutonomousWorkflowRepository:
             """,
             (user_id,),
         )
-        return result["count"] if result else 0
+        return int(result["count"]) if result else 0
 
     def get_paused_workflows(self, quota_prefix: str = "") -> list:
         """Get paused workflows, optionally filtered to a quota-pause reason.
