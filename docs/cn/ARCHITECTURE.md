@@ -2,6 +2,8 @@
 
 ## 系统总览
 
+关于 Claude / Codex / ZCode / Qwen 本地 token 如何抓取、计算、落库以及被各层消费，请参阅 [token-accounting.md](token-accounting.md)。
+
 Open ACE (AI Computing Explorer) 是一个企业级 AI 工作区平台，包含三层架构：
 
 ```
