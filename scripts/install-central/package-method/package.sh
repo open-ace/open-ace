@@ -474,8 +474,6 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
         PYTHON_VERSIONS=("3.9" "3.10" "3.11" "3.12")
         ABI_TAGS=("cp39" "cp310" "cp311" "cp312")
 
-        download_failed=false
-
         for i in "${!PYTHON_VERSIONS[@]}"; do
             py_ver="${PYTHON_VERSIONS[$i]}"
             abi="${ABI_TAGS[$i]}"
@@ -511,8 +509,10 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
             fi
         done
 
-        # Final fallback: download pure Python / universal wheels
-        echo -e "${YELLOW}Downloading universal wheels...${NC}"
+        # Final pass: download pure Python wheels (py3-none-any) and any missing packages.
+        # These wheels are architecture-independent and work across all Python versions.
+        # pip will skip already-downloaded files, so this only adds missing items.
+        echo -e "${YELLOW}Downloading pure Python wheels...${NC}"
         $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
             --prefer-binary 2>/dev/null || true
     else
