@@ -118,6 +118,48 @@ def test_build_test_execution_context_prefers_frontend_scope(tmp_path):
     assert "frontend/package.json" in context
 
 
+def test_extract_markdown_section_supports_numbered_validation_plan():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    text = (
+        "1. 需求分析\n"
+        "2. 技术方案\n"
+        "6. 验证计划：先跑前端组件测试\n"
+        "- 再根据需要补 smoke\n"
+        "7. 风险与回滚\n"
+    )
+
+    section = AutonomousOrchestrator._extract_markdown_section(text, ("验证计划",))
+    assert "先跑前端组件测试" in section
+    assert "补 smoke" in section
+
+
+def test_extract_markdown_section_supports_heading_suffix():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    text = "## 验证计划（按影响面）\n- 前端测试\n## 风险\n- 无\n"
+    section = AutonomousOrchestrator._extract_markdown_section(text, ("验证计划",))
+    assert section == "- 前端测试"
+
+
+def test_build_test_execution_context_marks_shared_backend_for_broader_scope(tmp_path):
+    repo_root = tmp_path / "repo"
+    _seed_repo_layout(repo_root)
+
+    plan_text = "## 验证计划\n- 覆盖共享工具调用方。\n"
+    milestones = [{"milestone_type": "plan_finalized", "plan_content": plan_text}]
+    wf = _make_workflow(str(repo_root))
+    orch, _ = _make_orchestrator(wf, milestones=milestones)
+    orch._gh.get_current_commit.return_value = "abc1234"
+    orch._gh.get_commit_changed_files.return_value = ["app/utils/session_diagnostics.py"]
+
+    context = orch._build_test_execution_context(wf, orch._gh)
+
+    assert "是否建议扩大测试范围：是" in context
+    assert "共享后端依赖验证" in context
+    assert "直接依赖方或相关调用链测试" in context
+
+
 def test_run_test_phase_prompt_includes_targeted_context(tmp_path):
     repo_root = tmp_path / "repo"
     _seed_repo_layout(repo_root)
@@ -152,3 +194,26 @@ def test_run_test_phase_prompt_includes_targeted_context(tmp_path):
     assert "frontend/src/styles/main.css" in prompt
     assert "不要从裸 `python -m pytest`" in prompt
     assert "frontend/package.json" in prompt
+
+
+def test_run_test_phase_falls_back_when_context_building_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    _seed_repo_layout(repo_root)
+    wf = _make_workflow(str(repo_root))
+    orch, _ = _make_orchestrator(wf, milestones=[])
+    orch._accumulate_tokens = MagicMock()
+    orch._build_test_execution_context = MagicMock(side_effect=RuntimeError("db offline"))
+    orch._run_agent = MagicMock(
+        return_value=AgentTaskResult(
+            success=True,
+            session_id="sess-test",
+            response_text="643 passed in 13.52s",
+            visible_response_text="643 passed in 13.52s",
+            error="",
+        )
+    )
+
+    orch._run_test_phase(wf, 1, orch._gh)
+
+    prompt = orch._run_agent.call_args.kwargs["prompt"]
+    assert "自动构建验证上下文失败" in prompt

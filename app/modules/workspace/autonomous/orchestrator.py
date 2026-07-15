@@ -1583,15 +1583,59 @@ class AutonomousOrchestrator:
 
     @staticmethod
     def _extract_markdown_section(text: str, headings: tuple[str, ...]) -> str:
-        """Extract a markdown section by heading name."""
+        """Extract a markdown or numbered-plan section by heading name."""
         if not text or not headings:
             return ""
-        names = "|".join(re.escape(h) for h in headings)
-        pattern = re.compile(
-            rf"(?ims)^#{{1,6}}\s*(?:{names})\s*$\n?(.*?)(?=^#{{1,6}}\s|\Z)"
-        )
-        match = pattern.search(text)
-        return match.group(1).strip() if match else ""
+        names = tuple(h.strip().lower() for h in headings if h and h.strip())
+        if not names:
+            return ""
+
+        def _normalize_title(title: str) -> str:
+            lowered = re.sub(r"\s+", " ", (title or "").strip().lower())
+            return re.sub(r"\s*[:：(\[（【].*$", "", lowered).strip()
+
+        def _matches_heading(title: str) -> bool:
+            normalized = _normalize_title(title)
+            return any(normalized == name.lower() for name in names)
+
+        lines = text.splitlines()
+        capture: list[str] = []
+        active_mode = ""
+
+        for idx, line in enumerate(lines):
+            md_match = re.match(r"^\s{0,3}#{1,6}\s*(.+?)\s*$", line)
+            if md_match:
+                title = md_match.group(1).strip()
+                if capture and active_mode:
+                    break
+                if _matches_heading(title):
+                    active_mode = "markdown"
+                    continue
+
+            num_match = re.match(r"^\s*(\d+)\.\s*(.+?)\s*$", line)
+            if num_match:
+                title = num_match.group(2).strip()
+                if capture and active_mode == "numbered":
+                    break
+                if _matches_heading(title):
+                    active_mode = "numbered"
+                    suffix_match = re.match(
+                        r"^\s*\d+\.\s*.+?(?:[:：]\s*(.*))?$",
+                        line,
+                    )
+                    suffix = (suffix_match.group(1) if suffix_match else "") or ""
+                    if suffix.strip():
+                        capture.append(suffix.strip())
+                    continue
+                if capture and active_mode == "numbered":
+                    break
+
+            if capture or active_mode:
+                if active_mode == "markdown" and re.match(r"^\s{0,3}#{1,6}\s+", line):
+                    break
+                capture.append(line)
+
+        return "\n".join(capture).strip()
 
     @staticmethod
     def _analyze_changed_files(changed_files: list[str]) -> dict:
@@ -1611,6 +1655,16 @@ class AutonomousOrchestrator:
                 tags.add("frontend")
             if path.startswith(("app/", "backend/", "tests/unit/", "tests/integration/")):
                 tags.add("backend")
+            if path.startswith(
+                (
+                    "app/utils/",
+                    "app/services/",
+                    "app/repositories/",
+                    "app/modules/",
+                    "app/schemas/",
+                )
+            ):
+                tags.add("shared-backend")
             if path.startswith(("app/routes/", "app/api/", "app/schemas/", "frontend/src/api/")):
                 tags.add("contracts")
             if path.startswith("tests/issues/"):
@@ -1639,9 +1693,9 @@ class AutonomousOrchestrator:
                 tags.add("migration")
 
         broaden_scope = bool(
-            {"migration", "contracts", "tooling"} & tags
+            {"migration", "contracts", "tooling", "shared-backend"} & tags
             or ("frontend" in tags and "backend" in tags)
-            or len({path.split("/", 1)[0] for path in normalized if "/" in path or path}) >= 3
+            or len({path.split("/", 1)[0] for path in normalized if "/" in path}) >= 3
         )
 
         return {
@@ -1667,6 +1721,13 @@ class AutonomousOrchestrator:
             scopes.append(("前端相关验证", "改动涉及 frontend 目录，应优先覆盖前端组件、页面或样式行为。"))
         if "backend" in tags:
             scopes.append(("后端单元验证", "改动涉及 Python/服务端目录，应优先验证对应单元测试。"))
+        if "shared-backend" in tags:
+            scopes.append(
+                (
+                    "共享后端依赖验证",
+                    "改动触及 app/utils、app/services、schema 等共享模块，应扩大到直接依赖方或相关调用链测试。",
+                )
+            )
         if "contracts" in tags:
             scopes.append(("接口/契约验证", "改动涉及路由、API 或前后端契约，需确认调用链兼容。"))
         if "migration" in tags:
@@ -1747,6 +1808,8 @@ class AutonomousOrchestrator:
             guardrail = (
                 "当前改动主要在后端。先验证最接近改动模块的后端测试；不要一上来跑整个仓库的所有测试。"
             )
+        if "shared-backend" in analysis["tags"]:
+            guardrail += " 若改动触及共享后端模块，还应补上直接依赖方或相关调用链测试。"
 
         repo_guidance: list[str] = []
         if project_path:
@@ -3155,7 +3218,7 @@ class AutonomousOrchestrator:
                 f"## 原始需求\n{requirements}\n\n"
                 f"## 审查意见\n{review_text}\n\n"
                 f"## 原方案\n{existing_plan}\n\n"
-                f"请输出完善后的完整实现方案，并保留/完善其中的“验证计划”章节，"
+                f"请输出完善后的完整实现方案，并使用 `## 验证计划` 作为独立标题，保留/完善其中的验证内容，"
                 f"明确本次改动完成后必须验证哪些方面。\n\n"
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
@@ -3182,7 +3245,7 @@ class AutonomousOrchestrator:
                 f"3. 实现步骤（按优先级排序）\n"
                 f"4. 测试策略\n"
                 f"5. 潜在风险和缓解措施\n"
-                f"6. 验证计划：按影响面列出必须验证的方面、建议测试范围、何时需要扩大到更广测试\n\n"
+                f"6. 必须包含 `## 验证计划` 独立标题：按影响面列出必须验证的方面、建议测试范围、何时需要扩大到更广测试\n\n"
                 f"重要约束：只输出高层设计方案和实现步骤描述，"
                 f"不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
             )
@@ -3419,7 +3482,7 @@ class AutonomousOrchestrator:
                 refine_prompt += (
                     f"## 当前方案\n{final_plan}\n\n"
                     f"## 审查意见\n{last_review}\n\n"
-                    "请保留并完善方案中的“验证计划”章节，明确本次实现完成后必须验证哪些方面，"
+                    "请保留并完善方案中的 `## 验证计划` 章节，明确本次实现完成后必须验证哪些方面，"
                     "以及什么情况下需要扩大测试范围。\n\n"
                     "重要约束：只输出高层设计方案和实现步骤描述，"
                     "不要输出完整的代码实现。具体代码将在后续开发阶段编写。"
@@ -4071,7 +4134,15 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"Running tests round {dev_round}",
         )
-        targeted_test_context = self._build_test_execution_context(wf, gh)
+        try:
+            targeted_test_context = self._build_test_execution_context(wf, gh)
+        except Exception as exc:
+            logger.warning("Failed to build targeted test context for workflow %s: %s", self._workflow_id[:8], exc)
+            targeted_test_context = (
+                "## 本轮定向验证上下文\n"
+                "- 自动构建验证上下文失败，请先自行检查最终方案、改动文件和仓库测试约定，"
+                "然后选择最小必要的测试范围。"
+            )
 
         test_prompt = (
             AUTONOMOUS_CONTEXT
