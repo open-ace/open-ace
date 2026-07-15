@@ -1,15 +1,20 @@
 name: Migration Graph
 
-# Guard the single-head invariant of the Alembic migration chain.
+# Guard structural invariants of the Alembic migration chain against the
+# pre-merged tree (base branch + PR's migration changes).
 #
 # Two parallel PRs can each fork off the same parent migration (both declaring
 # the same down_revision) without any git text conflict — each branch is
 # single-headed in isolation, so schema-sync and pre-commit cannot see the fork.
-# It only surfaces once the branches merge. This workflow catches it BEFORE
-# merge by assembling the pre-merged `migrations/versions/` tree (base branch +
-# PR's migration changes) and asserting exactly one Alembic head.
+# It only surfaces once the branches merge. The single-head check catches it
+# BEFORE merge by asserting exactly one Alembic head on the pre-merged tree.
 #
-# See scripts/check_migration_heads.py for the checker this workflow runs.
+# Authoring rules (Issue #1704) are enforced on the same pre-merged tree:
+#   - MIG001: no runtime app.* imports (migrations load from a tree without app/)
+#   - MIG002: CONCURRENTLY ops use the approved autocommit_block() pattern
+# These surface only when migrations load from a synthetic tree without the
+# app/ package, which the pre-merged tree reproduces — so they are checked here
+# in addition to pre-commit.
 
 on:
   pull_request:
@@ -89,6 +94,15 @@ jobs:
       - name: Assert single migration head
         working-directory: ${{ env.MERGED_DIR }}
         run: python "$GITHUB_WORKSPACE/scripts/check_migration_heads.py"
+
+      # Enforce repository migration authoring rules (Issue #1704) against the
+      # same pre-merged tree: no runtime app.* imports (MIG001) and the approved
+      # CONCURRENTLY pattern (MIG002). Run here — not just in pre-commit —
+      # because these failures surface when migrations load from a synthetic tree
+      # without the app/ package, which the pre-merged tree reproduces.
+      - name: Enforce migration authoring rules (MIG001/MIG002)
+        working-directory: ${{ env.MERGED_DIR }}
+        run: python "$GITHUB_WORKSPACE/scripts/lint/check_migration_rules.py" migrations/versions
 
       - name: Cleanup merged tree
         if: always()

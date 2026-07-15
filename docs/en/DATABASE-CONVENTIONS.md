@@ -153,9 +153,88 @@ op.add_column(
 )
 ```
 
+## Migration Authoring Rules
+
+Two repository-level migration constraints are enforced automatically by
+`scripts/lint/check_migration_rules.py`. They are easy to miss and hard to infer
+from local unit tests alone (Issue #1704), because the failure only surfaces
+when migrations load from a synthetic pre-merged tree (CI) or run against
+PostgreSQL (no PG service in the default CI job). Both rules are enforced by a
+pre-commit hook and by the `Migration Graph` CI workflow.
+
+### MIG001 — Migrations must not import `app.*` runtime modules
+
+The migration-graph CI job and `ScriptDirectory.get_heads()` load each migration
+module from a synthetic pre-merged tree that does **not** contain the `app/`
+package. A migration that does `from app.xxx import ...` therefore fails to
+import there, breaking the single-head check with an opaque `ImportError` —
+even though every local test passes.
+
+**Rule:** migration files under `migrations/versions/` must not import `app` or
+any `app.*` submodule. Operate via `alembic.op`, `sqlalchemy`, schema
+introspection queries (`information_schema` / `sqlite_master`), and the sibling
+`migrations.baseline` helper only. The only exception is an import guarded by
+`if TYPE_CHECKING:`, which is never executed at import time and so cannot break
+module loading.
+
+### MIG002 — PostgreSQL `CONCURRENTLY` operations must use the approved pattern
+
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction block. Issuing it
+the wrong way raises `ACTIVE SQL TRANSACTION` (or silently misbehaves) during
+`alembic upgrade` on PostgreSQL. There is exactly **one** approved pattern:
+
+```python
+def _is_postgresql() -> bool:
+    return op.get_bind().dialect.name == "postgresql"
+
+
+def upgrade() -> None:
+    if _is_postgresql():
+        with op.get_context().autocommit_block():          # <- required wrapper
+            op.create_index(
+                INDEX_NAME, TABLE, COLUMNS,
+                postgresql_concurrently=True,              # <- required kwarg
+            )
+    else:
+        op.create_index(INDEX_NAME, TABLE, COLUMNS)        # SQLite: plain index
+```
+
+The `downgrade()` mirrors this with `op.drop_index(..., postgresql_concurrently=True)`
+inside its own `autocommit_block()`. The check rejects two mistakes:
+
+- **Raw concurrent DDL** via `op.execute(...)` / `conn.execute(...)` /
+  `sa.text(...)` with a string literal containing `CONCURRENTLY`. Raw SQL bypasses
+  Alembic's autocommit handling. The check matches any statement led by a
+  `CONCURRENTLY`-bearing DDL verb (`CREATE`/`DROP`/`REINDEX`/`REFRESH`, covering
+  `CREATE/DROP INDEX`, `REINDEX`, and `REFRESH MATERIALIZED VIEW`); use
+  `op.create_index`/`op.drop_index` (wrapped as above) instead. `REFRESH
+  MATERIALIZED VIEW CONCURRENTLY` has no Alembic helper — if you genuinely need
+  it, run it outside Alembic (e.g. a post-deploy script), not in a migration.
+- **`postgresql_concurrently=True` outside an `autocommit_block()`**. The kwarg
+  is what issues `... CONCURRENTLY`; it is only valid outside a transaction, so
+  the call must be lexically nested inside the `with op.get_context().autocommit_block():`
+  statement (inline the `op.create_index` call under the `with`, do not delegate
+  to a sibling helper).
+
+### Running the checks
+
+```bash
+# Check the committed migrations/versions/ tree
+python3 scripts/lint/check_migration_rules.py
+
+# Check an alternate tree (e.g. a synthetic pre-merged tree)
+python3 scripts/lint/check_migration_rules.py /path/to/migrations/versions
+```
+
+The pre-commit hook `check-migration-rules` runs this on every commit that
+touches `migrations/versions/*.py`; the `Migration Graph` CI workflow runs it
+against the pre-merged tree. Both exit non-zero with a `file:line: MIGxx ...`
+message on violation.
+
 ## Related Files
 
 - `scripts/generate_schema.py` - Schema generation with boolean detection
 - `scripts/validate_schema.py` - Schema validation for boolean consistency
+- `scripts/lint/check_migration_rules.py` - Migration authoring rules (MIG001/MIG002)
 - `app/repositories/database.py` - `adapt_boolean_value()` and `adapt_boolean_condition()` helpers
-- `.pre-commit-config.yaml` - Automatic validation hook
+- `.pre-commit-config.yaml` - Automatic validation hooks

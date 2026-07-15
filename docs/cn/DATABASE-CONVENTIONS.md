@@ -153,9 +153,82 @@ op.add_column(
 )
 ```
 
+## 迁移编写规则
+
+仓库级的两条迁移约束由 `scripts/lint/check_migration_rules.py` 自动强制执行。
+它们很容易被忽略，且仅靠本地单元测试难以发现（Issue #1704），因为故障只在
+迁移从合成的预合并树（CI）加载、或在 PostgreSQL 上运行（默认 CI 任务没有 PG
+服务）时才会暴露。这两条规则同时由 pre-commit 钩子和 `Migration Graph` CI
+工作流强制执行。
+
+### MIG001 —— 迁移禁止导入 `app.*` 运行期模块
+
+migration-graph CI 任务和 `ScriptDirectory.get_heads()` 会从不包含 `app/` 包的
+合成预合并树加载每个迁移模块。因此，执行 `from app.xxx import ...` 的迁移在
+那里会导入失败，并以晦涩的 `ImportError` 破坏单头检查——而此时所有本地测试
+仍然通过。
+
+**规则：** `migrations/versions/` 下的迁移文件不得导入 `app` 或任何 `app.*`
+子模块。只能通过 `alembic.op`、`sqlalchemy`、模式内省查询
+（`information_schema` / `sqlite_master`）以及兄弟模块 `migrations.baseline`
+来操作。唯一的例外是被 `if TYPE_CHECKING:` 守卫的导入——它在导入期不会执行，
+因此不会破坏模块加载。
+
+### MIG002 —— PostgreSQL `CONCURRENTLY` 操作必须使用受批准的模式
+
+`CREATE INDEX CONCURRENTLY` 不能在事务块内运行。在 PostgreSQL 上执行
+`alembic upgrade` 时，错误用法会抛出 `ACTIVE SQL TRANSACTION`（或静默行为异常）。
+受批准的模式只有**唯一一种**：
+
+```python
+def _is_postgresql() -> bool:
+    return op.get_bind().dialect.name == "postgresql"
+
+
+def upgrade() -> None:
+    if _is_postgresql():
+        with op.get_context().autocommit_block():          # <- 必需的包裹
+            op.create_index(
+                INDEX_NAME, TABLE, COLUMNS,
+                postgresql_concurrently=True,              # <- 必需的参数
+            )
+    else:
+        op.create_index(INDEX_NAME, TABLE, COLUMNS)        # SQLite：普通索引
+```
+
+`downgrade()` 与之对称：在各自的 `autocommit_block()` 内调用
+`op.drop_index(..., postgresql_concurrently=True)`。检查器会拒绝两类错误：
+
+- **通过原始 SQL 发出并发 DDL**：`op.execute(...)` / `conn.execute(...)` /
+  `sa.text(...)` 的字符串字面量包含 `CONCURRENTLY`。原始 SQL 绕过了 Alembic 的
+  autocommit 处理。检查器匹配由带 `CONCURRENTLY` 的 DDL 动词
+  （`CREATE`/`DROP`/`REINDEX`/`REFRESH`，覆盖 `CREATE/DROP INDEX`、`REINDEX` 与
+  `REFRESH MATERIALIZED VIEW`）引导的语句；应改用（按上文包裹的）
+  `op.create_index`/`op.drop_index`。`REFRESH MATERIALIZED VIEW CONCURRENTLY`
+  没有 Alembic helper——若确需使用，请在 Alembic 之外（如部署后脚本）运行，不要写进迁移。
+- **`postgresql_concurrently=True` 不在 `autocommit_block()` 内**。该参数正是
+  发出 `... CONCURRENTLY` 的开关；它仅在事务外有效，因此调用必须在词法上嵌套在
+  `with op.get_context().autocommit_block():` 语句内（将 `op.create_index` 调用
+  直接内联到 `with` 下，不要委托给同级辅助函数）。
+
+### 运行检查
+
+```bash
+# 检查已提交的 migrations/versions/ 树
+python3 scripts/lint/check_migration_rules.py
+
+# 检查其他目录（例如合成的预合并树）
+python3 scripts/lint/check_migration_rules.py /path/to/migrations/versions
+```
+
+pre-commit 钩子 `check-migration-rules` 会在每次改动 `migrations/versions/*.py`
+的提交时运行此检查；`Migration Graph` CI 工作流则针对预合并树运行。两者在违规时
+均以非零退出码结束，并打印 `file:line: MIGxx ...` 消息。
+
 ## 相关文件
 
 - `scripts/generate_schema.py` - 带布尔检测的模式生成
 - `scripts/validate_schema.py` - 布尔一致性的模式验证
+- `scripts/lint/check_migration_rules.py` - 迁移编写规则（MIG001/MIG002）
 - `app/repositories/database.py` - `adapt_boolean_value()` 和 `adapt_boolean_condition()` 辅助函数
 - `.pre-commit-config.yaml` - 自动验证钩子
