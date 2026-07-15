@@ -8,30 +8,30 @@
     background-color 180ms ease;
 }
 
-.auto-workflow-search .input-group {
+[data-theme='dark'] .auto-workflow-search .input-group {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   overflow: hidden;
 }
 
-.auto-workflow-search .input-group-text {
+[data-theme='dark'] .auto-workflow-search .input-group-text {
   background: transparent;
   border: none;
   color: var(--text-muted);
 }
 
-.auto-workflow-search .form-control {
+[data-theme='dark'] .auto-workflow-search .form-control {
   background: transparent;
   border: none;
   color: var(--text-primary);
 }
 
-.auto-workflow-search .form-control:focus {
+[data-theme='dark'] .auto-workflow-search .form-control:focus {
   box-shadow: none;
 }
 
-.auto-workflow-search .form-control::placeholder {
+[data-theme='dark'] .auto-workflow-search .form-control::placeholder {
   color: var(--text-muted);
 }
 
