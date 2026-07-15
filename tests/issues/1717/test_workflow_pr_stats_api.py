@@ -93,7 +93,9 @@ def _mock_autonomous_enabled():
 
 class TestGetWorkflowPrStats(unittest.TestCase):
     def setUp(self):
-        self.client, self.db_path, self.orig, self.orig_get_database_url, self.db_mod = _make_client()
+        self.client, self.db_path, self.orig, self.orig_get_database_url, self.db_mod = (
+            _make_client()
+        )
 
     def tearDown(self):
         self.db_mod.adapt_sql = self.orig
