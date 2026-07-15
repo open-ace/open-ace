@@ -2,6 +2,8 @@
 
 ## System Overview
 
+For a detailed explanation of how Claude / Codex / ZCode / Qwen local token usage is collected, computed, stored, and consumed across the stack, see [token-accounting.md](token-accounting.md).
+
 Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with three layers:
 
 ```
