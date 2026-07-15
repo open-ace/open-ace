@@ -1166,7 +1166,16 @@ class AutonomousOrchestrator:
             if link:
                 lines.append(f"- 链接: {link}")
 
-            excerpt = gh.get_check_failure_excerpt(check)
+            try:
+                excerpt = gh.get_check_failure_excerpt(check)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to fetch CI failure excerpt for check '%s' in PR #%s: %s",
+                    name,
+                    pr_number,
+                    exc,
+                )
+                excerpt = ""
             if excerpt:
                 lines.append("- 失败摘录:")
                 lines.append("```text")
@@ -3108,8 +3117,7 @@ class AutonomousOrchestrator:
             # _run_development_agent sets status="failed" on failure; without
             # this guard, a "✅ Completed" comment is posted with a stale
             # commit that isn't the agent's work (#525).
-            if wf.get("status") != "failed":
-                self._post_dev_completion_comment(wf, dev_round, gh)
+            self._post_dev_completion_comment(wf, dev_round, gh)
 
         # ── Test phase (always runs) ──
         self._run_test_phase(wf, dev_round, gh)

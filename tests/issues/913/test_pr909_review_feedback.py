@@ -135,7 +135,7 @@ class TestGetCheckFailureExcerpt:
             return_value=MagicMock(
                 returncode=0,
                 stdout=(
-                    "lint\tSTEP\t\\x1b[31mblack....................................................................Failed\\x1b[0m\n"
+                    "lint\tSTEP\t\x1b[31mblack....................................................................Failed\x1b[0m\n"
                     "lint\tSTEP\tfiles were modified by this hook\n"
                 ),
                 stderr="",
@@ -151,6 +151,22 @@ class TestGetCheckFailureExcerpt:
 
         assert "black" in excerpt
         assert "\x1b" not in excerpt
+
+    def test_ci_repair_context_skips_excerpt_failure(self):
+        gh = MagicMock()
+        gh.get_check_failure_excerpt.side_effect = RuntimeError("timeout")
+        orch = MagicMock()
+
+        context = AutonomousOrchestrator._build_ci_repair_context(
+            orch,
+            {"project_path": "/tmp/repo", "worktree_path": "/tmp/repo"},
+            gh,
+            42,
+            [{"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}],
+        )
+
+        assert "### lint" in context
+        assert "失败摘录" not in context
 
 
 # ── Test _poll_ci_status ────────────────────────────────────────────────
