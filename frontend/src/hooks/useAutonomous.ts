@@ -370,6 +370,15 @@ export function useWorkflowPrDiff(workflowId: string, enabled = true) {
   });
 }
 
+export function useWorkflowPrStats(workflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['autonomous', 'pr-stats', workflowId],
+    queryFn: () => autonomousApi.getWorkflowPrStats(workflowId),
+    enabled: enabled && !!workflowId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // ── Auxiliary Queries ──────────────────────────────────────────────
 
 export function useAvailableTools() {

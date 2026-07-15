@@ -105,22 +105,6 @@ export function parseDiffFiles(diffText: string): ParsedDiffFile[] {
   return files;
 }
 
-export function summarizeDiffFiles(files: ParsedDiffFile[]): {
-  additions: number;
-  deletions: number;
-  files: number;
-} {
-  return files.reduce(
-    (summary, file) => {
-      summary.additions += file.additions;
-      summary.deletions += file.deletions;
-      summary.files += 1;
-      return summary;
-    },
-    { additions: 0, deletions: 0, files: 0 }
-  );
-}
-
 export function findForkMilestoneIndex(
   sourceMilestones: ForkTimelineMilestoneLike[],
   options?: {

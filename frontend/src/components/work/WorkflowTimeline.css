@@ -347,7 +347,6 @@
 .timeline-output-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   flex-wrap: wrap;
   min-height: 38px;
   padding-inline: 0.9rem;
@@ -356,6 +355,7 @@
 }
 
 .timeline-output-btn__summary {
+  margin-left: 2px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
