@@ -465,30 +465,56 @@ if [ "$SKIP_DOWNLOAD" = false ] && [ -f "$PROJECT_DIR/requirements.txt" ]; then
     fi
 
     if [ -n "$PIP_CMD" ]; then
-        # Download packages for current Python version
-        # Wheels will match the packaging machine's Python version
-        # Use --only-binary=:all: to avoid source builds that may fail on older systems
-        # Warning: If target system has different Python version, vendor wheels will not install.
-        #          Ensure packaging and target systems use the same Python version.
-        echo -e "${YELLOW}Downloading packages for current Python version...${NC}"
+        # Download wheels for Python 3.9/3.10/3.11/3.12 to support all target versions.
+        # pip install will automatically select the matching wheel during installation.
+        # Note: This increases vendor directory size but ensures offline compatibility.
+        echo -e "${YELLOW}Downloading packages for Python 3.9/3.10/3.11/3.12...${NC}"
 
-        # Use --prefer-binary only if pip version >= 20
-        if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: \
-                --prefer-binary || \
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: || \
-            # Fallback: download without constraints (for packages without pure wheels)
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" --prefer-binary || \
-                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
-                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
-        else
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
-                --only-binary=:all: || \
-            $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" || \
-                echo -e "${YELLOW}Warning: Failed to download some dependencies. Install will require network.${NC}"
-        fi
+        # Supported Python versions (ABI tags)
+        PYTHON_VERSIONS=("3.9" "3.10" "3.11" "3.12")
+        ABI_TAGS=("cp39" "cp310" "cp311" "cp312")
+
+        for i in "${!PYTHON_VERSIONS[@]}"; do
+            py_ver="${PYTHON_VERSIONS[$i]}"
+            abi="${ABI_TAGS[$i]}"
+
+            echo -e "${YELLOW}Downloading wheels for Python ${py_ver} (${abi})...${NC}"
+
+            # Try downloading with specific Python version and ABI
+            # Use manylinux platform for broad Linux compatibility
+            if [ -n "$PIP_VERSION" ] && [ "$PIP_VERSION" -ge 20 ]; then
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --platform manylinux2014_x86_64 \
+                    --platform manylinux_2_17_x86_64 \
+                    --implementation cp \
+                    --abi "$abi" \
+                    --only-binary=:all: \
+                    --prefer-binary 2>/dev/null || \
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --implementation cp \
+                    --abi "$abi" \
+                    --only-binary=:all: 2>/dev/null || \
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --prefer-binary 2>/dev/null || \
+                echo -e "${YELLOW}Warning: Could not download ${abi} wheels for some packages${NC}"
+            else
+                # Older pip: just try with python-version flag
+                $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+                    --python-version "$py_ver" \
+                    --prefer-binary 2>/dev/null || \
+                echo -e "${YELLOW}Warning: Could not download ${abi} wheels for some packages${NC}"
+            fi
+        done
+
+        # Final pass: download pure Python wheels (py3-none-any) and any missing packages.
+        # These wheels are architecture-independent and work across all Python versions.
+        # pip will skip already-downloaded files, so this only adds missing items.
+        echo -e "${YELLOW}Downloading pure Python wheels...${NC}"
+        $PIP_CMD download -r "$TEMP_REQ" -d "$VENDOR_DIR" \
+            --prefer-binary 2>/dev/null || true
     else
         echo -e "${YELLOW}Warning: pip/pip3 not found. Install will require network.${NC}"
     fi
