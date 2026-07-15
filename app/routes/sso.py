@@ -6,12 +6,13 @@ API endpoints for Single Sign-On authentication.
 
 import json
 import logging
+import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
-from flask import Blueprint, g, jsonify, redirect, request, url_for
+from flask import Blueprint, g, jsonify, make_response, redirect, request, url_for
 
 from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
@@ -19,6 +20,7 @@ from app.modules.sso.manager import SSOManager
 from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
+from app.services.auth_service import _get_session_timeout_hours
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,98 @@ def get_audit_logger():
     if _audit_logger is None:
         _audit_logger = AuditLogger()
     return _audit_logger
+
+
+def _encode_state(original_state: str, redirect_uri: str) -> str:
+    """Encode redirect_uri into state parameter.
+
+    Args:
+        original_state: Original state for CSRF verification.
+        redirect_uri: Frontend redirect URI.
+
+    Returns:
+        str: Base64 encoded state containing both values.
+    """
+    import base64
+
+    state_data = {
+        "s": original_state,  # 原始 state 用于验证
+        "r": redirect_uri,  # 前端重定向地址
+    }
+    return base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
+
+
+def _decode_state(encoded_state: str) -> tuple[str, Optional[str]]:
+    """Decode state parameter to get original state and redirect_uri.
+
+    Args:
+        encoded_state: Base64 encoded state parameter.
+
+    Returns:
+        tuple: (original_state, redirect_uri or None)
+    """
+    import base64
+
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(encoded_state).decode())
+        return state_data.get("s", encoded_state), state_data.get("r")
+    except (json.JSONDecodeError, Exception):
+        # 兼容旧格式（纯 state 字符串）
+        return encoded_state, None
+
+
+def _get_allowed_redirect_domains() -> list[str]:
+    """Get allowed redirect domains from environment variable.
+
+    Returns:
+        list: List of allowed domains.
+    """
+    domains = os.environ.get("SSO_ALLOWED_REDIRECT_DOMAINS", "")
+    if domains:
+        return [d.strip() for d in domains.split(",") if d.strip()]
+    return []
+
+
+def _validate_redirect_uri(redirect_uri: str) -> bool:
+    """Validate redirect_uri against domain whitelist.
+
+    Security: Prevent open redirect attacks.
+
+    Args:
+        redirect_uri: The frontend redirect URI to validate.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    from urllib.parse import urlparse
+
+    if not redirect_uri:
+        return False
+
+    try:
+        parsed = urlparse(redirect_uri)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+
+        # 只允许 https（生产环境）或 http（开发环境 localhost）
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        allowed_domains = _get_allowed_redirect_domains()
+
+        # 如果没有配置白名单，只允许 localhost（开发环境）
+        if not allowed_domains:
+            hostname = parsed.netloc.split(":")[0]
+            return hostname in ("localhost", "127.0.0.1", "[::1]")
+
+        # 检查域名是否在白名单中
+        for domain in allowed_domains:
+            if parsed.netloc == domain or parsed.netloc.endswith(f".{domain}"):
+                return True
+
+        return False
+    except Exception:
+        return False
 
 
 user_repo = UserRepository()
@@ -926,18 +1020,40 @@ def start_login(provider_name: str):
     Start SSO login flow.
 
     Returns the authorization URL to redirect the user.
+
+    Query Parameters:
+        redirect_uri: Frontend URL to redirect after successful SSO login.
+                      Encoded into OAuth state parameter for reliability.
     """
-    # Get redirect URI from query params or use default
-    redirect_uri = request.args.get("redirect_uri")
+    import urllib.parse
 
-    if not redirect_uri:
-        # Build default callback URL
-        redirect_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
+    # Get frontend redirect URI (for post-auth redirect)
+    frontend_redirect_uri = request.args.get("redirect_uri")
 
-    result = get_sso_manager().start_authentication(provider_name, redirect_uri)
+    # Build OAuth callback URL (this is where the provider redirects back to)
+    oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
+
+    result = get_sso_manager().start_authentication(provider_name, oauth_callback_uri)
 
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
+
+    # Encode redirect_uri into state parameter (more reliable than session)
+    if frontend_redirect_uri and _validate_redirect_uri(frontend_redirect_uri):
+        encoded_state = _encode_state(result["state"], frontend_redirect_uri)
+
+        # Update authorization_url with new state
+        parsed = urllib.parse.urlparse(result["authorization_url"])
+        query_params = urllib.parse.parse_qs(parsed.query)
+        query_params["state"] = [encoded_state]
+        new_query = urllib.parse.urlencode(query_params, doseq=True)
+        result["authorization_url"] = urllib.parse.urlunparse(
+            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
+        )
+        result["state"] = encoded_state
+    elif frontend_redirect_uri:
+        # 域名验证失败，记录警告但不阻止登录
+        logger.warning(f"Invalid redirect_uri domain rejected: {frontend_redirect_uri}")
 
     # For API clients, return the URL
     if request.args.get("json") or request.headers.get("Accept") == "application/json":
@@ -953,15 +1069,21 @@ def callback(provider_name: str):
     Handle SSO callback.
 
     This endpoint receives the authorization code from the provider.
+    On success, redirects to frontend with session token.
     """
     code = request.args.get("code")
     state = request.args.get("state")
     error = request.args.get("error")
     error_description = request.args.get("error_description")
 
+    # Decode redirect_uri from state parameter
+    original_state, frontend_url = _decode_state(state)
+
     # Handle error from provider
     if error:
         logger.error(f"SSO error from {provider_name}: {error} - {error_description}")
+        if frontend_url and _validate_redirect_uri(frontend_url):
+            return redirect(f"{frontend_url}?sso_error=auth_failed")
         return (
             jsonify(
                 {
@@ -972,23 +1094,26 @@ def callback(provider_name: str):
             400,
         )
 
-    if not code or not state:
+    if not code or not original_state:
+        if frontend_url and _validate_redirect_uri(frontend_url):
+            return redirect(f"{frontend_url}?sso_error=invalid_request")
         return jsonify({"error": "Missing code or state"}), 400
 
-    # Get redirect URI (should match what was used in start_login)
-    redirect_uri = request.args.get("redirect_uri") or url_for(
-        "sso.callback", provider_name=provider_name, _external=True
-    )
+    # Get OAuth callback URI (must match what was used in start_login)
+    oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
 
-    # Complete authentication
+    # Complete authentication (use original_state for verification)
     auth_result = get_sso_manager().complete_authentication(
         provider_name=provider_name,
         code=code,
-        state=state,
-        redirect_uri=redirect_uri,
+        state=original_state,
+        redirect_uri=oauth_callback_uri,
     )
 
     if not auth_result.success:
+        if frontend_url and _validate_redirect_uri(frontend_url):
+            error_type = auth_result.error or "auth_failed"
+            return redirect(f"{frontend_url}?sso_error={error_type}")
         return (
             jsonify(
                 {
@@ -1038,14 +1163,32 @@ def callback(provider_name: str):
             expires_in=auth_result.token.expires_in,
         )
 
-        # Also create local session
+        # Also create local session with correct expiration time
+        timeout_hours = _get_session_timeout_hours()
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            hours=timeout_hours
+        )
         UserRepository().create_session(
             user_id=user_id,
             token=session_token,
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            expires_at=expires_at,
         )
 
-    # Return result
+    # Redirect to frontend if configured, otherwise return JSON
+    if frontend_url and session_token and _validate_redirect_uri(frontend_url):
+        timeout_seconds = int(_get_session_timeout_hours() * 3600)
+        response = make_response(redirect(f"{frontend_url}?sso_success=1"))
+        response.set_cookie(
+            "session_token",
+            session_token,
+            max_age=timeout_seconds,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure,
+        )
+        return response
+
+    # Return result (fallback for API calls or missing session_token)
     return jsonify(
         {
             "success": True,
