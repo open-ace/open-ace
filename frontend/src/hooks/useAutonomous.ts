@@ -56,7 +56,7 @@ export function useWorkflowTimeline(workflowId: string, enabled = true) {
 /** A single agent activity event from the SSE stream */
 export interface AgentActivity {
   session_id: string;
-  type: 'assistant' | 'tool_use' | 'usage';
+  type: 'assistant' | 'tool_use' | 'usage' | 'system';
   timestamp?: string;
   text?: string;
   tool_name?: string;
@@ -64,6 +64,10 @@ export interface AgentActivity {
   total_tokens?: number;
   total_input_tokens?: number;
   total_output_tokens?: number;
+  // system-type fields
+  subtype?: string;
+  estimated_tokens?: number;
+  attempt?: number;
 }
 
 /**

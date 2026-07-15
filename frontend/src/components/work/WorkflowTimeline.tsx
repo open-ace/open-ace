@@ -176,10 +176,12 @@ function getDiffLineClass(line: string): string {
 
 function getActivityStableKey(activity: {
   session_id: string;
-  type: 'assistant' | 'tool_use' | 'usage';
+  type: 'assistant' | 'tool_use' | 'usage' | 'system';
   timestamp?: string;
   text?: string;
   tool_name?: string;
+  subtype?: string;
+  attempt?: number;
 }): string {
   return [
     activity.session_id,
@@ -187,6 +189,10 @@ function getActivityStableKey(activity: {
     activity.timestamp ?? '',
     activity.tool_name ?? '',
     (activity.text ?? '').slice(0, 40),
+    // Include subtype/attempt so same-millisecond system events (e.g.
+    // consecutive api_retry bursts) don't collide and get deduped.
+    activity.subtype ?? '',
+    activity.attempt?.toString() ?? '',
   ].join(':');
 }
 
@@ -645,11 +651,14 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const formatLiveActivityLine = (activity: {
     timestamp?: string;
-    type: 'assistant' | 'tool_use' | 'usage';
+    type: 'assistant' | 'tool_use' | 'usage' | 'system';
     text?: string;
     tool_name?: string;
     tool_input?: string;
     total_tokens?: number;
+    subtype?: string;
+    estimated_tokens?: number;
+    attempt?: number;
   }) => {
     const timestamp = formatMilestoneTime(activity.timestamp ?? null) || '--:--:--';
     if (activity.type === 'tool_use') {
@@ -675,6 +684,40 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         icon: 'bi-bar-chart-line text-primary',
         timestamp,
         content: <>Token: {formatTokens(activity.total_tokens ?? 0)}</>,
+      };
+    }
+
+    if (activity.type === 'system') {
+      const sub = activity.subtype ?? '';
+      if (sub === 'thinking_tokens') {
+        return {
+          icon: 'bi-lightbulb text-secondary',
+          timestamp,
+          content: (
+            <>
+              <span className="opacity-75">thinking…</span>{' '}
+              {activity.estimated_tokens ? `~${activity.estimated_tokens} tokens` : ''}
+            </>
+          ),
+        };
+      }
+      if (sub === 'api_retry') {
+        return {
+          icon: 'bi-arrow-repeat text-warning',
+          timestamp,
+          content: (
+            <>
+              <span className="opacity-75">retrying API request</span>{' '}
+              {activity.attempt ? `(attempt ${activity.attempt})` : ''}
+            </>
+          ),
+        };
+      }
+      // init, hook_started, etc. — lightweight status
+      return {
+        icon: 'bi-info-circle text-secondary',
+        timestamp,
+        content: <span className="opacity-75">{sub || 'system'}</span>,
       };
     }
 
