@@ -819,6 +819,10 @@ class GitHubOps:
         data = json.loads((result.stdout or "").strip() or "{}")
         return ((data.get("head") or {}).get("sha") or "").strip()
 
+    def get_pr_head_sha(self, pr_number: int) -> str:
+        """Return the current head SHA for a PR."""
+        return self._get_pr_head_sha(pr_number)
+
     def _get_pr_checks_via_api(self, pr_number: int) -> list:
         repo = self.get_repo_name()
         head_sha = self._get_pr_head_sha(pr_number)

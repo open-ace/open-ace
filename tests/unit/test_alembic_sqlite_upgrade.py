@@ -118,7 +118,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     # -> 20260709_001_add_base_commit_sha (Issue #1552)
     # -> 20260709_003_add_tenant_usage_aggregation (Tenant usage aggregation infrastructure)
     # -> 20260714_001_add_ci_repair_fields_to_workflows (Issue #1647)
-    assert version[0] == "20260714_001_add_ci_repair_fields_to_workflows"
+    # -> 20260715_001_add_last_ci_failure_head_sha (Issue #1574)
+    assert version[0] == "20260715_001_add_last_ci_failure_head_sha"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
@@ -135,6 +136,7 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     assert "ci_repair_context" in aw_columns
     assert "ci_repair_attempts" in aw_columns
     assert "last_ci_failure_signature" in aw_columns
+    assert "last_ci_failure_head_sha" in aw_columns
 
 
 def test_workflow_status_index_created_after_upgrade(tmp_path, monkeypatch):

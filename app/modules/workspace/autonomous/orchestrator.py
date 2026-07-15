@@ -1194,7 +1194,7 @@ class AutonomousOrchestrator:
         return "\n".join(lines).strip()
 
     def _get_ci_repair_prompt(self, wf: dict) -> str:
-        """Return merge-phase CI repair context for development, or empty."""
+        """Return merge-phase CI repair context, or empty."""
         context = wf.get("ci_repair_context", "")
         if not context or not context.strip():
             return ""
@@ -1203,6 +1203,194 @@ class AutonomousOrchestrator:
             "当前轮次是因为 PR 在合并阶段检测到 CI 失败而回流，请优先处理以下问题：\n"
             f"{context}\n\n"
         )
+
+    def _run_merge_ci_repair(
+        self, wf: dict, gh: GitHubOps, pr_number: int, failed_checks: list[dict]
+    ) -> None:
+        """Repair CI failures for an existing PR in-place during merge phase."""
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        attempt = int(wf.get("ci_repair_attempts", 0) or 0)
+        branch_name = wf.get("branch_name", "")
+        issue_number = wf.get("github_issue_number") or self.workflow.get("github_issue_number")
+
+        repair_ms = self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            milestone_type="ci_repair_applied",
+            status="in_progress",
+            title=f"CI repair attempt {attempt} for PR #{pr_number}",
+        )
+
+        repair_prompt = (
+            AUTONOMOUS_CONTEXT
+            + "当前任务是在已有 PR 上修复 merge 阶段失败的 CI，不是开始新一轮完整开发。\n\n"
+        )
+        if issue_number:
+            repair_prompt += (
+                f"## 关联 Issue\n"
+                f"本任务关联 GitHub Issue #{issue_number}。\n"
+                f"修复时请确保修改继续满足 Issue #{issue_number} 的所有需求。\n\n"
+            )
+        repair_prompt += (
+            "## 重要约束\n"
+            "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
+            "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
+            "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
+            "4. 修复后重新运行对应命令，以及你改动涉及到的必要相关测试。\n"
+            "5. 只有在确实产生代码或配置修改后，才能提交 git commit 并推送到当前 PR 分支。\n"
+            "6. 结束时请明确说明：你复现了哪些命令、修复了什么、还剩什么风险。\n"
+        )
+        repair_prompt += self._get_ci_repair_prompt(wf)
+        if failed_checks:
+            failure_list = "\n".join(
+                f"- **{check.get('name') or 'unknown'}**: {check.get('state') or 'unknown'}"
+                for check in failed_checks
+                if check.get("bucket") == "fail"
+            )
+            if failure_list:
+                repair_prompt += f"## 当前失败检查\n{failure_list}\n\n"
+        repair_prompt += self._get_user_feedback_prompt(wf)
+
+        commit_before = ""
+        try:
+            commit_before = gh.get_current_commit()
+        except Exception:
+            pass
+
+        repair_result = self._run_agent(
+            wf=wf,
+            workflow_id=self._workflow_id,
+            cli_tool=wf.get("cli_tool", "claude-code"),
+            model=wf.get("model", ""),
+            project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+            prompt=repair_prompt,
+            workspace_type=wf.get("workspace_type", "local"),
+            remote_machine_id=wf.get("remote_machine_id"),
+            permission_mode=wf.get("permission_mode", "auto-edit"),
+            allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
+            session_line="main",
+            timeout=int(wf.get("task_timeout") or DEFAULT_TASK_TIMEOUT),
+            milestone_id=repair_ms.get("milestone_id", ""),
+        )
+
+        if not hasattr(self._gh, "mock_calls"):
+            self._gh = None
+        gh = self._get_gh()
+
+        try:
+            current_branch = gh.get_current_branch()
+            if branch_name and current_branch != branch_name:
+                message = (
+                    f"CI repair changed workflow branch unexpectedly: expected {branch_name}, "
+                    f"actual {current_branch}"
+                )
+                self.repo.update_milestone(
+                    repair_ms.get("milestone_id", ""),
+                    {
+                        "status": "failed",
+                        "error_message": message,
+                    },
+                )
+                self._update_workflow({"status": "failed", "error_message": message})
+                return
+        except Exception as e:
+            logger.warning("Failed to verify branch after CI repair: %s", e)
+
+        if wf.get("user_feedback", "").strip():
+            self._update_workflow({"user_feedback": ""})
+
+        self._accumulate_tokens(repair_result)
+
+        commit_sha = ""
+        diff_stats = {}
+        push_error = ""
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+        sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
+
+        if not sha_changed:
+            try:
+                if gh.has_uncommitted_changes():
+                    gh.git_add_all()
+                    gh.git_commit(
+                        f"auto: ci repair (attempt {attempt})",
+                        no_verify=True,
+                    )
+                    commit_sha = gh.get_current_commit()
+                    sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
+            except Exception as e:
+                logger.warning("CI repair auto-commit failed: %s", e)
+
+        if sha_changed:
+            try:
+                gh.git_push(branch=branch_name or None)
+            except Exception as e:
+                push_error = str(e)
+                logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
+
+        try:
+            diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
+        except Exception:
+            pass
+
+        salvaged = (not repair_result.success) and sha_changed and not push_error
+        summary = self._build_dev_result_summary(
+            self._artifact_text(repair_result),
+            diff_stats,
+            commit_sha,
+            repair_result.success or salvaged,
+        )
+
+        milestone_updates = {
+            "status": "completed" if (repair_result.success or salvaged) else "failed",
+            "session_id": repair_result.session_id,
+            "commit_shas": json.dumps([commit_sha] if commit_sha else []),
+            "diff_stats": json.dumps(diff_stats),
+            "result_summary": summary,
+            "tldr": self._artifact_tldr(repair_result),
+            "error_message": "",
+        }
+
+        if push_error:
+            message = f"CI repair failed to push branch '{branch_name}': {push_error}"
+            milestone_updates["status"] = "failed"
+            milestone_updates["error_message"] = message
+            self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        if not sha_changed:
+            message = "CI repair failed: agent produced no code changes"
+            milestone_updates["status"] = "failed"
+            milestone_updates["error_message"] = message
+            self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        if not repair_result.success and not salvaged:
+            message = f"CI repair failed: {repair_result.error}"
+            milestone_updates["status"] = "failed"
+            milestone_updates["error_message"] = message
+            self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+        self._update_workflow({"current_phase": "merge", "status": "merging", "error_message": ""})
+
+        repair_comment = (
+            f"## 🔧 CI Repair Attempt {attempt}\n\n"
+            f"- PR: #{pr_number}\n"
+            f"- Branch: `{branch_name}`\n"
+        )
+        if commit_sha:
+            repair_comment += f"- Commit: `{commit_sha[:8]}`\n"
+        repair_comment += "\n已推送修复提交，等待 GitHub CI 重新运行。\n"
+        if summary:
+            repair_comment += f"\n### 修复摘要\n{summary}\n"
+        self._post_github_comment(gh, pr_number, repair_comment, is_pr=True, context="ci-repair")
 
     @staticmethod
     def _clean_agent_text(text: str) -> str:
@@ -1506,20 +1694,36 @@ class AutonomousOrchestrator:
             time.sleep(CI_POLL_INTERVAL)
 
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
-        """Route merge-phase CI failures back into a new development round."""
+        """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
         previous_attempts = int(wf.get("ci_repair_attempts", 0) or 0)
         next_attempt = previous_attempts + 1
         signature = self._ci_failure_signature(failed_checks)
         previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
+        previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
         failure_names = ", ".join(
             check.get("name") or "unknown"
             for check in failed_checks
             if check.get("bucket") == "fail"
         )
         preferred_worktree_path = self._get_preferred_worktree_path(wf)
+        gh = self._get_gh()
+        current_head_sha = ""
+        try:
+            current_head_sha = gh.get_pr_head_sha(pr_number)
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve PR head SHA for CI repair on PR #%s: %s", pr_number, e
+            )
 
-        if previous_signature and signature and previous_signature == signature:
+        if (
+            previous_signature
+            and signature
+            and previous_signature == signature
+            and previous_head_sha
+            and current_head_sha
+            and previous_head_sha != current_head_sha
+        ):
             message = f"PR #{pr_number} CI 失败在自动修复后仍未变化: {failure_names or signature}"
             self._create_milestone(
                 phase="merge",
@@ -1548,36 +1752,31 @@ class AutonomousOrchestrator:
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
-        next_dev_round = dev_round + 1
-        context = self._build_ci_repair_context(wf, self._get_gh(), pr_number, failed_checks)
+        context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)
         self._create_milestone(
             phase="merge",
             dev_round=dev_round,
             milestone_type="ci_repair_started",
             status="completed",
-            title=f"CI failed for PR #{pr_number}, restarting development round {next_dev_round}",
+            title=f"CI failed for PR #{pr_number}, starting merge repair attempt {next_attempt}",
             result_summary=context[:200],
         )
         updates = {
-            "current_phase": "development",
-            "status": "developing",
-            "current_round": 0,
-            "dev_round": next_dev_round,
+            "current_phase": "merge",
+            "status": "merging",
             "agent_pid": None,
             "agent_session_id": "",
-            "test_retries": 0,
-            "skip_retries": 0,
-            "dev_retries_on_test_fail": 0,
             "error_message": "",
             "ci_repair_attempts": next_attempt,
             "ci_repair_context": context,
             "last_ci_failure_signature": signature,
+            "last_ci_failure_head_sha": current_head_sha,
         }
         if wf.get("branch_strategy") == "worktree" and preferred_worktree_path:
             updates["preferred_worktree_path"] = preferred_worktree_path
             updates["worktree_path"] = preferred_worktree_path
         self._update_workflow(updates)
-        self._emit("phase_change", {"phase": "development"})
+        self._run_merge_ci_repair(self.workflow or wf, gh, pr_number, failed_checks)
 
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
