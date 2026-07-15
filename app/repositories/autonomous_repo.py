@@ -149,13 +149,15 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                     SELECT workflow_id, agent_pid, status
                     FROM autonomous_workflows
                     WHERE agent_pid IS NOT NULL
                       AND agent_pid > 0
                       AND status IN ({placeholders})
-                    """),
+                    """
+                ),
                 list(active_statuses),
             )
             cols = [d[0] for d in cursor.description]
@@ -443,12 +445,14 @@ class AutonomousWorkflowRepository:
 
     def get_active_workflows(self) -> list:
         """Get all workflows that need processing."""
-        return self.db.fetch_all("""
+        return self.db.fetch_all(
+            """
             SELECT * FROM autonomous_workflows
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
                              'pr_review', 'reporting', 'waiting', 'merging')
             ORDER BY created_at ASC
-            """)
+            """
+        )
 
     def get_paused_workflows(self, quota_prefix: str = "") -> list:
         """Get paused workflows, optionally filtered to a quota-pause reason.
@@ -466,19 +470,23 @@ class AutonomousWorkflowRepository:
                 """,
                 (f"{escape_like(quota_prefix)}%",),
             )
-        return self.db.fetch_all("""
+        return self.db.fetch_all(
+            """
             SELECT * FROM autonomous_workflows
             WHERE status = 'paused'
             ORDER BY created_at ASC
-            """)
+            """
+        )
 
     def get_queued_workflows(self) -> list:
         """Get workflows that are queued behind another workflow in the same batch."""
-        return self.db.fetch_all("""
+        return self.db.fetch_all(
+            """
             SELECT * FROM autonomous_workflows
             WHERE status = 'queued' AND batch_id IS NOT NULL AND batch_id != ''
             ORDER BY created_at ASC, batch_order ASC
-            """)
+            """
+        )
 
     def list_batch_workflows(self, batch_id: str) -> list:
         """List all workflows in a batch ordered by configured sequence."""
@@ -498,13 +506,15 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     UPDATE autonomous_workflows
                     SET status = 'cancelled', completed_at = ?, updated_at = ?
                     WHERE batch_id = ?
                       AND workflow_id != ?
                       AND status = 'queued'
-                    """),
+                    """
+                ),
                 (now, now, batch_id, exclude_workflow_id),
             )
             rowcount = cursor.rowcount
@@ -616,7 +626,8 @@ class AutonomousWorkflowRepository:
         milestones, matching the request count shown in the session list sidebar.
         """
         self.db.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 UPDATE autonomous_workflows SET
                     total_requests = (
                         SELECT COALESCE(SUM(cnt), 0) FROM (
@@ -630,7 +641,8 @@ class AutonomousWorkflowRepository:
                     ),
                     updated_at = ?
                 WHERE workflow_id = ?
-                """),
+                """
+            ),
             (
                 workflow_id,
                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
@@ -647,7 +659,8 @@ class AutonomousWorkflowRepository:
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.db.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 UPDATE autonomous_workflows SET
                     total_tokens = COALESCE((
                         SELECT SUM(COALESCE(phase_total_tokens, 0))
@@ -667,7 +680,8 @@ class AutonomousWorkflowRepository:
                     ), 0),
                     updated_at = ?
                 WHERE workflow_id = ?
-                """),
+                """
+            ),
             (workflow_id, workflow_id, workflow_id, workflow_id, now, workflow_id),
         )
 
@@ -1123,12 +1137,14 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql("""
+                _db_mod.adapt_sql(
+                    """
                     UPDATE autonomous_workflows
                     SET locked_at = ?, locked_by = ?
                     WHERE workflow_id = ?
                       AND (locked_at IS NULL OR locked_at < ?)
-                    """),
+                    """
+                ),
                 (now, owner, workflow_id, cutoff),
             )
             rowcount = cursor.rowcount
@@ -1145,11 +1161,13 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql("""
+                _db_mod.adapt_sql(
+                    """
                     UPDATE autonomous_workflows
                     SET locked_at = NULL, locked_by = NULL
                     WHERE workflow_id = ? AND locked_by = ?
-                    """),
+                    """
+                ),
                 (workflow_id, owner),
             )
             conn.commit()
