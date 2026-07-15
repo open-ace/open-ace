@@ -2,9 +2,12 @@
 
 import importlib
 import json
+import os
 import sqlite3
 import sys
+import time
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +23,23 @@ def _write_jsonl(path: Path, entries: list[dict]) -> Path:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     return path
+
+
+@contextmanager
+def _temporary_timezone(tz_name: str):
+    previous = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = tz_name
+        if hasattr(time, "tzset"):
+            time.tzset()
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        if hasattr(time, "tzset"):
+            time.tzset()
 
 
 def test_process_jsonl_file_keeps_provider_total_and_attributes_turn_to_user(tmp_path):
@@ -111,130 +131,131 @@ def test_process_jsonl_file_keeps_provider_total_and_attributes_turn_to_user(tmp
 
 
 def test_process_jsonl_file_splits_turns_by_local_date_and_counts_requests_once(tmp_path):
-    jsonl = _write_jsonl(
-        tmp_path / "rollout-test-codex-multi.jsonl",
-        [
-            {
-                "timestamp": "2026-07-14T15:55:00Z",
-                "type": "event_msg",
-                "payload": {"type": "task_started", "turn_id": "turn-1"},
-            },
-            {
-                "timestamp": "2026-07-14T15:55:01Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "first"}],
+    with _temporary_timezone("Asia/Shanghai"):
+        jsonl = _write_jsonl(
+            tmp_path / "rollout-test-codex-multi.jsonl",
+            [
+                {
+                    "timestamp": "2026-07-14T15:55:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-1"},
                 },
-            },
-            {
-                "timestamp": "2026-07-14T15:55:02Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "a1"}],
-                },
-            },
-            {
-                "timestamp": "2026-07-14T15:55:03Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "a2"}],
-                },
-            },
-            {
-                "timestamp": "2026-07-14T15:55:04Z",
-                "type": "event_msg",
-                "payload": {
-                    "type": "token_count",
-                    "info": {
-                        "last_token_usage": {
-                            "input_tokens": 120,
-                            "cached_input_tokens": 80,
-                            "output_tokens": 20,
-                            "reasoning_output_tokens": 5,
-                            "total_tokens": 140,
-                        }
+                {
+                    "timestamp": "2026-07-14T15:55:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "first"}],
                     },
                 },
-            },
-            {
-                "timestamp": "2026-07-14T15:55:05Z",
-                "type": "event_msg",
-                "payload": {"type": "task_complete", "turn_id": "turn-1"},
-            },
-            {
-                "timestamp": "2026-07-14T16:05:00Z",
-                "type": "event_msg",
-                "payload": {"type": "task_started", "turn_id": "turn-2"},
-            },
-            {
-                "timestamp": "2026-07-14T16:05:01Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "second"}],
-                },
-            },
-            {
-                "timestamp": "2026-07-14T16:05:02Z",
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "b1"}],
-                },
-            },
-            {
-                "timestamp": "2026-07-14T16:05:03Z",
-                "type": "event_msg",
-                "payload": {
-                    "type": "token_count",
-                    "info": {
-                        "last_token_usage": {
-                            "input_tokens": 230,
-                            "cached_input_tokens": 10,
-                            "output_tokens": 20,
-                            "reasoning_output_tokens": 3,
-                            "total_tokens": 250,
-                        }
+                {
+                    "timestamp": "2026-07-14T15:55:02Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "a1"}],
                     },
                 },
-            },
-            {
-                "timestamp": "2026-07-14T16:05:04Z",
-                "type": "event_msg",
-                "payload": {"type": "task_complete", "turn_id": "turn-2"},
-            },
-        ],
-    )
+                {
+                    "timestamp": "2026-07-14T15:55:03Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "a2"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-07-14T15:55:04Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 120,
+                                "cached_input_tokens": 80,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 5,
+                                "total_tokens": 140,
+                            }
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-14T15:55:05Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete", "turn_id": "turn-1"},
+                },
+                {
+                    "timestamp": "2026-07-14T16:05:00Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": "turn-2"},
+                },
+                {
+                    "timestamp": "2026-07-14T16:05:01Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "second"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-07-14T16:05:02Z",
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "b1"}],
+                    },
+                },
+                {
+                    "timestamp": "2026-07-14T16:05:03Z",
+                    "type": "event_msg",
+                    "payload": {
+                        "type": "token_count",
+                        "info": {
+                            "last_token_usage": {
+                                "input_tokens": 230,
+                                "cached_input_tokens": 10,
+                                "output_tokens": 20,
+                                "reasoning_output_tokens": 3,
+                                "total_tokens": 250,
+                            }
+                        },
+                    },
+                },
+                {
+                    "timestamp": "2026-07-14T16:05:04Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete", "turn_id": "turn-2"},
+                },
+            ],
+        )
 
-    daily, messages, _session_meta, session_tokens = process_jsonl_file(
-        jsonl, "localhost", "rhuang"
-    )
+        daily, messages, _session_meta, session_tokens = process_jsonl_file(
+            jsonl, "localhost", "rhuang"
+        )
 
-    assert daily["2026-07-14"]["prompt_tokens"] == 40
-    assert daily["2026-07-14"]["candidates_tokens"] == 20
-    assert daily["2026-07-14"]["cached_tokens"] == 80
-    assert daily["2026-07-14"]["total_tokens"] == 140
-    assert daily["2026-07-14"]["request_count"] == 1
+        assert daily["2026-07-14"]["prompt_tokens"] == 40
+        assert daily["2026-07-14"]["candidates_tokens"] == 20
+        assert daily["2026-07-14"]["cached_tokens"] == 80
+        assert daily["2026-07-14"]["total_tokens"] == 140
+        assert daily["2026-07-14"]["request_count"] == 1
 
-    assert daily["2026-07-15"]["prompt_tokens"] == 220
-    assert daily["2026-07-15"]["candidates_tokens"] == 20
-    assert daily["2026-07-15"]["cached_tokens"] == 10
-    assert daily["2026-07-15"]["total_tokens"] == 250
-    assert daily["2026-07-15"]["request_count"] == 1
+        assert daily["2026-07-15"]["prompt_tokens"] == 220
+        assert daily["2026-07-15"]["candidates_tokens"] == 20
+        assert daily["2026-07-15"]["cached_tokens"] == 10
+        assert daily["2026-07-15"]["total_tokens"] == 250
+        assert daily["2026-07-15"]["request_count"] == 1
 
-    user_messages = [msg for msg in messages if msg["role"] == "user"]
-    assert [msg["tokens_used"] for msg in user_messages] == [140, 250]
-    assert session_tokens["total_tokens"] == 390
-    assert session_tokens["input_tokens"] == 260
-    assert session_tokens["output_tokens"] == 40
+        user_messages = [msg for msg in messages if msg["role"] == "user"]
+        assert [msg["tokens_used"] for msg in user_messages] == [140, 250]
+        assert session_tokens["total_tokens"] == 390
+        assert session_tokens["input_tokens"] == 260
+        assert session_tokens["output_tokens"] == 40
 
 
 def test_reimport_replaces_stale_codex_session_rows(monkeypatch, tmp_path):

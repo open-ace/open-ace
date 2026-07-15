@@ -286,9 +286,7 @@ def process_zcode_session(
     # Token totals are authoritative session-level values from the turn_usage
     # table (session.total_input_tokens / total_output_tokens); per-message
     # ``data.tokens`` is sparse, so we do NOT sum it (see review feedback —
-    # that path under-counts). Tokens are attributed to the session's dominant
-    # date below and injected into the first assistant message for
-    # agent_sessions (codex pattern).
+    # that path under-counts). Tokens are attributed by turn/date below.
     session_dates: set[str] = set()
     for msg in session.messages:
         ts = msg.get("timestamp")
@@ -317,8 +315,8 @@ def process_zcode_session(
                     {"session_id": session_id, "role": role, "model": model},
                     ensure_ascii=False,
                 ),
-                # Per-message tokens left at 0; session totals are injected
-                # into the first assistant message below.
+                # Per-message tokens default to 0; matched turn_usage rows will
+                # overwrite the initiating user message below.
                 "tokens_used": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -342,15 +340,17 @@ def process_zcode_session(
     # session-level assistant row.
     message_by_id = {msg.get("message_id"): msg for msg in messages}
     turn_rows = _get_turn_usage_rows(session_id, db_path)
-    turn_assigned = False
+    matched_turns = 0
+    unmatched_turns: list[dict[str, Any]] = []
     for turn in turn_rows:
         target = message_by_id.get(turn["user_message_id"])
         if target is None:
+            unmatched_turns.append(turn)
             continue
         target["tokens_used"] = turn["tokens_used"]
         target["input_tokens"] = turn["input_tokens"]
         target["output_tokens"] = turn["output_tokens"]
-        turn_assigned = True
+        matched_turns += 1
 
     # Attribute authoritative token totals by each turn's local date so
     # long-lived sessions do not dump an entire day's usage onto the session's
@@ -375,10 +375,29 @@ def process_zcode_session(
     # message on its own date in the loop above (matches fetch_codex.py), so a
     # session reports its real assistant-turn count rather than collapsing to 1.
 
+    if unmatched_turns:
+        print(
+            "fetch_zcode: turn_usage rows could not be matched to a user message for "
+            f"session={session_id} ({matched_turns}/{len(turn_rows)} matched, "
+            f"{len(unmatched_turns)} unmatched). daily_usage remains authoritative, "
+            "but message/session attribution may be incomplete."
+        )
+
     # Fallback for older source DBs where turn_usage lacks user_message_id rows:
     # keep the previous "inject once" behavior so agent_sessions still sees the
     # full session token total.
-    if total_tokens > 0 and not turn_assigned:
+    if total_tokens > 0 and matched_turns == 0:
+        if turn_rows:
+            print(
+                "fetch_zcode: falling back to session-level assistant token attribution for "
+                f"session={session_id} because 0/{len(turn_rows)} turn_usage rows matched "
+                "a user message."
+            )
+        else:
+            print(
+                "fetch_zcode: falling back to session-level assistant token attribution for "
+                f"session={session_id} because no turn_usage rows were found."
+            )
         for msg in messages:
             if msg.get("role") == "assistant":
                 msg["tokens_used"] = total_tokens

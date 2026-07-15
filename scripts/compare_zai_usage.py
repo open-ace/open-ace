@@ -18,17 +18,14 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 import sqlite3
 import sys
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -227,31 +224,37 @@ def print_totals(label: str, totals: Totals) -> None:
     print(f"  Tokens+cache:   {_fmt_int(totals.tokens + totals.cache_tokens)}")
 
 
+def _default_end_date() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d")
+
+
+def _default_start_date() -> str:
+    return (datetime.now().astimezone() - timedelta(days=6)).strftime("%Y-%m-%d")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start-date", default="2026-07-09", help="Start date YYYY-MM-DD")
-    parser.add_argument("--end-date", default="2026-07-15", help="End date YYYY-MM-DD")
+    parser.add_argument("--start-date", default=_default_start_date(), help="Start date YYYY-MM-DD")
+    parser.add_argument("--end-date", default=_default_end_date(), help="End date YYYY-MM-DD")
     parser.add_argument(
         "--zai-total",
         type=int,
-        default=170051875,
-        help="Known z.ai total tokens for the range",
+        help="Optional known z.ai total tokens for the range",
     )
     parser.add_argument(
         "--zai-hour",
-        default="2026-07-15 15:00",
-        help="Known local-hour bucket from z.ai chart",
+        help="Optional known local-hour bucket from a z.ai chart (YYYY-MM-DD HH:00)",
     )
     parser.add_argument(
         "--zai-hour-total",
         type=int,
-        default=28618223,
-        help="Known z.ai token total for --zai-hour",
+        help="Optional known z.ai token total for --zai-hour",
     )
     args = parser.parse_args()
 
     print(f"Range: {args.start_date} -> {args.end_date}")
-    print(f"z.ai total: {_fmt_int(args.zai_total)}")
+    if args.zai_total is not None:
+        print(f"z.ai total: {_fmt_int(args.zai_total)}")
     print()
 
     claude_db = load_claude_daily_usage(args.start_date, args.end_date)
@@ -272,25 +275,26 @@ def main() -> int:
     print_totals("ZCode (all source sessions)", zcode_all_scope)
     print()
 
-    for label, zcode in [
-        ("Open ACE ZCode scope", zcode_openace_scope),
-        ("All-source ZCode scope", zcode_all_scope),
-    ]:
-        base_total = zcode.tokens + claude_src.tokens
-        cache_total = claude_src.cache_tokens
-        multiplier = implied_cache_multiplier(args.zai_total, base_total, cache_total)
-        print(label)
-        print(f"  Base total without Claude cache: {_fmt_int(base_total)}")
-        print(f"  Claude cache to reconcile:       {_fmt_int(cache_total)}")
-        if multiplier is None:
-            print("  Implied Claude cache multiplier: n/a")
-        else:
-            print(f"  Implied Claude cache multiplier: {_fmt_float(multiplier)}")
-            reconciled = base_total + int(round(cache_total * multiplier))
-            print(f"  Reconciled total at multiplier:  {_fmt_int(reconciled)}")
-        print()
+    if args.zai_total is not None:
+        for label, zcode in [
+            ("Open ACE ZCode scope", zcode_openace_scope),
+            ("All-source ZCode scope", zcode_all_scope),
+        ]:
+            base_total = zcode.tokens + claude_src.tokens
+            cache_total = claude_src.cache_tokens
+            multiplier = implied_cache_multiplier(args.zai_total, base_total, cache_total)
+            print(label)
+            print(f"  Base total without Claude cache: {_fmt_int(base_total)}")
+            print(f"  Claude cache to reconcile:       {_fmt_int(cache_total)}")
+            if multiplier is None:
+                print("  Implied Claude cache multiplier: n/a")
+            else:
+                print(f"  Implied Claude cache multiplier: {_fmt_float(multiplier)}")
+                reconciled = base_total + int(round(cache_total * multiplier))
+                print(f"  Reconciled total at multiplier:  {_fmt_int(reconciled)}")
+            print()
 
-    if args.zai_hour and args.zai_hour_total:
+    if args.zai_hour and args.zai_hour_total is not None:
         print(f"Hourly check: {args.zai_hour} -> z.ai {_fmt_int(args.zai_hour_total)}")
         claude_hour = load_claude_source_usage(
             args.zai_hour[:10], args.zai_hour[:10], hour_filter=args.zai_hour

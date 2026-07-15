@@ -827,3 +827,97 @@ def test_fetch_and_save_clears_stale_assistant_tokens(fetch_mod, tmp_path, monke
         ("m1", "user", 225, 200, 25),
         ("m2", "assistant", 0, 0, 0),
     ]
+
+
+def test_process_zcode_session_warns_on_partial_turn_match(fetch_mod, tmp_path, capsys):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_partial_warn"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db, sid, "turn_1", 200, 25, user_message_id="m1", started_at=now_ms, cache_read_t=75
+    )
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_2",
+        100,
+        10,
+        user_message_id="missing-user",
+        started_at=now_ms + 60000,
+        cache_read_t=25,
+    )
+
+    daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, hostname="localhost")
+    out = capsys.readouterr().out
+
+    assert "turn_usage rows could not be matched" in out
+    assert f"session={sid}" in out
+    user_row = next(msg for msg in messages if msg["message_id"] == "m1")
+    assistant_row = next(msg for msg in messages if msg["message_id"] == "m2")
+    assert user_row["tokens_used"] == 225
+    assert assistant_row["tokens_used"] == 0
+    msg_date = fetch_mod._ms_to_date(now_ms)
+    assert daily[msg_date]["total_tokens"] == 335
+
+
+def test_process_zcode_session_warns_when_falling_back_to_assistant(fetch_mod, tmp_path, capsys):
+    src_db = tmp_path / "source.sqlite"
+    _build_zcode_source_db(src_db)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    sid = "sess_fallback_warn"
+    conn = sqlite3.connect(str(src_db))
+    conn.execute(
+        "INSERT INTO session (id, directory, time_created, time_updated, time_archived, task_type, title) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sid, "/repo", now_ms, now_ms, None, "interactive", "t"),
+    )
+    conn.commit()
+    conn.close()
+    _insert_zcode_message(
+        src_db, "m1", sid, now_ms, {"role": "user"}, parts=[{"type": "text", "text": "hello"}]
+    )
+    _insert_zcode_message(
+        src_db,
+        "m2",
+        sid,
+        now_ms + 1,
+        {"role": "assistant", "modelID": "GLM-5.2"},
+        parts=[{"type": "text", "text": "world"}],
+    )
+    _insert_turn_usage(
+        src_db,
+        sid,
+        "turn_1",
+        200,
+        25,
+        user_message_id="missing-user",
+        started_at=now_ms,
+        cache_read_t=75,
+    )
+
+    _daily, messages, _project = fetch_mod.process_zcode_session(sid, src_db, hostname="localhost")
+    out = capsys.readouterr().out
+
+    assert "falling back to session-level assistant token attribution" in out
+    assistant_row = next(msg for msg in messages if msg["message_id"] == "m2")
+    assert assistant_row["tokens_used"] == 225
