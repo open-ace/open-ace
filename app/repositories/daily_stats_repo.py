@@ -310,8 +310,10 @@ class DailyStatsRepository:
             """
         else:
             # SQLite: use subquery for user_id resolution
-            # Issue #1573: Use sender_name in GROUP BY to ensure each unresolved
-            # sender counts as unique user. Hash is computed in application layer.
+            # Issue #1573: SQLite doesn't support SQL-level MD5 conversion like PostgreSQL.
+            # We must include sender_name in GROUP BY to preserve per-sender data,
+            # then compute hash in application layer for each unresolved sender.
+            # This ensures each unresolved sender appears as a distinct user in rankings.
             query = f"""
                 SELECT
                     COALESCE(ds.user_id,

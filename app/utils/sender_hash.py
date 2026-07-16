@@ -38,13 +38,13 @@ def compute_sender_hash(sender_name: str, max_length: int = MAX_SENDER_LENGTH) -
 
     Examples:
         >>> compute_sender_hash("alice")
-        -1234567890123456789  # Deterministic negative value
+        -7171105761220348917  # Deterministic negative value
 
         >>> compute_sender_hash("")
         -2  # Special marker for empty strings
 
         >>> compute_sender_hash("test")
-        -3632233995294317361  # Same as PostgreSQL: -ABS(('0x' || LEFT(MD5('test'), 16))::BIT(64)::BIGINT)
+        -3632233995294317361  # Matches PostgreSQL
 
     Note:
         The hash algorithm matches PostgreSQL's:
