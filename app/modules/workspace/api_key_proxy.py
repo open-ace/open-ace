@@ -1346,35 +1346,6 @@ class APIKeyProxyService:
         return secrets.token_hex(32)
 
 
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for API key proxy tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS api_key_store (
-            id {id_type},
-            tenant_id INTEGER,
-            provider TEXT NOT NULL,
-            key_name TEXT NOT NULL,
-            encrypted_key TEXT NOT NULL,
-            key_hash TEXT NOT NULL,
-            base_url TEXT,
-            is_active {bool_true},
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            cli_tools TEXT,
-            cli_settings TEXT,
-            scope TEXT DEFAULT 'remote',
-            priority INTEGER DEFAULT 0,
-            weight INTEGER DEFAULT 100,
-            UNIQUE(tenant_id, provider, key_name)
-        )
-        """,
-    ]
-
-
 # Module-level singleton
 _instance: Optional[APIKeyProxyService] = None
 _instance_lock = threading.Lock()

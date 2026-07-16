@@ -67,7 +67,8 @@ def isolated_stack(tmp_path, monkeypatch):
     db_path = str(tmp_path / "stack.db")
 
     from app.modules.workspace import api_key_proxy as akp
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+    from app.repositories.schema_init import load_schema_from_file
 
     monkeypatch.setattr(akp, "DB_PATH", db_path, raising=False)
 
@@ -75,18 +76,7 @@ def isolated_stack(tmp_path, monkeypatch):
     proxy._ensure_tables()
 
     manager = RemoteAgentManager(db_path=db_path)
-    with manager.db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception as exc:
-                # Tolerate idempotent re-runs (table/column already exists)
-                # but surface anything that would mask real schema drift.
-                msg = str(exc).lower()
-                if "already exists" not in msg and "duplicate column" not in msg:
-                    raise
-        conn.commit()
+    load_schema_from_file(db_url=manager.db.db_url, dialect="sqlite")
 
     return proxy, manager, db_path
 

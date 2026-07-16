@@ -176,10 +176,9 @@ class TestSSEAuthRevalidation(unittest.TestCase):
                     "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
                 )
-                from app.modules.workspace.autonomous import get_ddl_statements
+                from app.repositories.schema_init import load_schema_from_file
 
-                for sql in get_ddl_statements():
-                    cursor.execute(sql)
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
         finally:
             pass

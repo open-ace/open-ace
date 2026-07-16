@@ -607,41 +607,6 @@ class AuditLogger:
             raise ValueError(f"Unsupported format: {format}")
 
 
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for audit_logs table.
-
-    This function is called by schema_init.ensure_all_tables() at app startup
-    to ensure the audit_logs table exists, regardless of whether Alembic
-    migrations have been run.
-    """
-    from app.repositories.database import is_postgresql
-
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""CREATE TABLE IF NOT EXISTS audit_logs (
-            id {id_type},
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            username TEXT,
-            action TEXT NOT NULL,
-            severity TEXT DEFAULT 'info',
-            resource_type TEXT,
-            resource_id TEXT,
-            details TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            session_id TEXT,
-            success INTEGER DEFAULT 1,
-            error_message TEXT
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs (user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_logs (resource_type, resource_id)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_severity ON audit_logs (severity)",
-    ]
-
-
 def get_action_categories() -> dict[str, dict[str, Any]]:
     """Return audit action types organized by category.
 

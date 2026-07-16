@@ -9,7 +9,6 @@ from app.services.permission_service import (
     Permission,
     PermissionService,
     Role,
-    get_ddl_statements,
 )
 
 
@@ -707,34 +706,6 @@ class TestPermissionServiceGetPermissionAuditLog:
 
         result = svc.get_permission_audit_log(user_id=999)
         assert result == []
-
-
-class TestGetDDLStatements:
-    """Test get_ddl_statements function."""
-
-    @patch("app.repositories.database.is_postgresql", return_value=False)
-    def test_ddl_for_sqlite(self, mock_pg):
-        statements = get_ddl_statements()
-        assert len(statements) == 4
-        # Check SQLite syntax
-        for stmt in statements[:2]:
-            assert "INTEGER PRIMARY KEY AUTOINCREMENT" in stmt
-        assert "idx_user_permissions_user" in statements[2]
-        assert "idx_role_permissions_role" in statements[3]
-
-    @patch("app.repositories.database.is_postgresql", return_value=True)
-    def test_ddl_for_postgresql(self, mock_pg):
-        statements = get_ddl_statements()
-        assert len(statements) == 4
-        for stmt in statements[:2]:
-            assert "SERIAL PRIMARY KEY" in stmt
-
-    def test_ddl_creates_required_tables(self):
-        with patch("app.repositories.database.is_postgresql", return_value=False):
-            statements = get_ddl_statements()
-            table_sql = " ".join(statements)
-            assert "user_permissions" in table_sql
-            assert "role_permissions" in table_sql
 
 
 class TestPermissionServiceEnsureTables:

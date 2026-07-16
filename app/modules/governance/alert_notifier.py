@@ -118,7 +118,6 @@ class AlertNotifier:
         self._user_clients: dict[int, set[str]] = {}  # user_id -> set of client_ids
         self._email_config: dict[str, Any] = {}
         self._webhooks: dict[str, str] = {}
-        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""

@@ -14,15 +14,14 @@ import pytest
 
 import app.repositories.database as db_mod
 from app.modules.policy import evaluator as evmod
-from app.modules.policy import get_ddl_statements
 from app.modules.policy.evaluator import NullPolicyEvaluator, PolicyEvaluator
 from app.modules.policy.repo import PolicyRepository
 from app.modules.workspace.remote_session_manager import RemoteSessionManager
 from app.repositories.database import Database
+from app.repositories.schema_init import load_schema_from_file
 
 _PATCH_TARGETS = (
     "app.modules.policy.repo.is_postgresql",
-    "app.modules.policy.is_postgresql",
 )
 
 
@@ -42,14 +41,7 @@ def policy_db(tmp_path):
         stack.enter_context(patch.object(db_mod, "is_postgresql", return_value=False))
         for target in _PATCH_TARGETS:
             stack.enter_context(_make_patch(target, False))
-        conn = db.get_connection()
-        try:
-            cur = conn.cursor()
-            for sql in get_ddl_statements():
-                cur.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
+        load_schema_from_file(db_url=db.db_url, dialect="sqlite")
         yield db
 
 
