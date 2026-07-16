@@ -143,6 +143,9 @@ class WorkspaceConfig:
     cleanup_interval_minutes: int = 5
     token_secret: str = ""
     webui_path: str = ""  # Path to qwen-code-webui project directory
+    # Optional explicit URL for the webui to reach the LLM proxy (e.g. behind an
+    # HTTPS reverse proxy). When set, :web_port is NOT appended. See issue #1730.
+    webui_callback_url: str = ""
 
 
 class WebUIManager:
@@ -221,6 +224,7 @@ class WebUIManager:
                 cleanup_interval_minutes=workspace.get("cleanup_interval_minutes", 5),
                 token_secret=workspace.get("token_secret", ""),
                 webui_path=workspace.get("webui_path", ""),
+                webui_callback_url=(workspace.get("webui_callback_url", "") or "").strip(),
             )
         except Exception as e:
             logger.error(f"Error loading config: {e}")
@@ -755,10 +759,22 @@ class WebUIManager:
         # Build openace_api_url from base_url (from request host_url)
         # WebUI process needs to connect to main service's LLM proxy API
         # Use base_url (user's actual access IP) instead of config.url (container-detected IP)
-        openace_api_url = self._remove_port_from_url(base_url)
-        server_config = self._load_server_config()
-        server_port = server_config.get("web_port", 19888)
-        openace_api_url = f"{openace_api_url}:{server_port}"
+        #
+        # Issue #1730: When open-ace sits behind an HTTPS reverse proxy, the backend
+        # listens on plain HTTP (web_port) while users access it via https://<domain>.
+        # The default logic below would inject https://<domain>:<web_port> into the
+        # webui, but <web_port> is not TLS-terminated (TLS ends at the proxy on 443),
+        # causing Node fetch to fail with "fetch failed". When ``webui_callback_url``
+        # is configured, use it verbatim (already includes the correct scheme and,
+        # if needed, the proxy port) and do NOT append :web_port.
+        webui_callback_url = (getattr(self.config, "webui_callback_url", "") or "").strip()
+        if webui_callback_url:
+            openace_api_url = webui_callback_url.rstrip("/")
+        else:
+            openace_api_url = self._remove_port_from_url(base_url)
+            server_config = self._load_server_config()
+            server_port = server_config.get("web_port", 19888)
+            openace_api_url = f"{openace_api_url}:{server_port}"
 
         # Build child environment first (needed for sudo env passing)
         child_env = os.environ.copy()
