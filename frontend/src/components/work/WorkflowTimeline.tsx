@@ -370,6 +370,17 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const isWorkflowActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const activities = useWorkflowActivity(workflow.workflow_id, isWorkflowActive);
 
+  // Heartbeat auto-update: trigger re-render every 10s to update heartbeat status
+  // This ensures the "X seconds ago" display and stale/active status updates
+  const [, setHeartbeatTick] = useState(0);
+  useEffect(() => {
+    if (!isWorkflowActive) return;
+    const interval = setInterval(() => {
+      setHeartbeatTick((prev) => prev + 1);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [isWorkflowActive]);
+
   const milestones = useMemo(() => timelineData?.milestones ?? [], [timelineData?.milestones]);
 
   // Latest (highest dev_round, non-empty content) finalized plan / PR review summary.
