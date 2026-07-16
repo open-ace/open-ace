@@ -648,6 +648,46 @@
   margin-top: 10px;
 }
 
+/* Issue #1531: Live activity summary & heartbeat styles */
+.timeline-milestone-live-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 50%, var(--bg-primary) 50%);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.timeline-live-heartbeat {
+  font-size: 0.7rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.timeline-live-summary-text {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.timeline-live-summary-time {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .timeline-milestone-actions {
   display: flex;
   flex-wrap: wrap;
