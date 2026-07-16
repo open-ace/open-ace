@@ -16,7 +16,6 @@ from app.modules.workspace.run_timeline.recorder import (
     get_run_recorder,
 )
 
-
 __all__ = [
     "AgentRun",
     "RunEvent",

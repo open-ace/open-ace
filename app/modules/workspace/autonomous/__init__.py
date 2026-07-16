@@ -11,7 +11,6 @@ from app.modules.workspace.autonomous.models import (
     WorkflowMilestone,
 )
 
-
 __all__ = [
     "AutonomousWorkflow",
     "WorkflowMilestone",

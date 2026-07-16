@@ -30,7 +30,6 @@ from app.modules.workspace.model_gateway.planner import (
     reset_gateway_planner_for_tests,
 )
 
-
 __all__ = [
     "GatewayConfig",
     "GatewayPlan",

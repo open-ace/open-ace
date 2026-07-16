@@ -4,12 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.permission_service import (
-    DEFAULT_ROLES,
-    Permission,
-    PermissionService,
-    Role,
-)
+from app.services.permission_service import DEFAULT_ROLES, Permission, PermissionService, Role
 
 
 class TestPermissionEnum:

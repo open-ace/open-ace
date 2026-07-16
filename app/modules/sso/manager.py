@@ -23,7 +23,6 @@ from app.repositories.database import (
     Database,
     adapt_boolean_condition,
     adapt_boolean_value,
-    is_postgresql,
 )
 
 logger = logging.getLogger(__name__)

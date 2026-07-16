@@ -19,9 +19,7 @@ from app.modules.policy.repo import PolicyRepository
 from app.repositories.database import Database
 from app.repositories.schema_init import load_schema_from_file
 
-_PATCH_TARGETS = (
-    "app.modules.policy.repo.is_postgresql",
-)
+_PATCH_TARGETS = ("app.modules.policy.repo.is_postgresql",)
 
 
 @pytest.fixture
