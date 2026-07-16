@@ -243,52 +243,42 @@ class TestRetryCounterPersistence:
         ), "test milestone must not be marked 'skipped by agent'"
 
 
-# ── Legacy runtime DDL must include the new columns (#1476 review) ──────
+# ── Schema must include the retry columns (Issue #1277) ─────────────────────
 
 
-class TestLegacyDdlIncludesRetryColumns:
-    """The runtime ``get_ddl_statements()`` path (used by SQLite dev/test
-    setup) must create the three retry columns, otherwise
-    ``_update_workflow({"skip_retries": 1})`` fails with
-    ``OperationalError: no such column: skip_retries`` on fresh DBs that
-    bypass Alembic."""
+class TestSchemaIncludesRetryColumns:
+    """The authoritative schema.sql must include the retry columns so that
+    load_schema_from_file() creates them on fresh DBs, without relying on
+    per-module get_ddl_statements() shadow schema."""
 
-    def test_create_table_has_retry_columns(self):
-        from app.modules.workspace.autonomous import get_ddl_statements
+    def test_schema_has_retry_columns(self):
+        """Schema files must contain retry columns in autonomous_workflows table."""
+        from pathlib import Path
 
-        ddl = "\n".join(get_ddl_statements())
-        # The CREATE TABLE block must list all three columns so fresh DBs
-        # have them without relying on the ALTER TABLE fallback.
-        for col in ("test_retries", "skip_retries", "dev_retries_on_test_fail"):
-            assert col in ddl, f"{col} missing from get_ddl_statements()"
+        project_root = Path(__file__).resolve().parents[3]
+        schema_files = [
+            project_root / "schema" / "schema-sqlite.sql",
+            project_root / "schema" / "schema-postgres.sql",
+        ]
 
-    def test_alter_table_adds_retry_columns_for_existing_dbs(self):
-        from app.modules.workspace.autonomous import get_ddl_statements
-
-        alters = [s for s in get_ddl_statements() if s.strip().upper().startswith("ALTER TABLE")]
-        for col in ("test_retries", "skip_retries", "dev_retries_on_test_fail"):
-            assert any(col in a for a in alters), f"no ALTER TABLE adds {col} for existing DBs"
+        for schema_file in schema_files:
+            content = schema_file.read_text()
+            # The CREATE TABLE autonomous_workflows block must list all three columns
+            for col in ("test_retries", "skip_retries", "dev_retries_on_test_fail"):
+                assert col in content, f"{col} missing from {schema_file.name}"
 
     def test_update_skip_retries_succeeds_on_fresh_sqlite(self, tmp_path):
-        """End-to-end: init a fresh SQLite DB via get_ddl_statements(), then
+        """End-to-end: init a fresh SQLite DB via load_schema_from_file(), then
         update_workflow with skip_retries must not raise."""
         import sqlite3
 
-        from app.modules.workspace.autonomous import get_ddl_statements
         from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+        from app.repositories.schema_init import load_schema_from_file
 
         db_path = str(tmp_path / "test.db")
-        conn = sqlite3.connect(db_path)
-        try:
-            cursor = conn.cursor()
-            for sql in get_ddl_statements():
-                try:
-                    cursor.execute(sql)
-                except Exception:
-                    pass
-            conn.commit()
-        finally:
-            conn.close()
+
+        # Initialize schema via the single source of truth
+        load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
 
         # Minimal workflow row so update_workflow has something to update.
         conn = sqlite3.connect(db_path)

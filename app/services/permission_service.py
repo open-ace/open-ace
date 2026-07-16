@@ -553,34 +553,3 @@ class PermissionService:
                 LIMIT 100
             """
             )
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for permission service tables."""
-    from app.repositories.database import is_postgresql
-
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS user_permissions (
-            id {id_type},
-            user_id INTEGER NOT NULL,
-            permission TEXT NOT NULL,
-            granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            granted_by INTEGER,
-            UNIQUE(user_id, permission),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS role_permissions (
-            id {id_type},
-            role_name TEXT NOT NULL,
-            permission TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(role_name, permission)
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_name)",
-    ]

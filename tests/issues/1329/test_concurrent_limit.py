@@ -58,13 +58,9 @@ def auto_db(tmp_path):
                     "INSERT INTO tenants (name, slug, quota) VALUES (?, ?, ?)",
                     ("Test Tenant", "test-tenant", '{"max_sessions_per_user": 3}'),
                 )
-                from app.modules.workspace.autonomous import get_ddl_statements
+                from app.repositories.schema_init import load_schema_from_file
 
-                for sql in get_ddl_statements():
-                    try:
-                        cursor.execute(sql)
-                    except Exception:
-                        pass
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
             finally:
                 conn.close()

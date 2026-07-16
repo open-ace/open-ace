@@ -17,12 +17,8 @@ def auto_db(tmp_path):
     orig_adapt_sql = db_mod.adapt_sql
     db_mod.adapt_sql = lambda q: q
     try:
-        # Patch is_postgresql in BOTH the database module AND the autonomous module
-        # (the latter does `from ... import is_postgresql` which creates a separate reference)
-        with (
-            patch.object(db_mod, "is_postgresql", return_value=False),
-            patch("app.modules.workspace.autonomous.is_postgresql", return_value=False),
-        ):
+        # Patch is_postgresql in the database module
+        with patch.object(db_mod, "is_postgresql", return_value=False):
             db_path = str(tmp_path / "test_auto.db")
             db = Database(db_url=f"sqlite:///{db_path}")
 
@@ -54,13 +50,9 @@ def auto_db(tmp_path):
                 # Create autonomous tables (with try/except per statement,
                 # mirroring schema_init — ALTER TABLE may fail on duplicate
                 # columns for fresh DBs where CREATE TABLE already added them)
-                from app.modules.workspace.autonomous import get_ddl_statements
+                from app.repositories.schema_init import load_schema_from_file
 
-                for sql in get_ddl_statements():
-                    try:
-                        cursor.execute(sql)
-                    except Exception:
-                        pass
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
             finally:
                 conn.close()

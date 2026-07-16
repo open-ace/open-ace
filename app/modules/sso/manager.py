@@ -19,12 +19,7 @@ from app.modules.sso.provider import (
     SSOProviderConfig,
     get_provider_config,
 )
-from app.repositories.database import (
-    Database,
-    adapt_boolean_condition,
-    adapt_boolean_value,
-    is_postgresql,
-)
+from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 
 logger = logging.getLogger(__name__)
 
@@ -666,64 +661,3 @@ class SSOManager:
 
         except Exception as e:
             logger.error(f"Failed to delete auth state: {e}")
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for SSO tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS sso_providers (
-            id {id_type},
-            name TEXT UNIQUE NOT NULL,
-            provider_type TEXT NOT NULL,
-            config TEXT NOT NULL,
-            tenant_id INTEGER,
-            is_active {bool_true},
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (tenant_id) REFERENCES tenants(id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS sso_identities (
-            id {id_type},
-            user_id INTEGER NOT NULL,
-            provider_name TEXT NOT NULL,
-            provider_user_id TEXT NOT NULL,
-            provider_data TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_used_at TIMESTAMP,
-            UNIQUE(provider_name, provider_user_id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS sso_sessions (
-            id {id_type},
-            session_token TEXT UNIQUE NOT NULL,
-            user_id INTEGER NOT NULL,
-            provider_name TEXT NOT NULL,
-            access_token TEXT,
-            refresh_token TEXT,
-            expires_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS sso_auth_states (
-            state TEXT PRIMARY KEY,
-            code_verifier TEXT NOT NULL,
-            provider_name TEXT NOT NULL,
-            nonce TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_sso_providers_tenant ON sso_providers(tenant_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sso_identities_provider ON sso_identities(provider_name, provider_user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_sso_sessions_token ON sso_sessions(session_token)",
-        "CREATE INDEX IF NOT EXISTS idx_sso_sessions_user ON sso_sessions(user_id)",
-    ]

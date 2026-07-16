@@ -101,22 +101,12 @@ def proxy_service(tmp_path, monkeypatch):
 @pytest.fixture
 def manager(tmp_path):
     """A RemoteAgentManager backed by a temp SQLite database."""
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+    from app.repositories.schema_init import load_schema_from_file
 
     db_path = str(tmp_path / "test_agent.db")
     mgr = RemoteAgentManager(db_path=db_path)
-    with mgr.db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception as exc:
-                # Tolerate idempotent re-runs (table/column already exists)
-                # but surface anything that would mask real schema drift.
-                msg = str(exc).lower()
-                if "already exists" not in msg and "duplicate column" not in msg:
-                    raise
-        conn.commit()
+    load_schema_from_file(db_url=mgr.db.db_url, dialect="sqlite")
     return mgr
 
 

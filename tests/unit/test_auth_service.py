@@ -23,26 +23,7 @@ from app.services.auth_service import (
     _get_security_settings,
     _record_failed_login,
     _security_settings_cache,
-    get_ddl_statements,
 )
-
-
-class TestGetDDLStatements:
-    """Test DDL statement generation."""
-
-    def test_returns_list(self):
-        stmts = get_ddl_statements()
-        assert isinstance(stmts, list)
-        assert len(stmts) == 2
-
-    def test_creates_login_attempts_table(self):
-        stmts = get_ddl_statements()
-        assert "CREATE TABLE IF NOT EXISTS login_attempts" in stmts[0]
-
-    def test_creates_index(self):
-        stmts = get_ddl_statements()
-        assert "CREATE INDEX IF NOT EXISTS" in stmts[1]
-        assert "idx_login_attempts_locked_until" in stmts[1]
 
 
 class TestSecuritySettings:

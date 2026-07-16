@@ -15,57 +15,13 @@ from app.services.auth_service import (
     _check_login_lockout,
     _clear_failed_logins,
     _record_failed_login,
-    get_ddl_statements,
 )
-
-
-class TestDDL:
-    """Tests for DDL statement creation on PostgreSQL."""
-
-    def test_ddl_statements_create_tables(self, pg_db):
-        ddl = get_ddl_statements()
-        assert len(ddl) >= 1
-
-        conn = pg_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
-
-        assert pg_db.table_exists("login_attempts") is True
-
-    def test_ddl_idempotent(self, pg_db):
-        ddl = get_ddl_statements()
-        conn = pg_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
-
-        assert pg_db.table_exists("login_attempts") is True
 
 
 class TestLoginLockout:
     """Tests for login lockout via PostgreSQL."""
 
-    def _setup_login_attempts(self, pg_db):
-        conn = pg_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in get_ddl_statements():
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
+    # login_attempts table is created by pg_db fixture via load_schema_from_file()
 
     def _patch_db(self, pg_db):
         import app.repositories.database as db_mod
@@ -73,7 +29,6 @@ class TestLoginLockout:
         return patch.object(db_mod, "get_database_url", return_value=pg_db.db_url)
 
     def test_no_lockout_initially(self, pg_db):
-        self._setup_login_attempts(pg_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
@@ -82,7 +37,6 @@ class TestLoginLockout:
             assert msg is None
 
     def test_record_failed_login_increments(self, pg_db):
-        self._setup_login_attempts(pg_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
@@ -96,7 +50,6 @@ class TestLoginLockout:
             assert row["attempt_count"] == 2
 
     def test_lockout_after_max_attempts(self, pg_db):
-        self._setup_login_attempts(pg_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):
@@ -111,7 +64,6 @@ class TestLoginLockout:
             assert "temporarily locked" in msg.lower()
 
     def test_clear_failed_logins(self, pg_db):
-        self._setup_login_attempts(pg_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(pg_db):

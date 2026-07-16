@@ -184,10 +184,7 @@ def ensure_all_tables() -> None:
     schema (each module hand-maintained a parallel DDL that lost columns like
     project_id/project_path/request_count — #1273).
 
-    The per-module get_ddl_statements() functions are kept for now (deprecated;
-    not called here) to avoid breaking any external references and may be
-    removed in a follow-up. Schema is now driven solely by the .sql files +
-    Alembic migrations.
+    Schema is now driven solely by the .sql files + Alembic migrations.
     """
     load_schema_from_file()
     logger.info("Schema initialization complete (loaded from authoritative schema.sql)")
