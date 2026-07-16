@@ -25,7 +25,7 @@ import time
 import uuid
 
 import requests
-from test_helpers import (
+from helpers import (
     BASE_URL,
     HEADLESS,
     PROJECT_ROOT,
