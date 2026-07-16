@@ -1555,7 +1555,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 {milestone.status === 'in_progress' && hasLiveActivity && (
                   <div className="timeline-milestone-live-summary">
                     {(() => {
-                      const latestActivity = milestoneActivities[0];
+                      const latestActivity = visibleMilestoneActivities[0];
                       const summary = getActivitySummary(latestActivity, language);
                       const lastActivityTime = latestActivity?.timestamp
                         ? new Date(latestActivity.timestamp)
