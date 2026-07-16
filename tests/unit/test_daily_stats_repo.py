@@ -175,6 +175,8 @@ class TestDailyStatsRepository:
         self.db.fetch_all.return_value = [
             {
                 "sender_name": "alice",
+                "resolved_user_id": 1,
+                "unified_username": "alice",
                 "total_tokens": 500,
                 "total_input_tokens": 300,
                 "total_output_tokens": 200,
@@ -183,7 +185,7 @@ class TestDailyStatsRepository:
         ]
         result = self.repo.get_user_totals()
         assert len(result) == 1
-        assert result[0]["sender_name"] == "alice"
+        assert result[0]["resolved_user_id"] == 1
         # Should always have sender_name IS NOT NULL condition
         query = self.db.fetch_all.call_args[0][0]
         assert "sender_name IS NOT NULL" in query
@@ -312,23 +314,24 @@ class TestDailyStatsRepository:
     # -------------------------------------------------------------------------
 
     def test_get_batch_aggregates_basic(self):
-        self.db.fetch_one.return_value = {
-            "total_messages": 1000,
-            "total_tokens": 50000,
-            "total_input_tokens": 30000,
-            "total_output_tokens": 20000,
-            "unique_tools": 3,
-            "unique_hosts": 2,
-            "unique_users": 10,
-            "unique_days": 30,
-        }
-        result = self.repo.get_batch_aggregates()
-        assert result["total_messages"] == 1000
-        assert result["total_tokens"] == 50000
-        assert result["unique_tools"] == 3
-        assert result["unique_hosts"] == 2
-        assert result["unique_users"] == 10
-        assert result["unique_days"] == 30
+        with patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True):
+            self.db.fetch_one.return_value = {
+                "total_messages": 1000,
+                "total_tokens": 50000,
+                "total_input_tokens": 30000,
+                "total_output_tokens": 20000,
+                "unique_tools": 3,
+                "unique_hosts": 2,
+                "unique_users": 10,
+                "unique_days": 30,
+            }
+            result = self.repo.get_batch_aggregates()
+            assert result["total_messages"] == 1000
+            assert result["total_tokens"] == 50000
+            assert result["unique_tools"] == 3
+            assert result["unique_hosts"] == 2
+            assert result["unique_users"] == 10
+            assert result["unique_days"] == 30
 
     def test_get_batch_aggregates_no_result(self):
         self.db.fetch_one.return_value = None
@@ -607,22 +610,23 @@ class TestDailyStatsRepository:
 
     def test_get_batch_aggregates_unique_users_excludes_feishu_ids(self):
         """Verify unique_users calculation excludes ou_ prefix users."""
-        self.db.fetch_one.return_value = {
-            "total_messages": 1000,
-            "total_tokens": 50000,
-            "total_input_tokens": 30000,
-            "total_output_tokens": 20000,
-            "unique_tools": 3,
-            "unique_hosts": 2,
-            "unique_users": 8,
-            "unique_days": 30,
-        }
-        self.repo.get_batch_aggregates()
-        query = self.db.fetch_one.call_args[0][0]
-        # unique_users should use CASE WHEN with Feishu filter
-        assert "CASE WHEN" in query
-        # %% is escaped % for psycopg2/SQLite compatibility
-        assert "NOT (sender_name LIKE 'ou_%%' AND LENGTH(sender_name) > 10)" in query
-        # total_messages/tokens should NOT have the CASE filter
-        assert "SUM(message_count)" in query
-        assert "SUM(total_tokens)" in query
+        with patch("app.repositories.daily_stats_repo.is_postgresql", return_value=True):
+            self.db.fetch_one.return_value = {
+                "total_messages": 1000,
+                "total_tokens": 50000,
+                "total_input_tokens": 30000,
+                "total_output_tokens": 20000,
+                "unique_tools": 3,
+                "unique_hosts": 2,
+                "unique_users": 8,
+                "unique_days": 30,
+            }
+            self.repo.get_batch_aggregates()
+            query = self.db.fetch_one.call_args[0][0]
+            # unique_users should use CASE WHEN with Feishu filter
+            assert "CASE WHEN" in query
+            # %% is escaped % for psycopg2/SQLite compatibility
+            assert "NOT (sender_name LIKE 'ou_%%' AND LENGTH(sender_name) > 10)" in query
+            # total_messages/tokens should NOT have the CASE filter
+            assert "SUM(message_count)" in query
+            assert "SUM(total_tokens)" in query
