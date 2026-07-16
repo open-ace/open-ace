@@ -736,6 +736,14 @@ class AutonomousOrchestrator:
                 probe = GitHubOps(project_path, system_account=system_account)
                 if probe.path_exists_as_user(worktree_path, dir_only=True):
                     chosen = worktree_path
+            logger.info(
+                "_get_gh binding: workflow=%s chosen=%s worktree=%s project=%s path_check=%s",
+                self._workflow_id[:8],
+                "worktree" if chosen == worktree_path else "main_repo",
+                worktree_path,
+                project_path,
+                "passed" if worktree_path and chosen == worktree_path else "failed/skipped"
+            )
             self._gh = GitHubOps(chosen, system_account=system_account)
 
             # Issue #1573: Verify branch consistency after binding to worktree
@@ -1279,6 +1287,12 @@ class AutonomousOrchestrator:
         try:
             current_branch = gh.get_current_branch()
             if branch_name and current_branch != branch_name:
+                logger.error(
+                    "Branch mismatch before push: workflow=%s expected=%s actual=%s",
+                    self._workflow_id[:8],
+                    branch_name,
+                    current_branch,
+                )
                 message = (
                     f"CI repair changed workflow branch unexpectedly: expected {branch_name}, "
                     f"actual {current_branch}"
@@ -1293,7 +1307,7 @@ class AutonomousOrchestrator:
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
         except Exception as e:
-            logger.warning("Failed to verify branch after CI repair: %s", e)
+            logger.error("Failed to verify branch after CI repair: %s", e, exc_info=True)
 
         if wf.get("user_feedback", "").strip():
             self._update_workflow({"user_feedback": ""})
@@ -4780,13 +4794,20 @@ class AutonomousOrchestrator:
             # P1 修复（Issue #1611）：检查当前分支是否与预期一致
             current_branch = gh.get_current_branch()
             if branch_name and current_branch != branch_name:
+                logger.error(
+                    "Branch mismatch before push: workflow=%s expected=%s actual=%s",
+                    self._workflow_id[:8],
+                    branch_name,
+                    current_branch,
+                )
                 raise RuntimeError(
-                    f"Workflow branch changed unexpectedly before push: "
-                    f"expected {branch_name}, actual {current_branch}"
+                    f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
                 )
             gh.git_push(branch=branch_name)
         except Exception as e:
-            logger.warning("Failed to push branch %s: %s", branch_name, e)
+            logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
+            # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误
+            raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
 
         # Create PR on first round
         if round_num == 1:
