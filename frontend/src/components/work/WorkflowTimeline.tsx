@@ -46,6 +46,7 @@ import type {
   WorkflowDefinitionSnapshot,
   WorkflowMilestone,
 } from '@/api/autonomous';
+import type { Language } from '@/types';
 import {
   findForkMilestoneIndex,
   formatTokens,
@@ -199,6 +200,95 @@ function getActivityStableKey(activity: {
     activity.subtype ?? '',
     activity.attempt?.toString() ?? '',
   ].join(':');
+}
+
+// ── Activity Summary & Heartbeat Helpers (Issue #1531) ───────────────
+
+interface ActivitySummary {
+  icon: string;
+  text: string;
+}
+
+function getActivitySummary(
+  activity: {
+    type: 'assistant' | 'tool_use' | 'usage' | 'system';
+    text?: string;
+    tool_name?: string;
+    subtype?: string;
+  } | null,
+  language: Language
+): ActivitySummary {
+  if (!activity) {
+    return { icon: 'bi-hourglass', text: t('autoActivityWaiting', language) };
+  }
+  switch (activity.type) {
+    case 'tool_use':
+      return {
+        icon: 'bi-tools',
+        text: t('autoActivityExecuting', language, { tool: activity.tool_name ?? 'tool' }),
+      };
+    case 'assistant':
+      return { icon: 'bi-chat-text', text: t('autoActivityGenerating', language) };
+    case 'system':
+      if (activity.subtype === 'thinking_tokens') {
+        return { icon: 'bi-lightbulb', text: t('autoActivityThinking', language) };
+      }
+      if (activity.subtype === 'api_retry') {
+        return { icon: 'bi-arrow-repeat', text: t('autoActivityRetrying', language) };
+      }
+      return { icon: 'bi-info-circle', text: t('autoActivityProcessing', language) };
+    default:
+      return { icon: 'bi-activity', text: t('autoActivityActive', language) };
+  }
+}
+
+type HeartbeatStatus = 'active' | 'waiting' | 'stale';
+
+interface HeartbeatInfo {
+  status: HeartbeatStatus;
+  color: string;
+  label: string;
+  secondsAgo: number;
+}
+
+function getHeartbeatInfo(lastActivityTime: Date | null): HeartbeatInfo {
+  const now = Date.now();
+  const lastTime = lastActivityTime ? lastActivityTime.getTime() : 0;
+  const secondsAgo = Math.floor((now - lastTime) / 1000);
+
+  if (!lastActivityTime || secondsAgo > 120) {
+    return {
+      status: 'stale',
+      color: 'var(--color-danger)',
+      label: 'autoHeartbeatStale',
+      secondsAgo,
+    };
+  }
+  if (secondsAgo > 30) {
+    return {
+      status: 'waiting',
+      color: 'var(--color-warning)',
+      label: 'autoHeartbeatWaiting',
+      secondsAgo,
+    };
+  }
+  return {
+    status: 'active',
+    color: 'var(--color-success)',
+    label: 'autoHeartbeatActive',
+    secondsAgo,
+  };
+}
+
+function formatTimeAgo(seconds: number, language: Language): string {
+  if (seconds < 5) {
+    return t('timeJustNow', language);
+  }
+  if (seconds < 60) {
+    return t('timeSecondsAgo', language, { count: seconds });
+  }
+  const minutes = Math.floor(seconds / 60);
+  return t('timeMinutesAgo', language, { count: minutes });
 }
 
 // ── Branch data type for parallel view ──────────────────────────────
@@ -1461,6 +1551,35 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </p>
               )}
               <div className="timeline-milestone-meta-row">
+                {/* Issue #1531: Live activity summary & heartbeat for in-progress milestones */}
+                {milestone.status === 'in_progress' && hasLiveActivity && (
+                  <div className="timeline-milestone-live-summary">
+                    {(() => {
+                      const latestActivity = milestoneActivities[0];
+                      const summary = getActivitySummary(latestActivity, language);
+                      const lastActivityTime = latestActivity?.timestamp
+                        ? new Date(latestActivity.timestamp)
+                        : null;
+                      const heartbeat = getHeartbeatInfo(lastActivityTime);
+                      const timeAgo = formatTimeAgo(heartbeat.secondsAgo, language);
+
+                      return (
+                        <>
+                          <span
+                            className="timeline-live-heartbeat"
+                            style={{ color: heartbeat.color }}
+                            title={t(heartbeat.label, language)}
+                          >
+                            ●
+                          </span>
+                          <i className={`bi ${summary.icon} me-1`}></i>
+                          <span className="timeline-live-summary-text">{summary.text}</span>
+                          <span className="timeline-live-summary-time">{timeAgo}</span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
                 <div className="timeline-milestone-badges">
                   <span className={`timeline-chip timeline-chip--${statusDisplay.tone}`}>
                     {statusDisplay.label}
