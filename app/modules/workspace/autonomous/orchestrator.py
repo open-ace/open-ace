@@ -4995,6 +4995,22 @@ class AutonomousOrchestrator:
             )
 
         if (review_passed and not force_full_rounds) or at_cap:
+            # Check CI status before proceeding to report phase (Issue #1662)
+            # If CI failed, enter CI repair loop instead of reporting
+            if ci_failures:
+                self._create_milestone(
+                    phase="pr_review",
+                    dev_round=dev_round,
+                    round_number=round_num,
+                    milestone_type="ci_failed_before_report",
+                    status="completed",
+                    title=f"CI failed after review passed: {len(ci_failures)} checks",
+                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
+                )
+                # Reuse merge-phase CI repair loop
+                self._start_ci_repair_round(wf, pr_number, ci_failures)
+                return
+
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback
