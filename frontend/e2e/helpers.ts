@@ -32,18 +32,35 @@ export async function login(page: Page, username = 'admin', password = 'admin123
 
   // Handle ForceChangePasswordModal if it appears (for users with must_change_password=true)
   // The modal is loaded lazily via Suspense, so it may take time to appear in CI environments
+  // Use a longer polling loop to handle slow CI network conditions
   const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
   const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
 
-  // Wait for modal to appear (up to 5s for CI environments), then handle it
-  const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
-  if (modalVisible) {
-    // Wait for Skip button to be visible and clickable
-    await skipButton.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
-    // Click Skip button to dismiss the modal
-    await skipButton.click({ force: true });
-    // Wait for modal to disappear completely
-    await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+  // Poll for modal appearance for up to 15 seconds (3 iterations of 5s each)
+  // This handles slow CI networks where lazy-loaded components take time to load
+  let modalHandled = false;
+  for (let i = 0; i < 3; i++) {
+    const modalVisible = await modalDialog.isVisible().catch(() => false);
+    if (modalVisible) {
+      // Wait for Skip button to be visible and clickable
+      await skipButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+      // Click Skip button to dismiss the modal
+      await skipButton.click({ force: true });
+      // Wait for modal to disappear completely
+      await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+      modalHandled = true;
+      break;
+    }
+    // Wait 5 seconds before checking again
+    await page.waitForTimeout(5000);
+  }
+
+  // Log if modal was not handled (for debugging CI failures)
+  if (!modalHandled) {
+    const finalCheck = await modalDialog.isVisible().catch(() => false);
+    if (finalCheck) {
+      console.warn('ForceChangePasswordModal is still visible after 15s polling - test may fail');
+    }
   }
 
   // Wait for page to be ready
