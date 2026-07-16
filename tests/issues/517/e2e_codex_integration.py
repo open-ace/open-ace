@@ -25,9 +25,9 @@ import os
 import sys
 import time
 
+import helpers
 import requests
-import test_helpers
-from test_helpers import (
+from helpers import (
     BASE_URL,
     HEADLESS,
     PROJECT_ROOT,
@@ -239,7 +239,7 @@ def test_api_usage_codex():
     """GET /api/tool/codex/<days> returns usage data."""
     r = requests.get(
         f"{BASE_URL}/api/tool/codex/30",
-        cookies={"session_token": test_helpers._auth_token},
+        cookies={"session_token": helpers._auth_token},
     )
     assert r.status_code == 200, f"GET /api/tool/codex/30 failed: {r.status_code} {r.text[:300]}"
     data = r.json()
@@ -269,7 +269,7 @@ def test_api_usage_tools_includes_codex():
     """GET /api/tools includes codex."""
     r = requests.get(
         f"{BASE_URL}/api/tools",
-        cookies={"session_token": test_helpers._auth_token},
+        cookies={"session_token": helpers._auth_token},
     )
     assert r.status_code == 200, f"GET /api/tools failed: {r.status_code}"
     data = r.json()
