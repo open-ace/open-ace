@@ -40,7 +40,7 @@ export async function login(page: Page, username = 'admin', password = 'admin123
   const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 15000 })
     .then(() => true)
     .catch(() => false);
-  
+
   if (modalVisible) {
     // Wait for Skip button to be visible and clickable
     await skipButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
