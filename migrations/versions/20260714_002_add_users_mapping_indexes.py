@@ -27,14 +27,18 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-from app.repositories.database import is_postgresql
-
 log = logging.getLogger(__name__)
 
 revision: str = "20260714_002_add_users_mapping_indexes"
 down_revision: Union[str, None] = "20260715_001_add_last_ci_failure_head_sha"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
+
+
+def _is_postgresql() -> bool:
+    """Check if the database is PostgreSQL."""
+    bind = op.get_bind()
+    return bind.dialect.name == "postgresql"
 
 
 def upgrade() -> None:
@@ -45,7 +49,7 @@ def upgrade() -> None:
     inspector = sa.inspect(connection)
     existing_indexes = {idx["name"] for idx in inspector.get_indexes("users")}
 
-    if is_postgresql():
+    if _is_postgresql():
         # PostgreSQL: Use CONCURRENTLY to avoid locking the table
         # This allows the index to be built without blocking writes
 
