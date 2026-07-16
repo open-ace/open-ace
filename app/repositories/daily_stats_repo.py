@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
-from app.utils.sender_hash import compute_sender_hash, EMPTY_SENDER_HASH
+from app.utils.sender_hash import EMPTY_SENDER_HASH, compute_sender_hash
 from app.utils.senders import get_sender_filter_sql
 from app.utils.tool_names import normalize_tool_name
 
