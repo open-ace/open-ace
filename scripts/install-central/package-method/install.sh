@@ -1263,7 +1263,7 @@ update_config_workspace() {
     if command -v python3 &>/dev/null; then
         # Use environment variables to pass values safely (avoids special character issues in heredoc)
         export _CONFIG_FILE="$config_file"
-        export _WS_ENABLED="$WORKSPACE_MULTI_USER_MODE"
+        export _WS_ENABLED="$WORKSPACE_ENABLED"
         export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
         export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
         export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
@@ -1380,7 +1380,8 @@ with open('$config_file', 'w') as f:
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
 
-# Multi-user workspace mode settings
+# Workspace configuration defaults
+WORKSPACE_ENABLED="true"
 WORKSPACE_MULTI_USER_MODE="true"
 WORKSPACE_PORT_RANGE_START="3100"
 WORKSPACE_PORT_RANGE_END="3200"
@@ -2754,6 +2755,14 @@ detect_and_load_local_upgrade() {
         fi
         # Preserve config path for database configuration reuse
         EXISTING_CONFIG_PATH="$config_file"
+
+        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting)
+        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
+        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [ -n "$enabled" ]; then
+            WORKSPACE_ENABLED="$enabled"
+            print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
+        fi
 
         # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
         # Python prints True/False (capitalized), but shell expects true/false (lowercase)
