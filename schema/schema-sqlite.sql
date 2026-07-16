@@ -1456,7 +1456,11 @@ CREATE INDEX idx_users_email ON users (email);
 
 CREATE INDEX idx_users_role ON users (role);
 
+CREATE INDEX idx_users_system_account ON users (system_account) WHERE ((deleted_at IS NULL) AND (is_active = true) AND (system_account IS NOT NULL));
+
 CREATE INDEX idx_users_tenant ON users (tenant_id);
+
+CREATE INDEX idx_users_username ON users (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows (batch_id, batch_order);
 

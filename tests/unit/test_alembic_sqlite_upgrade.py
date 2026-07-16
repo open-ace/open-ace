@@ -119,7 +119,8 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     # -> 20260709_003_add_tenant_usage_aggregation (Tenant usage aggregation infrastructure)
     # -> 20260714_001_add_ci_repair_fields_to_workflows (Issue #1647)
     # -> 20260715_001_add_last_ci_failure_head_sha (Issue #1574)
-    assert version[0] == "20260715_001_add_last_ci_failure_head_sha"
+    # -> 20260714_002_add_users_mapping_indexes (Issue #1574)
+    assert version[0] == "20260714_002_add_users_mapping_indexes"
     if has_session_messages:
         assert "source" in columns
     assert has_mapping_rules is True
