@@ -19,11 +19,7 @@ from app.modules.sso.provider import (
     SSOProviderConfig,
     get_provider_config,
 )
-from app.repositories.database import (
-    Database,
-    adapt_boolean_condition,
-    adapt_boolean_value,
-)
+from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 
 logger = logging.getLogger(__name__)
 
