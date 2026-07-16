@@ -4343,6 +4343,14 @@ table .latency-row:hover td {
   border-color: var(--border-color) !important;
 }
 
+/* API Key dialog — Advanced Settings panel (Issue #1739)
+   Bootstrap .bg-light stays #f8f9fa (white) in dark mode, making the
+   "Priority" / "Weight" labels appear on a white block inside the dark modal. */
+[data-theme='dark'] .api-key-advanced-settings.bg-light {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
 /* Dark mode: global btn-secondary override (Issue #1634)
    Previously scoped to .session-detail-content only, leaving portal-rendered
    modals (NewSessionModal, ConfirmModal, etc.) with white-on-white text. */
