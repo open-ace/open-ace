@@ -2064,7 +2064,7 @@ ${line}"
         # authorization. Check the Cmnd_Alias definition line for each newer
         # CLI path; any missing one trips a rewrite.
         local cli_alias_line=""
-        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null)
+        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null || true)
         if [ -n "$cli_alias_line" ]; then
             for cli in claude openclaw zcode; do
                 if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
