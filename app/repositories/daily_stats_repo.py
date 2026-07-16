@@ -651,6 +651,8 @@ class DailyStatsRepository:
 
             # Compute unique_users separately using application-layer hash
             # This ensures consistency with PostgreSQL's hash algorithm
+            # Build WHERE clause: if no date/host filters, start with WHERE; otherwise append AND
+            sender_where = f"{where_clause} AND" if where_clause else "WHERE"
             sender_query = f"""
                 SELECT DISTINCT sender_name, user_id,
                     (SELECT u.id FROM users u
@@ -658,8 +660,7 @@ class DailyStatsRepository:
                         OR sender_name = u.username
                      LIMIT 1) as matched_user_id
                 FROM daily_stats
-                {where_clause}
-                AND {sender_filter}
+                {sender_where} {sender_filter}
             """
             sender_rows = self.db.fetch_all(sender_query, tuple(params))
 
