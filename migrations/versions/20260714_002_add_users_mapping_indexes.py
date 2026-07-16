@@ -87,7 +87,7 @@ def upgrade() -> None:
             log.info("idx_users_system_account already exists, skipping")
     else:
         # SQLite: Regular CREATE INDEX (no CONCURRENTLY support)
-        # SQLite doesn't support partial indexes with WHERE clause in older versions
+        # SQLite supports partial indexes since 3.8.0
 
         if "idx_users_username" not in existing_indexes:
             log.info("Creating idx_users_username index on users table (SQLite)")
@@ -96,6 +96,7 @@ def upgrade() -> None:
                 "users",
                 ["username"],
                 unique=False,
+                sqlite_where=sa.text("deleted_at IS NULL AND is_active = true"),
             )
         else:
             log.info("idx_users_username already exists, skipping")
@@ -107,6 +108,9 @@ def upgrade() -> None:
                 "users",
                 ["system_account"],
                 unique=False,
+                sqlite_where=sa.text(
+                    "deleted_at IS NULL AND is_active = true AND system_account IS NOT NULL"
+                ),
             )
         else:
             log.info("idx_users_system_account already exists, skipping")
