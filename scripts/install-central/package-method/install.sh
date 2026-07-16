@@ -2075,6 +2075,21 @@ ${line}"
             done
         fi
 
+        # 【修复 Issue #1522】Check env_keep contains GH_TOKEN and GIT_* vars.
+        # The env_keep list grew over time (Issue #1517 added GH_TOKEN/GIT_* vars).
+        # Without this check, incremental upgrades skip the rewrite when other
+        # checks pass, leaving GH_TOKEN missing and breaking autonomous dev
+        # workflows (gh issue view fails with "exit 4: populate the GH_TOKEN").
+        if ! grep -q "GH_TOKEN" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers env_keep missing GH_TOKEN (autonomous dev will fail)"
+            need_update=true
+        fi
+
+        if ! grep -q "GIT_AUTHOR_NAME" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers env_keep missing GIT_* vars (git commits may have wrong author)"
+            need_update=true
+        fi
+
         # 【新增】Warn about sudoers vs systemd service user mismatch
         if command -v systemctl &>/dev/null && systemctl is-enabled --quiet open-ace.service 2>/dev/null; then
             local svc_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
