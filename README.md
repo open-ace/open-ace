@@ -204,7 +204,7 @@ python3 server.py
 | 配额告警 | 用量达到阈值自动提醒 |
 | 异常检测 | 识别异常使用模式 |
 | 邮件通知 | 定期发送用量报告 |
-| 飞书推送 | 实时告警推送到飞书群 |
+| Webhook / 飞书推送 | 实时推送告警到 Webhook，支持飞书 / Lark 群机器人 |
 
 ### 👥 用户管理
 
@@ -509,7 +509,7 @@ python3 server.py
 | Quota Alerts | Automatic notifications when thresholds reached |
 | Anomaly Detection | Identify unusual usage patterns |
 | Email Reports | Periodic usage reports via email |
-| Feishu Push | Real-time alerts to Feishu groups |
+| Webhook / Feishu Push | Real-time alerts to webhooks, including Feishu / Lark group bots |
 
 ### 👥 User Management
 

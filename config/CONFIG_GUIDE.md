@@ -62,6 +62,14 @@
 |------|------|--------|
 | `autonomous.enabled` | 是否启用 AI 自主开发功能 | `true` |
 
+### Alerts（告警推送）
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `alerts.allow_private_webhook_urls` | 是否允许告警 webhook 指向私网 / 回环 / 链路本地地址。默认关闭，用于阻断 SSRF 风险。 | `false` |
+
+> 默认情况下，告警 webhook 仅允许公开可达的 `http(s)` 地址。飞书 / Lark 群机器人 webhook 可直接使用；如果你确实需要向内网地址推送，请显式打开 `alerts.allow_private_webhook_urls`，并在网络层自行控制访问范围。
+
 **多用户模式说明：**
 
 多用户模式下，Open ACE 会为每个用户启动独立的 `qwen-code-webui` 进程，以该用户的 `system_account` 身份运行。这确保了：

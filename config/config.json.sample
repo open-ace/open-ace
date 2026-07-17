@@ -29,6 +29,9 @@
   "run_timeline": {
     "enabled": false
   },
+  "alerts": {
+    "allow_private_webhook_urls": false
+  },
   "tools": {
     "openclaw": {
       "enabled": true,
