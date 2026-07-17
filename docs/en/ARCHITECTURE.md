@@ -159,7 +159,7 @@ See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for the full table reference.
 | Middleware | Purpose |
 |------------|---------|
 | `ProxyFix` | Trusts `X-Forwarded-For` / `X-Forwarded-Proto` from nginx |
-| CORS headers | `after_request` handler for `/api/` routes from localhost |
+| CORS headers | `after_request` handler for `/api/` routes from loopback WebUI origins plus explicit allowlist entries |
 | OPTIONS handler | Preflight CORS responses |
 | Error handlers | JSON for API routes, standard HTTP for pages |
 | `/health` | Returns service status and git commit hash |

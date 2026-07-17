@@ -283,6 +283,8 @@ Configuration is stored in `~/.open-ace/config.json`:
 |----------|-------------|
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | Email SMTP password |
+| `OPENACE_CORS_ALLOWED_ORIGINS` | Comma-separated explicit API CORS allowlist for non-loopback WebUI origins |
+| `OPENACE_WS_MAX_MESSAGE_BYTES` | Maximum inbound browser WebSocket message size for terminal / VSCode raw bridges (default: `8388608`) |
 
 ### Port Configuration
 

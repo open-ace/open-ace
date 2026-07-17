@@ -283,6 +283,8 @@ cd /home/open-ace/open-ace
 |------|------|
 | `OPENCLAW_TOKEN` | OpenClaw API token |
 | `SMTP_PASSWORD` | 邮件 SMTP 密码 |
+| `OPENACE_CORS_ALLOWED_ORIGINS` | 非 loopback WebUI 源的显式 API CORS 白名单，多个值用逗号分隔 |
+| `OPENACE_WS_MAX_MESSAGE_BYTES` | 浏览器侧终端 / VSCode 原始桥接允许的入站 WebSocket 最大消息大小（默认 `8388608`） |
 
 ### 端口配置
 

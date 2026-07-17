@@ -12,11 +12,16 @@ geventwebsocket 0.10.1 and newer gevent versions.
 from __future__ import annotations
 
 import hashlib
+import os
 import struct
 from base64 import b64encode
 
 # RFC 6455 magic GUID for Sec-WebSocket-Accept computation
 _WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# Cap inbound WebSocket messages to keep a malformed or malicious client from
+# forcing unbounded allocation in the raw frame bridge.
+DEFAULT_MAX_MESSAGE_SIZE = 8 * 1024 * 1024
 
 # Opcodes
 OP_CONT = 0x0
@@ -25,6 +30,24 @@ OP_BINARY = 0x2
 OP_CLOSE = 0x8
 OP_PING = 0x9
 OP_PONG = 0xA
+
+
+class WebSocketMessageTooLarge(ValueError):
+    """Raised when an inbound WebSocket message exceeds the configured cap."""
+
+
+def get_max_message_size() -> int:
+    """Get the inbound WebSocket message cap in bytes."""
+    raw_value = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES", "").strip()
+    if not raw_value:
+        return DEFAULT_MAX_MESSAGE_SIZE
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return DEFAULT_MAX_MESSAGE_SIZE
+
+    return value if value > 0 else DEFAULT_MAX_MESSAGE_SIZE
 
 
 def _compute_accept_key(client_key: str) -> str:
@@ -87,6 +110,8 @@ def recv_message(sock) -> bytes | str | None:
     """
     fragments: list[bytes] = []
     message_opcode: int | None = None
+    total_length = 0
+    max_message_size = get_max_message_size()
 
     while True:
         header = _recv_exactly(sock, 2)
@@ -109,6 +134,12 @@ def recv_message(sock) -> bytes | str | None:
             if len(ext) < 8:
                 return None
             length = struct.unpack("!Q", ext)[0]
+
+        if length > max_message_size:
+            send_close(sock, 1009, "Message too large")
+            raise WebSocketMessageTooLarge(
+                f"WebSocket frame length {length} exceeds limit {max_message_size}"
+            )
 
         mask_key = _recv_exactly(sock, 4) if masked else b""
         if masked and len(mask_key) < 4:
@@ -138,12 +169,20 @@ def recv_message(sock) -> bytes | str | None:
         if opcode in (OP_TEXT, OP_BINARY):
             message_opcode = opcode
             fragments = [payload]
+            total_length = len(payload)
         elif opcode == OP_CONT:
             if message_opcode is None:
                 return None
             fragments.append(payload)
+            total_length += len(payload)
         else:
             continue
+
+        if total_length > max_message_size:
+            send_close(sock, 1009, "Message too large")
+            raise WebSocketMessageTooLarge(
+                f"WebSocket message length {total_length} exceeds limit {max_message_size}"
+            )
 
         if fin:
             combined = b"".join(fragments)

@@ -159,7 +159,7 @@ Modules (domain logic):
 | 中间件 | 用途 |
 |--------|------|
 | `ProxyFix` | 信任来自 nginx 的 `X-Forwarded-For` / `X-Forwarded-Proto` |
-| CORS 头 | `after_request` 处理器，用于 `/api/` 路由的 localhost 跨域 |
+| CORS 头 | `after_request` 处理器，用于 `/api/` 路由的 loopback WebUI 跨域和显式白名单来源 |
 | OPTIONS 处理器 | 预检 CORS 响应 |
 | 错误处理器 | API 路由返回 JSON，页面返回标准 HTTP |
 | `/health` | 返回服务状态和 git commit hash |
