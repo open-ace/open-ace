@@ -72,6 +72,12 @@ def get_retention_manager():
     return _retention_manager
 
 
+def _current_tenant_id():
+    """Return the authenticated user's tenant scope."""
+    user = getattr(g, "user", None) or {}
+    return user.get("tenant_id")
+
+
 # =============================================================================
 # Report Generation Endpoints
 # =============================================================================
@@ -160,7 +166,7 @@ def generate_report():
         period_start=period_start,
         period_end=period_end,
         generated_by=g.user_id,
-        tenant_id=data.get("tenant_id"),
+        tenant_id=data.get("tenant_id", _current_tenant_id()),
         filters=data.get("filters"),
     )
 
@@ -198,6 +204,7 @@ def generate_report():
                 resource_type="compliance_report",
                 resource_id=report.metadata.report_id,
                 resource_name=report_type,
+                tenant_id=_current_tenant_id(),
                 details={
                     "report_type": report_type,
                     "format": output_format,

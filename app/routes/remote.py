@@ -1706,6 +1706,7 @@ def agent_message():
                     )
 
                     try:
+                        current_session = sync_session_mgr.get_session(session_id)
                         with get_db_connection() as conn:
                             cursor = conn.cursor()
                             from app.repositories.database import is_postgresql
@@ -1716,8 +1717,8 @@ def agent_message():
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
-                                     conversation_id, agent_session_id, project_path)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                     conversation_id, agent_session_id, user_id, project_path)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                     ON CONFLICT (date, tool_name, message_id, host_name) DO NOTHING""",
                                     (
                                         date_str,
@@ -1735,6 +1736,7 @@ def agent_message():
                                         message_source,
                                         session_id,
                                         session_id,
+                                        getattr(current_session, "user_id", None),
                                         project_path or "",
                                     ),
                                 )
@@ -1744,8 +1746,8 @@ def agent_message():
                                     (date, tool_name, host_name, message_id, role, content,
                                      full_entry, tokens_used, input_tokens, output_tokens,
                                      model, timestamp, message_source,
-                                     conversation_id, agent_session_id, project_path)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                     conversation_id, agent_session_id, user_id, project_path)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                     (
                                         date_str,
                                         tool_name,
@@ -1762,6 +1764,7 @@ def agent_message():
                                         message_source,
                                         session_id,
                                         session_id,
+                                        getattr(current_session, "user_id", None),
                                         project_path or "",
                                     ),
                                 )

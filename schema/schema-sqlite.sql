@@ -216,6 +216,7 @@ CREATE TABLE audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  user_id integer,
+ tenant_id integer,
  username text,
  action text NOT NULL,
  severity text DEFAULT 'info',
@@ -387,6 +388,7 @@ CREATE TABLE daily_stats (
 
 CREATE TABLE daily_usage (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer DEFAULT 1 NOT NULL,
  date TEXT NOT NULL,
  tool_name TEXT NOT NULL,
  host_name TEXT DEFAULT 'localhost' NOT NULL,
@@ -1127,7 +1129,7 @@ CREATE UNIQUE INDEX uq_daily_messages_date_tool_msg_host ON daily_messages (date
 
 CREATE UNIQUE INDEX uq_daily_stats_date_tool_host_sender ON daily_stats (date, tool_name, host_name, sender_name);
 
-CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE UNIQUE INDEX uq_hourly_stats_date_hour_tool_host ON hourly_stats (date, hour, tool_name, host_name);
 
@@ -1206,6 +1208,7 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
 CREATE INDEX idx_audit_action ON audit_logs (action);
+CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
@@ -1441,7 +1444,8 @@ CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
-CREATE INDEX idx_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
+CREATE INDEX idx_usage_tenant_date ON daily_usage (tenant_id, date);
 
 CREATE INDEX idx_usage_host_name ON daily_usage (host_name);
 

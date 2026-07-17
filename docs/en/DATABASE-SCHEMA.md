@@ -212,6 +212,7 @@ Daily usage with cache token tracking.
 | Column | Type | Notes |
 |--------|------|-------|
 | id | integer PK | |
+| tenant_id | integer | DEFAULT 1; tenant-scoped usage aggregation key |
 | date | date | NOT NULL |
 | tool_name | varchar | NOT NULL |
 | host_name | varchar | DEFAULT 'localhost' |
@@ -222,7 +223,9 @@ Daily usage with cache token tracking.
 | request_count | integer | DEFAULT 0 |
 | models_used | text | |
 
-Unique: `(date, tool_name, host_name)`
+Unique: `(tenant_id, date, tool_name, host_name)`
+
+Indexes: `idx_usage_date`, `idx_usage_date_tool_host(tenant_id, date, tool_name, host_name)`, `idx_usage_tenant_date`
 
 ### usage_summary
 
@@ -342,6 +345,7 @@ Unique: `(provider_name, provider_user_id)`
 | id | integer PK | |
 | timestamp | timestamp | DEFAULT CURRENT_TIMESTAMP |
 | user_id | integer | |
+| tenant_id | integer | Resolved from the actor when available for tenant-scoped audit queries |
 | username | text | |
 | action | text | NOT NULL |
 | severity | text | DEFAULT 'info' |
@@ -351,7 +355,7 @@ Unique: `(provider_name, provider_user_id)`
 | ip_address | text | |
 | success | boolean | DEFAULT true |
 
-Indexes: `idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_action`, `idx_audit_severity`
+Indexes: `idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_tenant_id`, `idx_audit_action`, `idx_audit_severity`
 
 ### content_filter_rules
 

@@ -358,6 +358,7 @@ CREATE TABLE audit_logs (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     user_id integer,
+    tenant_id integer,
     username text,
     action text NOT NULL,
     severity text DEFAULT 'info'::text,
@@ -592,6 +593,7 @@ CREATE TABLE daily_stats (
 
 CREATE TABLE daily_usage (
     id integer NOT NULL,
+    tenant_id integer DEFAULT 1 NOT NULL,
     date date NOT NULL,
     tool_name character varying NOT NULL,
     host_name character varying DEFAULT 'localhost'::character varying NOT NULL,
@@ -2084,7 +2086,7 @@ ALTER TABLE ONLY daily_stats
     ADD CONSTRAINT uq_daily_stats_date_tool_host_sender UNIQUE (date, tool_name, host_name, sender_name);
 
 ALTER TABLE ONLY daily_usage
-    ADD CONSTRAINT uq_daily_usage_date_tool_host UNIQUE (date, tool_name, host_name);
+    ADD CONSTRAINT uq_daily_usage_date_tool_host UNIQUE (tenant_id, date, tool_name, host_name);
 
 ALTER TABLE ONLY hourly_stats
     ADD CONSTRAINT uq_hourly_stats_date_hour_tool_host UNIQUE (date, hour, tool_name, host_name);
@@ -2257,6 +2259,7 @@ CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (ten
 --
 
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
+CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
@@ -2736,11 +2739,8 @@ CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_i
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
-
---
---
-
-CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (date, tool_name, host_name);
+CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (tenant_id, date, tool_name, host_name);
+CREATE INDEX idx_usage_tenant_date ON daily_usage USING btree (tenant_id, date);
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 

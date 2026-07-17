@@ -252,6 +252,7 @@ def admin_required(f=None):
                     g.user = user
                     g.user_id = user.get("id")
                     g.user_role = user.get("role")
+                    g.tenant_id = user.get("tenant_id")
 
                     password_change_response = enforce_password_change_requirement(user)
                     if password_change_response is not None:
@@ -280,6 +281,7 @@ def admin_required(f=None):
                             g.user = user
                             g.user_id = user_id
                             g.user_role = user.get("role")
+                            g.tenant_id = user.get("tenant_id")
 
                             password_change_response = enforce_password_change_requirement(user)
                             if password_change_response is not None:
