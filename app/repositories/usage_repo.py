@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
@@ -49,6 +49,22 @@ class UsageRepository:
         """
         self.db = db or Database()
 
+    @staticmethod
+    def _normalize_tenant_id(value: object) -> Optional[int]:
+        """Normalize a tenant identifier to a positive integer."""
+        if value in (None, "", 0, "0"):
+            return None
+        try:
+            tenant_id = int(cast(Any, value))
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    @staticmethod
+    def _tenant_user_condition(column_ref: str) -> str:
+        """Return a tenant-scope predicate for a user_id column."""
+        return f"{column_ref} IN (SELECT id FROM users WHERE tenant_id = ?)"
+
     def save_usage(
         self,
         date: str,
@@ -60,6 +76,7 @@ class UsageRepository:
         request_count: int = 0,
         models_used: Optional[list[str]] = None,
         host_name: str = "localhost",
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """
         Save or update usage data for a specific date and tool.
@@ -82,6 +99,7 @@ class UsageRepository:
         # never re-enter daily_usage and split the ROI cost-breakdown pie.
         tool_name = normalize_tool_name(tool_name)
         models_json = json.dumps(models_used) if models_used else None
+        effective_tenant_id = self._normalize_tenant_id(tenant_id) or 1
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
@@ -91,10 +109,10 @@ class UsageRepository:
                 cursor.execute(
                     """
                     INSERT INTO daily_usage
-                    (date, tool_name, host_name, tokens_used, input_tokens, output_tokens,
-                     cache_tokens, request_count, models_used)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (date, tool_name, host_name) DO UPDATE SET
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, date, tool_name, host_name) DO UPDATE SET
                         tokens_used = EXCLUDED.tokens_used,
                         input_tokens = EXCLUDED.input_tokens,
                         output_tokens = EXCLUDED.output_tokens,
@@ -112,15 +130,16 @@ class UsageRepository:
                         cache_tokens,
                         request_count,
                         models_json,
+                        effective_tenant_id,
                     ),
                 )
             else:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO daily_usage
-                    (date, tool_name, host_name, tokens_used, input_tokens, output_tokens,
-                     cache_tokens, request_count, models_used)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         date,
@@ -132,6 +151,7 @@ class UsageRepository:
                         cache_tokens,
                         request_count,
                         models_json,
+                        effective_tenant_id,
                     ),
                 )
             conn.commit()
@@ -144,6 +164,7 @@ class UsageRepository:
         date: str,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get raw usage rows from daily_usage for a specific date.
@@ -161,6 +182,10 @@ class UsageRepository:
         """
         conditions = ["date = ?"]
         params: list = [date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
         if tool_name:
             conditions.append("tool_name = ?")
             params.append(tool_name)
@@ -189,12 +214,18 @@ class UsageRepository:
         date: str,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get usage data for a specific date from daily_messages joined with daily_usage.
         """
         conditions = ["dm.date = ?"]
         params: list = [date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("dm.user_id"))
+            params.append(normalized_tenant_id)
 
         if tool_name:
             conditions.append("dm.tool_name = ?")
@@ -206,11 +237,16 @@ class UsageRepository:
 
         where_clause = " AND ".join(conditions)
         if is_postgresql():
-            join_on = "dm.date::text = du.date::text AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
+            join_on = (
+                "dm.date::text = du.date::text AND dm.tool_name = du.tool_name "
+                "AND dm.host_name = du.host_name"
+            )
         else:
             join_on = (
                 "dm.date = du.date AND dm.tool_name = du.tool_name AND dm.host_name = du.host_name"
             )
+        if normalized_tenant_id is not None:
+            join_on += " AND du.tenant_id = ?"
         query = f"""
             SELECT dm.*,
                    COALESCE(du.request_count, 0) as request_count
@@ -219,8 +255,11 @@ class UsageRepository:
             WHERE {where_clause}
             ORDER BY dm.date DESC
         """
-
-        rows = self.db.fetch_all(query, tuple(params))
+        query_params: list = []
+        if normalized_tenant_id is not None:
+            query_params.append(normalized_tenant_id)
+        query_params.extend(params)
+        rows = self.db.fetch_all(query, tuple(query_params))
 
         results = []
         for row in rows:
@@ -238,6 +277,7 @@ class UsageRepository:
         days: int = 7,
         end_date: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get usage data for a specific tool over a date range.
@@ -259,7 +299,12 @@ class UsageRepository:
         )
 
         conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
-        params = [tool_name, start_date, end_date]
+        params: list[Any] = [tool_name, start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -287,6 +332,7 @@ class UsageRepository:
         end_date: str,
         tool_name: Optional[str] = None,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get usage data for a date range.
@@ -301,7 +347,12 @@ class UsageRepository:
             List[Dict]: List of usage records.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if tool_name:
             conditions.append("tool_name = ?")
@@ -327,7 +378,13 @@ class UsageRepository:
 
         return results
 
-    def get_summary_by_tool(self, host_name: Optional[str] = None) -> dict[str, dict]:
+    def get_summary_by_tool(
+        self,
+        host_name: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        tenant_id: Optional[int] = None,
+    ) -> dict[str, dict]:
         """
         Get summary statistics for all tools.
 
@@ -338,7 +395,20 @@ class UsageRepository:
             Dict[str, Dict]: Summary data keyed by tool name.
         """
         conditions = []
-        params = []
+        params: list[Any] = []
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -388,23 +458,32 @@ class UsageRepository:
 
         return results
 
-    def get_all_tools(self) -> list[str]:
+    def get_all_tools(self, tenant_id: Optional[int] = None) -> list[str]:
         """
         Get list of all tools.
 
         Returns:
             List[str]: List of tool names.
         """
-        query = """
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        params: list = []
+        conditions = []
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
             SELECT DISTINCT tool_name
             FROM daily_messages
+            {where_clause}
             ORDER BY tool_name
         """
 
-        rows = self.db.fetch_all(query)
+        rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
         return sorted({normalize_tool_name(row["tool_name"]) for row in rows})
 
-    def get_all_hosts(self) -> list[str]:
+    def get_all_hosts(self, tenant_id: Optional[int] = None) -> list[str]:
         """
         Get list of all hosts.
 
@@ -413,15 +492,21 @@ class UsageRepository:
         """
         # Get SQL filter clause
         sql_filter = get_hostname_filter_sql()
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        tenant_filter = ""
+        params: list = []
+        if normalized_tenant_id is not None:
+            tenant_filter = f" AND {self._tenant_user_condition('user_id')}"
+            params.append(normalized_tenant_id)
 
         query = f"""
             SELECT DISTINCT host_name
             FROM daily_messages
-            WHERE {sql_filter}
+            WHERE {sql_filter}{tenant_filter}
             ORDER BY host_name
         """
 
-        rows = self.db.fetch_all(query)
+        rows = self.db.fetch_all(query, tuple(params)) if params else self.db.fetch_all(query)
 
         # Python-side validation (double-check for edge cases)
         valid_hosts = []
@@ -439,7 +524,11 @@ class UsageRepository:
         return valid_hosts
 
     def get_daily_aggregated(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get usage data aggregated by date for trend charts.
@@ -453,7 +542,12 @@ class UsageRepository:
             List[Dict]: List of aggregated usage records by date.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -490,7 +584,11 @@ class UsageRepository:
         return results
 
     def get_daily_by_tool(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get usage data aggregated by date and tool for trend charts.
@@ -506,7 +604,12 @@ class UsageRepository:
             List[Dict]: List of usage records by date and tool.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -542,7 +645,11 @@ class UsageRepository:
         return list(merged.values())
 
     def get_request_count_total(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> int:
         """
         Get total request count from daily_usage table.
@@ -559,7 +666,12 @@ class UsageRepository:
             int: Total request count.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -575,7 +687,11 @@ class UsageRepository:
         return int(result.get("total_requests", 0) or 0) if result else 0
 
     def get_request_trend_data(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get request count trend data aggregated by date.
@@ -589,7 +705,12 @@ class UsageRepository:
             List[Dict]: List of request counts by date.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -626,7 +747,11 @@ class UsageRepository:
         return results
 
     def get_request_trend_by_tool(
-        self, start_date: str, end_date: str, host_name: Optional[str] = None
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get request count trend data aggregated by date and tool.
@@ -640,7 +765,12 @@ class UsageRepository:
             List[Dict]: List of request counts by date and tool.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -681,7 +811,9 @@ class UsageRepository:
 
         return list(results.values())
 
-    def get_today_request_stats(self, host_name: Optional[str] = None) -> dict:
+    def get_today_request_stats(
+        self, host_name: Optional[str] = None, tenant_id: Optional[int] = None
+    ) -> dict:
         """
         Get today's request statistics.
 
@@ -694,7 +826,12 @@ class UsageRepository:
         today = datetime.now().strftime("%Y-%m-%d")
 
         conditions = ["date = ?"]
-        params = [today]
+        params: list[Any] = [today]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -737,6 +874,7 @@ class UsageRepository:
         date: Optional[str] = None,
         host_name: Optional[str] = None,
         user_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get request statistics grouped by user (sender_name).
@@ -762,7 +900,12 @@ class UsageRepository:
             date = datetime.now().strftime("%Y-%m-%d")
 
         conditions = ["dm.date = ?", "dm.role = ?"]
-        params = [date, "assistant"]
+        params: list[Any] = [date, "assistant"]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("dm.user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("dm.host_name = ?")
@@ -854,6 +997,7 @@ class UsageRepository:
         start_date: str,
         end_date: str,
         host_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get request trend for a specific user.
@@ -871,10 +1015,17 @@ class UsageRepository:
             List[Dict]: Request trend by date for the user.
         """
         # First, try to get user_id from username
-        user = self.db.fetch_one(
-            "SELECT id FROM users WHERE username = ? OR system_account = ?",
-            (user_name, user_name),
-        )
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None:
+            user = self.db.fetch_one(
+                "SELECT id FROM users WHERE username = ? OR system_account = ?",
+                (user_name, user_name),
+            )
+        else:
+            user = self.db.fetch_one(
+                "SELECT id FROM users WHERE (username = ? OR system_account = ?) AND tenant_id = ?",
+                (user_name, user_name, normalized_tenant_id),
+            )
 
         if user:
             user_id = user["id"]
@@ -915,7 +1066,11 @@ class UsageRepository:
         # sender_name format is: {username}-{hostname}-{tool}
         # Use LIKE to match username prefix
         conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ? ESCAPE '\\'"]
-        params = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
+        params: list[Any] = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")
@@ -1013,6 +1168,7 @@ class UsageRepository:
         month: int,
         host_name: Optional[str] = None,
         user_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict]:
         """
         Get monthly request statistics grouped by user.
@@ -1033,7 +1189,12 @@ class UsageRepository:
             end_date = f"{year}-{month + 1:02d}-01"
 
         conditions = ["date >= ?", "date < ?", "role = ?"]
-        params = [start_date, end_date, "assistant"]
+        params: list[Any] = [start_date, end_date, "assistant"]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
 
         if host_name:
             conditions.append("host_name = ?")

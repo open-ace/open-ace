@@ -97,7 +97,7 @@
 - 🔑 **API Key 治理** — 加密存储 API Key，通过代理令牌调用模型，避免密钥下发到远程机器
 - 🚨 **智能告警** — 配额预警、异常检测、超支提醒，风险早知道
 - 📋 **合规审计** — 敏感内容检测、对话记录追溯、合规报告生成和 CSV 下载
-- 👥 **多租户管理** — 部门隔离、权限控制、资源配额，精细化管理
+- 👥 **多租户管理** — 租户级会话、项目、用量与审计隔离，配合权限控制与资源配额实现精细化管理
 - 💰 **ROI 分析** — 基于可见、可配置假设的 ROI 规划估算与效率量化
 
 ---
@@ -402,7 +402,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 - 🔑 **API Key Governance** — Encrypt API keys on the server and call models through scoped proxy tokens
 - 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
 - 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
-- 👥 **Multi-tenant Management** — Department isolation, permission control, resource quotas
+- 👥 **Multi-tenant Management** — Tenant-scoped session and project isolation, permission control, and resource quotas
 - 💰 **ROI Analysis** — Configurable ROI planning estimates with transparent assumptions and efficiency metrics
 
 ---
@@ -520,8 +520,6 @@ python3 server.py
 | SSO Integration | Enterprise single sign-on via SAML 2.0, OIDC, and OAuth2 |
 | Feishu Sync | Manual and optionally scheduled Feishu organization sync |
 | DingTalk Resolution | Resolve DingTalk user and group names during OpenClaw import |
-| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
->>>>>>> 997c5054 (Implement Feishu org sync)
 
 ### 📋 Compliance and Reporting
 

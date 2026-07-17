@@ -7,6 +7,7 @@ state_sync, and collaboration modules.
 """
 
 import os
+import sqlite3
 import tempfile
 from datetime import datetime, timezone
 
@@ -375,6 +376,55 @@ class TestSessionManager:
         stats = session_manager.get_session_stats(user_id=1)
         assert stats["total_sessions"] == 1
         assert stats["active_sessions"] == 1
+
+    def test_create_session_derives_tenant_from_user_and_propagates_to_messages(
+        self, session_manager
+    ):
+        """Session/message rows should persist the owning tenant boundary."""
+        conn = sqlite3.connect(session_manager.db_path)
+        conn.execute(
+            "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (101, "tenant-user", "tenant@example.com", "hash", "user", 7),
+        )
+        conn.commit()
+        conn.close()
+
+        session = session_manager.create_session(tool_name="claude", user_id=101)
+        message = session_manager.add_message(session.session_id, role="user", content="hello")
+        reloaded = session_manager.get_session(session.session_id, include_messages=True)
+
+        assert session.tenant_id == 7
+        assert message is not None
+        assert message.tenant_id == 7
+        assert reloaded is not None
+        assert reloaded.tenant_id == 7
+        assert reloaded.messages[0].tenant_id == 7
+
+    def test_list_sessions_filters_by_tenant_id(self, session_manager):
+        """Tenant filtering should exclude other-tenant rows even with same user_id."""
+        conn = sqlite3.connect(session_manager.db_path)
+        conn.execute(
+            "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (202, "tenant-a", "a@example.com", "hash", "user", 3),
+        )
+        conn.execute(
+            "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (203, "tenant-b", "b@example.com", "hash", "user", 9),
+        )
+        conn.commit()
+        conn.close()
+
+        session_manager.create_session(tool_name="claude", user_id=202, title="Tenant 3")
+        session_manager.create_session(tool_name="claude", user_id=203, title="Tenant 9")
+
+        tenant_3 = session_manager.list_sessions(tenant_id=3)
+        tenant_9 = session_manager.list_sessions(tenant_id=9)
+
+        assert [session.title for session in tenant_3["sessions"]] == ["Tenant 3"]
+        assert [session.title for session in tenant_9["sessions"]] == ["Tenant 9"]
 
 
 # ==================== Tool Connector Tests ====================
