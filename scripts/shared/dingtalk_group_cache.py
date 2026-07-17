@@ -25,6 +25,11 @@ CACHE_FILE = CACHE_DIR / "dingtalk_groups.json"
 CACHE_TTL = 86400  # 24 hours
 
 
+def get_dingtalk_access_token(app_key: str, app_secret: str) -> Optional[str]:
+    """Keep the historical helper available for callers and monkeypatch-based tests."""
+    return cast(Optional[str], _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret))
+
+
 def ensure_cache_dir():
     """Ensure cache directory exists."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -74,7 +79,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
             return cast(Optional[dict], group_cache.get("data"))
 
-    token = _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret)
+    token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
         return None
 
