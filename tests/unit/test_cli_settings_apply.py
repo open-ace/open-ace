@@ -71,7 +71,9 @@ def test_write_codex_settings_uses_bearer_token_on_windows(tmp_path):
 
     parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
     # Should use experimental_bearer_token instead of env_key
-    assert parsed["model_providers"]["openace"]["experimental_bearer_token"] == "test-bearer-token-123"
+    assert (
+        parsed["model_providers"]["openace"]["experimental_bearer_token"] == "test-bearer-token-123"
+    )
     assert "env_key" not in parsed["model_providers"]["openace"]
     # Should have secure file permissions (0600)
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
