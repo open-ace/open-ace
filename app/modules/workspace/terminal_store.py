@@ -1,8 +1,8 @@
 """In-memory store for terminal session info with TTL-based cleanup.
 
-This store is process-local. Kubernetes and other multi-pod deployments must
-use sticky routing for active terminal sessions until issue #1782 externalizes
-the shareable remote-session runtime state.
+This metadata cache is process-local. Remote-session commands and SSE output
+are durable, but active terminal bridge sockets still require the owning web
+process or a reconnect after failover.
 """
 
 from __future__ import annotations

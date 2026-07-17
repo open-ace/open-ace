@@ -577,6 +577,45 @@ Remote workspace machine registry.
 | updated_at | timestamp | Update time |
 | last_heartbeat | timestamp | Last heartbeat time |
 
+### remote_runtime_commands
+
+Persistent HTTP-polling command queue for remote agents.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | |
+| command_id | varchar(64) | UNIQUE; request_id for command-response calls |
+| machine_id | text | Target remote machine |
+| session_id | text | Optional remote session |
+| command_type | text | Command name |
+| payload | text | JSON command payload |
+| status | varchar(32) | `pending`, `delivered`, or `responded` |
+| response_payload | text | JSON response payload for synchronous commands |
+| created_at | timestamp | Creation time |
+| delivered_at | timestamp | Agent poll claim time |
+| responded_at | timestamp | Response arrival time |
+| expires_at | timestamp | Retention cutoff |
+
+Indexes: `idx_remote_runtime_commands_machine_status`, `idx_remote_runtime_commands_expires`
+
+### remote_runtime_outputs
+
+Persistent SSE replay buffer for remote session output.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | |
+| session_id | text | Remote session ID |
+| event_index | integer | Monotonic per-session output index |
+| stream | text | stdout, stderr, system, permission, request_state |
+| payload | text | JSON output payload |
+| created_at | timestamp | Creation time |
+| expires_at | timestamp | Retention cutoff |
+
+Unique: `(session_id, event_index)`
+
+Indexes: `idx_remote_runtime_outputs_session_index`, `idx_remote_runtime_outputs_expires`
+
 ### machine_assignments
 
 User-to-remote-machine assignment relationships.

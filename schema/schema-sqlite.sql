@@ -688,6 +688,31 @@ CREATE TABLE remote_machines (
  legacy_mode INTEGER DEFAULT 0
 );
 
+CREATE TABLE remote_runtime_commands (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id TEXT NOT NULL,
+ machine_id text NOT NULL,
+ session_id text,
+ command_type text DEFAULT '' NOT NULL,
+ payload text NOT NULL,
+ status TEXT DEFAULT 'pending' NOT NULL,
+ response_payload text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ delivered_at TIMESTAMP,
+ responded_at TIMESTAMP,
+ expires_at TIMESTAMP
+);
+
+CREATE TABLE remote_runtime_outputs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id text NOT NULL,
+ event_index integer NOT NULL,
+ stream text DEFAULT 'stdout' NOT NULL,
+ payload text NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP
+);
+
 CREATE TABLE retention_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1122,6 +1147,8 @@ CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (t
 
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
 
+CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
+
 CREATE UNIQUE INDEX role_permissions_role_permission_key ON role_permissions (role, permission);
 
 CREATE UNIQUE INDEX security_settings_setting_key_key ON security_settings (setting_key);
@@ -1163,6 +1190,8 @@ CREATE UNIQUE INDEX uq_hourly_stats_date_hour_tool_host ON hourly_stats (date, h
 CREATE UNIQUE INDEX uq_mapping_rule_user_pattern ON tool_account_mapping_rules (user_id, pattern, match_type);
 
 CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id, date, period);
+
+CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
 
@@ -1391,6 +1420,14 @@ CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines (hostname, t
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines (machine_id);
 
 CREATE INDEX idx_remote_machines_status ON remote_machines (status);
+
+CREATE INDEX idx_remote_runtime_commands_expires ON remote_runtime_commands (expires_at);
+
+CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_commands (machine_id, status, id);
+
+CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expires_at);
+
+CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 

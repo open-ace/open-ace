@@ -539,6 +539,45 @@ AI 生成的使用洞察报告。
 | updated_at | timestamp | 更新时间 |
 | last_heartbeat | timestamp | 最后心跳时间 |
 
+### remote_runtime_commands
+
+远程 Agent 的持久化 HTTP polling 命令队列。
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer PK | |
+| command_id | varchar(64) | UNIQUE；同步命令响应路径使用 request_id |
+| machine_id | text | 目标远程机器 |
+| session_id | text | 可选远程会话 |
+| command_type | text | 命令名称 |
+| payload | text | JSON 命令载荷 |
+| status | varchar(32) | `pending`、`delivered` 或 `responded` |
+| response_payload | text | 同步命令的 JSON 响应载荷 |
+| created_at | timestamp | 创建时间 |
+| delivered_at | timestamp | Agent poll claim 时间 |
+| responded_at | timestamp | 响应到达时间 |
+| expires_at | timestamp | 保留截止时间 |
+
+索引：`idx_remote_runtime_commands_machine_status`、`idx_remote_runtime_commands_expires`
+
+### remote_runtime_outputs
+
+远程会话输出的持久化 SSE 回放缓冲。
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer PK | |
+| session_id | text | 远程会话 ID |
+| event_index | integer | 每个会话内单调递增的输出序号 |
+| stream | text | stdout、stderr、system、permission、request_state |
+| payload | text | JSON 输出载荷 |
+| created_at | timestamp | 创建时间 |
+| expires_at | timestamp | 保留截止时间 |
+
+唯一约束：`(session_id, event_index)`
+
+索引：`idx_remote_runtime_outputs_session_index`、`idx_remote_runtime_outputs_expires`
+
 ### machine_assignments
 
 用户与远程机器的分配关系。

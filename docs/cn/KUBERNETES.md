@@ -59,7 +59,7 @@ k8s/
 
 **HorizontalPodAutoscaler：** 参考清单至少保留 3 个副本，并可根据 CPU 与内存利用率扩展到 10 个副本。
 
-**粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程工作区终端 / relay 的活跃会话仍有部分运行态保存在单个 Web 进程内，因此同一个浏览器 / Agent 会话的请求必须持续回到同一个 Pod。
+**粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程会话 HTTP 控制态已经持久化并可跨 Pod，但实时终端 relay WebSocket bridge 仍属于单个 Web 进程；对活跃终端会话而言，粘性路由仍是最稳妥的默认配置。
 
 **多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
 
@@ -151,10 +151,10 @@ k8s/
 
 ### 当前支持边界
 
-- 仓库内提供的 Kubernetes 清单是**带粘性路由的多副本参考部署**，不是完全无状态的活跃会话 HA 设计。
-- 普通 HTTP/API 请求可以在 Pod 间负载均衡。活跃的远程工作区终端 relay、输出缓冲、命令队列和 WebSocket 对象仍保存在单个进程内。
-- 如果承载某个活跃终端 / relay 会话的 Pod 重启，数据库中的持久记录仍在，但内存缓冲和实时 relay socket 会中断；用户可能需要重新连接、恢复或重建该活跃终端 / 会话。
-- 移除粘性路由需要完成 [#1782](https://github.com/open-ace/open-ace/issues/1782) 中的运行态外置化。
+- 仓库内提供的 Kubernetes 清单仍是**带粘性路由的多副本参考部署**，因为这对实时终端 relay WebSocket 仍是最稳妥的默认配置。
+- 普通 HTTP/API 请求可以在 Pod 间负载均衡。远程会话命令、命令响应、会话输出回放、session-machine 绑定、远程机器、会话、消息、配额和审计记录均已持久化。
+- 如果承载某个活跃终端 / relay socket 的 Pod 重启，已持久化的远程会话状态仍可用，但该实时终端 bridge 需要重新连接。
+- 浏览器 SSE 重连可以在 Web Pod 重启后回放已持久化的远程会话输出。
 - tenant-aware schema / query 边界覆盖用户、项目、工作区会话与消息、用量聚合、审计日志、远程机器、权限和配额；系统管理员保留有意设计的全局可见性。
 
 ### 使用 cert-manager 配置 TLS

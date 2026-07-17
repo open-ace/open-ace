@@ -59,7 +59,7 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 **HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
 
-**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Active Remote Workspace terminal/relay sessions keep some runtime state inside one web process, so requests for a given browser/agent session must keep returning to the same pod.
+**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
 
 **Multi-user workspace note:** The default Kubernetes manifest runs the web container as a non-root user. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root and document that exception in your cluster change process.
 
@@ -151,10 +151,10 @@ Before deploying, update:
 
 ### Current support boundary
 
-- The shipped Kubernetes manifest is a **multi-replica reference deployment with sticky routing**, not a fully stateless active-session HA design.
-- Ordinary HTTP/API requests can be balanced across pods. Active Remote Workspace terminal relay, output buffering, command queues, and in-flight WebSocket objects still keep process-local state.
-- If the pod that owns an active terminal/relay session restarts, the persisted database records remain, but in-memory buffers and live relay sockets are interrupted. Users may need to reconnect, resume, or recreate that active terminal/session.
-- Removing sticky routing requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
+- The shipped Kubernetes manifest is a **multi-replica reference deployment with sticky routing** because that is still the safest default for live terminal relay WebSockets.
+- Ordinary HTTP/API requests can be balanced across pods. Remote session commands, command responses, session output replay, session-machine bindings, machines, sessions, messages, quotas, and audit records are persisted.
+- If the pod that owns an active terminal/relay socket restarts, persisted remote-session state remains available, but that live terminal bridge must reconnect.
+- Browser SSE reconnects can replay persisted remote session output after a web-pod restart.
 - Tenant-aware schema and query boundaries cover users, projects, workspace sessions/messages, usage aggregates, audit logs, remote machines, permissions, and quotas; system administrators retain intentional global visibility.
 
 ### TLS with cert-manager
