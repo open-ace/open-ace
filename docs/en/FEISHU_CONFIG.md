@@ -2,7 +2,10 @@
 
 > **ACE** = **AI Computing Explorer**
 
-This guide explains how to configure Feishu (Lark) integration to display real user names and group names instead of IDs.
+This guide explains how to configure Feishu (Lark) integration for:
+
+- imported-session user and group name resolution
+- local org sync of Feishu departments and users into Open ACE teams and users
 
 ## Overview
 
@@ -10,6 +13,8 @@ Open ACE can integrate with Feishu to:
 
 - Display real user names instead of `ou_xxxxx` IDs
 - Display group names instead of `oc_xxxxx` identifiers
+- Sync Feishu departments into Open ACE collaboration teams
+- Sync Feishu users into local users + team memberships
 
 ## Prerequisites
 
@@ -35,6 +40,7 @@ In the app settings:
 | Permission | Description |
 |------------|-------------|
 | `contact:contact:user:readonly` | Read user information |
+| `contact:contact:department:readonly` | Read department information |
 | `chat:chat:readonly` | Read chat information |
 
 3. Submit for approval if required
@@ -48,7 +54,10 @@ Edit `~/.open-ace/config.json`:
 {
   "feishu": {
     "app_id": "cli_xxxxxxxxxxxxxxxx",
-    "app_secret": "your_app_secret_here"
+    "app_secret": "your_app_secret_here",
+    "org_sync_enabled": true,
+    "org_sync_tenant_id": 1,
+    "org_sync_interval_minutes": 60
   }
 }
 ```
@@ -62,6 +71,29 @@ python3 scripts/shared/feishu_user_cache.py test ou_xxxxx <app_id> <app_secret>
 # Test group info query
 python3 scripts/shared/feishu_group_cache.py test chat_xxxxx <app_id> <app_secret>
 ```
+
+### 5. Sync the organization structure
+
+After saving the config:
+
+1. Restart Open ACE if you changed `config.json`
+2. Open `Manage -> Users`
+3. Click `Sync Feishu`
+
+When `feishu.org_sync_enabled=true`, the background data-fetch scheduler also performs periodic sync based on `feishu.org_sync_interval_minutes`.
+
+Current sync behavior:
+
+- departments are mirrored into collaboration `teams`
+- users are provisioned into local `users`
+- Feishu identities are linked through `sso_identities`
+- team memberships are reconciled for Feishu-managed teams
+
+Current non-goals:
+
+- disabling or deleting local users when they disappear from Feishu
+- removing Feishu-managed teams automatically when departments disappear
+- Feishu SSO login flow
 
 ## Cache Management
 
@@ -98,6 +130,12 @@ User and group information is cached to avoid frequent API calls.
 - Verify App ID and App Secret
 - Ensure the app is published
 - Check if permissions are approved
+
+### Org sync creates fewer users than expected
+
+- Check whether the app can read the relevant departments
+- Check whether an existing local user with the same email belongs to another tenant
+- Review server logs for `Skipped Feishu user ...` warnings
 
 ## Disabling Integration
 

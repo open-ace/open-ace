@@ -67,6 +67,22 @@ class RemoteSessionManager:
         # unconditional and removing the feature = deleting these references.
         self._policy_evaluator = get_evaluator()
 
+    def _get_run_recorder(self):
+        """Return the run recorder, lazily restoring it for lightweight test doubles."""
+        recorder = getattr(self, "_run_recorder", None)
+        if recorder is None:
+            recorder = get_run_recorder()
+            self._run_recorder = recorder
+        return recorder
+
+    def _get_policy_evaluator(self):
+        """Return the policy evaluator, lazily restoring it for lightweight test doubles."""
+        evaluator = getattr(self, "_policy_evaluator", None)
+        if evaluator is None:
+            evaluator = get_evaluator()
+            self._policy_evaluator = evaluator
+        return evaluator
+
     def _timeline(self, method: str, *args: Any, **kwargs: Any) -> None:
         """Single integration seam to the run-timeline recorder.
 
@@ -82,7 +98,7 @@ class RemoteSessionManager:
         interrupted. (The recorder methods already catch internally; this is the
         belt-and-suspenders for the ``_timeline`` call site itself.)
         """
-        recorder = self._run_recorder
+        recorder = self._get_run_recorder()
         if recorder.is_noop:
             return
         fn = getattr(recorder, method, None)
@@ -142,7 +158,7 @@ class RemoteSessionManager:
             session_id=session_id,
             run_id=session_id,
         )
-        return self._policy_evaluator.evaluate(ctx)
+        return self._get_policy_evaluator().evaluate(ctx)
 
     def _emit_policy_decision_event(
         self,
@@ -287,7 +303,7 @@ class RemoteSessionManager:
 
         # Central policy gate: a denied model/provider cannot be selected for a
         # remote session (acceptance criterion). No-op when policy is disabled.
-        if not self._policy_evaluator.is_noop:
+        if not self._get_policy_evaluator().is_noop:
             model_decision = self._evaluate_model_policy(
                 tenant_id=effective_tenant_id,
                 project_path=project_path,
@@ -751,7 +767,7 @@ class RemoteSessionManager:
         recompute it. Live fingerprint re-verification is the deferred Phase-2
         CLI-side pre-side-effect recheck (honest-client boundary, plan §2.6).
         """
-        if self._policy_evaluator.is_noop or not request_id:
+        if self._get_policy_evaluator().is_noop or not request_id:
             return behavior
         try:
             from app.modules.policy.repo import PolicyRepository
@@ -793,7 +809,7 @@ class RemoteSessionManager:
 
         # Central policy gate: a denied model/provider cannot be switched to.
         # No-op when policy is disabled.
-        if not self._policy_evaluator.is_noop:
+        if not self._get_policy_evaluator().is_noop:
             scope = self._session_policy_scope(session_id)
             session = self._session_manager.get_session(session_id)
             cli_tool = (
@@ -1286,7 +1302,7 @@ class RemoteSessionManager:
         self._timeline("record_approval_request", session_id, control_request)
 
         # 2. Policy disabled → legacy manual-approval path.
-        if self._policy_evaluator.is_noop:
+        if self._get_policy_evaluator().is_noop:
             self._buffer_permission_for_human(session_id, control_request)
             return
 
@@ -1302,7 +1318,7 @@ class RemoteSessionManager:
             session_id=session_id,
             run_id=session_id,
         )
-        result = self._policy_evaluator.evaluate(ctx)
+        result = self._get_policy_evaluator().evaluate(ctx)
 
         if result.requires_human:
             # Persist the require_human decision (consumed on human approval).

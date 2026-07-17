@@ -758,6 +758,21 @@ class SessionManager:
         conn.commit()
         conn.close()
 
+        if success and session.status in (SessionStatus.COMPLETED.value, SessionStatus.ERROR.value):
+            try:
+                from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+                get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                    session.session_id,
+                    reason=f"session_{session.status}",
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to revoke proxy tokens for session %s: %s",
+                    session.session_id,
+                    e,
+                )
+
         return success
 
     def list_cli_session_ids_for_project(self, project_path: str) -> set[str]:
@@ -865,6 +880,21 @@ class SessionManager:
         success = cursor.rowcount > 0
         conn.commit()
         conn.close()
+
+        terminal_status = safe_fields.get("status")
+        if success and terminal_status in (
+            SessionStatus.COMPLETED.value,
+            SessionStatus.ERROR.value,
+        ):
+            try:
+                from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+                get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                    session_id,
+                    reason=f"session_{terminal_status}",
+                )
+            except Exception as e:
+                logger.warning("Failed to revoke proxy tokens for session %s: %s", session_id, e)
 
         return success
 
@@ -1579,6 +1609,17 @@ class SessionManager:
 
         success = cursor.rowcount > 0
         conn.commit()
+
+        if success:
+            try:
+                from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+                get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                    session_id,
+                    reason="session_completed",
+                )
+            except Exception as e:
+                logger.warning("Failed to revoke proxy tokens for session %s: %s", session_id, e)
 
         # Update project statistics if session has project_id and user_id
         if success and session_row:

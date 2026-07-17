@@ -88,6 +88,22 @@ export interface QuotaStats {
   };
 }
 
+export interface FeishuSyncResult {
+  tenant_id: number;
+  departments_seen: number;
+  users_seen: number;
+  teams_created: number;
+  teams_updated: number;
+  users_created: number;
+  users_linked: number;
+  users_updated: number;
+  memberships_added: number;
+  memberships_removed: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  warnings: string[];
+}
+
 export interface AuditLogEntry {
   id: number;
   user_id: number;
@@ -170,5 +186,12 @@ export const adminApi = {
 
   async updateUserQuota(userId: number, data: UpdateQuotaRequest): Promise<{ success: boolean }> {
     return apiClient.put<{ success: boolean }>(`/api/admin/users/${userId}/quota`, data);
+  },
+
+  async syncFeishuOrg(tenantId?: number): Promise<{ success: boolean; result: FeishuSyncResult }> {
+    return apiClient.post<{ success: boolean; result: FeishuSyncResult }>(
+      '/api/admin/feishu/sync',
+      tenantId ? { tenant_id: tenantId } : {}
+    );
   },
 };

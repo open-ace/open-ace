@@ -274,6 +274,10 @@ def get_session_models():
         scope="remote",
         provider="openai",
     )
+    api_proxy.revoke_proxy_tokens_for_session(
+        f"ha-pool:{machine_id}",
+        reason="ha_pool_rotated",
+    )
     ha_pool_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=f"ha-pool:{machine_id}",

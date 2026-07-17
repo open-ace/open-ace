@@ -54,7 +54,10 @@
   },
   "feishu": {
     "app_id": "<FEISHU_APP_ID>",
-    "app_secret": "<FEISHU_APP_SECRET>"
+    "app_secret": "<FEISHU_APP_SECRET>",
+    "org_sync_enabled": false,
+    "org_sync_tenant_id": 1,
+    "org_sync_interval_minutes": 60
   },
   "dingtalk": {
     "app_key": "<DINGTALK_APP_KEY>",

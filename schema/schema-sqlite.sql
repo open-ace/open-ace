@@ -602,6 +602,29 @@ CREATE TABLE prompt_templates (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE proxy_token_jtis (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ jti text NOT NULL,
+ token_hash text NOT NULL,
+ user_id integer,
+ session_id text NOT NULL,
+ tenant_id integer,
+ provider text NOT NULL,
+ session_type text NOT NULL,
+ scope text,
+ reuse_mode text DEFAULT 'multi_use' NOT NULL,
+ is_single_use INTEGER DEFAULT 0 NOT NULL,
+ issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP NOT NULL,
+ first_used_at TIMESTAMP,
+ last_used_at TIMESTAMP,
+ consumed_at TIMESTAMP,
+ revoked_at TIMESTAMP,
+ revoke_reason text,
+ use_count integer DEFAULT 0 NOT NULL,
+ metadata text
+);
+
 CREATE TABLE quota_alerts (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -1091,6 +1114,10 @@ CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
 
+CREATE UNIQUE INDEX proxy_token_jtis_jti_key ON proxy_token_jtis (jti);
+
+CREATE UNIQUE INDEX proxy_token_jtis_token_hash_key ON proxy_token_jtis (token_hash);
+
 CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (token_hash);
 
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
@@ -1340,6 +1367,12 @@ CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 CREATE INDEX idx_prompt_templates_category ON prompt_templates (category);
 
 CREATE INDEX idx_prompt_templates_public ON prompt_templates (is_public);
+
+CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis (revoked_at, consumed_at);
+
+CREATE INDEX idx_proxy_token_jtis_expires ON proxy_token_jtis (expires_at);
+
+CREATE INDEX idx_proxy_token_jtis_session ON proxy_token_jtis (session_id);
 
 CREATE INDEX idx_quota_alerts_created ON quota_alerts (created_at);
 

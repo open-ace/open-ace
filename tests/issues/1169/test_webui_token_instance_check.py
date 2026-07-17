@@ -8,6 +8,7 @@ instead of fixed expiration time.
 
 import json
 import os
+import secrets
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -36,7 +37,7 @@ def _make_proxy_token_payload(
         "tenant_id": tenant_id,
         "provider": provider,
         "exp": exp_str,
-        "jti": "test-token-id",
+        "jti": secrets.token_hex(16),
         "session_type": session_type,
     }
 
@@ -57,7 +58,14 @@ def _make_signed_token(service, payload: dict) -> str:
         payload_b64.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return f"{payload_b64}.{signature}"
+    token = f"{payload_b64}.{signature}"
+    service._record_proxy_token_issue(
+        token=token,
+        payload=payload,
+        expires_at=datetime.fromisoformat(payload["exp"]),
+        reuse_mode=payload.get("reuse_mode", "multi_use"),
+    )
+    return token
 
 
 class TestWebUITokenInstanceCheck:
