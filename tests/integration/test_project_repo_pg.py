@@ -10,13 +10,25 @@ pytestmark = pytest.mark.postgres
 from app.repositories.project_repo import ProjectRepository
 
 
-def _insert_user(pg_db, username="testuser", email=None):
+def _ensure_tenant(pg_db, tenant_id):
+    pg_db.execute(
+        """
+        INSERT INTO tenants (id, name, slug, quota)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        (tenant_id, f"Tenant {tenant_id}", f"tenant-{tenant_id}", "{}"),
+    )
+
+
+def _insert_user(pg_db, username="testuser", email=None, tenant_id=1):
     """Insert a user row for foreign key references."""
+    _ensure_tenant(pg_db, tenant_id)
     if email is None:
         email = f"{username}@example.com"
     pg_db.execute(
-        "INSERT INTO users (username, email, password_hash, role) VALUES (%s, %s, %s, %s)",
-        (username, email, "hashed_pw", "user"),
+        "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (%s, %s, %s, %s, %s)",
+        (username, email, "hashed_pw", "user", tenant_id),
     )
     # For PostgreSQL, execute returns cursor but lastrowid may not work
     # Use RETURNING via fetch_one instead
@@ -74,6 +86,30 @@ class TestProjectCRUD:
         project = repo.get_project_by_path("/projects/unique-path")
         assert project is not None
         assert project.name == "Path Project"
+
+    def test_same_path_allowed_across_tenants(self, pg_db):
+        repo = ProjectRepository(db=pg_db)
+        user_a = _insert_user(pg_db, username="tenant_a_user_pg", tenant_id=1)
+        user_b = _insert_user(pg_db, username="tenant_b_user_pg", tenant_id=2)
+
+        first_id = repo.create_project(
+            path="/projects/shared-path-pg",
+            name="Tenant A",
+            created_by=user_a,
+            tenant_id=1,
+        )
+        second_id = repo.create_project(
+            path="/projects/shared-path-pg",
+            name="Tenant B",
+            created_by=user_b,
+            tenant_id=2,
+        )
+
+        assert first_id is not None
+        assert second_id is not None
+        assert first_id != second_id
+        assert repo.get_project_by_path("/projects/shared-path-pg", tenant_id=1).id == first_id
+        assert repo.get_project_by_path("/projects/shared-path-pg", tenant_id=2).id == second_id
 
     def test_update_project(self, pg_db):
         repo = ProjectRepository(db=pg_db)
@@ -244,3 +280,14 @@ class TestUserProject:
 
         assert len(repo.get_all_projects()) == 2
         assert len(repo.get_all_projects(created_by=user_id)) == 1
+
+    def test_get_all_projects_filters_by_tenant(self, pg_db):
+        repo = ProjectRepository(db=pg_db)
+        user_a = _insert_user(pg_db, username="creator-a", tenant_id=1)
+        user_b = _insert_user(pg_db, username="creator-b", tenant_id=2)
+
+        repo.create_project(path="/projects/tenant-a", created_by=user_a, tenant_id=1)
+        repo.create_project(path="/projects/tenant-b", created_by=user_b, tenant_id=2)
+
+        tenant_one_projects = repo.get_all_projects(tenant_id=1)
+        assert [project.path for project in tenant_one_projects] == ["/projects/tenant-a"]

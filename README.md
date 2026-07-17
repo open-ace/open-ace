@@ -42,14 +42,14 @@
 |------|----------|
 | 🤖 **团队同时使用多个 AI Coding Agent** | 多 CLI 工作台统一 Claude Code、Qwen Code、Codex、OpenClaw 等工具 |
 | 🖥️ **Agent 需要跑在内网、测试机或 GPU 机器上** | Remote Agent 让 AI CLI 直接在目标机器执行 |
-| 🔑 **API Key 不该散落在个人电脑和远程机器上** | API Key Proxy 把真实密钥留在服务端，只下发短期代理令牌 |
+| 🔑 **API Key 不该散落在个人电脑和远程机器上** | API Key Proxy 把真实密钥留在服务端，只下发短生命周期、可回收的代理令牌 |
 | 📊 **成本、配额、风险和审计需要可见** | Manage 模式提供用量、成本、配额、异常、审计和合规视图 |
 
 **你可以用 Open ACE 做什么：**
 
 - 给团队一个统一入口，管理本地/远程 AI coding 会话、提示词、历史记录和项目上下文
 - 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
-- 加密保存 LLM API Key，通过短期代理令牌给本地和远程会话安全调用模型
+- 加密保存 LLM API Key，通过短生命周期、可回收的代理令牌给本地和远程会话安全调用模型
 - 给管理者一套控制面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
 - 在自己的网络里部署，保留企业数据边界，并逐步接入 SSO、飞书/钉钉和 Kubernetes
 
@@ -60,7 +60,7 @@
 | AI Coding Agent 控制面 | 把团队已在使用的多个 AI CLI 纳入统一入口、权限、成本和审计体系 |
 | 远程工作区与 Remote Agent | 用户在浏览器里选择远程机器，AI CLI 直接在目标机器运行，无需反复传 SSH 凭据 |
 | 多 CLI 适配器 | Claude Code、Qwen Code、Codex、OpenClaw 统一接入，包含会话恢复、权限模式和历史同步 |
-| API Key 代理 | API Key 加密存储在服务器，远程 Agent 只拿短期代理令牌，统一配额和用量统计 |
+| API Key 代理 | API Key 加密存储在服务器，远程 Agent 只拿短生命周期、可回收的代理令牌，统一配额和用量统计 |
 | 终端与 VSCode/code-server 代理 | 支持浏览器终端、远程目录浏览和 code-server/VSCode 访问，适合真实研发工作流 |
 | 合规与报表 | 支持审计追踪、配额检查、合规报告生成和 CSV 下载 |
 | 开源协作基础 | 已补齐 Roadmap、Security Policy、Issue 模板、Dependabot、CODEOWNERS 和适合新手的 Issue 标签 |
@@ -97,7 +97,7 @@
 - 🔑 **API Key 治理** — 加密存储 API Key，通过代理令牌调用模型，避免密钥下发到远程机器
 - 🚨 **智能告警** — 配额预警、异常检测、超支提醒，风险早知道
 - 📋 **合规审计** — 敏感内容检测、对话记录追溯、合规报告生成和 CSV 下载
-- 👥 **多租户管理** — 部门隔离、权限控制、资源配额，精细化管理
+- 👥 **多租户管理** — 租户级会话、项目、用量与审计隔离，配合权限控制与资源配额实现精细化管理
 - 💰 **ROI 分析** — 基于可见、可配置假设的 ROI 规划估算与效率量化
 
 ---
@@ -195,7 +195,7 @@ python3 server.py
 | CLI 适配器 | 支持 Claude Code、Qwen Code、Codex、OpenClaw 的启动、会话恢复和权限模式 |
 | 浏览器终端 | 通过 WebSocket PTY 访问远程 shell，并支持断线后的屏幕恢复 |
 | VSCode/code-server | 代理远程 code-server/VSCode 路径，方便在浏览器中继续开发 |
-| API Key 代理 | 真实密钥只保存在服务器，远程会话通过短期代理令牌访问模型 |
+| API Key 代理 | 真实密钥只保存在服务器，远程会话通过短生命周期、可回收的代理令牌访问模型 |
 
 ### 🔔 告警中心
 
@@ -347,14 +347,14 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 |-----------|----------|
 | 🤖 **Teams use multiple AI coding agents** | Multi-CLI workspace for Claude Code, Qwen Code, Codex, OpenClaw, and more |
 | 🖥️ **Agents need to run on internal, staging, or GPU machines** | Remote Agent runs AI CLIs directly on target machines |
-| 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived proxy tokens |
+| 🔑 **API keys should not spread across laptops and remote boxes** | API Key Proxy keeps real keys on the server and issues short-lived, revocable proxy tokens |
 | 📊 **Cost, quotas, risk, and audit need visibility** | Manage Mode tracks usage, cost, quotas, anomalies, audit trails, and compliance |
 
 **What you can do with Open ACE:**
 
 - Give teams one place for local/remote AI coding sessions, prompts, history, and project context
 - Run Claude Code, Qwen Code, Codex, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
-- Store LLM API keys centrally and issue short-lived proxy tokens to local and remote sessions
+- Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
 - Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
 - Deploy inside your own network while integrating SSO, Feishu/DingTalk, and Kubernetes over time
 
@@ -365,7 +365,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 | AI coding agent control plane | Bring the team's existing AI CLIs under one access, key, quota, cost, and audit model |
 | Remote Workspace and Remote Agent | Users choose a remote machine in the browser and run AI CLIs there without repeatedly sharing SSH credentials |
 | Multi-CLI adapters | Claude Code, Qwen Code, Codex, and OpenClaw share one workspace with session recovery, permission modes, and history sync |
-| API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived proxy tokens with unified quota and usage tracking |
+| API Key proxy | Keys are encrypted on the server; remote agents only receive short-lived, revocable proxy tokens with unified quota and usage tracking |
 | Terminal and VSCode/code-server proxy | Browser terminal, remote directory browsing, and code-server/VSCode access make the workspace useful for real development loops |
 | Compliance and reporting | Audit trails, quota checks, compliance reports, and CSV downloads are available for governance workflows |
 | Open-source readiness | Roadmap, Security Policy, issue templates, Dependabot, CODEOWNERS, and beginner-friendly labels are in place |
@@ -402,7 +402,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 - 🔑 **API Key Governance** — Encrypt API keys on the server and call models through scoped proxy tokens
 - 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
 - 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
-- 👥 **Multi-tenant Management** — Department isolation, permission control, resource quotas
+- 👥 **Multi-tenant Management** — Tenant-scoped session and project isolation, permission control, and resource quotas
 - 💰 **ROI Analysis** — Configurable ROI planning estimates with transparent assumptions and efficiency metrics
 
 ---
@@ -500,7 +500,7 @@ python3 server.py
 | CLI Adapters | Start, resume, and control permission modes for Claude Code, Qwen Code, Codex, and OpenClaw |
 | Browser Terminal | Access remote shells through WebSocket PTY with screen recovery after disconnects |
 | VSCode/code-server | Proxy remote code-server/VSCode paths so users can continue development in the browser |
-| API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived proxy tokens |
+| API Key Proxy | Keep real keys on the server and let remote sessions call models through short-lived, revocable proxy tokens |
 
 ### 🔔 Alert Center
 
@@ -520,8 +520,6 @@ python3 server.py
 | SSO Integration | Enterprise single sign-on via SAML 2.0, OIDC, and OAuth2 |
 | Feishu Sync | Manual and optionally scheduled Feishu organization sync |
 | DingTalk Resolution | Resolve DingTalk user and group names during OpenClaw import |
-| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
->>>>>>> 997c5054 (Implement Feishu org sync)
 
 ### 📋 Compliance and Reporting
 

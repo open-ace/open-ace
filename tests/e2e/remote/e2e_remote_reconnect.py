@@ -398,11 +398,11 @@ def test_4_sse_latency():
 
 
 def test_5_proxy_token_expiry():
-    """Test 5: Verify proxy token is valid for extended period (24h)."""
+    """Test 5: Verify active sessions do not fail early because of proxy token lifecycle."""
     global auth_token
 
     print("=" * 60)
-    print("  TEST 5: Proxy token 应有 24 小时有效期")
+    print("  TEST 5: 活跃会话中的 proxy token 不应过早失效")
     print("=" * 60)
 
     assert wait_for_server(), "Server not running"

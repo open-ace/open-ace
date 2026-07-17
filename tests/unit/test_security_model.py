@@ -110,6 +110,18 @@ def manager(tmp_path):
     return mgr
 
 
+@pytest.fixture
+def session_manager(tmp_path):
+    """A SessionManager backed by a temp SQLite database."""
+    from app.modules.workspace.session_manager import SessionManager
+    from app.repositories.schema_init import load_schema_from_file
+
+    db_path = str(tmp_path / "test_session.db")
+    mgr = SessionManager(db_path=db_path)
+    load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
+    return mgr
+
+
 # ── §2 Secret encryption at rest ─────────────────────────────────────────
 
 
@@ -260,6 +272,24 @@ class TestRegistrationTokens:
 class TestProxyTokens:
     """SECURITY.md §6.2 — proxy tokens are HMAC-signed and expire."""
 
+    def test_default_ttl_is_shorter_than_24_hours_and_configurable(
+        self, proxy_service, monkeypatch
+    ):
+        monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_MINUTES", "30")
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-ttl",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+        )
+        payload = proxy_service.validate_proxy_token(token)
+        assert payload is not None
+        exp = datetime.fromisoformat(payload["exp"])
+        remaining = exp - datetime.now(timezone.utc).replace(tzinfo=None)
+        assert remaining <= timedelta(minutes=31)
+        assert proxy_service.DEFAULT_PROXY_TOKEN_TTL_MINUTES < 1440
+
     def test_token_has_payload_and_signature(self, proxy_service):
         token = proxy_service.generate_proxy_token(
             user_id=1,
@@ -283,7 +313,7 @@ class TestProxyTokens:
             session_id="sess-1",
             tenant_id=1,
             provider="openai",
-            session_type="terminal",  # skips the active-session DB check
+            session_type="ha_pool",
         )
         payload = proxy_service.validate_proxy_token(token)
         assert payload is not None
@@ -295,7 +325,7 @@ class TestProxyTokens:
             session_id="sess-1",
             tenant_id=1,
             provider="openai",
-            session_type="terminal",
+            session_type="ha_pool",
         )
         payload_b64, _sig = token.split(".")
         forged = f"{payload_b64}.{'0' * 64}"
@@ -310,6 +340,30 @@ class TestProxyTokens:
             session_type="terminal",
             expires_minutes=-10,  # already expired
         )
+        assert proxy_service.validate_proxy_token(token) is None
+
+    def test_single_use_token_replay_rejected(self, proxy_service):
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-single",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+            extra_payload={"single_use": True},
+        )
+        assert proxy_service.validate_proxy_token(token) is not None
+        assert proxy_service.validate_proxy_token(token) is None
+
+    def test_session_revocation_blocks_multi_use_token(self, proxy_service):
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-revoke",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+        )
+        assert proxy_service.validate_proxy_token(token) is not None
+        assert proxy_service.revoke_proxy_tokens_for_session("sess-revoke") >= 1
         assert proxy_service.validate_proxy_token(token) is None
 
     def test_wrong_key_rejects_token(self, proxy_service, monkeypatch):

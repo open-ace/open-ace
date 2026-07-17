@@ -93,7 +93,8 @@ CREATE TABLE agent_sessions (
  workspace_type text DEFAULT 'local',
  remote_machine_id text,
  paused_at TIMESTAMP,
- cli_session_id text DEFAULT ''
+ cli_session_id text DEFAULT '',
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -225,7 +226,8 @@ CREATE TABLE audit_logs (
  user_agent text,
  session_id text,
  success INTEGER DEFAULT 1,
- error_message text
+ error_message text,
+ tenant_id integer
 );
 
 CREATE TABLE autonomous_workflows (
@@ -396,6 +398,7 @@ CREATE TABLE daily_usage (
  request_count integer DEFAULT 0,
  models_used text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ tenant_id integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_daily_usage_cache_tokens_positive CHECK ((cache_tokens >= 0)),
     CONSTRAINT chk_daily_usage_input_tokens_positive CHECK ((input_tokens >= 0)),
     CONSTRAINT chk_daily_usage_output_tokens_positive CHECK ((output_tokens >= 0)),
@@ -578,7 +581,8 @@ CREATE TABLE projects (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
- is_shared INTEGER DEFAULT 0 NOT NULL
+ is_shared INTEGER DEFAULT 0 NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE prompt_templates (
@@ -596,6 +600,29 @@ CREATE TABLE prompt_templates (
  use_count integer DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE proxy_token_jtis (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ jti text NOT NULL,
+ token_hash text NOT NULL,
+ user_id integer,
+ session_id text NOT NULL,
+ tenant_id integer,
+ provider text NOT NULL,
+ session_type text NOT NULL,
+ scope text,
+ reuse_mode text DEFAULT 'multi_use' NOT NULL,
+ is_single_use INTEGER DEFAULT 0 NOT NULL,
+ issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP NOT NULL,
+ first_used_at TIMESTAMP,
+ last_used_at TIMESTAMP,
+ consumed_at TIMESTAMP,
+ revoked_at TIMESTAMP,
+ revoke_reason text,
+ use_count integer DEFAULT 0 NOT NULL,
+ metadata text
 );
 
 CREATE TABLE quota_alerts (
@@ -695,7 +722,8 @@ CREATE TABLE session_messages (
  source text DEFAULT '' NOT NULL,
  source_timestamp TIMESTAMP,
  external_message_id text DEFAULT '' NOT NULL,
- content_blocks text
+ content_blocks text,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE sessions (
@@ -1086,6 +1114,10 @@ CREATE UNIQUE INDEX knowledge_base_entry_id_key ON knowledge_base (entry_id);
 
 CREATE UNIQUE INDEX machine_assignments_machine_id_user_id_key ON machine_assignments (machine_id, user_id);
 
+CREATE UNIQUE INDEX proxy_token_jtis_jti_key ON proxy_token_jtis (jti);
+
+CREATE UNIQUE INDEX proxy_token_jtis_token_hash_key ON proxy_token_jtis (token_hash);
+
 CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (token_hash);
 
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
@@ -1124,7 +1156,7 @@ CREATE UNIQUE INDEX uq_daily_messages_date_tool_msg_host ON daily_messages (date
 
 CREATE UNIQUE INDEX uq_daily_stats_date_tool_host_sender ON daily_stats (date, tool_name, host_name, sender_name);
 
-CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE UNIQUE INDEX uq_hourly_stats_date_hour_tool_host ON hourly_stats (date, hour, tool_name, host_name);
 
@@ -1168,6 +1200,10 @@ CREATE INDEX idx_agent_sessions_session_type ON agent_sessions (session_type);
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions (status);
 
+CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions (tenant_id, updated_at);
+
+CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions (tenant_id, user_id);
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions (tool_name);
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
@@ -1203,6 +1239,8 @@ CREATE INDEX idx_audit_action ON audit_logs (action);
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
 CREATE INDEX idx_audit_severity ON audit_logs (severity);
+
+CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
@@ -1320,13 +1358,21 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
-CREATE INDEX idx_projects_path ON projects (path);
+CREATE INDEX idx_projects_path ON projects (tenant_id, path);
+
+CREATE INDEX idx_projects_tenant_created_by ON projects (tenant_id, created_by);
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates (category);
 
 CREATE INDEX idx_prompt_templates_public ON prompt_templates (is_public);
+
+CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis (revoked_at, consumed_at);
+
+CREATE INDEX idx_proxy_token_jtis_expires ON proxy_token_jtis (expires_at);
+
+CREATE INDEX idx_proxy_token_jtis_session ON proxy_token_jtis (session_id);
 
 CREATE INDEX idx_quota_alerts_created ON quota_alerts (created_at);
 
@@ -1363,6 +1409,10 @@ CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages (session_id, "timestamp", id);
 
 CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
+
+CREATE INDEX idx_session_messages_tenant_session ON session_messages (tenant_id, session_id);
+
+CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages (tenant_id, session_id, "timestamp", id);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 
@@ -1428,7 +1478,7 @@ CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
-CREATE INDEX idx_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE INDEX idx_usage_host_name ON daily_usage (host_name);
 
@@ -1437,6 +1487,8 @@ CREATE INDEX idx_usage_summary_host ON usage_summary (host_name);
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name) <> '') AND ((host_name) NOT LIKE '<%>') AND ((length((host_name)) >= 1) AND (length((host_name)) <= 253)));
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary (tool_name);
+
+CREATE INDEX idx_usage_tenant_date ON daily_usage (tenant_id, date);
 
 CREATE INDEX idx_usage_tool_name ON daily_usage (tool_name);
 
@@ -1476,6 +1528,6 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decisi
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
-CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
+CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);

@@ -212,6 +212,7 @@ AI 代理会话追踪。
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer PK | |
+| tenant_id | integer | DEFAULT 1；租户级用量聚合键 |
 | date | date | NOT NULL |
 | tool_name | varchar | NOT NULL |
 | host_name | varchar | DEFAULT 'localhost' |
@@ -222,7 +223,9 @@ AI 代理会话追踪。
 | request_count | integer | DEFAULT 0 |
 | models_used | text | |
 
-唯一约束：`(date, tool_name, host_name)`
+唯一约束：`(tenant_id, date, tool_name, host_name)`
+
+索引：`idx_usage_date`、`idx_usage_date_tool_host(tenant_id, date, tool_name, host_name)`、`idx_usage_tenant_date`
 
 ### usage_summary
 
@@ -342,6 +345,7 @@ AI 代理会话追踪。
 | id | integer PK | |
 | timestamp | timestamp | DEFAULT CURRENT_TIMESTAMP |
 | user_id | integer | |
+| tenant_id | integer | 尽可能从操作者解析，用于租户级审计查询 |
 | username | text | |
 | action | text | NOT NULL |
 | severity | text | DEFAULT 'info' |
@@ -351,7 +355,7 @@ AI 代理会话追踪。
 | ip_address | text | |
 | success | boolean | DEFAULT true |
 
-索引：`idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_action`, `idx_audit_severity`
+索引：`idx_audit_timestamp`、`idx_audit_user_id`、`idx_audit_tenant_id`、`idx_audit_action`、`idx_audit_severity`
 
 ### content_filter_rules
 
@@ -467,12 +471,15 @@ AI 生成的使用洞察报告。
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer PK | |
-| path | varchar(500) | UNIQUE |
+| tenant_id | integer | DEFAULT 1；用于按租户限定项目查找和唯一性 |
+| path | varchar(500) | 对活动项目按 `(tenant_id, path)` 唯一 |
 | name | varchar(200) | |
 | description | text | |
 | created_by | integer | |
 | is_active | boolean | DEFAULT true |
 | is_shared | boolean | DEFAULT false |
+
+索引：`idx_projects_created_by`、`idx_projects_is_active`、`idx_projects_path(tenant_id, path)`、`idx_projects_tenant_created_by`
 
 ### user_projects
 
