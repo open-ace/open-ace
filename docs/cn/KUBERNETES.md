@@ -4,7 +4,7 @@
 
 - Kubernetes 集群（1.24+）
 - 已配置 `kubectl`
-- 可用的 StorageClass（默认：`standard`）
+- 可用且支持 `ReadWriteMany` 的 StorageClass（用于共享应用 PVC）
 - Ingress 控制器（推荐 nginx-ingress）
 - cert-manager（可选，用于 TLS）
 
@@ -38,11 +38,11 @@ k8s/
 
 | 设置 | 值 |
 |------|-----|
-| 副本数 | 1 |
+| 副本数 | 3 |
 | 镜像 | `open-ace:latest` |
 | 容器端口 | 19888 |
 | 更新策略 | RollingUpdate（maxSurge=1, maxUnavailable=0） |
-| 安全上下文 | `runAsUser: 0`（当前多用户工作区 entrypoint 需要） |
+| 安全上下文 | `runAsNonRoot: true`、`runAsUser: 1000`、`allowPrivilegeEscalation: false` |
 
 **资源限制：**
 
@@ -55,7 +55,11 @@ k8s/
 - 存活检查：HTTP GET `/health`，initialDelay=10s，period=10s
 - 就绪检查：HTTP GET `/health`，initialDelay=5s，period=5s
 
-**Pod 反亲和性：** 仅保留为调度偏好。当前清单是单实例参考部署。
+**Pod 反亲和性：** 优先分散到不同节点，以便在容量允许时保持可用性。
+
+**HorizontalPodAutoscaler：** 参考清单至少保留 3 个副本，并可根据 CPU 与内存利用率扩展到 10 个副本。
+
+**多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 
@@ -105,10 +109,10 @@ k8s/
 
 - 名称：`open-ace-data`
 - 大小：10Gi
-- 访问模式：ReadWriteOnce
+- 访问模式：ReadWriteMany
 - 挂载路径：
   - `/workspace`（subPath `workspace`）
-  - `/root/.open-ace`（subPath `config`）
+  - `/home/open-ace/.open-ace`（subPath `config`）
 
 ### RBAC
 

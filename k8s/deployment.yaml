@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: open-ace
     app.kubernetes.io/component: web
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: open-ace
@@ -20,18 +20,31 @@ spec:
       maxUnavailable: 0
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "19888"
+        prometheus.io/path: "/health"
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web
     spec:
       serviceAccountName: open-ace
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: open-ace
           image: open-ace:latest
           imagePullPolicy: IfNotPresent
           securityContext:
-            runAsNonRoot: false
-            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: http
               containerPort: 19888
@@ -50,6 +63,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: HOME
+              value: /home/open-ace
+            - name: OPENACE_CONFIG_DIR
+              value: /home/open-ace/.open-ace
           resources:
             requests:
               cpu: "100m"
@@ -80,7 +97,7 @@ spec:
             - name: logs
               mountPath: /app/logs
             - name: config
-              mountPath: /root/.open-ace
+              mountPath: /home/open-ace/.open-ace
               subPath: config
       volumes:
         - name: data
@@ -104,3 +121,34 @@ spec:
         - key: "node-role.kubernetes.io/master"
           operator: "Exists"
           effect: "NoSchedule"
+
+---
+# Open ACE - HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: open-ace
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: open-ace
+    app.kubernetes.io/component: web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: open-ace
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

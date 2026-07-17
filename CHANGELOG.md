@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Kubernetes reference manifests now run the web pod as non-root with 3 replicas, HPA, and Prometheus scrape annotations restored; multi-user workspace deployments that require root must opt in via an explicit overlay.
+- Docker-generated default config now enables AI autonomous development by default and only enables multi-user workspace mode when `WORKSPACE_MULTI_USER_MODE=true`.
+- Documented the encrypted-secret upgrade path: existing deployments should set `OPENACE_ENCRYPTION_KEY` to the previous `SECRET_KEY` value before first restart after the security-hardening upgrade, then rotate in a planned maintenance window if desired.
+
 ## [v1.2.0] - 2026-07-14
 
 ### Fixed

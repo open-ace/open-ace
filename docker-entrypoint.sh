@@ -10,6 +10,12 @@ set -e
 # Create logs directory (Issue #1205)
 mkdir -p /app/logs
 
+# Keep the legacy Docker path by default, but let non-root deployments (K8s)
+# mount and write config under the application user's home.
+OPENACE_CONFIG_DIR="${OPENACE_CONFIG_DIR:-/root/.open-ace}"
+OPENACE_CONFIG_FILE="${OPENACE_CONFIG_FILE:-${OPENACE_CONFIG_DIR}/config.json}"
+export OPENACE_CONFIG_DIR OPENACE_CONFIG_FILE
+
 # ============================================================================
 # 0.1. Pre-flight Validation (Issue #1006)
 # ============================================================================
@@ -137,7 +143,7 @@ echo "=========================================="
 # ============================================================================
 # Generate default config.json if not exists (one-click deploy support)
 generate_default_config() {
-    CONFIG_FILE="/root/.open-ace/config.json"
+    CONFIG_FILE="$OPENACE_CONFIG_FILE"
     CONFIG_DIR=$(dirname "$CONFIG_FILE")
 
     # Skip if config already exists (user-mounted or previously generated)
@@ -171,6 +177,10 @@ generate_default_config() {
         fi
     fi
     PORT="${PORT:-19888}"
+    DEFAULT_WORKSPACE_MULTI_USER_MODE="${WORKSPACE_MULTI_USER_MODE:-false}"
+    if [ "$DEFAULT_WORKSPACE_MULTI_USER_MODE" != "true" ]; then
+        DEFAULT_WORKSPACE_MULTI_USER_MODE="false"
+    fi
 
     # Get hostname dynamically (matches install.sh behavior)
     HOST_NAME=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "docker-container")
@@ -201,7 +211,7 @@ generate_default_config() {
   "workspace": {
     "enabled": true,
     "url": "http://${SERVER_IP}",
-    "multi_user_mode": true,
+    "multi_user_mode": ${DEFAULT_WORKSPACE_MULTI_USER_MODE},
     "port_range_start": 3100,
     "port_range_end": 3200,
     "max_instances": 30,
@@ -211,7 +221,7 @@ generate_default_config() {
     "webui_path": ""
   },
   "autonomous": {
-    "enabled": false
+    "enabled": true
   },
   "tools": {
     "openclaw": {
@@ -405,8 +415,8 @@ fi
 # Check multi-user mode from both environment variable and config.json
 # This ensures the setting works even if docker-compose.yml is missing the env var
 CONFIG_MULTI_USER="false"
-if [ -f "/root/.open-ace/config.json" ]; then
-    CONFIG_MULTI_USER=$(python3 -c "import json; c=json.load(open('/root/.open-ace/config.json')); print('true' if c.get('workspace',{}).get('multi_user_mode',False) else 'false')" 2>/dev/null || echo "false")
+if [ -f "$OPENACE_CONFIG_FILE" ]; then
+    CONFIG_MULTI_USER=$(python3 -c "import json, os; c=json.load(open(os.environ['OPENACE_CONFIG_FILE'])); print('true' if c.get('workspace',{}).get('multi_user_mode',False) else 'false')" 2>/dev/null || echo "false")
 fi
 
 if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then

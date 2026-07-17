@@ -190,7 +190,11 @@ def get_cost_breakdown():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         breakdown = calculator.get_cost_breakdown(start_date, end_date, user_id)
 
         return jsonify(
@@ -221,7 +225,11 @@ def get_daily_costs():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         daily_costs = calculator.get_daily_costs(start_date, end_date, user_id)
 
         return jsonify({"success": True, "data": daily_costs})

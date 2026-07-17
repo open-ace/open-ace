@@ -408,6 +408,45 @@ class TestROICalculator:
         assert roi.estimated_savings == 600.0
         assert roi.productivity_gain == 300.0
 
+    def test_calculate_roi_cache_key_includes_assumptions(self):
+        low_calc, low_db = self._make_calculator()
+        high_db = MagicMock()
+        high_calc = ROICalculator(
+            db=high_db,
+            assumptions=ROIAssumptions(
+                hourly_labor_cost=200.0,
+                productivity_multiplier=10.0,
+                avg_time_saved_per_request=5.0,
+                currency="USD",
+            ),
+        )
+        row = {
+            "request_count": 10,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 500,
+            "total_tokens": 1500,
+        }
+        model_rows = [
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        low_db.fetch_one.return_value = row
+        low_db.fetch_all.return_value = model_rows
+        high_db.fetch_one.return_value = row
+        high_db.fetch_all.return_value = model_rows
+
+        low_roi = low_calc.calculate_roi("2026-01-01", "2026-01-31")
+        high_roi = high_calc.calculate_roi("2026-01-01", "2026-01-31")
+
+        assert low_roi is not None
+        assert high_roi is not None
+        assert low_roi.estimated_savings != high_roi.estimated_savings
+        high_db.fetch_one.assert_called_once()
+
     def test_summary_stats_exposes_active_assumptions(self):
         calc, mock_db = self._make_calculator()
         mock_db.fetch_one.return_value = {
