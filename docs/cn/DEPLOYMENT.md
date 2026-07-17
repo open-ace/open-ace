@@ -286,6 +286,13 @@ cd /home/open-ace/open-ace
 | `OPENACE_CORS_ALLOWED_ORIGINS` | 非 loopback WebUI 源的显式 API CORS 白名单，多个值用逗号分隔 |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | 浏览器侧终端 / VSCode 原始桥接允许的入站 WebSocket 最大消息大小（默认 `8388608`） |
 
+### 出站 URL 安全
+
+管理员配置的 SSO/OIDC 端点 URL 会在 Open ACE 发起测试、token、userinfo 或 JWKS
+请求前进行校验。默认仅允许公网 `http` 和 `https` 目标；loopback、localhost、内网地址、
+link-local 网段、云 metadata 服务主机、带账号密码的 URL，以及解析到非公网地址的 DNS
+结果都会被拦截，以降低 SSRF 风险。
+
 ### 端口配置
 
 Open ACE 默认监听 19888 端口。如需修改端口，可根据部署方式选择以下方法。
