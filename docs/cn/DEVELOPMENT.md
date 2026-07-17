@@ -69,7 +69,7 @@ open-ace/
 │   ├── agent.py        # 主守护进程循环
 │   ├── executor.py     # CLI 子进程管理
 │   ├── cli_adapters/   # 工具适配器（Claude、Qwen、Codex、OpenClaw）
-│   ├── terminal_server.py  # WebSocket PTY 服务器
+│   ├── terminal_server.py  # WebSocket 终端服务器（Linux/macOS 使用 PTY，Windows 使用管道子进程）
 │   └── session_sync.py # 会话历史同步
 │
 ├── scripts/            # 数据采集脚本

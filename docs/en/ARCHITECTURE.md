@@ -26,7 +26,7 @@ Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with thr
 ┌──────────┴──────┐  ┌────────┴────────────────────────────┐
 │ SQLite/PostgreSQL│  │       Remote Agent (daemon)          │
 │  35+ tables      │  │  HTTP polling │ CLI subprocesses     │
-│  Alembic         │  │  WebSocket PTY │ Session sync        │
+│  Alembic         │  │  WS terminal   │ Session sync        │
 └─────────────────┘  │  Claude/Qwen/Codex/OpenClaw          │
                       └─────────────────────────────────────┘
 ```

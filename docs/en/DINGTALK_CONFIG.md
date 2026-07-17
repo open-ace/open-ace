@@ -1,10 +1,12 @@
-# DingTalk Integration Configuration
+# DingTalk Import Resolution Configuration
 
-This guide explains how to configure DingTalk integration so Open ACE can resolve DingTalk user names and group names from imported OpenClaw session logs.
+This guide explains how to configure DingTalk import resolution so Open ACE can resolve DingTalk user names and group names from imported OpenClaw session logs.
+
+Current scope is limited to OpenClaw import name resolution and local caches. DingTalk organization sync and DingTalk bot/webhook features are not implemented yet; follow [#1785](https://github.com/open-ace/open-ace/issues/1785) for that work.
 
 ## Overview
 
-Open ACE can integrate with DingTalk to:
+Open ACE can use DingTalk APIs to:
 
 - Display real DingTalk user names instead of raw `userId` values
 - Display DingTalk group names instead of raw `chatId` metadata when available
@@ -14,6 +16,11 @@ Current scope:
 - OpenClaw message import path
 - DingTalk user name resolution
 - DingTalk group name resolution when session metadata contains a DingTalk `chatId`
+
+Out of scope today:
+
+- DingTalk department/user synchronization into Open ACE users and teams
+- DingTalk group bot commands or alert delivery
 
 ## Prerequisites
 
@@ -82,4 +89,4 @@ Cache files:
 
 ## Disabling integration
 
-To disable DingTalk integration, remove the `dingtalk` section from your config file.
+To disable DingTalk import resolution, remove the `dingtalk` section from your config file.
