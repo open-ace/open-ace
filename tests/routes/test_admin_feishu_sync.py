@@ -67,3 +67,31 @@ def test_manual_feishu_sync_validates_tenant_id(admin_client):
     response = admin_client.post("/api/admin/feishu/sync", json={"tenant_id": "oops"})
     assert response.status_code == 400
     assert "tenant_id" in response.get_json()["error"]
+
+
+def test_manual_dingtalk_sync_returns_summary(admin_client):
+    """Admin API should return the DingTalk sync result payload."""
+
+    class DummyResult:
+        def to_dict(self):
+            return {"tenant_id": 4, "users_seen": 3, "teams_created": 2}
+
+    with patch(
+        "app.services.dingtalk_org_sync.DingTalkOrgSyncService.sync_org",
+        return_value=DummyResult(),
+    ) as sync_org:
+        response = admin_client.post("/api/admin/dingtalk/sync", json={"tenant_id": 4})
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "success": True,
+        "result": {"tenant_id": 4, "users_seen": 3, "teams_created": 2},
+    }
+    sync_org.assert_called_once_with(tenant_id=4)
+
+
+def test_manual_dingtalk_sync_validates_tenant_id(admin_client):
+    """Admin API should reject non-integer tenant_id values for DingTalk sync."""
+    response = admin_client.post("/api/admin/dingtalk/sync", json={"tenant_id": "oops"})
+    assert response.status_code == 400
+    assert "tenant_id" in response.get_json()["error"]

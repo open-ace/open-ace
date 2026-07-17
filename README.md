@@ -51,7 +51,7 @@
 - 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
 - 加密保存 LLM API Key，通过短生命周期、可回收的代理令牌给本地和远程会话安全调用模型
 - 给管理者一套控制面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
-- 在自己的网络里部署，保留企业数据边界，并接入 OIDC/OAuth2 SSO、飞书同步、钉钉导入解析和 Kubernetes
+- 在自己的网络里部署，保留企业数据边界，并接入 OIDC/OAuth2 SSO、飞书/钉钉同步和 Kubernetes
 
 ## 🔥 近期功能亮点
 
@@ -111,7 +111,7 @@
 | 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、OpenClaw 统一入口、统一历史、统一治理 |
 | 🖥️ **远程执行** | Remote Agent 让 AI CLI 在目标机器运行，适合研发服务器、测试环境和 GPU 机器 |
 | 📊 **治理可观测** | Token、成本、配额、异常、审计、合规和 ROI 统一分析 |
-| 🔌 **企业集成** | 支持 OIDC/OAuth2 SSO、飞书组织同步、钉钉导入解析、Kubernetes、反向代理和多租户权限模型；SAML 2.0 计划见 [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| 🔌 **企业集成** | 支持 OIDC/OAuth2 SSO、飞书/钉钉组织同步、钉钉/飞书告警机器人、Kubernetes、反向代理和多租户权限模型；SAML 2.0 计划见 [#1784](https://github.com/open-ace/open-ace/issues/1784) |
 | 🆓 **开放协作** | Apache 2.0 协议，Roadmap、贡献指南和 good first issue 已就位 |
 
 ---
@@ -204,7 +204,7 @@ python3 server.py
 | 配额告警 | 用量达到阈值自动提醒 |
 | 异常检测 | 识别异常使用模式 |
 | 邮件通知 | 定期发送用量报告 |
-| Webhook / 飞书推送 | 实时推送告警到 Webhook，支持飞书 / Lark 群机器人 |
+| Webhook / 机器人推送 | 实时推送告警到 Webhook，支持飞书 / Lark 和钉钉群机器人 |
 
 ### 👥 用户管理
 
@@ -214,7 +214,7 @@ python3 server.py
 | 角色权限 | 管理员/普通用户角色区分 |
 | SSO 集成 | 支持 OIDC/OAuth2 企业单点登录；SAML 2.0 Provider 尚未实现，跟踪见 [#1784](https://github.com/open-ace/open-ace/issues/1784) |
 | 飞书同步 | 手动触发并可按配置自动同步飞书组织架构 |
-| 钉钉解析 | 导入 OpenClaw 会话时解析钉钉用户名和群名称；完整通讯录同步/机器人能力跟踪见 [#1785](https://github.com/open-ace/open-ace/issues/1785) |
+| 钉钉同步 | 手动触发并可按配置自动同步钉钉组织架构，导入 OpenClaw 会话时解析钉钉用户名和群名称 |
 
 ### 📋 合规与报表
 
@@ -302,7 +302,7 @@ open-ace/
 | [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
 | [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考（多副本 + 粘性会话边界） |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
-| [钉钉配置](docs/cn/DINGTALK_CONFIG.md) | 钉钉导入解析配置 |
+| [钉钉配置](docs/cn/DINGTALK_CONFIG.md) | 钉钉集成配置 |
 | [API 文档](docs/cn/API.md) | API 接口说明 |
 | [仓库设置](docs/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
 
@@ -356,7 +356,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 - Run Claude Code, Qwen Code, Codex, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
 - Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
 - Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
-- Deploy inside your own network while integrating OIDC/OAuth2 SSO, Feishu sync, DingTalk import resolution, and Kubernetes
+- Deploy inside your own network while integrating OIDC/OAuth2 SSO, Feishu/DingTalk sync, and Kubernetes
 
 ## 🔥 Recent Highlights
 
@@ -416,7 +416,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 | 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, and OpenClaw with unified access, history, and governance |
 | 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
 | 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
-| 🔌 **Enterprise integration** | OIDC/OAuth2 SSO, Feishu org sync, DingTalk import resolution, Kubernetes, reverse proxy, and multi-tenant permissions; SAML 2.0 is tracked in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| 🔌 **Enterprise integration** | OIDC/OAuth2 SSO, Feishu/DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions; SAML 2.0 is tracked in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
 | 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
 
 ---
@@ -509,7 +509,7 @@ python3 server.py
 | Quota Alerts | Automatic notifications when thresholds reached |
 | Anomaly Detection | Identify unusual usage patterns |
 | Email Reports | Periodic usage reports via email |
-| Webhook / Feishu Push | Real-time alerts to webhooks, including Feishu / Lark group bots |
+| Webhook / Bot Push | Real-time alerts to webhooks, including Feishu / Lark and DingTalk group bots |
 
 ### 👥 User Management
 
@@ -519,7 +519,7 @@ python3 server.py
 | Role Permissions | Admin/user role distinction |
 | SSO Integration | Enterprise single sign-on via OIDC/OAuth2; SAML 2.0 Provider is not implemented yet and is tracked in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
 | Feishu Sync | Manual and optionally scheduled Feishu organization sync |
-| DingTalk Resolution | Resolve DingTalk user and group names during OpenClaw import; full org sync/bot support is tracked in [#1785](https://github.com/open-ace/open-ace/issues/1785) |
+| DingTalk Sync | Manual and optionally scheduled DingTalk organization sync, plus DingTalk user/group name resolution during OpenClaw import |
 
 ### 📋 Compliance and Reporting
 
@@ -607,7 +607,7 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
 | [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference with multi-replica sticky-session boundaries |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
-| [DingTalk Config](docs/en/DINGTALK_CONFIG.md) | DingTalk import resolution |
+| [DingTalk Config](docs/en/DINGTALK_CONFIG.md) | DingTalk integration |
 | [API Reference](docs/en/API.md) | API documentation |
 | [Repository Setup](docs/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
 

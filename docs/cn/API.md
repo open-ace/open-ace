@@ -281,6 +281,44 @@ PUT /api/admin/users/<user_id>/quota
 
 ---
 
+### 同步飞书组织架构
+
+```
+POST /api/admin/feishu/sync
+```
+
+手动将飞书部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `feishu.org_sync_tenant_id` 配置。
+
+---
+
+### 同步钉钉组织架构
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+手动将钉钉部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `dingtalk.org_sync_tenant_id` 配置。
+
+---
+
 ### 获取配额使用情况
 
 ```

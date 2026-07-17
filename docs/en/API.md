@@ -281,6 +281,44 @@ Update a user's token/request quotas.
 
 ---
 
+### Sync Feishu Organization
+
+```
+POST /api/admin/feishu/sync
+```
+
+Manually sync Feishu departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `feishu.org_sync_tenant_id`.
+
+---
+
+### Sync DingTalk Organization
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+Manually sync DingTalk departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `dingtalk.org_sync_tenant_id`.
+
+---
+
 ### Get Quota Usage
 
 ```
