@@ -72,8 +72,8 @@ def test_apply_local_cli_settings_uses_proxy_v1(monkeypatch):
     openace_cli = load_openace_cli()
     applied = []
 
-    def fake_apply(cli_settings, proxy_base_url):
-        applied.append((cli_settings, proxy_base_url))
+    def fake_apply(cli_settings, proxy_base_url, codex_bearer_token=None):
+        applied.append((cli_settings, proxy_base_url, codex_bearer_token))
 
     monkeypatch.setattr(openace_cli, "apply_cli_settings", fake_apply)
 
@@ -88,6 +88,35 @@ def test_apply_local_cli_settings_uses_proxy_v1(monkeypatch):
         (
             {"codex-cli": {"model_provider": "openace"}},
             "https://openace.example/api/remote/llm-proxy/v1",
+            None,  # Not Windows, so no codex_bearer_token
+        )
+    ]
+
+
+def test_apply_local_cli_settings_passes_token_on_windows(monkeypatch):
+    """Verify codex_bearer_token is passed on Windows for UWP compatibility."""
+    openace_cli = load_openace_cli()
+    applied = []
+
+    def fake_apply(cli_settings, proxy_base_url, codex_bearer_token=None):
+        applied.append((cli_settings, proxy_base_url, codex_bearer_token))
+
+    monkeypatch.setattr(openace_cli, "apply_cli_settings", fake_apply)
+    monkeypatch.setattr(openace_cli.os, "name", "nt")
+
+    openace_cli._apply_local_cli_settings(
+        {
+            "proxy_url": "https://openace.example/api/remote/llm-proxy",
+            "cli_settings": {"codex-cli": {"model_provider": "openace"}},
+            "tokens": {"openai": "test-openai-token"},
+        }
+    )
+
+    assert applied == [
+        (
+            {"codex-cli": {"model_provider": "openace"}},
+            "https://openace.example/api/remote/llm-proxy/v1",
+            "test-openai-token",  # Windows: codex_bearer_token passed
         )
     ]
 
