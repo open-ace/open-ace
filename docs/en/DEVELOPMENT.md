@@ -49,7 +49,7 @@ open-ace/
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
 │   │   ├── compliance/ # Audit analysis, reports, retention
 │   │   ├── governance/ # Audit logging, alerts, quotas, content filter
-│   │   ├── sso/        # OAuth2/OIDC SSO
+│   │   ├── sso/        # OAuth2/OIDC/SAML SSO
 │   │   └── workspace/  # Remote agents, sessions, collaboration
 │   ├── models/         # Data models (User, Message, Session, Tenant, etc.)
 │   ├── auth/           # Authentication decorators

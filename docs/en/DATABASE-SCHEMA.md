@@ -308,7 +308,7 @@ Unique: `(tenant_id, date)`
 |--------|------|-------|
 | id | integer PK | |
 | name | text | UNIQUE |
-| provider_type | text | NOT NULL (oauth2/oidc) |
+| provider_type | text | NOT NULL (oauth2/oidc/saml) |
 | config | text | NOT NULL (JSON; stores encrypted `client_secret_encrypted` instead of plaintext `client_secret`) |
 | tenant_id | integer | FK → tenants(id) |
 | is_active | boolean | DEFAULT true |

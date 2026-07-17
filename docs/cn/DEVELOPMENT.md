@@ -49,7 +49,7 @@ open-ace/
 │   │   ├── analytics/  # 使用分析、ROI、成本优化
 │   │   ├── compliance/ # 审计分析、报告、数据保留
 │   │   ├── governance/ # 审计日志、告警、配额、内容过滤
-│   │   ├── sso/        # OAuth2/OIDC SSO
+│   │   ├── sso/        # OAuth2/OIDC/SAML SSO
 │   │   └── workspace/  # 远程代理、会话、协作
 │   ├── models/         # 数据模型（User、Message、Session、Tenant 等）
 │   ├── auth/           # 认证装饰器

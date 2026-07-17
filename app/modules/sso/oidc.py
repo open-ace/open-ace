@@ -18,6 +18,7 @@ import requests
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOUser
+from app.modules.sso.saml import SAMLProvider
 from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
 
 logger = logging.getLogger(__name__)
@@ -425,6 +426,7 @@ PROVIDER_CLASSES = {
     "github": OAuth2Provider,  # GitHub uses OAuth2, not OIDC
     "okta": OktaProvider,
     "auth0": Auth0Provider,
+    "saml": SAMLProvider,
 }
 
 

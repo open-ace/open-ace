@@ -77,7 +77,7 @@ Modules (domain logic):
 | `remote_bp` | `/api/remote` | 远程机器、会话、LLM 代理 |
 | `report_bp` | `/api` | 使用报告 |
 | `roi_bp` | `/api` | ROI 分析、成本优化 |
-| `sso_bp` | `/api/sso` | SSO 提供商管理、OAuth2/OIDC |
+| `sso_bp` | `/api/sso` | SSO 提供商管理、OAuth2/OIDC/SAML |
 | `tenant_bp` | `/api/tenants` | 多租户管理 |
 | `tool_accounts_bp` | `/api` | 用户-工具-账户映射 |
 | `upload_bp` | `/api` | 外部数据导入 |
@@ -124,7 +124,7 @@ Modules (domain logic):
 
 **`app/modules/governance/`** — 审计日志、告警通知、配额管理、内容过滤（PII 检测）
 
-**`app/modules/sso/`** — SSO 提供商生命周期、OAuth2 授权码流程、带 ID Token 验证的 OIDC
+**`app/modules/sso/`** — SSO 提供商生命周期、OAuth2 授权码流程、带 ID Token 验证的 OIDC，以及 SAML 2.0 SP metadata/AuthnRequest/ACS 处理
 
 **`app/modules/workspace/`** — API Key 代理（加密存储）、协作、提示词库、远程代理/会话管理器、会话持久化、状态同步、终端存储、工具连接器、WebSocket 代理
 

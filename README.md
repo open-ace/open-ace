@@ -51,7 +51,7 @@
 - 通过 Remote Agent 把 Claude Code、Qwen Code、Codex、OpenClaw 等 CLI 跑在团队自己的开发机、测试机或 GPU 机器上
 - 加密保存 LLM API Key，通过短生命周期、可回收的代理令牌给本地和远程会话安全调用模型
 - 给管理者一套控制面板，查看 Token、成本、异常、配额、审计、合规报告和 ROI
-- 在自己的网络里部署，保留企业数据边界，并接入 OIDC/OAuth2 SSO、飞书/钉钉同步和 Kubernetes
+- 在自己的网络里部署，保留企业数据边界，并接入 OIDC/OAuth2/SAML SSO、飞书/钉钉同步和 Kubernetes
 
 ## 🔥 近期功能亮点
 
@@ -111,7 +111,7 @@
 | 🌐 **多工具工作台** | Claude Code、Qwen Code、Codex、OpenClaw 统一入口、统一历史、统一治理 |
 | 🖥️ **远程执行** | Remote Agent 让 AI CLI 在目标机器运行，适合研发服务器、测试环境和 GPU 机器 |
 | 📊 **治理可观测** | Token、成本、配额、异常、审计、合规和 ROI 统一分析 |
-| 🔌 **企业集成** | 支持 OIDC/OAuth2 SSO、飞书/钉钉组织同步、钉钉/飞书告警机器人、Kubernetes、反向代理和多租户权限模型；SAML 2.0 计划见 [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| 🔌 **企业集成** | 支持 OIDC/OAuth2/SAML 2.0 SSO、飞书/钉钉组织同步、钉钉/飞书告警机器人、Kubernetes、反向代理和多租户权限模型 |
 | 🆓 **开放协作** | Apache 2.0 协议，Roadmap、贡献指南和 good first issue 已就位 |
 
 ---
@@ -212,7 +212,7 @@ python3 server.py
 |------|------|
 | 多租户 | 支持多部门/团队隔离 |
 | 角色权限 | 管理员/普通用户角色区分 |
-| SSO 集成 | 支持 OIDC/OAuth2 企业单点登录；SAML 2.0 Provider 尚未实现，跟踪见 [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| SSO 集成 | 支持 OIDC/OAuth2 与 SAML 2.0 企业单点登录 |
 | 飞书同步 | 手动触发并可按配置自动同步飞书组织架构 |
 | 钉钉同步 | 手动触发并可按配置自动同步钉钉组织架构，导入 OpenClaw 会话时解析钉钉用户名和群名称 |
 
@@ -356,7 +356,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 - Run Claude Code, Qwen Code, Codex, OpenClaw, and similar CLIs on your own development, staging, or GPU machines through the Remote Agent
 - Store LLM API keys centrally and issue short-lived, revocable proxy tokens to local and remote sessions
 - Give administrators a control plane for tokens, cost, anomalies, quotas, audits, compliance reports, and ROI
-- Deploy inside your own network while integrating OIDC/OAuth2 SSO, Feishu/DingTalk sync, and Kubernetes
+- Deploy inside your own network while integrating OIDC/OAuth2/SAML SSO, Feishu/DingTalk sync, and Kubernetes
 
 ## 🔥 Recent Highlights
 
@@ -416,7 +416,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 | 🌐 **Multi-tool workspace** | Claude Code, Qwen Code, Codex, and OpenClaw with unified access, history, and governance |
 | 🖥️ **Remote execution** | Remote Agent runs AI CLIs on development servers, staging boxes, or GPU machines |
 | 📊 **Governance observability** | Analyze tokens, cost, quotas, anomalies, audits, compliance, and ROI together |
-| 🔌 **Enterprise integration** | OIDC/OAuth2 SSO, Feishu/DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions; SAML 2.0 is tracked in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| 🔌 **Enterprise integration** | OIDC/OAuth2/SAML 2.0 SSO, Feishu/DingTalk org sync, Feishu/DingTalk alert bots, Kubernetes, reverse proxy, and multi-tenant permissions |
 | 🆓 **Open collaboration** | Apache 2.0, roadmap, contributor guide, and good first issues are ready |
 
 ---
@@ -517,7 +517,7 @@ python3 server.py
 |---------|-------------|
 | Multi-tenant | Department/team isolation |
 | Role Permissions | Admin/user role distinction |
-| SSO Integration | Enterprise single sign-on via OIDC/OAuth2; SAML 2.0 Provider is not implemented yet and is tracked in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| SSO Integration | Enterprise single sign-on via OIDC/OAuth2 and SAML 2.0 |
 | Feishu Sync | Manual and optionally scheduled Feishu organization sync |
 | DingTalk Sync | Manual and optionally scheduled DingTalk organization sync, plus DingTalk user/group name resolution during OpenClaw import |
 

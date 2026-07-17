@@ -19,6 +19,7 @@ from app.modules.sso.provider import (
     SSOProviderConfig,
     get_provider_config,
 )
+from app.modules.sso.saml import SAMLProvider
 from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
 from app.utils.smtp_crypto import get_password_manager
 
@@ -419,6 +420,15 @@ class SSOManager:
         # Generate state for CSRF protection
         state = secrets.token_urlsafe(32)
 
+        if provider.provider_type == "saml" and isinstance(provider, SAMLProvider):
+            auth_url = provider.get_authorization_url(state=state, redirect_uri=redirect_uri)
+            request_id = provider.last_request_id or ""
+            self._store_auth_state(state, request_id, provider_name, None)
+            return {
+                "authorization_url": auth_url,
+                "state": state,
+            }
+
         # Generate PKCE for added security
         code_verifier, code_challenge = OAuth2Provider.generate_pkce()
 
@@ -442,6 +452,35 @@ class SSOManager:
             "authorization_url": auth_url,
             "state": state,
         }
+
+    def complete_saml_authentication(
+        self,
+        provider_name: str,
+        saml_response: str,
+        relay_state: str,
+        acs_url: str,
+    ) -> SSOAuthResult:
+        """Complete a SAML ACS flow after the IdP posts a SAMLResponse."""
+        provider = self.get_provider(provider_name)
+        if not provider:
+            return SSOAuthResult(success=False, error="provider_not_found")
+        if provider.provider_type != "saml" or not isinstance(provider, SAMLProvider):
+            return SSOAuthResult(success=False, error="unsupported_provider_type")
+
+        auth_state = self._get_auth_state(relay_state)
+        if not auth_state:
+            return SSOAuthResult(success=False, error="invalid_state")
+        if auth_state.get("provider_name") != provider_name:
+            return SSOAuthResult(success=False, error="invalid_state")
+
+        request_id = cast("Optional[str]", auth_state.get("code_verifier"))
+        result = provider.authenticate_saml_response(
+            saml_response=saml_response,
+            request_id=request_id,
+            acs_url=acs_url,
+        )
+        self._delete_auth_state(relay_state)
+        return result
 
     def complete_authentication(
         self, provider_name: str, code: str, state: str, redirect_uri: str
