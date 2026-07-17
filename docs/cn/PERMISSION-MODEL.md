@@ -112,6 +112,8 @@ def health_check():
 
 大多数 `/api/*` 路由通过 blueprint 级别的 `before_request` 使用 `@auth_required`。敏感操作使用 `@admin_required`。
 
+如果用户被标记为 `must_change_password=true`，服务端会额外收紧访问范围，只允许认证检查、个人资料、密码修改、登出和密码策略等最小必要接口。
+
 ### 公开路由
 
 - `/` — SPA 全局捕获（提供 index.html）

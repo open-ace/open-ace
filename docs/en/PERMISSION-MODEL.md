@@ -112,6 +112,8 @@ All `/manage/*` routes require admin role. Regular users and machine admins cann
 
 Most `/api/*` routes use `@auth_required` via `before_request` at the blueprint level. Sensitive operations use `@admin_required`.
 
+If a user is marked with `must_change_password=true`, the server further narrows access and only allows the minimum required auth, profile, password-change, logout, and password-policy endpoints.
+
 ### Public Routes
 
 - `/` — SPA catch-all (serves index.html)
