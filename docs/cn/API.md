@@ -1450,6 +1450,7 @@ POST /api/sso/providers
 ```
 
 注册新的 SSO 提供商（仅管理员）。
+Provider 的密钥在持久化前会先加密。
 
 ---
 
@@ -1470,6 +1471,7 @@ GET /api/sso/login/<provider_name>
 ```
 
 发起 SSO 登录流程。
+对于 OAuth2/OIDC Provider，登录流程会启用 PKCE，并将 verifier 绑定到回调 state。
 
 ---
 

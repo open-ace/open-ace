@@ -322,7 +322,7 @@ def get_provider_detail(provider_name: str):
         return jsonify({"error": "Provider not found"}), 404
 
     try:
-        config_data = json.loads(row["config"])
+        config_data = get_sso_manager().deserialize_provider_config(row["config"])
 
         # Check if it's a predefined provider
         predefined_config = get_provider_config(provider_name)
@@ -467,7 +467,7 @@ def update_provider(provider_name: str):
         return jsonify({"error": "Provider not found"}), 404
 
     try:
-        existing_config = json.loads(existing["config"])
+        existing_config = get_sso_manager().deserialize_provider_config(existing["config"])
     except Exception:
         return jsonify({"error": "Failed to parse existing configuration"}), 500
 
@@ -521,13 +521,14 @@ def update_provider(provider_name: str):
     # Check if provider was disabled - auto-enable on update
     was_disabled = not existing.get("is_active", True)
 
+    serialized_config = get_sso_manager().serialize_provider_config(new_config)
     get_sso_manager().db.execute(
         """
         UPDATE sso_providers
         SET config = ?, updated_at = ?, is_active = ?
         WHERE name = ?
     """,
-        (json.dumps(new_config), now, adapt_boolean_value(True), provider_name),
+        (serialized_config, now, adapt_boolean_value(True), provider_name),
     )
 
     # Clear cache
@@ -678,7 +679,7 @@ def reset_provider_to_defaults(provider_name: str):
         return jsonify({"error": "Provider not found"}), 404
 
     try:
-        existing_config = json.loads(existing["config"])
+        existing_config = get_sso_manager().deserialize_provider_config(existing["config"])
     except Exception:
         return jsonify({"error": "Failed to parse existing configuration"}), 500
 
@@ -700,13 +701,14 @@ def reset_provider_to_defaults(provider_name: str):
 
     # Update provider
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    serialized_config = get_sso_manager().serialize_provider_config(new_config)
     get_sso_manager().db.execute(
         """
         UPDATE sso_providers
         SET config = ?, updated_at = ?
         WHERE name = ?
     """,
-        (json.dumps(new_config), now, provider_name),
+        (serialized_config, now, provider_name),
     )
 
     # Clear cache
@@ -955,7 +957,7 @@ def export_providers():
 
     for row in rows:
         try:
-            config = json.loads(row["config"])
+            config = get_sso_manager().deserialize_provider_config(row["config"])
             provider_names.append(row["name"])
 
             # Check if predefined
