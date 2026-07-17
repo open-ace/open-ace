@@ -97,6 +97,12 @@ Password: admin123
 
 **Important**: Change the default password immediately after first login!
 
+Before starting the production stack, define these secrets in `.env` or your secret manager:
+
+- `SECRET_KEY` — Flask session secret, must be strong and unique
+- `OPENACE_ENCRYPTION_KEY` — dedicated encryption key for stored API keys / SMTP passwords
+- `UPLOAD_AUTH_KEY` — shared secret for upload endpoints
+
 ### Directory Structure
 
 ```
@@ -554,7 +560,9 @@ chmod -R 755 ~/.open-ace/
 1. **Authentication**: Enable user authentication in production
 2. **HTTPS**: Use reverse proxy (nginx/Apache) with SSL
 3. **Firewall**: Restrict access to port 19888
-4. **Secrets**: Use environment variables for sensitive data
+4. **Secrets**: Use environment variables or a secret manager for sensitive data
+5. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
+6. **No placeholder secrets**: Do not use values such as `change-me-in-production` for `SECRET_KEY` or `UPLOAD_AUTH_KEY`
 
 ## Multi-User Workspace Deployment
 

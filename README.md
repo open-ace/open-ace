@@ -163,7 +163,7 @@ python3 server.py
 |------|--------|------|
 | 管理员 | admin | admin123 |
 
-> ⚠️ 默认账号仅用于本地首次启动。生产环境请务必设置 `SECRET_KEY`、修改默认密码，并参考 [部署指南](docs/cn/DEPLOYMENT.md) 完成安全配置。
+> ⚠️ 默认账号仅用于本地首次启动。生产环境请务必显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`、`UPLOAD_AUTH_KEY`，修改默认密码，并参考 [部署指南](docs/cn/DEPLOYMENT.md) 完成安全配置。
 
 ---
 
@@ -466,7 +466,7 @@ python3 server.py
 |------|----------|----------|
 | Admin | admin | admin123 |
 
-> ⚠️ The default account is only for the first local startup. For production, set `SECRET_KEY`, change the default password, and follow the [Deployment Guide](docs/en/DEPLOYMENT.md).
+> ⚠️ The default account is only for the first local startup. For production, explicitly set `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY`, change the default password, and follow the [Deployment Guide](docs/en/DEPLOYMENT.md).
 
 ---
 

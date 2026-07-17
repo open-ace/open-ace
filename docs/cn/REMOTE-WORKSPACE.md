@@ -240,8 +240,8 @@ curl -b cookies.txt -X POST \
 
 | 变量 | 必需 | 说明 | 默认值 |
 |------|------|------|--------|
-| `OPENACE_ENCRYPTION_KEY` | 推荐 | API Key 加密密钥。未设置时从 `SECRET_KEY` 派生 | `SECRET_KEY` 的 SHA-256 |
-| `SECRET_KEY` | 是 | Flask 会话密钥，也影响 API Key 加密 | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | 生产环境必需 | API Key 与 SMTP 密码的独立加密密钥 | 仅开发环境提供 fallback |
+| `SECRET_KEY` | 是 | Flask 会话密钥 | `dev-secret-key`（仅开发环境） |
 
 ### API Key 管理
 
@@ -922,8 +922,8 @@ ADAPTERS = {
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `OPENACE_ENCRYPTION_KEY` | API Key 加密密钥（推荐设置） | 从 `SECRET_KEY` 派生 |
-| `SECRET_KEY` | Flask 会话密钥 | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | API Key / SMTP 密码的独立加密密钥（生产环境必需） | 仅开发环境提供 fallback |
+| `SECRET_KEY` | Flask 会话密钥 | `dev-secret-key`（仅开发环境） |
 
 ### 远程 Agent
 

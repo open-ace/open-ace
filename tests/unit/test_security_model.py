@@ -3,8 +3,8 @@ Unit tests that verify the security model documented in docs/en/SECURITY.md.
 
 These tests assert the concrete, auditable guarantees the documentation makes:
   - API keys / SMTP passwords are Fernet-encrypted (AES-128-CBC + HMAC-SHA256).
-  - The encryption key is derived via SHA-256 from OPENACE_ENCRYPTION_KEY or
-    SECRET_KEY and is never the raw value.
+  - The encryption key is derived via SHA-256 from OPENACE_ENCRYPTION_KEY and is
+    never the raw value; development fallback stays separate from SECRET_KEY.
   - Only a SHA-256 hash of a registration token is stored; tokens are one-time
     use with a 1-hour TTL.
   - Proxy tokens are HMAC-SHA256 signed and expire; tampering invalidates them.
@@ -157,14 +157,15 @@ class TestApiEncryption:
 
         Fernet(fernet_key)  # does not raise
 
-    def test_secret_key_fallback(self, monkeypatch):
-        """When OPENACE_ENCRYPTION_KEY is unset, SECRET_KEY is used."""
+    def test_dev_fallback_is_independent_from_secret_key(self, monkeypatch):
+        """Development fallback must not derive encryption from SECRET_KEY."""
         from app.modules.workspace import api_key_proxy as akp
 
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
         monkeypatch.setenv("SECRET_KEY", "flask-secret")
+        monkeypatch.setenv("FLASK_ENV", "development")
         svc = akp.APIKeyProxyService.__new__(akp.APIKeyProxyService)
-        assert svc._get_encryption_key() == hashlib.sha256(b"flask-secret").digest()
+        assert svc._get_encryption_key() == hashlib.sha256(b"openace-dev-encryption-key").digest()
 
     def test_tampered_ciphertext_is_rejected(self, proxy_service):
         """Fernet's HMAC must catch tampering (integrity guarantee)."""

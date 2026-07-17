@@ -42,8 +42,9 @@ services:
     environment:
       - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
-      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
-      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-change-me-in-production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
+      - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:?OPENACE_ENCRYPTION_KEY must be set}
+      - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:?UPLOAD_AUTH_KEY must be set}
       # Database
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-ace-secret}@postgres:5432/${DB_NAME:-ace}
       # Multi-user Workspace

@@ -9,7 +9,6 @@ that are exchanged for real keys by the server's LLM proxy endpoint.
 import hashlib
 import json
 import logging
-import os
 import secrets
 import sqlite3
 import threading
@@ -20,6 +19,7 @@ from typing import Any, Optional, Union, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
 try:
@@ -130,15 +130,7 @@ class APIKeyProxyService:
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
-        key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
-        if not key_env:
-            secret = os.environ.get("SECRET_KEY")
-            if not secret:
-                raise RuntimeError(
-                    "OPENACE_ENCRYPTION_KEY or SECRET_KEY must be set for API key encryption. "
-                    "Refusing to use default key in production."
-                )
-            key_env = secret
+        key_env = get_encryption_key_material(purpose="API key encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 

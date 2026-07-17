@@ -110,7 +110,7 @@ k8s/
 
 **重要：** 部署到生产环境前，请更改所有占位值。建议使用 sealed-secrets 或外部密钥管理工具。
 
-键：`SECRET_KEY`、`UPLOAD_AUTH_KEY`、`DB_USER`、`DB_PASSWORD`、`REDIS_PASSWORD`
+键：`SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`、`UPLOAD_AUTH_KEY`、`DB_USER`、`DB_PASSWORD`、`REDIS_PASSWORD`
 
 ### PersistentVolumeClaim
 

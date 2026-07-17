@@ -7,7 +7,6 @@ API routes for data upload operations.
 import hmac
 import json
 import logging
-import os
 from functools import wraps
 from typing import Any, Optional
 
@@ -16,6 +15,7 @@ from flask import Blueprint, jsonify, request
 from app.services.message_service import MessageService
 from app.services.usage_service import UsageService
 from app.utils.hostname_validator import sanitize_hostname
+from app.utils.security_env import get_upload_auth_key
 
 
 def _sanitize_host_name(host_name: Optional[str]) -> str:
@@ -41,9 +41,6 @@ usage_service = UsageService()
 message_service = MessageService()
 logger = logging.getLogger(__name__)
 
-# Upload authentication key for API access
-UPLOAD_AUTH_KEY = os.environ.get("UPLOAD_AUTH_KEY")
-
 
 def require_upload_auth(f):
     """Decorator to require upload authentication."""
@@ -51,13 +48,14 @@ def require_upload_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         # Check for UPLOAD_AUTH_KEY in environment
-        if not UPLOAD_AUTH_KEY:
+        upload_auth_key = get_upload_auth_key()
+        if not upload_auth_key:
             logger.error("UPLOAD_AUTH_KEY not configured - upload endpoints disabled")
             return jsonify({"error": "Upload service not configured"}), 503
 
         # Check Authorization header
         auth_header = request.headers.get("X-Upload-Auth")
-        if not auth_header or not hmac.compare_digest(auth_header, UPLOAD_AUTH_KEY):
+        if not auth_header or not hmac.compare_digest(auth_header, upload_auth_key):
             logger.warning("Unauthorized upload attempt")
             return jsonify({"error": "Unauthorized"}), 401
 
