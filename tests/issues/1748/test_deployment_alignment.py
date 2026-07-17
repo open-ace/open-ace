@@ -48,6 +48,9 @@ class TestKubernetesManifestAlignment:
         assert "port: 19888" in policies
         assert "port: 5001" not in service
         assert "port: 5001" not in policies
+        assert "sessionAffinity: ClientIP" in service
+        assert 'nginx.ingress.kubernetes.io/affinity: "cookie"' in service
+        assert "minAvailable: 2" in policies
 
     def test_k8s_secret_includes_dedicated_encryption_key(self):
         configmap = (ROOT / "k8s" / "configmap.yaml").read_text(encoding="utf-8")
@@ -60,6 +63,14 @@ class TestKubernetesManifestAlignment:
         storage = (ROOT / "k8s" / "storage.yaml").read_text(encoding="utf-8")
 
         assert "ReadWriteMany" in storage
+
+    def test_k8s_docs_describe_sticky_multi_replica_boundary(self):
+        docs = (ROOT / "docs" / "en" / "KUBERNETES.md").read_text(encoding="utf-8")
+
+        assert "multi-replica reference deployment with sticky routing" in docs
+        assert "#1782" in docs
+        assert "#1781" in docs
+        assert "single-instance reference deployment" not in docs
 
 
 class TestComposeSunset:

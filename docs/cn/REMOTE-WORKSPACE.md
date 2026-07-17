@@ -76,6 +76,19 @@ Agent 优先尝试 WebSocket 连接，失败时自动降级为 HTTP 轮询。当
 
 ---
 
+## 部署拓扑与运行态边界
+
+Remote Workspace 可以运行在仓库提供的 Kubernetes 参考部署后面，但活跃远程会话目前还不是完全无状态：
+
+- Remote agent WebSocket 连接、终端 relay socket、进行中的命令队列和短期输出缓冲保存在承载该活跃会话的 Web 进程内。
+- Kubernetes 部署必须保留粘性路由（仓库清单中已配置 Service `ClientIP` affinity 和 nginx cookie affinity），让同一个活跃会话的浏览器与 Agent 流量持续回到同一个 Pod。
+- 如果该 Pod 重启，远程机器、会话、消息、配额和审计等持久记录仍保存在数据库中，但实时终端 relay socket 和内存输出缓冲会中断。
+- 移除粘性路由、支持活跃会话故障转移，需要完成 [#1782](https://github.com/open-ace/open-ace/issues/1782) 的运行态外置化。
+
+当前租户隔离覆盖用户、远程机器、会话所有权、机器权限和配额。系统管理员有意保留全局运维可见性。历史分析与项目相关表的 tenant-aware schema / query 加固在 [#1781](https://github.com/open-ace/open-ace/issues/1781) 中继续推进。
+
+---
+
 ## 部署检查清单
 
 从零到可用，按顺序完成以下步骤：

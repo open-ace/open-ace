@@ -46,6 +46,11 @@ class RemoteAgentManager:
 
     Tracks active agent connections, monitors heartbeats, dispatches
     commands to agents, and routes agent responses back to sessions.
+
+    Runtime boundary: connection objects, output buffers, HTTP polling command
+    queues, and pending request events are process-local. Multi-pod deployments
+    require sticky routing for active remote sessions until issue #1782 moves
+    shareable state into Redis or another persistent coordination layer.
     """
 
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
@@ -78,7 +83,9 @@ class RemoteAgentManager:
             self.db = Database(db_url=f"sqlite:///{self.db_path}")
         else:
             self.db = Database()
-        # Active WebSocket connections: {machine_id: websocket_connection}
+        # Process-local WebSocket connections: {machine_id: websocket_connection}.
+        # See the class docstring and issue #1782 before removing sticky routing
+        # from Kubernetes or other horizontally scaled deployments.
         self._connections: dict[str, Any] = {}
         # Session to machine mapping: {session_id: machine_id}
         self._session_machines: dict[str, str] = {}

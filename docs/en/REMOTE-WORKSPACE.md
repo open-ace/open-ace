@@ -76,6 +76,19 @@ The Agent tries WebSocket first and falls back to HTTP polling on failure. For t
 
 ---
 
+## Deployment Topology and Runtime State
+
+Remote Workspace is safe to run behind the Kubernetes reference deployment, but active remote sessions are not fully stateless yet:
+
+- Remote agent WebSocket connections, terminal relay sockets, in-flight command queues, and short-lived output buffers are held in the web process that owns the active session.
+- Kubernetes deployments must keep sticky routing enabled (`ClientIP` Service affinity and nginx cookie affinity in the shipped manifests) so browser and agent traffic for an active session returns to the same pod.
+- If that pod restarts, durable records such as machines, sessions, messages, quotas, and audit entries remain in the database, but live terminal relay sockets and in-memory output buffers are interrupted.
+- Removing sticky routing and supporting active-session failover requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
+
+Tenant isolation currently covers users, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility. Broader tenant-aware schema/query hardening for historical analytics and project tables is tracked in [#1781](https://github.com/open-ace/open-ace/issues/1781).
+
+---
+
 ## Deployment Checklist
 
 From zero to working, complete these steps in order:

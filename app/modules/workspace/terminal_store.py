@@ -1,4 +1,9 @@
-"""In-memory store for terminal session info with TTL-based cleanup."""
+"""In-memory store for terminal session info with TTL-based cleanup.
+
+This store is process-local. Kubernetes and other multi-pod deployments must
+use sticky routing for active terminal sessions until issue #1782 externalizes
+the shareable remote-session runtime state.
+"""
 
 from __future__ import annotations
 

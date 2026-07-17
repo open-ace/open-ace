@@ -59,6 +59,8 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 **HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
 
+**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Active Remote Workspace terminal/relay sessions keep some runtime state inside one web process, so requests for a given browser/agent session must keep returning to the same pod.
+
 **Multi-user workspace note:** The default Kubernetes manifest runs the web container as a non-root user. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root and document that exception in your cluster change process.
 
 ### Service & Ingress
@@ -134,7 +136,7 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 ### PodDisruptionBudget
 
-- `minAvailable: 1` — Protects the single supported application replica during voluntary disruptions
+- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
 
 ## Configuration
 
@@ -149,9 +151,11 @@ Before deploying, update:
 
 ### Current support boundary
 
-- The shipped Kubernetes manifest is a **single-instance reference deployment**.
-- Remote workspace / terminal / session coordination still keeps important runtime state in-process, so horizontal scaling is not advertised or enabled here.
-- The container intentionally runs as root because the current entrypoint provisions per-user workspace accounts dynamically. A hardened non-root image variant is not shipped yet.
+- The shipped Kubernetes manifest is a **multi-replica reference deployment with sticky routing**, not a fully stateless active-session HA design.
+- Ordinary HTTP/API requests can be balanced across pods. Active Remote Workspace terminal relay, output buffering, command queues, and in-flight WebSocket objects still keep process-local state.
+- If the pod that owns an active terminal/relay session restarts, the persisted database records remain, but in-memory buffers and live relay sockets are interrupted. Users may need to reconnect, resume, or recreate that active terminal/session.
+- Removing sticky routing requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
+- Stronger tenant-aware schema/query isolation is tracked separately in [#1781](https://github.com/open-ace/open-ace/issues/1781).
 
 ### TLS with cert-manager
 
@@ -167,7 +171,7 @@ The `/health` endpoint returns service status and git commit hash.
 
 ## Scaling
 
-This reference manifest intentionally stays at one application replica. For manual restarts or rescheduling:
+The reference manifest starts with three web replicas plus sticky routing. For manual restarts or rescheduling:
 
 ```bash
 kubectl rollout restart deployment open-ace -n open-ace

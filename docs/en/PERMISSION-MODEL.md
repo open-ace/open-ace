@@ -142,3 +142,8 @@ When multi-tenant mode is enabled:
 - Tenant quotas enforce per-tenant token and request limits
 - `QuotaEnforcementScheduler` runs every 60s to check and enforce limits
 - Exceeded users get sessions terminated and alerts generated
+
+Current boundary:
+- Remote machines, remote sessions, machine permissions, user identity, and quotas are tenant-aware.
+- System administrators intentionally retain global operational visibility for support and incident response.
+- Some historical analytics and project tables derive tenant context indirectly or do not yet carry an explicit `tenant_id`; tightening those schema/query boundaries is tracked in [#1781](https://github.com/open-ace/open-ace/issues/1781).
