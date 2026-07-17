@@ -12,7 +12,7 @@
      │
      ├── subprocess ──► CLI Tool (claude/qwen/codex/openclaw)
      │
-     └── WebSocket ──► Terminal Server (PTY)
+     └── WebSocket ──► Terminal Server（PTY / 管道子进程）
                          │
                     Browser (xterm.js)
 ```
@@ -88,13 +88,15 @@ curl -fsSL https://<server>/api/remote/agent/install.sh | bash -s -- \
 
 ## 终端服务器
 
-终端服务器提供基于 WebSocket 的 PTY 访问：
+终端服务器提供基于 WebSocket 的终端访问：
 
-- **单 PTY 模型** — 每个终端服务器实例一个 PTY
+- **终端进程模型** — Linux/macOS 使用持久 PTY，Windows 使用持久的管道子进程
 - **认证** — 通过查询参数的 HMAC token
-- **重连** — PTY 在 WebSocket 断开后保持；64KB 输出历史用于屏幕恢复
+- **重连** — 终端进程在 WebSocket 断开后保持；64KB 输出历史用于屏幕恢复
 - **调整大小** — JSON 控制消息 `{"type":"resize","cols":N,"rows":N}`
 - **环境** — 自动从代理 token 注入 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
+
+在 Windows 上，`openace menu` 会使用编号式文本菜单，而不是 Unix 上基于原始终端的方向键菜单，这样在 PowerShell/cmd 和浏览器终端里都可以继续使用同一套流程。
 
 ## 会话同步
 

@@ -12,19 +12,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import fcntl
 import hmac
 import json
 import logging
 import os
-import pty
 import select
+import shlex
 import signal
 import struct
+import subprocess
 import sys
-import termios
+import tempfile
 import urllib.parse
 from pathlib import Path
+
+if os.name != "nt":
+    import fcntl
+    import pty
+    import termios
+else:  # pragma: no cover - exercised by Windows runtime/tests via monkeypatch
+    fcntl = None
+    pty = None
+    termios = None
 
 from cli_adapters.base import collect_custom_envkeys
 
@@ -63,6 +72,7 @@ class SinglePtyTerminalServer:
     def __init__(self):
         self.master_fd: int | None = None
         self.pty_pid: int | None = None
+        self.process: subprocess.Popen[bytes] | None = None
         self._output_buffer: bytearray = bytearray()
         self._active_websockets: set = set()
         self._pty_alive = True
@@ -70,11 +80,12 @@ class SinglePtyTerminalServer:
         self._ws_lock = asyncio.Lock()
         self._pty_cols = 80
         self._pty_rows = 24
+        self._uses_pty = os.name != "nt"
 
     def spawn_pty(self) -> bool:
         """Spawn PTY process once at startup."""
         if SHELL_CMD:
-            cmd = [SHELL_CMD]
+            cmd = _parse_shell_command(SHELL_CMD)
         else:
             menu_script = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "terminal_menu.py"
@@ -84,20 +95,30 @@ class SinglePtyTerminalServer:
         work_dir = WORK_DIR or os.path.expanduser("~")
 
         # Update bashrc with aliases (for "Exit to shell" option)
-        self._update_bashrc()
+        self._update_shell_profile()
 
         try:
-            self.master_fd, self.pty_pid = _spawn_pty(cmd, env, work_dir)
-            logger.info(
-                "PTY spawned: pid=%d fd=%d work_dir=%s", self.pty_pid, self.master_fd, work_dir
-            )
+            if self._uses_pty:
+                self.master_fd, self.pty_pid = _spawn_pty(cmd, env, work_dir)
+                logger.info(
+                    "PTY spawned: pid=%d fd=%d work_dir=%s",
+                    self.pty_pid,
+                    self.master_fd,
+                    work_dir,
+                )
+            else:
+                self.process = _spawn_pipe_process(cmd, env, work_dir)
+                self.pty_pid = self.process.pid
+                logger.info("Pipe terminal spawned: pid=%d work_dir=%s", self.pty_pid, work_dir)
             return True
         except Exception as e:
             logger.error("Failed to spawn PTY: %s", e)
             return False
 
-    def _update_bashrc(self) -> None:
-        """Update bashrc with AI CLI aliases (creates backup first)."""
+    def _update_shell_profile(self) -> None:
+        """Update shell profile with AI CLI aliases on Unix shells."""
+        if os.name == "nt":
+            return
         bashrc_path = os.path.join(os.path.expanduser("~"), ".bashrc")
         try:
             aliases = []
@@ -135,7 +156,7 @@ class SinglePtyTerminalServer:
         """Resize the PTY terminal."""
         self._pty_cols = cols
         self._pty_rows = rows
-        if self.master_fd is not None:
+        if self._uses_pty and self.master_fd is not None:
             try:
                 winsize = struct.pack("HHHH", rows, cols, 0, 0)
                 fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
@@ -190,6 +211,10 @@ class SinglePtyTerminalServer:
 
     async def relay_output_loop(self) -> None:
         """Read PTY output continuously and broadcast to WebSockets."""
+        if not self._uses_pty:
+            await self._relay_pipe_output_loop()
+            return
+
         loop = asyncio.get_event_loop()
         while self._pty_alive and self.master_fd is not None:
             try:
@@ -216,6 +241,27 @@ class SinglePtyTerminalServer:
                 break
 
         # PTY exited - notify all WebSockets
+        if not self._pty_alive:
+            await self._notify_pty_exit()
+
+    async def _relay_pipe_output_loop(self) -> None:
+        """Read subprocess output continuously and broadcast to WebSockets."""
+        loop = asyncio.get_event_loop()
+        while self._pty_alive and self.process is not None and self.process.stdout is not None:
+            try:
+                reader = getattr(self.process.stdout, "read1", self.process.stdout.read)
+                data = await loop.run_in_executor(None, reader, 65536)
+                if data:
+                    await self.broadcast_output(data)
+                else:
+                    logger.info("Terminal output stream closed (process likely exited)")
+                    self._pty_alive = False
+                    break
+            except Exception as e:
+                logger.error("Output relay error: %s", e)
+                self._pty_alive = False
+                break
+
         if not self._pty_alive:
             await self._notify_pty_exit()
 
@@ -250,7 +296,11 @@ class SinglePtyTerminalServer:
 
                 if isinstance(message, bytes):
                     try:
-                        os.write(self.master_fd, message)
+                        if self._uses_pty:
+                            os.write(self.master_fd, message)
+                        elif self.process is not None and self.process.stdin is not None:
+                            self.process.stdin.write(message)
+                            self.process.stdin.flush()
                     except OSError as e:
                         logger.warning("PTY write error: %s", e)
                         break
@@ -262,7 +312,7 @@ class SinglePtyTerminalServer:
     def kill_pty(self) -> None:
         """Terminate the PTY process."""
         self._pty_alive = False
-        if self.pty_pid is not None:
+        if self._uses_pty and self.pty_pid is not None:
             try:
                 os.kill(self.pty_pid, signal.SIGTERM)
                 logger.info("Sent SIGTERM to PTY pid=%d", self.pty_pid)
@@ -270,15 +320,44 @@ class SinglePtyTerminalServer:
                 pass
             except Exception as e:
                 logger.warning("Failed to kill PTY: %s", e)
+        elif self.process is not None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+                logger.info("Terminated terminal process pid=%d", self.process.pid)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            except Exception as e:
+                logger.warning("Failed to kill terminal process: %s", e)
         if self.master_fd is not None:
             try:
                 os.close(self.master_fd)
             except OSError:
                 pass
             self.master_fd = None
+        if self.process is not None:
+            for stream_name in ("stdin", "stdout", "stderr"):
+                stream = getattr(self.process, stream_name, None)
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            self.process = None
 
     def is_pty_alive(self) -> bool:
         """Check if PTY process is still running."""
+        if not self._uses_pty:
+            if self.process is None:
+                return False
+            return_code = self.process.poll()
+            if return_code is None:
+                return True
+            logger.info("Terminal process %d exited with status %d", self.process.pid, return_code)
+            self._pty_alive = False
+            return False
+
         if self.pty_pid is None:
             return False
         try:
@@ -312,6 +391,35 @@ def _spawn_pty(shell_cmd: list[str], env: dict[str, str], work_dir: str) -> tupl
             print(f"Shell not found: {shell_cmd[0]}", file=sys.stderr)
             os._exit(1)
     return master_fd, pid
+
+
+def _spawn_pipe_process(
+    shell_cmd: list[str], env: dict[str, str], work_dir: str
+) -> subprocess.Popen[bytes]:
+    """Spawn a subprocess with stdin/stdout pipes for Windows-compatible terminal I/O."""
+    cwd = work_dir or os.path.expanduser("~")
+    if not os.path.isdir(cwd):
+        cwd = os.path.expanduser("~")
+
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return subprocess.Popen(
+        shell_cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        cwd=cwd,
+        bufsize=0,
+        creationflags=creationflags,
+    )
+
+
+def _parse_shell_command(command: str) -> list[str]:
+    """Split a user-provided shell command into argv with platform-aware rules."""
+    try:
+        return shlex.split(command, posix=os.name != "nt")
+    except ValueError:
+        return [command]
 
 
 def _build_env() -> dict[str, str]:
@@ -458,7 +566,12 @@ def main() -> None:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         handlers=[
             # Log to file to avoid filling stderr pipe buffer
-            logging.FileHandler(f"/tmp/terminal_server_{args.terminal_id[:8]}.log"),
+            logging.FileHandler(
+                os.path.join(
+                    tempfile.gettempdir(),
+                    f"terminal_server_{args.terminal_id[:8]}.log",
+                )
+            ),
         ],
     )
 
@@ -475,7 +588,10 @@ def main() -> None:
         loop.stop()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _shutdown_handler)
+        try:
+            loop.add_signal_handler(sig, _shutdown_handler)
+        except NotImplementedError:
+            signal.signal(sig, lambda *_: _shutdown_handler())
 
     try:
         loop.run_until_complete(_run_server(port))

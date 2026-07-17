@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import sys
+import tempfile
 
 try:
     import websockets
@@ -152,7 +153,7 @@ def main() -> None:
         sys.exit(1)
 
     # Set up logging
-    log_file = f"/tmp/terminal_relay_{TERMINAL_ID[:8]}.log"
+    log_file = os.path.join(tempfile.gettempdir(), f"terminal_relay_{TERMINAL_ID[:8]}.log")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
