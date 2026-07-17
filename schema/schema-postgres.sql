@@ -1037,6 +1037,49 @@ CREATE SEQUENCE remote_machines_id_seq
     CACHE 1;
 
 ALTER SEQUENCE remote_machines_id_seq OWNED BY remote_machines.id;
+CREATE TABLE remote_runtime_commands (
+    id integer NOT NULL,
+    command_id character varying(64) NOT NULL,
+    machine_id text NOT NULL,
+    session_id text,
+    command_type text DEFAULT ''::text NOT NULL,
+    payload text NOT NULL,
+    status character varying(32) DEFAULT 'pending'::character varying NOT NULL,
+    response_payload text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    delivered_at timestamp without time zone,
+    responded_at timestamp without time zone,
+    expires_at timestamp without time zone
+);
+
+CREATE SEQUENCE remote_runtime_commands_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE remote_runtime_commands_id_seq OWNED BY remote_runtime_commands.id;
+CREATE TABLE remote_runtime_outputs (
+    id integer NOT NULL,
+    session_id text NOT NULL,
+    event_index integer NOT NULL,
+    stream text DEFAULT 'stdout'::text NOT NULL,
+    payload text NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    expires_at timestamp without time zone
+);
+
+CREATE SEQUENCE remote_runtime_outputs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE remote_runtime_outputs_id_seq OWNED BY remote_runtime_outputs.id;
 CREATE TABLE retention_history (
     id integer NOT NULL,
     "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -1802,6 +1845,10 @@ ALTER TABLE ONLY registration_tokens ALTER COLUMN id SET DEFAULT nextval('regist
 
 ALTER TABLE ONLY remote_machines ALTER COLUMN id SET DEFAULT nextval('remote_machines_id_seq'::regclass);
 
+ALTER TABLE ONLY remote_runtime_commands ALTER COLUMN id SET DEFAULT nextval('remote_runtime_commands_id_seq'::regclass);
+
+ALTER TABLE ONLY remote_runtime_outputs ALTER COLUMN id SET DEFAULT nextval('remote_runtime_outputs_id_seq'::regclass);
+
 ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retention_history_id_seq'::regclass);
 
 ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_permissions_id_seq'::regclass);
@@ -2017,6 +2064,15 @@ ALTER TABLE ONLY remote_machines
 ALTER TABLE ONLY remote_machines
     ADD CONSTRAINT remote_machines_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY remote_runtime_commands
+    ADD CONSTRAINT remote_runtime_commands_command_id_key UNIQUE (command_id);
+
+ALTER TABLE ONLY remote_runtime_commands
+    ADD CONSTRAINT remote_runtime_commands_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY remote_runtime_outputs
+    ADD CONSTRAINT remote_runtime_outputs_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY retention_history
     ADD CONSTRAINT retention_history_pkey PRIMARY KEY (id);
 
@@ -2139,6 +2195,9 @@ ALTER TABLE ONLY tool_account_mapping_rules
 
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT uq_quota_usage_user_date_period_new UNIQUE (user_id, date, period);
+
+ALTER TABLE ONLY remote_runtime_outputs
+    ADD CONSTRAINT uq_remote_runtime_outputs_session_index UNIQUE (session_id, event_index);
 
 ALTER TABLE ONLY smtp_settings
     ADD CONSTRAINT uq_smtp_settings_single PRIMARY KEY (id);
@@ -2614,6 +2673,22 @@ CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (mach
 --
 
 CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
+
+CREATE INDEX idx_remote_runtime_commands_expires ON remote_runtime_commands USING btree (expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_commands USING btree (machine_id, status, id);
+
+CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs USING btree (expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs USING btree (session_id, event_index);
 
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
 

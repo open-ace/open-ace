@@ -78,12 +78,12 @@ The Agent tries WebSocket first and falls back to HTTP polling on failure. For t
 
 ## Deployment Topology and Runtime State
 
-Remote Workspace is safe to run behind the Kubernetes reference deployment, but active remote sessions are not fully stateless yet:
+Remote Workspace is safe to run behind the Kubernetes reference deployment. The shareable control-plane state is persisted, while live socket bridges remain process-local:
 
-- Remote agent WebSocket connections, terminal relay sockets, in-flight command queues, and short-lived output buffers are held in the web process that owns the active session.
-- Kubernetes deployments must keep sticky routing enabled (`ClientIP` Service affinity and nginx cookie affinity in the shipped manifests) so browser and agent traffic for an active session returns to the same pod.
-- If that pod restarts, durable records such as machines, sessions, messages, quotas, and audit entries remain in the database, but live terminal relay sockets and in-memory output buffers are interrupted.
-- Removing sticky routing and supporting active-session failover requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
+- HTTP-polling command queues, command responses, session-to-machine bindings, session output replay, machines, sessions, messages, quotas, and audit entries are persisted.
+- Remote session control APIs such as send, pause, resume, stop, abort, model update, and permission response can be served by any web pod; the next agent poll claims the persisted command.
+- SSE reconnects can replay persisted session output after a browser disconnect or web-pod restart.
+- Live terminal relay WebSocket objects are still process-local. An active browser-to-agent terminal bridge should use sticky routing or reconnect after failover.
 
 Tenant isolation covers users, projects, workspace sessions and messages, daily usage aggregates, audit logs, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility for support and incident response.
 

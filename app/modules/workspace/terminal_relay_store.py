@@ -7,9 +7,9 @@ bridges browser WebSocket connections through this relay to the remote terminal.
 This solves the issue where backend cannot directly connect to ws://192.168.x.x:port
 because the remote machine is behind NAT or on a private network.
 
-The relay WebSocket objects are process-local. Multi-pod deployments must keep
-agent/browser traffic for an active terminal on the same web pod until issue
-#1782 provides a shared coordination layer and reconnect protocol.
+The relay WebSocket objects are process-local. HTTP remote-session control
+state is persisted, but an active browser-to-agent terminal bridge must still
+use the web pod that owns the live relay socket or reconnect after failover.
 """
 
 from __future__ import annotations

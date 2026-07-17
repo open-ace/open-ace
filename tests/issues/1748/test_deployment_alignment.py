@@ -68,7 +68,7 @@ class TestKubernetesManifestAlignment:
         docs = (ROOT / "docs" / "en" / "KUBERNETES.md").read_text(encoding="utf-8")
 
         assert "multi-replica reference deployment with sticky routing" in docs
-        assert "#1782" in docs
+        assert "Remote session commands, command responses, session output replay" in docs
         assert "Tenant-aware schema and query boundaries cover users" in docs
         assert "single-instance reference deployment" not in docs
 

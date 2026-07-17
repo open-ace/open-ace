@@ -78,12 +78,12 @@ Agent 优先尝试 WebSocket 连接，失败时自动降级为 HTTP 轮询。当
 
 ## 部署拓扑与运行态边界
 
-Remote Workspace 可以运行在仓库提供的 Kubernetes 参考部署后面，但活跃远程会话目前还不是完全无状态：
+Remote Workspace 可以运行在仓库提供的 Kubernetes 参考部署后面。可共享的控制面状态已经持久化，实时 socket bridge 仍保留在进程内：
 
-- Remote agent WebSocket 连接、终端 relay socket、进行中的命令队列和短期输出缓冲保存在承载该活跃会话的 Web 进程内。
-- Kubernetes 部署必须保留粘性路由（仓库清单中已配置 Service `ClientIP` affinity 和 nginx cookie affinity），让同一个活跃会话的浏览器与 Agent 流量持续回到同一个 Pod。
-- 如果该 Pod 重启，远程机器、会话、消息、配额和审计等持久记录仍保存在数据库中，但实时终端 relay socket 和内存输出缓冲会中断。
-- 移除粘性路由、支持活跃会话故障转移，需要完成 [#1782](https://github.com/open-ace/open-ace/issues/1782) 的运行态外置化。
+- HTTP polling 命令队列、命令响应、session-to-machine 绑定、会话输出回放、远程机器、会话、消息、配额和审计记录均已持久化。
+- 发送消息、暂停、恢复、停止、终止请求、切换模型和权限响应等远程会话控制 API 可以由任意 Web Pod 服务；下一次 Agent poll 会 claim 已持久化的命令。
+- SSE 重连可以在浏览器断开或 Web Pod 重启后回放已持久化的会话输出。
+- 实时终端 relay WebSocket 对象仍是进程内对象。活跃的浏览器到 Agent 终端 bridge 应使用粘性路由，或在故障转移后重新连接。
 
 当前租户隔离覆盖用户、项目、工作区会话与消息、每日用量聚合、审计日志、远程机器、会话所有权、机器权限和配额。系统管理员有意保留全局运维可见性，用于支持和故障处理。
 
