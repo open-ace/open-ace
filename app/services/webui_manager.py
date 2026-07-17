@@ -1020,6 +1020,16 @@ class WebUIManager:
 
         instance = self._instances.pop(user_id)
 
+        try:
+            from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+            get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                f"webui:{user_id}",
+                reason="webui_stopped",
+            )
+        except Exception as e:
+            logger.warning("Failed to revoke WebUI proxy tokens for user %s: %s", user_id, e)
+
         # Stop the process
         if instance.process is not None:
             try:
