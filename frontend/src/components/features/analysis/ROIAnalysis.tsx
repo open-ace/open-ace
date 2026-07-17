@@ -21,6 +21,7 @@ import {
   Card,
   StatCard,
   Select,
+  TextInput,
   Error,
   EmptyState,
   LineChart,
@@ -33,6 +34,7 @@ import {
 } from '@/components/common';
 import {
   roiApi,
+  type ROIAssumptions,
   type ROIMetrics,
   type ROITrend,
   type CostBreakdown,
@@ -44,8 +46,8 @@ import { formatTokens, formatToolName, formatChartDate } from '@/utils';
 import { useTools, usePageRefresh } from '@/hooks';
 
 // Cache key generator
-const getCacheKey = (startDate: string, endDate: string, tool: string) =>
-  `roi_${startDate}_${endDate}_${tool}`;
+const getCacheKey = (startDate: string, endDate: string, tool: string, assumptions: string) =>
+  `roi_${startDate}_${endDate}_${tool}_${assumptions}`;
 
 // Simple cache for ROI data
 const roiDataCache = new Map<
@@ -65,7 +67,28 @@ interface CachedData {
   efficiency: EfficiencyReport | null;
 }
 
+interface AssumptionDraft {
+  hourly_labor_cost: string;
+  productivity_multiplier: string;
+  avg_time_saved_per_request: string;
+  currency: string;
+}
+
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const EMPTY_ASSUMPTION_DRAFT: AssumptionDraft = {
+  hourly_labor_cost: '',
+  productivity_multiplier: '',
+  avg_time_saved_per_request: '',
+  currency: '',
+};
+
+const toAssumptionDraft = (assumptions: ROIAssumptions): AssumptionDraft => ({
+  hourly_labor_cost: String(assumptions.hourly_labor_cost),
+  productivity_multiplier: String(assumptions.productivity_multiplier),
+  avg_time_saved_per_request: String(assumptions.avg_time_saved_per_request),
+  currency: assumptions.currency,
+});
 
 // Maps suggestion_type -> { title key, description key } for i18n interpolation.
 const SUGGESTION_KEY_MAP: Record<string, { title: string; desc: string }> = {
@@ -168,12 +191,20 @@ export const ROIAnalysis: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedTool, setSelectedTool] = useState('');
+  const [baselineAssumptions, setBaselineAssumptions] = useState<ROIAssumptions | null>(null);
+  const [overrideAssumptions, setOverrideAssumptions] = useState<ROIAssumptions | null>(null);
+  const [draftAssumptions, setDraftAssumptions] = useState<AssumptionDraft>(EMPTY_ASSUMPTION_DRAFT);
+  const [assumptionError, setAssumptionError] = useState<string | null>(null);
 
   // Expanded action-item rows (by suggestion_id)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   // Track if this is the initial load
   const isInitialLoad = useRef(true);
+  const assumptionKey = useMemo(
+    () => JSON.stringify(overrideAssumptions ?? {}),
+    [overrideAssumptions]
+  );
 
   // Page refresh control - manual refresh for ROI analysis
   const pageRefresh = usePageRefresh({
@@ -193,6 +224,12 @@ export const ROIAnalysis: React.FC = () => {
     setEndDate(end.toISOString().split('T')[0]);
     setStartDate(start.toISOString().split('T')[0]);
   }, []);
+
+  useEffect(() => {
+    if (baselineAssumptions || !roiMetrics?.assumptions) return;
+    setBaselineAssumptions(roiMetrics.assumptions);
+    setDraftAssumptions(toAssumptionDraft(roiMetrics.assumptions));
+  }, [baselineAssumptions, roiMetrics]);
 
   // Translate suggestion title/description based on suggestion_type + dynamic params.
   const translateSuggestion = useCallback(
@@ -275,12 +312,61 @@ export const ROIAnalysis: React.FC = () => {
     });
   }, []);
 
+  const updateDraftAssumption = useCallback((key: keyof AssumptionDraft, value: string) => {
+    setDraftAssumptions((prev) => ({ ...prev, [key]: value }));
+    setAssumptionError(null);
+  }, []);
+
+  const validateAssumptionDraft = useCallback((): ROIAssumptions | null => {
+    const hourlyLaborCost = Number(draftAssumptions.hourly_labor_cost);
+    const productivityMultiplier = Number(draftAssumptions.productivity_multiplier);
+    const avgTimeSavedPerRequest = Number(draftAssumptions.avg_time_saved_per_request);
+    const currency = draftAssumptions.currency.trim().toUpperCase();
+
+    if (
+      !Number.isFinite(hourlyLaborCost) ||
+      !Number.isFinite(productivityMultiplier) ||
+      !Number.isFinite(avgTimeSavedPerRequest) ||
+      hourlyLaborCost <= 0 ||
+      productivityMultiplier <= 0 ||
+      avgTimeSavedPerRequest <= 0 ||
+      !currency ||
+      currency.length > 8
+    ) {
+      return null;
+    }
+
+    return {
+      hourly_labor_cost: hourlyLaborCost,
+      productivity_multiplier: productivityMultiplier,
+      avg_time_saved_per_request: avgTimeSavedPerRequest,
+      currency,
+    };
+  }, [draftAssumptions]);
+
+  const handleApplyAssumptions = useCallback(() => {
+    const assumptions = validateAssumptionDraft();
+    if (!assumptions) {
+      setAssumptionError(t('roiAssumptionValidation', language));
+      return;
+    }
+    setAssumptionError(null);
+    setOverrideAssumptions(assumptions);
+  }, [language, validateAssumptionDraft]);
+
+  const handleResetAssumptions = useCallback(() => {
+    if (!baselineAssumptions) return;
+    setDraftAssumptions(toAssumptionDraft(baselineAssumptions));
+    setOverrideAssumptions(null);
+    setAssumptionError(null);
+  }, [baselineAssumptions]);
+
   // Fetch data with caching
   const fetchData = useCallback(
     async (forceRefresh = false) => {
       if (!startDate || !endDate) return;
 
-      const cacheKey = getCacheKey(startDate, endDate, selectedTool);
+      const cacheKey = getCacheKey(startDate, endDate, selectedTool, assumptionKey);
       const cached = roiDataCache.get(cacheKey);
       const now = Date.now();
 
@@ -308,8 +394,9 @@ export const ROIAnalysis: React.FC = () => {
             start_date: startDate,
             end_date: endDate,
             tool_name: selectedTool || undefined,
+            assumptions: overrideAssumptions ?? undefined,
           }),
-          roiApi.getROITrend(6),
+          roiApi.getROITrend(6, undefined, overrideAssumptions ?? undefined),
           roiApi.getCostBreakdown({ start_date: startDate, end_date: endDate }),
           roiApi.getDailyCosts({ start_date: startDate, end_date: endDate }),
           roiApi.getOptimizationSuggestions(30),
@@ -342,7 +429,7 @@ export const ROIAnalysis: React.FC = () => {
         setIsLoading(false);
       }
     },
-    [startDate, endDate, selectedTool]
+    [assumptionKey, endDate, overrideAssumptions, selectedTool, startDate]
   );
 
   useEffect(() => {
@@ -418,6 +505,8 @@ export const ROIAnalysis: React.FC = () => {
     }
   };
 
+  const currentAssumptions = roiMetrics?.assumptions ?? baselineAssumptions;
+
   // Show skeleton on initial load
   if (isLoading && isInitialLoad.current) {
     return (
@@ -487,6 +576,93 @@ export const ROIAnalysis: React.FC = () => {
           <div className="col-md-3">
             <label className="form-label">{t('tableTool', language)}</label>
             <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} />
+          </div>
+        </div>
+      </Card>
+
+      <Card className="mb-4">
+        <div className="d-flex flex-column gap-3">
+          <div>
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h5 className="mb-0">{t('roiAssumptions', language)}</h5>
+              <span className="badge bg-secondary-subtle text-secondary-emphasis">
+                {t('roiAppliedAssumptions', language)}
+              </span>
+            </div>
+            <p className="text-muted mb-2">{t('roiAssumptionsHelp', language)}</p>
+            <p className="small text-muted mb-2">{t('roiEstimateDisclaimer', language)}</p>
+            <p className="small text-muted mb-0">{t('roiCurrencyNotice', language)}</p>
+          </div>
+
+          {currentAssumptions && (
+            <div className="d-flex flex-wrap gap-3 small">
+              <span className="text-muted">
+                {t('hourlyLaborCost', language)}:{' '}
+                <strong>
+                  {currentAssumptions.hourly_labor_cost} {currentAssumptions.currency}/h
+                </strong>
+              </span>
+              <span className="text-muted">
+                {t('avgTimeSavedPerRequest', language)}:{' '}
+                <strong>{currentAssumptions.avg_time_saved_per_request} min</strong>
+              </span>
+              <span className="text-muted">
+                {t('productivityMultiplier', language)}:{' '}
+                <strong>{currentAssumptions.productivity_multiplier}x</strong>
+              </span>
+            </div>
+          )}
+
+          <div className="row g-3">
+            <div className="col-md-3">
+              <TextInput
+                label={t('hourlyLaborCost', language)}
+                type="number"
+                value={draftAssumptions.hourly_labor_cost}
+                onChange={(value) => updateDraftAssumption('hourly_labor_cost', value)}
+              />
+            </div>
+            <div className="col-md-3">
+              <TextInput
+                label={t('avgTimeSavedPerRequest', language)}
+                type="number"
+                value={draftAssumptions.avg_time_saved_per_request}
+                onChange={(value) => updateDraftAssumption('avg_time_saved_per_request', value)}
+              />
+            </div>
+            <div className="col-md-3">
+              <TextInput
+                label={t('productivityMultiplier', language)}
+                type="number"
+                value={draftAssumptions.productivity_multiplier}
+                onChange={(value) => updateDraftAssumption('productivity_multiplier', value)}
+              />
+            </div>
+            <div className="col-md-3">
+              <TextInput
+                label={t('currency', language)}
+                value={draftAssumptions.currency}
+                onChange={(value) => updateDraftAssumption('currency', value)}
+              />
+            </div>
+          </div>
+
+          {assumptionError && (
+            <div className="alert alert-warning py-2 mb-0">{assumptionError}</div>
+          )}
+
+          <div className="d-flex gap-2">
+            <button type="button" className="btn btn-primary" onClick={handleApplyAssumptions}>
+              {t('apply', language)}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={handleResetAssumptions}
+              disabled={!baselineAssumptions}
+            >
+              {t('reset', language)}
+            </button>
           </div>
         </div>
       </Card>

@@ -91,6 +91,7 @@ export type {
 } from './compliance';
 export { roiApi } from './roi';
 export type {
+  ROIAssumptions,
   ROIMetrics,
   ROITrend,
   ROIBreakdown,

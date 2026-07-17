@@ -1126,6 +1126,14 @@ Get ROI metrics for a period.
 - `end_date` - End date
 - `user_id` - Filter by user ID
 - `tool_name` - Filter by tool name
+- `hourly_labor_cost` - Optional positive labor-cost assumption used for savings estimates
+- `productivity_multiplier` - Optional positive planning multiplier for productivity gain
+- `avg_time_saved_per_request` - Optional positive minutes-saved assumption per request
+- `currency` - Optional 1-8 character currency label for the planning assumptions
+
+**Notes:**
+- ROI values are planning estimates derived from configurable assumptions, not verified realized savings.
+- Changing `currency` labels the labor-cost assumption; it does not convert provider costs with FX rates.
 
 ---
 
@@ -1137,6 +1145,8 @@ GET /api/roi/trend
 
 Get ROI trend over months.
 
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
+
 ---
 
 ### ROI by Tool
@@ -1147,6 +1157,8 @@ GET /api/roi/by-tool
 
 Get ROI breakdown by tool.
 
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
+
 ---
 
 ### ROI by User
@@ -1156,6 +1168,8 @@ GET /api/roi/by-user
 ```
 
 Get ROI breakdown by user.
+
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
 
 ---
 
@@ -1186,6 +1200,8 @@ GET /api/roi/summary
 ```
 
 Get ROI summary statistics.
+
+Supports the same optional ROI assumption query parameters as `GET /api/roi` and returns the active assumptions in the response payload.
 
 ---
 

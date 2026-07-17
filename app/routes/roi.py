@@ -6,16 +6,62 @@ API endpoints for ROI analysis and cost optimization.
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import auth_required
 from app.modules.analytics.cost_optimizer import CostOptimizer
-from app.modules.analytics.roi_calculator import ROICalculator
+from app.modules.analytics.roi_calculator import ROIAssumptions, ROICalculator
 
 logger = logging.getLogger(__name__)
 
 roi_bp = Blueprint("roi", __name__)
+
+
+def _parse_positive_float_arg(name: str) -> tuple[Optional[float], Optional[str]]:
+    """Parse a positive float query parameter."""
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return None, None
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return None, f"{name} must be a positive number"
+    if parsed <= 0:
+        return None, f"{name} must be a positive number"
+    return parsed, None
+
+
+def _build_roi_assumptions() -> tuple[Optional[ROIAssumptions], Optional[str]]:
+    """Build ROI assumptions from request overrides."""
+    hourly_labor_cost, error = _parse_positive_float_arg("hourly_labor_cost")
+    if error:
+        return None, error
+
+    productivity_multiplier, error = _parse_positive_float_arg("productivity_multiplier")
+    if error:
+        return None, error
+
+    avg_time_saved_per_request, error = _parse_positive_float_arg("avg_time_saved_per_request")
+    if error:
+        return None, error
+
+    currency = request.args.get("currency")
+    if currency is not None:
+        currency = currency.strip().upper()
+        if not currency:
+            return None, "currency must not be empty"
+        if len(currency) > 8:
+            return None, "currency must be 8 characters or fewer"
+
+    assumptions = ROIAssumptions.from_env().with_overrides(
+        hourly_labor_cost=hourly_labor_cost,
+        productivity_multiplier=productivity_multiplier,
+        avg_time_saved_per_request=avg_time_saved_per_request,
+        currency=currency,
+    )
+    return assumptions, None
 
 
 @roi_bp.before_request
@@ -43,10 +89,14 @@ def get_roi():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         roi = calculator.calculate_roi(start_date, end_date, user_id, tool_name)
 
-        return jsonify({"success": True, "data": roi.to_dict()})
+        return jsonify({"success": True, "data": roi.to_dict() if roi else None})
     except Exception as e:
         logger.error(f"Error calculating ROI: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
@@ -59,7 +109,11 @@ def get_roi_trend():
         months = request.args.get("months", default=6, type=int)
         user_id = request.args.get("user_id", type=int)
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         trends = calculator.get_roi_trend(months, user_id)
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
@@ -81,7 +135,11 @@ def get_roi_by_tool():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         roi_by_tool = calculator.get_roi_by_tool(start_date, end_date)
 
         return jsonify({"success": True, "data": {k: v.to_dict() for k, v in roi_by_tool.items()}})
@@ -103,7 +161,11 @@ def get_roi_by_user():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         roi_by_user = calculator.get_roi_by_user(start_date, end_date)
 
         return jsonify(
@@ -182,7 +244,11 @@ def get_roi_summary():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        calculator = ROICalculator()
+        assumptions, error = _build_roi_assumptions()
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+
+        calculator = ROICalculator(assumptions=assumptions)
         summary = calculator.get_summary_stats(start_date, end_date, user_id)
 
         return jsonify({"success": True, "data": summary})

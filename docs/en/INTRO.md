@@ -76,8 +76,9 @@ Open ACE provides two distinct interfaces based on user role:
 #### ROI Analysis
 - Cost per conversation
 - Token efficiency metrics
-- Tool ROI calculation
+- Tool ROI calculation with visible, configurable assumptions
 - Budget vs actual spending
+- Planning estimate disclaimers for ROI interpretation
 
 ### 4. Enterprise Governance
 

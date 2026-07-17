@@ -1126,6 +1126,14 @@ GET /api/roi
 - `end_date` - 结束日期
 - `user_id` - 按用户 ID 筛选
 - `tool_name` - 按工具名筛选
+- `hourly_labor_cost` - 可选，正数；用于节约金额估算的人力成本假设
+- `productivity_multiplier` - 可选，正数；用于生产力提升展示的规划倍数
+- `avg_time_saved_per_request` - 可选，正数；单次请求平均节省分钟数假设
+- `currency` - 可选，1-8 个字符；规划假设使用的货币标签
+
+**说明：**
+- ROI 数值基于可配置假设进行规划估算，并非已验证的真实收益。
+- 修改 `currency` 只会标记人工成本假设，不会对模型成本做汇率换算。
 
 ---
 
@@ -1137,6 +1145,8 @@ GET /api/roi/trend
 
 获取月度 ROI 趋势。
 
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
+
 ---
 
 ### 按工具 ROI
@@ -1147,6 +1157,8 @@ GET /api/roi/by-tool
 
 获取按工具分类的 ROI 明细。
 
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
+
 ---
 
 ### 按用户 ROI
@@ -1156,6 +1168,8 @@ GET /api/roi/by-user
 ```
 
 获取按用户分类的 ROI 明细。
+
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
 
 ---
 
@@ -1186,6 +1200,8 @@ GET /api/roi/summary
 ```
 
 获取 ROI 汇总统计。
+
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数，并会在响应中返回当前生效的假设。
 
 ---
 
