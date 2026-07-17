@@ -7,6 +7,8 @@ This guide explains how to configure Feishu (Lark) integration for:
 - imported-session user and group name resolution
 - local org sync of Feishu departments and users into Open ACE teams and users
 
+It does not provide a Feishu SSO login flow or a general-purpose Feishu chatbot.
+
 ## Overview
 
 Open ACE can integrate with Feishu to:
@@ -94,6 +96,7 @@ Current non-goals:
 - disabling or deleting local users when they disappear from Feishu
 - removing Feishu-managed teams automatically when departments disappear
 - Feishu SSO login flow
+- general-purpose Feishu chatbot commands
 
 ## Cache Management
 

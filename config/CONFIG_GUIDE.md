@@ -120,6 +120,9 @@
 | `cron.run_time` | 每日运行时间（HH:MM 格式） | `00:30` |
 
 #### 飞书集成（可选）
+
+当前飞书能力覆盖导入会话中的用户/群名解析，以及手动或定时的飞书组织架构同步；不包含飞书 SSO 登录流程。
+
 | 参数 | 说明 | 默认值 / 示例值 |
 |------|------|----------------|
 | `feishu.app_id` | 飞书应用 App ID | `cli_xxxxxxxxxxxxx` |
@@ -128,7 +131,10 @@
 | `feishu.org_sync_tenant_id` | 同步写入的租户 ID | `1` |
 | `feishu.org_sync_interval_minutes` | 自动同步间隔（分钟） | `60` |
 
-#### 钉钉集成（可选）
+#### 钉钉导入解析（可选）
+
+当前钉钉能力仅用于 OpenClaw 导入链路中的用户/群名解析和本地缓存，不包含钉钉通讯录同步或群机器人集成；完整能力跟踪见 [#1785](https://github.com/open-ace/open-ace/issues/1785)。
+
 | 参数 | 说明 | 示例值 |
 |------|------|--------|
 | `dingtalk.app_key` | 钉钉内部应用 AppKey | `dingxxxxxxxxxxxxxx` |

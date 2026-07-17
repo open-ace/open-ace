@@ -69,7 +69,7 @@ open-ace/
 │   ├── agent.py        # Main daemon loop
 │   ├── executor.py     # CLI subprocess management
 │   ├── cli_adapters/   # Tool adapters (Claude, Qwen, Codex, OpenClaw)
-│   ├── terminal_server.py  # WebSocket PTY server
+│   ├── terminal_server.py  # WebSocket terminal server (PTY on Linux/macOS, piped subprocess on Windows)
 │   └── session_sync.py # Session history sync
 │
 ├── scripts/            # Data collection scripts

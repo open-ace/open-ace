@@ -2,7 +2,7 @@
 Open ACE - SSO Module
 
 Single Sign-On integration for enterprise authentication.
-Supports OAuth2, OIDC, and SAML providers.
+Supports OAuth2 and OIDC providers. SAML 2.0 is tracked in issue #1784.
 """
 
 from app.modules.sso.manager import SSOManager

@@ -131,7 +131,7 @@ Remote work is not only about model calls. Developers also need to interact with
 
 Open ACE's remote workspace direction includes:
 
-- browser terminal through WebSocket PTY
+- browser terminal through WebSocket with PTY on Linux/macOS and a piped subprocess on Windows
 - terminal reconnect and screen recovery
 - remote directory browsing
 - code-server/VSCode proxy support

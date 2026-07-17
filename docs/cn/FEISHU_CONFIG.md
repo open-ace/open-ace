@@ -7,6 +7,8 @@
 - 导入会话时把飞书用户/群组 ID 解析成人名/群名
 - 将飞书组织架构同步到 Open ACE 的本地用户与团队
 
+当前不提供飞书 SSO 登录流程，也不是通用飞书聊天机器人。
+
 ## 概述
 
 Open ACE 可以与飞书集成以实现以下功能：
@@ -94,6 +96,7 @@ python3 scripts/shared/feishu_group_cache.py test chat_xxxxx <app_id> <app_secre
 - 用户从飞书消失后自动禁用/删除本地账号
 - 部门删除后自动删除本地团队
 - 飞书 SSO 登录流程
+- 通用飞书聊天机器人命令
 
 ## 缓存管理
 
