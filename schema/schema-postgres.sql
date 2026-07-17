@@ -902,6 +902,38 @@ CREATE SEQUENCE prompt_templates_id_seq
     CACHE 1;
 
 ALTER SEQUENCE prompt_templates_id_seq OWNED BY prompt_templates.id;
+CREATE TABLE proxy_token_jtis (
+    id integer NOT NULL,
+    jti text NOT NULL,
+    token_hash text NOT NULL,
+    user_id integer,
+    session_id text NOT NULL,
+    tenant_id integer,
+    provider text NOT NULL,
+    session_type text NOT NULL,
+    scope text,
+    reuse_mode text DEFAULT 'multi_use'::text NOT NULL,
+    is_single_use boolean DEFAULT false NOT NULL,
+    issued_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    expires_at timestamp without time zone NOT NULL,
+    first_used_at timestamp without time zone,
+    last_used_at timestamp without time zone,
+    consumed_at timestamp without time zone,
+    revoked_at timestamp without time zone,
+    revoke_reason text,
+    use_count integer DEFAULT 0 NOT NULL,
+    metadata text
+);
+
+CREATE SEQUENCE proxy_token_jtis_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE proxy_token_jtis_id_seq OWNED BY proxy_token_jtis.id;
 CREATE TABLE quota_alerts (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -1755,6 +1787,8 @@ ALTER TABLE ONLY projects ALTER COLUMN id SET DEFAULT nextval('projects_id_seq':
 
 ALTER TABLE ONLY prompt_templates ALTER COLUMN id SET DEFAULT nextval('prompt_templates_id_seq'::regclass);
 
+ALTER TABLE ONLY proxy_token_jtis ALTER COLUMN id SET DEFAULT nextval('proxy_token_jtis_id_seq'::regclass);
+
 ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_new_id_seq'::regclass);
 
 ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
@@ -1950,6 +1984,15 @@ ALTER TABLE ONLY projects
 
 ALTER TABLE ONLY prompt_templates
     ADD CONSTRAINT prompt_templates_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY proxy_token_jtis
+    ADD CONSTRAINT proxy_token_jtis_jti_key UNIQUE (jti);
+
+ALTER TABLE ONLY proxy_token_jtis
+    ADD CONSTRAINT proxy_token_jtis_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY proxy_token_jtis
+    ADD CONSTRAINT proxy_token_jtis_token_hash_key UNIQUE (token_hash);
 
 ALTER TABLE ONLY quota_alerts
     ADD CONSTRAINT quota_alerts_new_pkey PRIMARY KEY (id);
@@ -2241,7 +2284,6 @@ CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
 
-
 --
 --
 
@@ -2502,6 +2544,18 @@ CREATE INDEX idx_prompt_templates_category ON prompt_templates USING btree (cate
 --
 
 CREATE INDEX idx_prompt_templates_public ON prompt_templates USING btree (is_public);
+
+--
+--
+
+CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis USING btree (revoked_at, consumed_at);
+
+CREATE INDEX idx_proxy_token_jtis_expires ON proxy_token_jtis USING btree (expires_at);
+
+CREATE INDEX idx_proxy_token_jtis_session ON proxy_token_jtis USING btree (session_id);
+
+--
+--
 
 CREATE INDEX idx_quota_alerts_created ON quota_alerts USING btree (created_at);
 
