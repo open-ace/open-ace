@@ -223,13 +223,19 @@ def _normalize_codex_settings(
         "wire_api": openace_provider.get("wire_api", "responses"),
         "base_url": proxy_base_url,
     }
-    # Windows UWP: use experimental_bearer_token to bypass env var restrictions
-    if bearer_token:
-        openace_provider["experimental_bearer_token"] = bearer_token
-    else:
-        openace_provider["env_key"] = "OPENAI_API_KEY"
+    _set_codex_auth_mode(openace_provider, bearer_token=bearer_token)
     providers["openace"] = openace_provider
     return cleaned
+
+
+def _set_codex_auth_mode(provider: dict[str, Any], bearer_token: str | None) -> None:
+    """Keep Codex auth fields mutually exclusive across repeated rewrites."""
+    if bearer_token:
+        provider["experimental_bearer_token"] = bearer_token
+        provider.pop("env_key", None)
+    else:
+        provider["env_key"] = "OPENAI_API_KEY"
+        provider.pop("experimental_bearer_token", None)
 
 
 def write_claude_settings(settings: dict[str, Any], home_dir: Path | None = None) -> Path:
@@ -278,6 +284,9 @@ def write_codex_settings(
         bearer_token=bearer_token,
     )
     merged = _deep_merge_dicts(_load_toml_file(config_path), normalized)
+    provider = merged.get("model_providers", {}).get("openace")
+    if isinstance(provider, dict):
+        _set_codex_auth_mode(provider, bearer_token=bearer_token)
     _atomic_write_text(config_path, dump_toml(merged))
     # Ensure config file has secure permissions (0600) when containing bearer token
     if bearer_token:
