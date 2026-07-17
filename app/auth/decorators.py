@@ -18,7 +18,7 @@ import logging
 from functools import wraps
 from typing import TYPE_CHECKING, cast
 
-from flask import g, jsonify, request
+from flask import Response, g, jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ def _load_user_from_token(token: str) -> dict | None:
             "username": result.get("username"),
             "email": result.get("email"),
             "role": result.get("role"),
+            "must_change_password": bool(result.get("must_change_password")),
         }
     except Exception as e:
         logger.error(f"Database error during authentication: {e}")
@@ -94,6 +95,46 @@ def _check_machine_admin(user_id: int, machine_id: str) -> bool:
         return cast("bool", perm == "admin")
     except Exception:
         return False
+
+
+_PASSWORD_CHANGE_ALLOWED_ENDPOINTS = {
+    ("GET", "/api/auth/check"),
+    ("GET", "/api/auth/me"),
+    ("GET", "/api/auth/profile"),
+    ("POST", "/api/auth/change-password"),
+    ("POST", "/api/auth/logout"),
+    ("GET", "/api/password-policy"),
+}
+
+
+def _is_password_change_allowed_request() -> bool:
+    """Return whether the current request is exempt from password-change enforcement."""
+    if request.method == "OPTIONS":
+        return True
+    return (request.method, request.path) in _PASSWORD_CHANGE_ALLOWED_ENDPOINTS
+
+
+def _password_change_required_response() -> tuple[Response, int]:
+    """Return the standard response for blocked requests."""
+    return (
+        jsonify(
+            {
+                "error": "Password change required",
+                "code": "password_change_required",
+                "must_change_password": True,
+            }
+        ),
+        403,
+    )
+
+
+def enforce_password_change_requirement(user: dict | None) -> tuple[Response, int] | None:
+    """Block non-exempt requests when the user must change their password."""
+    if not user or not user.get("must_change_password"):
+        return None
+    if _is_password_change_allowed_request():
+        return None
+    return _password_change_required_response()
 
 
 # ── Public API for cross-module use ──────────────────────────────────
@@ -144,6 +185,10 @@ def auth_required(f=None, *, ownership=None):
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
 
             # Ownership checks (admin bypasses)
             if g.user_role == "admin":
@@ -201,6 +246,10 @@ def admin_required(f=None):
                     g.user = user
                     g.user_id = user.get("id")
                     g.user_role = user.get("role")
+
+                    password_change_response = enforce_password_change_requirement(user)
+                    if password_change_response is not None:
+                        return password_change_response
                     return func(*args, **kwargs)
 
             # Fallback: try WebUI token from query param
@@ -225,6 +274,10 @@ def admin_required(f=None):
                             g.user = user
                             g.user_id = user_id
                             g.user_role = user.get("role")
+
+                            password_change_response = enforce_password_change_requirement(user)
+                            if password_change_response is not None:
+                                return password_change_response
                             return func(*args, **kwargs)
 
             # No valid authentication found

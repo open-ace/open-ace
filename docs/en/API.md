@@ -126,6 +126,15 @@ POST /api/auth/change-password
 
 Change the current user's password.
 
+When a user is marked with `must_change_password=true`, the server blocks access to most protected endpoints until the password is changed. During that state, only the minimum required endpoints remain available:
+
+- `GET /api/auth/check`
+- `GET /api/auth/me`
+- `GET /api/auth/profile`
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+- `GET /api/password-policy`
+
 **Request Body:**
 ```json
 {

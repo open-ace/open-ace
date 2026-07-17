@@ -53,6 +53,16 @@ def _make_app():
     def admin_route():
         return jsonify({"user_id": g.user_id, "role": g.user_role})
 
+    @app.route("/api/auth/change-password", methods=["POST"])
+    @auth_required
+    def change_password_route():
+        return jsonify({"ok": True})
+
+    @app.route("/api/password-policy")
+    @auth_required
+    def password_policy_route():
+        return jsonify({"password_min_length": 8})
+
     return app
 
 
@@ -75,6 +85,7 @@ MOCK_SESSION = {
     "username": "testuser",
     "email": "test@example.com",
     "role": "user",
+    "must_change_password": False,
 }
 
 MOCK_ADMIN_SESSION = {
@@ -82,6 +93,17 @@ MOCK_ADMIN_SESSION = {
     "username": "admin",
     "email": "admin@example.com",
     "role": "admin",
+    "must_change_password": False,
+}
+
+MOCK_MUST_CHANGE_SESSION = {
+    **MOCK_SESSION,
+    "must_change_password": True,
+}
+
+MOCK_MUST_CHANGE_ADMIN_SESSION = {
+    **MOCK_ADMIN_SESSION,
+    "must_change_password": True,
 }
 
 
@@ -174,6 +196,35 @@ class TestAuthRequired:
                 resp = client.get("/api/user", headers={"Authorization": "Bearer bad"})
                 assert resp.status_code == 401
 
+    def test_must_change_password_blocks_protected_route(self):
+        app = _make_app()
+
+        with self._mock_auth(MOCK_MUST_CHANGE_SESSION):
+            with app.test_client() as client:
+                resp = client.get("/api/user", headers={"Authorization": "Bearer t"})
+                assert resp.status_code == 403
+                data = resp.get_json()
+                assert data["code"] == "password_change_required"
+                assert data["must_change_password"] is True
+
+    def test_must_change_password_allows_change_password_route(self):
+        app = _make_app()
+
+        with self._mock_auth(MOCK_MUST_CHANGE_SESSION):
+            with app.test_client() as client:
+                resp = client.post(
+                    "/api/auth/change-password", headers={"Authorization": "Bearer t"}
+                )
+                assert resp.status_code == 200
+
+    def test_must_change_password_allows_password_policy_route(self):
+        app = _make_app()
+
+        with self._mock_auth(MOCK_MUST_CHANGE_SESSION):
+            with app.test_client() as client:
+                resp = client.get("/api/password-policy", headers={"Authorization": "Bearer t"})
+                assert resp.status_code == 200
+
 
 class TestAdminRequired:
     """Test @admin_required decorator."""
@@ -208,6 +259,19 @@ class TestAdminRequired:
         with app.test_client() as client:
             resp = client.get("/api/admin")
             assert resp.status_code == 401
+
+    def test_must_change_password_admin_gets_blocked(self):
+        app = _make_app()
+
+        with patch(
+            "app.auth.decorators._authenticate",
+            return_value=(True, MOCK_MUST_CHANGE_ADMIN_SESSION),
+        ):
+            with app.test_client() as client:
+                resp = client.get("/api/admin", headers={"Authorization": "Bearer t"})
+                assert resp.status_code == 403
+                data = resp.get_json()
+                assert data["code"] == "password_change_required"
 
 
 class TestPublicEndpoint:

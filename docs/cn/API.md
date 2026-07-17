@@ -126,6 +126,15 @@ POST /api/auth/change-password
 
 修改当前用户的密码。
 
+当用户被标记为 `must_change_password=true` 时，服务端会拒绝其访问大多数受保护接口，直到密码修改完成。此时仅保留以下最小必要接口可用：
+
+- `GET /api/auth/check`
+- `GET /api/auth/me`
+- `GET /api/auth/profile`
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+- `GET /api/password-policy`
+
 **请求体：**
 ```json
 {
