@@ -60,7 +60,7 @@
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `autonomous.enabled` | 是否启用 AI 自主开发功能 | `false` |
+| `autonomous.enabled` | 是否启用 AI 自主开发功能 | `true` |
 
 **多用户模式说明：**
 
