@@ -28,6 +28,7 @@ data:
   ENABLE_MULTI_TENANT: "true"
   ENABLE_AUDIT_LOG: "true"
   ENABLE_CONTENT_FILTER: "true"
+  WORKSPACE_BASE_DIR: "/workspace"
 
   # Retention settings
   AUDIT_LOG_RETENTION_DAYS: "90"
@@ -48,6 +49,7 @@ type: Opaque
 stringData:
   # These should be changed in production
   SECRET_KEY: "change-me-in-production-use-strong-secret"
+  OPENACE_ENCRYPTION_KEY: "change-me-in-production-use-dedicated-encryption-key"
   UPLOAD_AUTH_KEY: "change-me-in-production"
   DB_USER: "openace"
   DB_PASSWORD: "change-me-in-production"

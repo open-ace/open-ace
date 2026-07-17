@@ -22,7 +22,7 @@ Documentation files are in the [en/](en/) directory.
 | [**REMOTE-AGENT**](en/REMOTE-AGENT.md) | Remote agent client — installation, configuration, CLI tools |
 | [**REMOTE-WORKSPACE**](en/REMOTE-WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API |
 | [**DEPLOYMENT**](en/DEPLOYMENT.md) | Docker deployment and multi-user workspace setup |
-| [**KUBERNETES**](en/KUBERNETES.md) | Kubernetes deployment guide with manifests reference |
+| [**KUBERNETES**](en/KUBERNETES.md) | Single-instance Kubernetes deployment guide with manifests reference |
 | [**NGINX**](en/NGINX.md) | Nginx reverse proxy configuration for HTTPS and WebSocket |
 | [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
@@ -62,7 +62,7 @@ Documentation files are in the [en/](en/) directory.
 | [**REMOTE-AGENT**](cn/REMOTE-AGENT.md) | 远程代理客户端 — 安装、配置、CLI 工具 |
 | [**REMOTE-WORKSPACE**](cn/REMOTE-WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API |
 | [**DEPLOYMENT**](cn/DEPLOYMENT.md) | Docker 部署和多用户工作空间配置 |
-| [**KUBERNETES**](cn/KUBERNETES.md) | Kubernetes 部署指南及 manifests 参考 |
+| [**KUBERNETES**](cn/KUBERNETES.md) | 单实例 Kubernetes 部署指南及 manifests 参考 |
 | [**NGINX**](cn/NGINX.md) | Nginx 反向代理配置（HTTPS 和 WebSocket） |
 | [**DEVELOPMENT**](cn/DEVELOPMENT.md) | 开发环境搭建、项目结构和测试 |
 | [**FEISHU-CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |

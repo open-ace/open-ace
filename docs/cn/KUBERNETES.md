@@ -38,11 +38,11 @@ k8s/
 
 | 设置 | 值 |
 |------|-----|
-| 副本数 | 3 |
+| 副本数 | 1 |
 | 镜像 | `open-ace:latest` |
-| 容器端口 | 5001 |
+| 容器端口 | 19888 |
 | 更新策略 | RollingUpdate（maxSurge=1, maxUnavailable=0） |
-| 安全上下文 | runAsNonRoot, runAsUser=1000 |
+| 安全上下文 | `runAsUser: 0`（当前多用户工作区 entrypoint 需要） |
 
 **资源限制：**
 
@@ -55,22 +55,11 @@ k8s/
 - 存活检查：HTTP GET `/health`，initialDelay=10s，period=10s
 - 就绪检查：HTTP GET `/health`，initialDelay=5s，period=5s
 
-**Pod 反亲和性：** 优先分布在不同节点上。
-
-### HorizontalPodAutoscaler
-
-| 设置 | 值 |
-|------|-----|
-| 最小副本数 | 3 |
-| 最大副本数 | 10 |
-| CPU 目标 | 70% |
-| 内存目标 | 80% |
-| 扩容 | max(100%/15s, 2 pods/15s) |
-| 缩容 | 10%/60s，稳定期 300s |
+**Pod 反亲和性：** 仅保留为调度偏好。当前清单是单实例参考部署。
 
 ### Service 与 Ingress
 
-**ClusterIP Service：** 端口 80 → targetPort 5001
+**ClusterIP Service：** 端口 80 → targetPort 19888
 
 **Ingress：**
 - 主机：`open-ace.example.com`（需修改）
@@ -104,7 +93,7 @@ k8s/
 
 ### ConfigMap
 
-应用配置键：`FLASK_APP`、`FLASK_ENV`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
+应用配置键：`FLASK_APP`、`FLASK_ENV`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`WORKSPACE_BASE_DIR`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
 
 ### Secret
 
@@ -117,7 +106,9 @@ k8s/
 - 名称：`open-ace-data`
 - 大小：10Gi
 - 访问模式：ReadWriteOnce
-- 挂载路径：`/app/data`
+- 挂载路径：
+  - `/workspace`（subPath `workspace`）
+  - `/root/.open-ace`（subPath `config`）
 
 ### RBAC
 
@@ -128,7 +119,7 @@ k8s/
 ### NetworkPolicy
 
 **入站规则：**
-- 允许来自 `ingress-nginx` 命名空间到端口 5001
+- 允许来自 `ingress-nginx` 命名空间到端口 19888
 - 允许来自 `open-ace` 命名空间（健康检查）
 
 **出站规则：**
@@ -139,7 +130,7 @@ k8s/
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — 确保中断期间至少有 2 个副本
+- `minAvailable: 1` — 在单实例支持边界内保护当前应用副本不被自愿驱逐
 
 ## 配置
 
@@ -152,6 +143,12 @@ k8s/
 3. **StorageClass** 在 `storage.yaml` 中 — 匹配集群的 StorageClass
 4. **镜像** 在 `kustomization.yaml` 中 — 设置你的容器镜像仓库路径
 
+### 当前支持边界
+
+- 仓库内提供的 Kubernetes 清单是**单实例参考部署**。
+- 远程工作区 / 终端 / 会话协调仍有关键运行时状态保存在进程内，因此这里不再宣称或启用水平扩缩容。
+- 容器当前有意以 root 身份运行，因为 entrypoint 需要动态创建多用户工作区账户；仓库中尚未提供等价的非 root 生产镜像变体。
+
 ### 使用 cert-manager 配置 TLS
 
 Ingress 已为 cert-manager 预配置了 `letsencrypt-prod` ClusterIssuer。请先安装 cert-manager：
@@ -162,20 +159,12 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## 监控
 
-Deployment 上设置了 Prometheus 注解：
-
-```yaml
-prometheus.io/scrape: "true"
-prometheus.io/port: "5001"
-prometheus.io/path: "/metrics"
-```
-
 `/health` 端点返回服务状态和 git commit hash。
 
 ## 扩容
 
-HPA 基于 CPU（70%）和内存（80%）利用率自动在 3-10 个副本之间扩缩。手动扩缩：
+当前参考清单固定为单实例。如需重启或重新调度：
 
 ```bash
-kubectl scale deployment open-ace -n open-ace --replicas=5
+kubectl rollout restart deployment open-ace -n open-ace
 ```

@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: open-ace
     app.kubernetes.io/component: web
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: open-ace
@@ -23,23 +23,18 @@ spec:
       labels:
         app.kubernetes.io/name: open-ace
         app.kubernetes.io/component: web
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "5001"
-        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: open-ace
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
       containers:
         - name: open-ace
           image: open-ace:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
           ports:
             - name: http
-              containerPort: 5001
+              containerPort: 19888
               protocol: TCP
           envFrom:
             - configMapRef:
@@ -80,12 +75,13 @@ spec:
             failureThreshold: 3
           volumeMounts:
             - name: data
-              mountPath: /app/data
+              mountPath: /workspace
+              subPath: workspace
             - name: logs
               mountPath: /app/logs
             - name: config
-              mountPath: /app/config
-              readOnly: true
+              mountPath: /root/.open-ace
+              subPath: config
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -93,8 +89,8 @@ spec:
         - name: logs
           emptyDir: {}
         - name: config
-          configMap:
-            name: open-ace-config
+          persistentVolumeClaim:
+            claimName: open-ace-data
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -108,50 +104,3 @@ spec:
         - key: "node-role.kubernetes.io/master"
           operator: "Exists"
           effect: "NoSchedule"
-
----
-# Open ACE - HorizontalPodAutoscaler
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: open-ace
-  namespace: open-ace
-  labels:
-    app.kubernetes.io/name: open-ace
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: open-ace
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-        - type: Percent
-          value: 10
-          periodSeconds: 60
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      policies:
-        - type: Percent
-          value: 100
-          periodSeconds: 15
-        - type: Pods
-          value: 2
-          periodSeconds: 15
-      selectPolicy: Max
