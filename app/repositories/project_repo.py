@@ -218,9 +218,7 @@ class ProjectRepository:
         result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
-    def get_project_by_path(
-        self, path: str, tenant_id: Optional[int] = None
-    ) -> Optional[Project]:
+    def get_project_by_path(self, path: str, tenant_id: Optional[int] = None) -> Optional[Project]:
         """
         Get project by path.
 

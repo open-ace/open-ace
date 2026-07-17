@@ -95,7 +95,16 @@ def test_get_request_stats_by_user_filters_by_tenant(tmp_db):
         (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("2026-07-17", "codex", "devbox", "req-1", "assistant", 90, "alice-devbox-codex", tenant_one_user),
+        (
+            "2026-07-17",
+            "codex",
+            "devbox",
+            "req-1",
+            "assistant",
+            90,
+            "alice-devbox-codex",
+            tenant_one_user,
+        ),
     )
     tmp_db.execute(
         """
@@ -103,7 +112,16 @@ def test_get_request_stats_by_user_filters_by_tenant(tmp_db):
         (date, tool_name, host_name, message_id, role, tokens_used, sender_name, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("2026-07-17", "codex", "devbox", "req-2", "assistant", 120, "bob-devbox-codex", tenant_two_user),
+        (
+            "2026-07-17",
+            "codex",
+            "devbox",
+            "req-2",
+            "assistant",
+            120,
+            "bob-devbox-codex",
+            tenant_two_user,
+        ),
     )
 
     tenant_one_stats = repo.get_request_stats_by_user(date="2026-07-17", tenant_id=1)

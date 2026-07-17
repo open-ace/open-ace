@@ -33,7 +33,12 @@ def _login_as(monkeypatch, user_id: int, tenant_id: int, username: str) -> None:
     monkeypatch.setattr(
         auth_module,
         "_load_user_from_token",
-        lambda token: {"id": user_id, "username": username, "role": "admin", "tenant_id": tenant_id},
+        lambda token: {
+            "id": user_id,
+            "username": username,
+            "role": "admin",
+            "tenant_id": tenant_id,
+        },
     )
 
 

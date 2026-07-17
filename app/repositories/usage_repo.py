@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database, escape_like, is_postgresql
 from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostname
@@ -55,7 +55,7 @@ class UsageRepository:
         if value in (None, "", 0, "0"):
             return None
         try:
-            tenant_id = int(value)
+            tenant_id = int(cast(Any, value))
         except (TypeError, ValueError):
             return None
         return tenant_id if tenant_id > 0 else None
@@ -299,7 +299,7 @@ class UsageRepository:
         )
 
         conditions = ["tool_name = ?", "date >= ?", "date <= ?"]
-        params = [tool_name, start_date, end_date]
+        params: list[Any] = [tool_name, start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -347,7 +347,7 @@ class UsageRepository:
             List[Dict]: List of usage records.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -395,7 +395,7 @@ class UsageRepository:
             Dict[str, Dict]: Summary data keyed by tool name.
         """
         conditions = []
-        params = []
+        params: list[Any] = []
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if start_date:
@@ -542,7 +542,7 @@ class UsageRepository:
             List[Dict]: List of aggregated usage records by date.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -604,7 +604,7 @@ class UsageRepository:
             List[Dict]: List of usage records by date and tool.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -666,7 +666,7 @@ class UsageRepository:
             int: Total request count.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -705,7 +705,7 @@ class UsageRepository:
             List[Dict]: List of request counts by date.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -765,7 +765,7 @@ class UsageRepository:
             List[Dict]: List of request counts by date and tool.
         """
         conditions = ["date >= ?", "date <= ?"]
-        params = [start_date, end_date]
+        params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -826,7 +826,7 @@ class UsageRepository:
         today = datetime.now().strftime("%Y-%m-%d")
 
         conditions = ["date = ?"]
-        params = [today]
+        params: list[Any] = [today]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -900,7 +900,7 @@ class UsageRepository:
             date = datetime.now().strftime("%Y-%m-%d")
 
         conditions = ["dm.date = ?", "dm.role = ?"]
-        params = [date, "assistant"]
+        params: list[Any] = [date, "assistant"]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
@@ -1066,7 +1066,7 @@ class UsageRepository:
         # sender_name format is: {username}-{hostname}-{tool}
         # Use LIKE to match username prefix
         conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ? ESCAPE '\\'"]
-        params = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
+        params: list[Any] = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
 
         if normalized_tenant_id is not None:
             conditions.append(self._tenant_user_condition("user_id"))
@@ -1189,7 +1189,7 @@ class UsageRepository:
             end_date = f"{year}-{month + 1:02d}-01"
 
         conditions = ["date >= ?", "date < ?", "role = ?"]
-        params = [start_date, end_date, "assistant"]
+        params: list[Any] = [start_date, end_date, "assistant"]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:

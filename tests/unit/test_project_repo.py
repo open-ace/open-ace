@@ -76,9 +76,7 @@ class TestProjectRepository:
         self.db.fetch_one.side_effect = [None, {"id": 3}]
 
         with patch.object(self.repo, "add_user_project", return_value=1):
-            result = self.repo.create_project(
-                path="/test/pg", name="PG", created_by=1, tenant_id=1
-            )
+            result = self.repo.create_project(path="/test/pg", name="PG", created_by=1, tenant_id=1)
         assert result == 3
         # fetch_one called twice: check soft-deleted, then insert with RETURNING
         assert self.db.fetch_one.call_count == 2

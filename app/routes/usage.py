@@ -60,7 +60,10 @@ def api_refresh_summary():
     """Refresh summary data from daily_messages table."""
     host = request.args.get("host")
     if _current_tenant_id() is not None:
-        return jsonify({"status": "error", "message": "Tenant-scoped summary refresh is automatic"}), 403
+        return (
+            jsonify({"status": "error", "message": "Tenant-scoped summary refresh is automatic"}),
+            403,
+        )
     success = summary_service.refresh_summary(host_name=host)
     if success:
         return jsonify({"status": "success", "message": "Summary refreshed"})

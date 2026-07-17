@@ -14,15 +14,13 @@ user_id-only filtering.
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260717_002_add_workspace_session_tenant_scope"
-down_revision: Union[str, None] = "20260717_001_add_proxy_token_jti_registry"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260717_001_add_proxy_token_jti_registry"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:

@@ -11,7 +11,7 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -77,7 +77,8 @@ def _current_tenant_id() -> Optional[int]:
 
 def _tenant_scope_required() -> bool:
     """Whether workspace data should be tenant-scoped for this request."""
-    return (g.user.get("role") if hasattr(g, "user") and g.user else None) != "admin"
+    current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+    return bool(current_role != "admin")
 
 
 workspace_bp = Blueprint("workspace", __name__)
@@ -577,7 +578,7 @@ def list_sessions():
 
         # Query agent_sessions table (user-created sessions)
         base_conditions = ["1=1"]
-        base_params = []
+        base_params: list[Any] = []
 
         # Filter out webui aggregate sessions (session_id LIKE 'webui:%')
         # These are internal containers that mix multiple conversations
@@ -1032,7 +1033,7 @@ def _get_messages_page_for_session(
     milestone_id: Optional[str] = None,
 ):
     """Call SessionManager.get_messages_page with a tenant-aware fallback."""
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     if limit is not None:
         kwargs["limit"] = limit
     if before_timestamp is not None:

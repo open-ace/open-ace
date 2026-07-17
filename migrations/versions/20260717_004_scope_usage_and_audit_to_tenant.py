@@ -12,15 +12,13 @@ queries can enforce tenant boundaries inside the data layer.
 
 from __future__ import annotations
 
-from typing import Union
-
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260717_004_scope_usage_and_audit_to_tenant"
-down_revision: Union[str, None] = "20260717_003_add_project_tenant_scope"
-branch_labels: Union[str, None] = None
-depends_on: Union[str, None] = None
+down_revision: str | None = "20260717_003_add_project_tenant_scope"
+branch_labels: str | None = None
+depends_on: str | None = None
 
 
 def _column_names(inspector: sa.Inspector, table_name: str) -> set[str]:

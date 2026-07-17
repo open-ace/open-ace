@@ -687,15 +687,15 @@ class SessionManager:
                 SELECT * FROM session_messages
                 WHERE session_id = {_param()}
             """
-            params: list[Any] = [session_id]
+            message_params: list[Any] = [session_id]
             if has_message_tenant and session.tenant_id:
                 query += f" AND tenant_id = {_param()}"
-                params.append(session.tenant_id)
+                message_params.append(session.tenant_id)
             if message_milestone_id is not None:
                 query += f" AND milestone_id = {_param()}"
-                params.append(message_milestone_id)
+                message_params.append(message_milestone_id)
             query += " ORDER BY timestamp ASC"
-            cursor.execute(query, params)
+            cursor.execute(query, message_params)
             message_rows = cursor.fetchall()
             session.messages = [self._row_to_message(msg_row) for msg_row in message_rows]
 
@@ -1218,12 +1218,12 @@ class SessionManager:
             identity_value = metadata.get(identity_key)
             if not identity_value:
                 continue
-            escaped = escape_like(str(identity_value))
+            identity_snippet = f'"{identity_key}": "{identity_value}"'
             tenant_clause = f" AND tenant_id = {_param()}" if has_message_tenant else ""
             params = [session_id]
             if has_message_tenant:
                 params.append(tenant_id)
-            params.extend([role, f'%"{identity_key}": "{escaped}"%'])
+            params.extend([role, "%" + escape_like(identity_snippet) + "%"])
             cursor.execute(
                 f"""
                 SELECT *
@@ -1231,8 +1231,7 @@ class SessionManager:
                 WHERE session_id = {_param()}
                   {tenant_clause}
                   AND role = {_param()}
-                  AND metadata LIKE {_param()}
-                  ESCAPE '\\'
+                  AND metadata LIKE {_param()} ESCAPE '\\'  -- escape_like used in params
                 ORDER BY id ASC
                 LIMIT 1
                 """,
@@ -1494,23 +1493,21 @@ class SessionManager:
             VALUES ({_params(13 if has_message_tenant else 12)})
         """,
             tuple(
-                (
-                    ([message.tenant_id] if has_message_tenant else [])
-                    + [
-                        message.session_id,
-                        message.role,
-                        message.content,
-                        message.tokens_used,
-                        message.model,
-                        message.timestamp.isoformat() if message.timestamp else None,
-                        message.source_timestamp.isoformat() if message.source_timestamp else None,
-                        _sanitize_text_value(json.dumps(message.metadata)),
-                        milestone_id,
-                        message.source,
-                        message.external_message_id,
-                        self._serialize_json(message.content_blocks),
-                    ]
-                )
+                ([message.tenant_id] if has_message_tenant else [])
+                + [
+                    message.session_id,
+                    message.role,
+                    message.content,
+                    message.tokens_used,
+                    message.model,
+                    message.timestamp.isoformat() if message.timestamp else None,
+                    message.source_timestamp.isoformat() if message.source_timestamp else None,
+                    _sanitize_text_value(json.dumps(message.metadata)),
+                    milestone_id,
+                    message.source,
+                    message.external_message_id,
+                    self._serialize_json(message.content_blocks),
+                ]
             ),
         )
 
