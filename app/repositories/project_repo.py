@@ -27,6 +27,32 @@ class ProjectRepository:
         """
         self.db = db or Database()
 
+    @staticmethod
+    def _normalize_tenant_id(value: Any) -> Optional[int]:
+        """Normalize tenant identifiers to positive integers."""
+        try:
+            tenant_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    def _resolve_tenant_id(
+        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
+    ) -> int:
+        """Resolve the effective tenant for project writes."""
+        normalized = self._normalize_tenant_id(tenant_id)
+        if normalized is not None:
+            return normalized
+
+        if user_id is not None:
+            row = self.db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
+            if row:
+                normalized = self._normalize_tenant_id(row.get("tenant_id"))
+                if normalized is not None:
+                    return normalized
+
+        return 1
+
     def create_project(
         self,
         path: str,
@@ -34,6 +60,7 @@ class ProjectRepository:
         description: Optional[str] = None,
         created_by: Optional[int] = None,
         is_shared: bool = False,
+        tenant_id: Optional[int] = None,
     ) -> Optional[int]:
         """
         Create a new project or restore a soft-deleted one.
@@ -54,11 +81,12 @@ class ProjectRepository:
         """
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
+            effective_tenant_id = self._resolve_tenant_id(tenant_id=tenant_id, user_id=created_by)
 
             # Check if a soft-deleted project with the same path exists
             soft_deleted = self.db.fetch_one(
-                "SELECT id FROM projects WHERE path = ? AND is_active IS FALSE",
-                (path,),
+                "SELECT id FROM projects WHERE path = ? AND tenant_id = ? AND is_active IS FALSE",
+                (path, effective_tenant_id),
             )
 
             if soft_deleted:
@@ -68,11 +96,19 @@ class ProjectRepository:
                     self.db.execute(
                         """
                         UPDATE projects SET
-                            name = ?, description = ?, created_by = ?, is_shared = ?,
+                            tenant_id = ?, name = ?, description = ?, created_by = ?, is_shared = ?,
                             is_active = TRUE, updated_at = ?
                         WHERE id = ?
                         """,
-                        (name, description, created_by, is_shared, now, restored_id),
+                        (
+                            effective_tenant_id,
+                            name,
+                            description,
+                            created_by,
+                            is_shared,
+                            now,
+                            restored_id,
+                        ),
                     )
                 else:
                     is_shared_int = adapt_boolean_value(is_shared)
@@ -80,11 +116,12 @@ class ProjectRepository:
                     self.db.execute(
                         """
                         UPDATE projects SET
-                            name = ?, description = ?, created_by = ?, is_shared = ?,
+                            tenant_id = ?, name = ?, description = ?, created_by = ?, is_shared = ?,
                             is_active = ?, updated_at = ?
                         WHERE id = ?
                         """,
                         (
+                            effective_tenant_id,
                             name,
                             description,
                             created_by,
@@ -107,12 +144,22 @@ class ProjectRepository:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
                     """
-                    INSERT INTO projects (path, name, description, created_by, created_at,
+                    INSERT INTO projects (tenant_id, path, name, description, created_by, created_at,
                                           updated_at, is_active, is_shared)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                     """,
-                    (path, name, description, created_by, now, now, True, is_shared),
+                    (
+                        effective_tenant_id,
+                        path,
+                        name,
+                        description,
+                        created_by,
+                        now,
+                        now,
+                        True,
+                        is_shared,
+                    ),
                     commit=True,
                 )
                 project_id = int(result["id"]) if result else None
@@ -122,16 +169,26 @@ class ProjectRepository:
                 is_active_int = adapt_boolean_value(True)
                 cursor = self.db.execute(
                     """
-                    INSERT INTO projects (path, name, description, created_by, created_at,
+                    INSERT INTO projects (tenant_id, path, name, description, created_by, created_at,
                                           updated_at, is_active, is_shared)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (path, name, description, created_by, now, now, is_active_int, is_shared_int),
+                    (
+                        effective_tenant_id,
+                        path,
+                        name,
+                        description,
+                        created_by,
+                        now,
+                        now,
+                        is_active_int,
+                        is_shared_int,
+                    ),
                 )
                 project_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
 
             # If creator is specified, add them to user_projects
-            if project_id and created_by:
+            if project_id and created_by is not None:
                 self.add_user_project(created_by, project_id)
 
             return project_id
@@ -139,7 +196,9 @@ class ProjectRepository:
             logger.error(f"Error creating project: {e}")
             return None
 
-    def get_project_by_id(self, project_id: int) -> Optional[Project]:
+    def get_project_by_id(
+        self, project_id: int, tenant_id: Optional[int] = None
+    ) -> Optional[Project]:
         """
         Get project by ID.
 
@@ -149,11 +208,19 @@ class ProjectRepository:
         Returns:
             Optional[Project]: Project data or None.
         """
-        query = "SELECT * FROM projects WHERE id = ? AND is_active IS TRUE"
-        result = self.db.fetch_one(query, (project_id,))
+        conditions = ["id = ?", "is_active IS TRUE"]
+        params: list[Any] = [project_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+        query = f"SELECT * FROM projects WHERE {' AND '.join(conditions)}"
+        result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
-    def get_project_by_path(self, path: str) -> Optional[Project]:
+    def get_project_by_path(
+        self, path: str, tenant_id: Optional[int] = None
+    ) -> Optional[Project]:
         """
         Get project by path.
 
@@ -163,14 +230,21 @@ class ProjectRepository:
         Returns:
             Optional[Project]: Project data or None.
         """
-        query = "SELECT * FROM projects WHERE path = ? AND is_active IS TRUE"
-        result = self.db.fetch_one(query, (path,))
+        conditions = ["path = ?", "is_active IS TRUE"]
+        params: list[Any] = [path]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+        query = f"SELECT * FROM projects WHERE {' AND '.join(conditions)}"
+        result = self.db.fetch_one(query, tuple(params))
         return Project.from_dict(result) if result else None
 
     def get_all_projects(
         self,
         include_inactive: bool = False,
         created_by: Optional[int] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[Project]:
         """
         Get all projects.
@@ -188,9 +262,14 @@ class ProjectRepository:
         if not include_inactive:
             conditions.append("is_active IS TRUE")
 
-        if created_by:
+        if created_by is not None:
             conditions.append("created_by = ?")
             params.append(created_by)
+
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -198,7 +277,7 @@ class ProjectRepository:
         results = self.db.fetch_all(query, tuple(params))
         return [Project.from_dict(r) for r in results]
 
-    def get_user_projects(self, user_id: int) -> list[Project]:
+    def get_user_projects(self, user_id: int, tenant_id: Optional[int] = None) -> list[Project]:
         """
         Get projects accessible by a user.
 
@@ -212,9 +291,14 @@ class ProjectRepository:
             SELECT p.* FROM projects p
             INNER JOIN user_projects up ON p.id = up.project_id
             WHERE up.user_id = ? AND p.is_active IS TRUE
-            ORDER BY up.last_access_at DESC
         """
-        results = self.db.fetch_all(query, (user_id,))
+        params: list[Any] = [user_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            query += " AND p.tenant_id = ?"
+            params.append(normalized_tenant_id)
+        query += " ORDER BY up.last_access_at DESC"
+        results = self.db.fetch_all(query, tuple(params))
         return [Project.from_dict(r) for r in results]
 
     def update_project(
@@ -223,6 +307,7 @@ class ProjectRepository:
         name: Optional[str] = None,
         description: Optional[str] = None,
         is_shared: Optional[bool] = None,
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """
         Update project information.
@@ -262,16 +347,21 @@ class ProjectRepository:
             updates.append("updated_at = ?")
             params.append(datetime.now(timezone.utc).replace(tzinfo=None))
 
-            params.append(project_id)
-
             query = f"UPDATE projects SET {', '.join(updates)} WHERE id = ?"
+            params.append(project_id)
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+            if normalized_tenant_id is not None:
+                query += " AND tenant_id = ?"
+                params.append(normalized_tenant_id)
             self.db.execute(query, tuple(params))
             return True
         except Exception as e:
             logger.error(f"Error updating project: {e}")
             return False
 
-    def delete_project(self, project_id: int, soft_delete: bool = True) -> bool:
+    def delete_project(
+        self, project_id: int, soft_delete: bool = True, tenant_id: Optional[int] = None
+    ) -> bool:
         """
         Delete a project.
 
@@ -283,15 +373,23 @@ class ProjectRepository:
             bool: True if successful.
         """
         try:
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
             if soft_delete:
                 query = "UPDATE projects SET is_active = FALSE, updated_at = ? WHERE id = ?"
-                self.db.execute(
-                    query, (datetime.now(timezone.utc).replace(tzinfo=None), project_id)
-                )
+                params: list[Any] = [datetime.now(timezone.utc).replace(tzinfo=None), project_id]
+                if normalized_tenant_id is not None:
+                    query += " AND tenant_id = ?"
+                    params.append(normalized_tenant_id)
+                self.db.execute(query, tuple(params))
             else:
                 # Hard delete - remove user_projects first
                 self.db.execute("DELETE FROM user_projects WHERE project_id = ?", (project_id,))
-                self.db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+                query = "DELETE FROM projects WHERE id = ?"
+                params = [project_id]
+                if normalized_tenant_id is not None:
+                    query += " AND tenant_id = ?"
+                    params.append(normalized_tenant_id)
+                self.db.execute(query, tuple(params))
             return True
         except Exception as e:
             logger.error(f"Error deleting project: {e}")
@@ -413,7 +511,9 @@ class ProjectRepository:
             logger.error(f"Error updating user project stats: {e}")
             return False
 
-    def get_user_project(self, user_id: int, project_id: int) -> Optional[UserProject]:
+    def get_user_project(
+        self, user_id: int, project_id: int, tenant_id: Optional[int] = None
+    ) -> Optional[UserProject]:
         """
         Get user-project relationship.
 
@@ -424,11 +524,24 @@ class ProjectRepository:
         Returns:
             Optional[UserProject]: Relationship data or None.
         """
-        query = "SELECT * FROM user_projects WHERE user_id = ? AND project_id = ?"
-        result = self.db.fetch_one(query, (user_id, project_id))
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None:
+            query = "SELECT * FROM user_projects WHERE user_id = ? AND project_id = ?"
+            params: tuple[Any, ...] = (user_id, project_id)
+        else:
+            query = """
+                SELECT up.*
+                FROM user_projects up
+                INNER JOIN projects p ON p.id = up.project_id
+                WHERE up.user_id = ? AND up.project_id = ? AND p.tenant_id = ?
+            """
+            params = (user_id, project_id, normalized_tenant_id)
+        result = self.db.fetch_one(query, params)
         return UserProject.from_dict(result) if result else None
 
-    def get_project_users(self, project_id: int) -> list[UserProject]:
+    def get_project_users(
+        self, project_id: int, tenant_id: Optional[int] = None
+    ) -> list[UserProject]:
         """
         Get all users associated with a project.
 
@@ -443,12 +556,25 @@ class ProjectRepository:
             FROM user_projects up
             LEFT JOIN users u ON up.user_id = u.id
             WHERE up.project_id = ?
-            ORDER BY up.last_access_at DESC
         """
-        results = self.db.fetch_all(query, (project_id,))
+        params: list[Any] = [project_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            query = """
+                SELECT up.*, u.username
+                FROM user_projects up
+                LEFT JOIN users u ON up.user_id = u.id
+                INNER JOIN projects p ON p.id = up.project_id
+                WHERE up.project_id = ? AND p.tenant_id = ?
+            """
+            params.append(normalized_tenant_id)
+        query += " ORDER BY up.last_access_at DESC"
+        results = self.db.fetch_all(query, tuple(params))
         return [UserProject.from_dict(r) for r in results]
 
-    def get_project_stats(self, project_id: int) -> Optional[ProjectStats]:
+    def get_project_stats(
+        self, project_id: int, tenant_id: Optional[int] = None
+    ) -> Optional[ProjectStats]:
         """
         Get aggregated statistics for a project.
 
@@ -459,7 +585,7 @@ class ProjectRepository:
             Optional[ProjectStats]: Project statistics or None.
         """
         # Get project info
-        project = self.get_project_by_id(project_id)
+        project = self.get_project_by_id(project_id, tenant_id=tenant_id)
         if not project:
             return None
 
@@ -481,7 +607,7 @@ class ProjectRepository:
             return None
 
         # Get user-level stats
-        user_stats = self.get_project_users(project_id)
+        user_stats = self.get_project_users(project_id, tenant_id=tenant_id)
 
         return ProjectStats(
             project_id=project_id,
@@ -497,7 +623,7 @@ class ProjectRepository:
             user_stats=user_stats,
         )
 
-    def get_all_project_stats(self) -> list[ProjectStats]:
+    def get_all_project_stats(self, tenant_id: Optional[int] = None) -> list[ProjectStats]:
         """
         Get statistics for all active projects.
 
@@ -520,15 +646,19 @@ class ProjectRepository:
             FROM projects p
             LEFT JOIN user_projects up ON p.id = up.project_id
             WHERE p.is_active IS TRUE
-            GROUP BY p.id
-            ORDER BY total_tokens DESC
         """
-        results = self.db.fetch_all(query)
+        params: list[Any] = []
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            query += " AND p.tenant_id = ?"
+            params.append(normalized_tenant_id)
+        query += " GROUP BY p.id ORDER BY total_tokens DESC"
+        results = self.db.fetch_all(query, tuple(params))
 
         stats_list = []
         for r in results:
             project_id = r["project_id"]
-            user_stats = self.get_project_users(project_id)
+            user_stats = self.get_project_users(project_id, tenant_id=tenant_id)
 
             def parse_datetime(value):
                 return parse_db_datetime(value)
@@ -556,6 +686,7 @@ class ProjectRepository:
         project_id: int,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[ProjectDailyStats]:
         """
         Get daily statistics for a project from daily_stats table.
@@ -568,6 +699,10 @@ class ProjectRepository:
         Returns:
             List[ProjectDailyStats]: List of daily statistics.
         """
+        project = self.get_project_by_id(project_id, tenant_id=tenant_id)
+        if not project:
+            return []
+
         conditions = ["project_id = ?"]
         params: list[Any] = [project_id]
 
@@ -584,8 +719,6 @@ class ProjectRepository:
         query = f"""
             SELECT
                 date,
-                project_id,
-                project_path,
                 SUM(total_tokens) as total_tokens,
                 SUM(total_input_tokens) as total_input_tokens,
                 SUM(total_output_tokens) as total_output_tokens,
@@ -601,8 +734,8 @@ class ProjectRepository:
         return [
             ProjectDailyStats(
                 date=r["date"],
-                project_id=r["project_id"],
-                project_path=r.get("project_path", ""),
+                project_id=project_id,
+                project_path=project.path,
                 total_tokens=int(r.get("total_tokens", 0) or 0),
                 total_input_tokens=int(r.get("total_input_tokens", 0) or 0),
                 total_output_tokens=int(r.get("total_output_tokens", 0) or 0),

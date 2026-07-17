@@ -945,7 +945,7 @@ def create_session():
                 from app.repositories.project_repo import ProjectRepository
 
                 project_repo = ProjectRepository()
-                project = project_repo.get_project_by_path(project_path)
+                project = project_repo.get_project_by_path(project_path, tenant_id=tenant_id)
                 if project:
                     project_id = project.id
                     # Auto-add user to project if not already

@@ -25,6 +25,19 @@ project_repo = ProjectRepository()
 user_repo = UserRepository()
 
 
+def _current_tenant_id() -> int | None:
+    """Return the current request's tenant scope, if any."""
+    user = getattr(g, "user", None) or {}
+    raw_tenant_id = user.get("tenant_id")
+    if raw_tenant_id in (None, ""):
+        return None
+    try:
+        tenant_id = int(raw_tenant_id)
+    except (TypeError, ValueError):
+        return None
+    return tenant_id if tenant_id > 0 else None
+
+
 @projects_bp.before_request
 def _authenticate_user():
     """Authenticate via session token or WebUI token."""
@@ -36,6 +49,8 @@ def _authenticate_user():
             if user:
                 g.user = user  # Store full user object for system_account access
                 g.user_id = user.get("id")
+                g.user_role = user.get("role")
+                g.tenant_id = user.get("tenant_id")
                 return None
 
     # Fallback: try WebUI token from query param
@@ -52,6 +67,7 @@ def _authenticate_user():
                     g.user = user  # Store full user object for system_account access
                     g.user_id = user_id
                     g.user_role = user.get("role")
+                    g.tenant_id = user.get("tenant_id")
                     return None
 
     return jsonify({"error": "Authentication required"}), 401
@@ -85,12 +101,13 @@ def run_as_user(system_account: str, command: list) -> subprocess.CompletedProce
 def api_get_projects():
     """Get projects accessible by current user."""
     user_id = g.user_id
+    tenant_id = _current_tenant_id()
 
     # Get user's projects
-    projects = project_repo.get_user_projects(user_id)
+    projects = project_repo.get_user_projects(user_id, tenant_id=tenant_id)
 
     # Also include shared projects
-    all_projects = project_repo.get_all_projects()
+    all_projects = project_repo.get_all_projects(tenant_id=tenant_id)
     for p in all_projects:
         if p.is_shared and p.id not in [proj.id for proj in projects]:
             projects.append(p)
@@ -107,6 +124,7 @@ def api_get_projects():
 def api_create_project():
     """Create a new project."""
     user_id = g.user_id
+    tenant_id = _current_tenant_id()
     system_account = g.user.get("system_account") if g.user else None
     data = request.get_json() or {}
 
@@ -140,7 +158,7 @@ def api_create_project():
         return jsonify({"error": "Path traversal not allowed"}), 400
 
     # Check if project already exists
-    existing = project_repo.get_project_by_path(path)
+    existing = project_repo.get_project_by_path(path, tenant_id=tenant_id)
     if existing:
         return jsonify({"error": "Project already exists", "project": existing.to_dict()}), 409
 
@@ -197,10 +215,11 @@ def api_create_project():
         description=description,
         created_by=user_id,
         is_shared=is_shared,
+        tenant_id=tenant_id,
     )
 
     if project_id:
-        project = project_repo.get_project_by_id(project_id)
+        project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
         return (
@@ -220,19 +239,20 @@ def api_create_project():
 @projects_bp.route("/projects/<int:project_id>", methods=["GET"])
 def api_get_project(project_id):
     """Get project details."""
-    project = project_repo.get_project_by_id(project_id)
+    tenant_id = _current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check if user has access
     user_id = g.user_id
-    user_project = project_repo.get_user_project(user_id, project_id)
+    user_project = project_repo.get_user_project(user_id, project_id, tenant_id=tenant_id)
 
     if not user_project and not project.is_shared:
         return jsonify({"error": "Access denied"}), 403
 
     # Get project stats
-    stats = project_repo.get_project_stats(project_id)
+    stats = project_repo.get_project_stats(project_id, tenant_id=tenant_id)
 
     return jsonify(
         {
@@ -246,7 +266,8 @@ def api_get_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["PUT"])
 def api_update_project(project_id):
     """Update project information."""
-    project = project_repo.get_project_by_id(project_id)
+    tenant_id = _current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
@@ -267,10 +288,11 @@ def api_update_project(project_id):
         name=name,
         description=description,
         is_shared=is_shared,
+        tenant_id=tenant_id,
     )
 
     if success:
-        project = project_repo.get_project_by_id(project_id)
+        project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
         return jsonify({"success": True, "project": project.to_dict()})
@@ -281,7 +303,8 @@ def api_update_project(project_id):
 @projects_bp.route("/projects/<int:project_id>", methods=["DELETE"])
 def api_delete_project(project_id):
     """Delete a project (soft delete)."""
-    project = project_repo.get_project_by_id(project_id)
+    tenant_id = _current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
@@ -293,7 +316,7 @@ def api_delete_project(project_id):
         return jsonify({"error": "Only project creator or admin can delete"}), 403
 
     # Soft delete
-    success = project_repo.delete_project(project_id, soft_delete=True)
+    success = project_repo.delete_project(project_id, soft_delete=True, tenant_id=tenant_id)
 
     if success:
         return jsonify({"success": True, "message": "Project deleted"})
@@ -307,7 +330,7 @@ def api_get_all_project_stats():
     if g.user.get("role") != "admin":
         return jsonify({"error": "Admin access required"}), 403
 
-    stats = project_repo.get_all_project_stats()
+    stats = project_repo.get_all_project_stats(tenant_id=_current_tenant_id())
 
     return jsonify(
         {
@@ -320,13 +343,14 @@ def api_get_all_project_stats():
 @projects_bp.route("/projects/<int:project_id>/daily", methods=["GET"])
 def api_get_project_daily_stats(project_id):
     """Get daily statistics for a project."""
-    project = project_repo.get_project_by_id(project_id)
+    tenant_id = _current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check access
     user_id = g.user_id
-    user_project = project_repo.get_user_project(user_id, project_id)
+    user_project = project_repo.get_user_project(user_id, project_id, tenant_id=tenant_id)
 
     if not user_project and not project.is_shared and g.user.get("role") != "admin":
         return jsonify({"error": "Access denied"}), 403
@@ -338,6 +362,7 @@ def api_get_project_daily_stats(project_id):
         project_id=project_id,
         start_date=start_date,
         end_date=end_date,
+        tenant_id=tenant_id,
     )
 
     return jsonify(
@@ -351,18 +376,19 @@ def api_get_project_daily_stats(project_id):
 @projects_bp.route("/projects/<int:project_id>/users", methods=["GET"])
 def api_get_project_users(project_id):
     """Get users collaborating on a project."""
-    project = project_repo.get_project_by_id(project_id)
+    tenant_id = _current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
     # Check access
     user_id = g.user_id
-    user_project = project_repo.get_user_project(user_id, project_id)
+    user_project = project_repo.get_user_project(user_id, project_id, tenant_id=tenant_id)
 
     if not user_project and not project.is_shared and g.user.get("role") != "admin":
         return jsonify({"error": "Access denied"}), 403
 
-    user_stats = project_repo.get_project_users(project_id)
+    user_stats = project_repo.get_project_users(project_id, tenant_id=tenant_id)
 
     # Add username to each user stat
     result = []

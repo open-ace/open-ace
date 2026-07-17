@@ -467,12 +467,15 @@ AI 生成的使用洞察报告。
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer PK | |
-| path | varchar(500) | UNIQUE |
+| tenant_id | integer | DEFAULT 1；用于按租户限定项目查找和唯一性 |
+| path | varchar(500) | 对活动项目按 `(tenant_id, path)` 唯一 |
 | name | varchar(200) | |
 | description | text | |
 | created_by | integer | |
 | is_active | boolean | DEFAULT true |
 | is_shared | boolean | DEFAULT false |
+
+索引：`idx_projects_created_by`、`idx_projects_is_active`、`idx_projects_path(tenant_id, path)`、`idx_projects_tenant_created_by`
 
 ### user_projects
 

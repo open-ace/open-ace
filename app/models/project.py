@@ -16,6 +16,7 @@ class Project:
     """Project data model."""
 
     id: Optional[int] = None
+    tenant_id: Optional[int] = None
     path: str = ""
     name: Optional[str] = None
     description: Optional[str] = None
@@ -29,6 +30,7 @@ class Project:
         """Convert to dictionary."""
         return {
             "id": self.id,
+            "tenant_id": self.tenant_id,
             "path": self.path,
             "name": self.name,
             "description": self.description,
@@ -48,6 +50,7 @@ class Project:
 
         return cls(
             id=data.get("id"),
+            tenant_id=data.get("tenant_id"),
             path=data.get("path", ""),
             name=data.get("name"),
             description=data.get("description"),

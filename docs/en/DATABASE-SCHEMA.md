@@ -505,12 +505,15 @@ Unique: `(user_id, date, period)`
 | Column | Type | Notes |
 |--------|------|-------|
 | id | integer PK | |
-| path | varchar(500) | UNIQUE |
+| tenant_id | integer | DEFAULT 1; used for tenant-scoped project lookup and uniqueness |
+| path | varchar(500) | UNIQUE per active `(tenant_id, path)` |
 | name | varchar(200) | |
 | description | text | |
 | created_by | integer | |
 | is_active | boolean | DEFAULT true |
 | is_shared | boolean | DEFAULT false |
+
+Indexes: `idx_projects_created_by`, `idx_projects_is_active`, `idx_projects_path(tenant_id, path)`, `idx_projects_tenant_created_by`
 
 ### user_projects
 

@@ -572,6 +572,7 @@ CREATE TABLE project_categories (
 
 CREATE TABLE projects (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer DEFAULT 1 NOT NULL,
  path TEXT NOT NULL,
  name TEXT,
  description text,
@@ -1326,7 +1327,9 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
-CREATE INDEX idx_projects_path ON projects (path);
+CREATE INDEX idx_projects_path ON projects (tenant_id, path);
+
+CREATE INDEX idx_projects_tenant_created_by ON projects (tenant_id, created_by);
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
@@ -1486,6 +1489,6 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decisi
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
-CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
+CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);

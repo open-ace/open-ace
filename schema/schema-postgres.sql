@@ -858,6 +858,7 @@ CREATE SEQUENCE project_categories_id_seq
 ALTER SEQUENCE project_categories_id_seq OWNED BY project_categories.id;
 CREATE TABLE projects (
     id integer NOT NULL,
+    tenant_id integer DEFAULT 1 NOT NULL,
     path character varying(500) NOT NULL,
     name character varying(200),
     description text,
@@ -2497,7 +2498,9 @@ CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
 
-CREATE INDEX idx_projects_path ON projects USING btree (path);
+CREATE INDEX idx_projects_path ON projects USING btree (tenant_id, path);
+
+CREATE INDEX idx_projects_tenant_created_by ON projects USING btree (tenant_id, created_by);
 
 
 --
@@ -2829,11 +2832,7 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING b
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
-
---
---
-
-CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (path) WHERE (is_active IS TRUE);
+CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
 
