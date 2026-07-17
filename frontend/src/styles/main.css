@@ -3340,9 +3340,37 @@ table .latency-row:hover td {
 .work-main .prompts,
 .work-main .sessions,
 .work-main .usage-overview,
-.work-main .insights-report {
+.work-main .insights-report,
+.work-main .personal-files {
   padding: var(--spacing-md);
   overflow-y: auto;
+}
+
+.personal-files {
+  min-height: 0;
+}
+
+.personal-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.personal-files-header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.personal-files-browser {
+  max-width: 960px;
+}
+
+.personal-files .directory-list {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
 }
 
 /* Sessions page specific styles */
