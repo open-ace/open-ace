@@ -10,14 +10,19 @@ Supports WebSocket push, email, and webhook notifications.
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
+import socket
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional, Union
+from urllib.parse import urlparse
+
+import requests
 
 from app.repositories.database import (
     DB_PATH,
@@ -28,8 +33,13 @@ from app.repositories.database import (
     is_postgresql,
 )
 from app.services.email_notification_service import get_email_notification_service
+from app.utils.config import get_config_value
 
 logger = logging.getLogger(__name__)
+
+_SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+_WEBHOOK_TIMEOUT_SECONDS = 5
+_FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
 
 
 class AlertType(Enum):
@@ -118,6 +128,175 @@ class AlertNotifier:
         self._user_clients: dict[int, set[str]] = {}  # user_id -> set of client_ids
         self._email_config: dict[str, Any] = {}
         self._webhooks: dict[str, str] = {}
+
+    def _matches_notification_preferences(
+        self, alert: Alert, prefs: NotificationPreference, channel: str
+    ) -> bool:
+        """Return whether the alert matches the user's notification preferences."""
+        if alert.alert_type not in prefs.alert_types:
+            logger.debug(
+                "Alert type %s not in user %s preferences for %s: %s",
+                alert.alert_type,
+                prefs.user_id,
+                channel,
+                prefs.alert_types,
+            )
+            return False
+
+        if _SEVERITY_ORDER.get(alert.severity, 0) < _SEVERITY_ORDER.get(prefs.min_severity, 1):
+            logger.debug(
+                "Alert severity %s below user %s threshold %s for %s",
+                alert.severity,
+                prefs.user_id,
+                prefs.min_severity,
+                channel,
+            )
+            return False
+
+        return True
+
+    def _allow_private_webhook_urls(self) -> bool:
+        """Whether private/loopback webhook targets are explicitly allowed."""
+        return bool(get_config_value("alerts", "allow_private_webhook_urls", False))
+
+    def _is_disallowed_webhook_ip(self, ip: ipaddress._BaseAddress) -> bool:
+        """Return whether the resolved webhook IP is blocked by default."""
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+
+    def validate_webhook_url(
+        self, webhook_url: Optional[str], resolve_dns: bool = True
+    ) -> tuple[bool, Optional[str]]:
+        """Validate a webhook URL for syntax and outbound safety."""
+        if not webhook_url:
+            return True, None
+
+        parsed = urlparse(webhook_url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False, "Webhook URL must start with http:// or https://"
+
+        if not parsed.hostname:
+            return False, "Webhook URL must include a hostname"
+
+        if self._allow_private_webhook_urls():
+            return True, None
+
+        host = parsed.hostname.strip().lower()
+        if host in {"localhost", "localhost.localdomain"}:
+            return False, "Private and loopback webhook targets are blocked by default"
+
+        try:
+            ip = ipaddress.ip_address(host.split("%", 1)[0])
+        except ValueError:
+            ip = None
+
+        if ip is not None:
+            if self._is_disallowed_webhook_ip(ip):
+                return False, "Private and loopback webhook targets are blocked by default"
+            return True, None
+
+        if not resolve_dns:
+            return True, None
+
+        try:
+            resolved = socket.getaddrinfo(
+                parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+        except OSError:
+            return False, "Webhook hostname could not be resolved"
+
+        for entry in resolved:
+            resolved_ip = ipaddress.ip_address(entry[4][0].split("%", 1)[0])
+            if self._is_disallowed_webhook_ip(resolved_ip):
+                return False, "Private and loopback webhook targets are blocked by default"
+
+        return True, None
+
+    def _is_feishu_webhook(self, webhook_url: str) -> bool:
+        """Return whether the webhook target looks like a Feishu/Lark bot webhook."""
+        host = (urlparse(webhook_url).hostname or "").lower()
+        return any(snippet in host for snippet in _FEISHU_WEBHOOK_HOST_SNIPPETS)
+
+    def _format_webhook_text(self, alert: Alert) -> str:
+        """Render a plain-text alert summary suitable for chat webhook bots."""
+        lines = [
+            f"[Open ACE] {alert.severity.upper()} - {alert.title}",
+            alert.message,
+            f"Type: {alert.alert_type}",
+        ]
+        if alert.username:
+            lines.append(f"User: {alert.username}")
+        if alert.tool_name:
+            lines.append(f"Tool: {alert.tool_name}")
+        if alert.action_url:
+            lines.append(f"Action: {alert.action_url}")
+        return "\n".join(line for line in lines if line)
+
+    def _build_webhook_payload(self, alert: Alert, webhook_url: str) -> dict[str, Any]:
+        """Build the outbound webhook payload for the given target."""
+        summary = self._format_webhook_text(alert)
+        if self._is_feishu_webhook(webhook_url):
+            return {"msg_type": "text", "content": {"text": summary}}
+        return {
+            "event": "openace.alert",
+            "source": "open-ace",
+            "summary": summary,
+            "alert": alert.to_dict(),
+        }
+
+    def _send_webhook_notification(self, alert: Alert, user_id: int) -> None:
+        """Send a webhook notification for an alert if user preferences allow."""
+        try:
+            prefs = self.get_notification_preferences(user_id)
+
+            if not prefs.push_enabled:
+                logger.debug("Webhook notifications disabled for user %s", user_id)
+                return
+
+            if not prefs.webhook_url:
+                logger.debug("No webhook URL configured for user %s", user_id)
+                return
+
+            if not self._matches_notification_preferences(alert, prefs, "webhook"):
+                return
+
+            valid, error = self.validate_webhook_url(prefs.webhook_url, resolve_dns=True)
+            if not valid:
+                logger.warning(
+                    "Skipping webhook notification for user %s alert %s: %s",
+                    user_id,
+                    alert.alert_id,
+                    error,
+                )
+                return
+
+            payload = self._build_webhook_payload(alert, prefs.webhook_url)
+            response = requests.post(
+                prefs.webhook_url,
+                json=payload,
+                timeout=_WEBHOOK_TIMEOUT_SECONDS,
+                allow_redirects=False,
+                headers={"User-Agent": "Open-ACE Alert Webhook"},
+            )
+            response.raise_for_status()
+            logger.info(
+                "Webhook notification delivered for alert %s to user %s",
+                alert.alert_id,
+                user_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to deliver webhook notification for alert %s to user %s: %s",
+                alert.alert_id,
+                user_id,
+                e,
+            )
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""
@@ -326,6 +505,7 @@ class AlertNotifier:
         # Send email notification if user preferences allow
         if user_id:
             self._send_email_notification(alert, user_id, language)
+            self._send_webhook_notification(alert, user_id)
 
         logger.info(f"Created alert: [{severity}] {title}")
         return alert
@@ -358,19 +538,7 @@ class AlertNotifier:
                 logger.debug(f"No notification email set for user {user_id}")
                 return
 
-            # Check alert type is in user's preferences
-            if alert.alert_type not in prefs.alert_types:
-                logger.debug(
-                    f"Alert type {alert.alert_type} not in user {user_id} preferences: {prefs.alert_types}"
-                )
-                return
-
-            # Check severity meets minimum threshold
-            severity_order = {"info": 0, "warning": 1, "critical": 2}
-            if severity_order.get(alert.severity, 0) < severity_order.get(prefs.min_severity, 1):
-                logger.debug(
-                    f"Alert severity {alert.severity} below user {user_id} threshold {prefs.min_severity}"
-                )
+            if not self._matches_notification_preferences(alert, prefs, "email"):
                 return
 
             # Prepare alert data for email
