@@ -244,6 +244,10 @@ class ROICalculator:
         self.db = db or Database()
         self.assumptions = assumptions or ROIAssumptions.from_env()
 
+    def __repr__(self) -> str:
+        """Stable cache-key representation that includes ROI assumptions."""
+        return f"ROICalculator(assumptions={self.assumptions!r})"
+
     def _build_metrics(
         self,
         *,
@@ -424,6 +428,7 @@ class ROICalculator:
 
         return input_cost, output_cost, total_cost
 
+    @cached(ttl=60, key_prefix="roi")
     def calculate_roi(
         self,
         start_date: str,
@@ -527,6 +532,7 @@ class ROICalculator:
             requests_made=requests,
         )
 
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_trend(self, months: int = 6, user_id: Optional[int] = None) -> list[ROIMetrics]:
         """
         Get ROI trend over months.
@@ -661,6 +667,7 @@ class ROICalculator:
 
         return trends
 
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_by_tool(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by tool.
@@ -753,6 +760,7 @@ class ROICalculator:
 
         return result
 
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_by_user(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by user (via host_name grouping).
@@ -1004,6 +1012,7 @@ class ROICalculator:
 
         return daily_costs
 
+    @cached(ttl=60, key_prefix="roi")
     def get_summary_stats(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
     ) -> dict[str, Any]:

@@ -83,6 +83,37 @@ class TestRoiAssumptionRoutes:
         assert assumptions.avg_time_saved_per_request == 12.0
         assert assumptions.currency == "CNY"
 
+    @pytest.mark.parametrize(
+        "path,method_name",
+        [
+            ("/api/roi/cost-breakdown", "get_cost_breakdown"),
+            ("/api/roi/daily-costs", "get_daily_costs"),
+        ],
+    )
+    def test_display_routes_pass_overrides_to_calculator(self, client, path, method_name):
+        fake_calc = MagicMock()
+        getattr(fake_calc, method_name).return_value = []
+
+        with patch("app.auth.decorators._authenticate", return_value=(True, MOCK_ADMIN_SESSION)):
+            with patch("app.routes.roi.ROICalculator", return_value=fake_calc) as calc_cls:
+                resp = client.get(
+                    path,
+                    headers={"Authorization": "Bearer t"},
+                    query_string={
+                        "hourly_labor_cost": "90",
+                        "productivity_multiplier": "3",
+                        "avg_time_saved_per_request": "8",
+                        "currency": "eur",
+                    },
+                )
+
+        assert resp.status_code == 200
+        assumptions = calc_cls.call_args.kwargs["assumptions"]
+        assert assumptions.hourly_labor_cost == 90.0
+        assert assumptions.productivity_multiplier == 3.0
+        assert assumptions.avg_time_saved_per_request == 8.0
+        assert assumptions.currency == "EUR"
+
     def test_invalid_roi_assumption_returns_400(self, client):
         with patch("app.auth.decorators._authenticate", return_value=(True, MOCK_ADMIN_SESSION)):
             resp = client.get(

@@ -574,6 +574,12 @@ chmod -R 755 ~/.open-ace/
 5. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
 6. **No placeholder secrets**: Do not use values such as `change-me-in-production` for `SECRET_KEY` or `UPLOAD_AUTH_KEY`
 
+### Upgrade Note: Encrypted Secrets
+
+Recent security hardening separates Flask session signing from stored-secret encryption. Before upgrading an existing deployment that already has encrypted SSO client secrets, SMTP passwords, or API keys, set `OPENACE_ENCRYPTION_KEY` to the same value previously used for `SECRET_KEY`. After the service starts and can read existing secrets, rotate `OPENACE_ENCRYPTION_KEY` during a planned maintenance window if you need a dedicated new key.
+
+Docker Compose now requires `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, and `UPLOAD_AUTH_KEY` to be set explicitly. Update your `.env` or secret manager before restarting the stack.
+
 ## Multi-User Workspace Deployment
 
 When enabling `workspace.multi_user_mode`, Open ACE starts separate `qwen-code-webui` processes for each user with their `system_account` identity. This requires additional deployment configuration.

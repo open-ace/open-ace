@@ -4,7 +4,7 @@
 
 - Kubernetes cluster (1.24+)
 - `kubectl` configured
-- StorageClass available (default: `standard`)
+- StorageClass available with `ReadWriteMany` support for the shared app PVC
 - Ingress controller (nginx-ingress recommended)
 - cert-manager (optional, for TLS)
 
@@ -38,11 +38,11 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 | Setting | Value |
 |---------|-------|
-| Replicas | 1 |
+| Replicas | 3 |
 | Image | `open-ace:latest` |
 | Container port | 19888 |
 | Strategy | RollingUpdate (maxSurge=1, maxUnavailable=0) |
-| Security context | `runAsUser: 0` (required by the current multi-user workspace entrypoint) |
+| Security context | `runAsNonRoot: true`, `runAsUser: 1000`, `allowPrivilegeEscalation: false` |
 
 **Resource Limits:**
 
@@ -55,7 +55,11 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 - Liveness: HTTP GET `/health`, initialDelay=10s, period=10s
 - Readiness: HTTP GET `/health`, initialDelay=5s, period=5s
 
-**Pod Anti-Affinity:** Kept as a preference only. The current manifest is a single-instance reference deployment.
+**Pod Anti-Affinity:** Preferred across nodes to preserve availability when capacity allows.
+
+**HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
+
+**Multi-user workspace note:** The default Kubernetes manifest runs the web container as a non-root user. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root and document that exception in your cluster change process.
 
 ### Service & Ingress
 
@@ -105,10 +109,10 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 - Name: `open-ace-data`
 - Size: 10Gi
-- Access: ReadWriteOnce
+- Access: ReadWriteMany
 - Mounts:
   - `/workspace` via subPath `workspace`
-  - `/root/.open-ace` via subPath `config`
+  - `/home/open-ace/.open-ace` via subPath `config`
 
 ### RBAC
 

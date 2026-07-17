@@ -575,6 +575,12 @@ chmod -R 755 ~/.open-ace/
 5. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
 6. **禁止占位密钥**：不要在生产环境使用 `change-me-in-production` 之类的占位值作为 `SECRET_KEY` 或 `UPLOAD_AUTH_KEY`
 
+### 升级注意：已加密敏感数据
+
+近期安全加固将 Flask 会话签名与敏感数据加密拆分。已有部署如果已经保存了加密的 SSO client secret、SMTP 密码或 API Key，升级前请先把 `OPENACE_ENCRYPTION_KEY` 设置为旧版曾用于 `SECRET_KEY` 的同一个值。确认服务启动后能读取既有密文，再在计划维护窗口中按需轮换为新的专用加密密钥。
+
+Docker Compose 现在要求显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY` 和 `UPLOAD_AUTH_KEY`。重启 stack 前，请先更新 `.env` 或密钥管理系统。
+
 ## 多用户工作区部署
 
 启用 `workspace.multi_user_mode` 时，Open ACE 为每个用户以各自的 `system_account` 身份启动独立的 `qwen-code-webui` 进程。这需要额外的部署配置。
