@@ -426,6 +426,19 @@ class SessionManager:
 
         return 1
 
+    def _tenant_scope_condition(
+        self,
+        cursor: Any,
+        table: str,
+        tenant_id: Optional[int],
+        column_ref: str = "tenant_id",
+    ) -> tuple[str, list[Any]]:
+        """Return a tenant predicate when the table supports tenant_id."""
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None or not self._column_exists(cursor, table, "tenant_id"):
+            return "", []
+        return f" AND {column_ref} = {_param()}", [normalized_tenant_id]
+
     def _ensure_tables(self) -> None:
         """Ensure required tables exist from the authoritative schema (#1273).
 
@@ -721,6 +734,9 @@ class SessionManager:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         session.updated_at = now
 
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", session.tenant_id
+        )
         cursor.execute(
             f"""
             UPDATE agent_sessions
@@ -730,7 +746,7 @@ class SessionManager:
                 updated_at = {_param()}, completed_at = {_param()},
                 workspace_type = {_param()}, remote_machine_id = {_param()}, paused_at = {_param()},
                 cli_session_id = {_param()}
-            WHERE session_id = {_param()}
+            WHERE session_id = {_param()}{tenant_clause}
         """,
             (
                 session.title,
@@ -751,6 +767,7 @@ class SessionManager:
                 session.paused_at.isoformat() if session.paused_at else None,
                 session.cli_session_id or "",
                 session.session_id,
+                *tenant_params,
             ),
         )
 
@@ -833,7 +850,9 @@ class SessionManager:
         "cli_session_id",
     }
 
-    def update_session_fields(self, session_id: str, fields: dict[str, Any]) -> bool:
+    def update_session_fields(
+        self, session_id: str, fields: dict[str, Any], tenant_id: Optional[int] = None
+    ) -> bool:
         """
         Update specific fields of a session.
 
@@ -867,13 +886,16 @@ class SessionManager:
                 if isinstance(values[i], datetime):
                     values[i] = values[i].isoformat()
         values.append(datetime.now(timezone.utc).replace(tzinfo=None).isoformat())
-        values.append(session_id)
-
         conn = self._get_connection()
         cursor = conn.cursor()
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", tenant_id
+        )
+        values.append(session_id)
+        values.extend(tenant_params)
 
         cursor.execute(
-            f"UPDATE agent_sessions SET {sets} WHERE session_id = {p}",
+            f"UPDATE agent_sessions SET {sets} WHERE session_id = {p}{tenant_clause}",
             values,
         )
 
@@ -906,6 +928,7 @@ class SessionManager:
         total_input_delta: int = 0,
         total_output_delta: int = 0,
         message_delta: int = 0,
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
 
@@ -923,6 +946,9 @@ class SessionManager:
         p = _param()
         conn = self._get_connection()
         cursor = conn.cursor()
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", tenant_id
+        )
         cursor.execute(
             f"""
             UPDATE agent_sessions
@@ -932,7 +958,7 @@ class SessionManager:
                 total_input_tokens = COALESCE(total_input_tokens, 0) + {p},
                 total_output_tokens = COALESCE(total_output_tokens, 0) + {p},
                 updated_at = {p}
-            WHERE session_id = {p}
+            WHERE session_id = {p}{tenant_clause}
             """,
             (
                 message_delta,
@@ -942,6 +968,7 @@ class SessionManager:
                 total_output_delta,
                 datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 session_id,
+                *tenant_params,
             ),
         )
         success = cursor.rowcount > 0
@@ -955,6 +982,7 @@ class SessionManager:
         limit: Optional[int] = None,
         before_id: Optional[int] = None,
         milestone_id: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[SessionMessage]:
         """
         Get messages for a session.
@@ -973,6 +1001,11 @@ class SessionManager:
 
         query = f"SELECT * FROM session_messages WHERE session_id = {_param()}"
         params: list[Any] = [session_id]
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "session_messages", tenant_id
+        )
+        query += tenant_clause
+        params.extend(tenant_params)
 
         if milestone_id is not None:
             query += f" AND milestone_id = {_param()}"
@@ -1379,8 +1412,15 @@ class SessionManager:
 
                 # Get user_id from session for audit logging
                 cursor.execute(
-                    f"SELECT user_id FROM agent_sessions WHERE session_id = {_param()}",
-                    (session_id,),
+                    f"""
+                    SELECT user_id FROM agent_sessions
+                    WHERE session_id = {_param()}
+                    {f"AND tenant_id = {_param()}" if has_session_tenant else ""}
+                    """,
+                    (
+                        session_id,
+                        *([effective_tenant_id] if has_session_tenant else []),
+                    ),
                 )
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
@@ -1559,8 +1599,15 @@ class SessionManager:
                     total_tokens = total_tokens + {_param()},
                     updated_at = {_param()}
                 WHERE session_id = {_param()}
+                {f"AND tenant_id = {_param()}" if has_session_tenant else ""}
             """,
-                (request_count_increment, tokens_used, now.isoformat(), session_id),
+                (
+                    request_count_increment,
+                    tokens_used,
+                    now.isoformat(),
+                    session_id,
+                    *([effective_tenant_id] if has_session_tenant else []),
+                ),
             )
 
         message.id = cursor.lastrowid
@@ -1570,7 +1617,7 @@ class SessionManager:
 
         return message
 
-    def complete_session(self, session_id: str) -> bool:
+    def complete_session(self, session_id: str, tenant_id: Optional[int] = None) -> bool:
         """
         Mark a session as completed and update project statistics.
 
@@ -1582,6 +1629,9 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", tenant_id
+        )
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         now_iso = now.isoformat()
@@ -1591,9 +1641,9 @@ class SessionManager:
             f"""
             SELECT user_id, project_id, project_path, created_at, total_tokens
             FROM agent_sessions
-            WHERE session_id = {_param()}
+            WHERE session_id = {_param()}{tenant_clause}
         """,
-            (session_id,),
+            (session_id, *tenant_params),
         )
         session_row = cursor.fetchone()
 
@@ -1602,9 +1652,9 @@ class SessionManager:
             f"""
             UPDATE agent_sessions
             SET status = {_param()}, completed_at = {_param()}, updated_at = {_param()}
-            WHERE session_id = {_param()}
+            WHERE session_id = {_param()}{tenant_clause}
         """,
-            (SessionStatus.COMPLETED.value, now_iso, now_iso, session_id),
+            (SessionStatus.COMPLETED.value, now_iso, now_iso, session_id, *tenant_params),
         )
 
         success = cursor.rowcount > 0
@@ -1684,7 +1734,7 @@ class SessionManager:
             logger.info(f"Completed session: {session_id}")
         return success
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(self, session_id: str, tenant_id: Optional[int] = None) -> bool:
         """
         Delete a session and its messages.
 
@@ -1696,12 +1746,24 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        session_tenant_clause, session_tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", tenant_id
+        )
+        message_tenant_clause, message_tenant_params = self._tenant_scope_condition(
+            cursor, "session_messages", tenant_id
+        )
 
         # Delete messages first
-        cursor.execute(f"DELETE FROM session_messages WHERE session_id = {_param()}", (session_id,))
+        cursor.execute(
+            f"DELETE FROM session_messages WHERE session_id = {_param()}{message_tenant_clause}",
+            (session_id, *message_tenant_params),
+        )
 
         # Delete session
-        cursor.execute(f"DELETE FROM agent_sessions WHERE session_id = {_param()}", (session_id,))
+        cursor.execute(
+            f"DELETE FROM agent_sessions WHERE session_id = {_param()}{session_tenant_clause}",
+            (session_id, *session_tenant_params),
+        )
 
         success = cursor.rowcount > 0
         conn.commit()
@@ -1845,7 +1907,9 @@ class SessionManager:
 
         return [self._row_to_session(row) for row in rows]
 
-    def recover_session(self, session_id: str) -> Optional[AgentSession]:
+    def recover_session(
+        self, session_id: str, tenant_id: Optional[int] = None
+    ) -> Optional[AgentSession]:
         """
         Recover a paused or interrupted session.
 
@@ -1855,7 +1919,7 @@ class SessionManager:
         Returns:
             AgentSession if recovery successful, None otherwise.
         """
-        session = self.get_session(session_id, include_messages=True)
+        session = self.get_session(session_id, include_messages=True, tenant_id=tenant_id)
 
         if not session:
             return None

@@ -127,6 +127,7 @@ AI agent session tracking.
 |--------|------|-------|
 | id | integer PK | |
 | session_id | text | UNIQUE |
+| tenant_id | integer | DEFAULT 1; tenant-scoped session lookup and write boundary |
 | session_type | text | DEFAULT 'chat' |
 | title | text | |
 | tool_name | text | NOT NULL |
@@ -160,12 +161,15 @@ Messages within an agent session.
 |--------|------|-------|
 | id | integer PK | |
 | session_id | text | FK → agent_sessions(session_id) |
+| tenant_id | integer | DEFAULT 1; tenant-scoped message lookup |
 | role | text | NOT NULL |
 | content | text | |
 | tokens_used | integer | DEFAULT 0 |
 | model | text | |
 | timestamp | timestamp | |
 | metadata | text | |
+
+Session indexes include `idx_agent_sessions_tenant_user`, `idx_agent_sessions_tenant_updated`, `idx_session_messages_tenant_session`, and `idx_session_messages_tenant_session_timestamp`.
 
 ## Statistics
 

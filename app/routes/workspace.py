@@ -81,6 +81,12 @@ def _tenant_scope_required() -> bool:
     return bool(current_role != "admin")
 
 
+def _session_lookup_tenant_id() -> Optional[int]:
+    """Return tenant scope for session lookups; system admins stay global."""
+    tenant_id = _current_tenant_id()
+    return tenant_id if tenant_id is not None and _tenant_scope_required() else None
+
+
 workspace_bp = Blueprint("workspace", __name__)
 
 
@@ -1067,7 +1073,9 @@ def get_session(session_id):
         manager = get_session_manager()
 
         # Load the lightweight session (no messages) for ownership + metadata.
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
@@ -1113,7 +1121,9 @@ def get_session_messages(session_id):
     try:
         manager = get_session_manager()
         # Ownership must be checked on the session BEFORE reading messages.
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
@@ -1163,12 +1173,15 @@ def complete_session(session_id):
         manager = get_session_manager()
 
         # Ownership check
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
 
-        success = manager.complete_session(session_id)
+        assert session is not None
+        success = manager.complete_session(session_id, tenant_id=session.tenant_id)
 
         if not success:
             return jsonify({"success": False, "error": "Session not found"}), 404
@@ -1186,12 +1199,15 @@ def delete_session(session_id):
         manager = get_session_manager()
 
         # Ownership check before deletion
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
 
-        success = manager.delete_session(session_id)
+        assert session is not None
+        success = manager.delete_session(session_id, tenant_id=session.tenant_id)
 
         if not success:
             return jsonify({"success": False, "error": "Session not found"}), 404
@@ -1485,7 +1501,7 @@ def rename_session(session_id):
             return jsonify({"success": False, "error": "Session name cannot be empty"}), 400
 
         manager = get_session_manager()
-        session = manager.get_session(session_id)
+        session = manager.get_session(session_id, tenant_id=_session_lookup_tenant_id())
         denied = _check_session_access(session)
         if denied:
             return denied
@@ -1510,7 +1526,7 @@ def get_session_stats():
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
         manager = get_session_manager()
-        stats = manager.get_session_stats(user_id)
+        stats = manager.get_session_stats(user_id, tenant_id=_session_lookup_tenant_id())
 
         return jsonify({"success": True, "data": stats})
     except Exception as e:

@@ -144,6 +144,6 @@ When multi-tenant mode is enabled:
 - Exceeded users get sessions terminated and alerts generated
 
 Current boundary:
-- Remote machines, remote sessions, machine permissions, user identity, and quotas are tenant-aware.
+- Users, projects, workspace sessions, session messages, daily usage aggregates, audit logs, remote machines, machine permissions, and quotas are tenant-aware.
+- Non-admin user-facing APIs apply the authenticated tenant scope to session, project, usage, and audit queries. Workspace session mutations also include the session tenant in the write boundary.
 - System administrators intentionally retain global operational visibility for support and incident response.
-- Some historical analytics and project tables derive tenant context indirectly or do not yet carry an explicit `tenant_id`; tightening those schema/query boundaries is tracked in [#1781](https://github.com/open-ace/open-ace/issues/1781).
