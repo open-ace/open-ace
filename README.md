@@ -299,7 +299,7 @@ open-ace/
 | [远程工作区](docs/cn/REMOTE-WORKSPACE.md) | 远程机器、Agent、API Key 代理与安全设计 |
 | [远程 Agent](docs/cn/REMOTE-AGENT.md) | Agent 安装、CLI 适配器、终端和会话同步 |
 | [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
-| [Kubernetes](docs/cn/KUBERNETES.md) | K8s 部署参考 |
+| [Kubernetes](docs/cn/KUBERNETES.md) | K8s 单实例参考部署 |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
 | [API 文档](docs/cn/API.md) | API 接口说明 |
 | [仓库设置](docs/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
@@ -602,7 +602,7 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | [Remote Workspace](docs/en/REMOTE-WORKSPACE.md) | Remote machines, Agent, API Key proxy, and security design |
 | [Remote Agent](docs/en/REMOTE-AGENT.md) | Agent install, CLI adapters, terminal, and session sync |
 | [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
-| [Kubernetes](docs/en/KUBERNETES.md) | K8s deployment reference |
+| [Kubernetes](docs/en/KUBERNETES.md) | Single-instance K8s deployment reference |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
 | [API Reference](docs/en/API.md) | API documentation |
 | [Repository Setup](docs/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |

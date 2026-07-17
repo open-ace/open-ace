@@ -7,7 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/name: open-ace
 spec:
-  minAvailable: 2
+  minAvailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: open-ace
@@ -37,7 +37,7 @@ spec:
               kubernetes.io/metadata.name: ingress-nginx
       ports:
         - protocol: TCP
-          port: 5001
+          port: 19888
     # Allow health checks from within the cluster
     - from:
         - namespaceSelector:
@@ -45,7 +45,7 @@ spec:
               kubernetes.io/metadata.name: open-ace
       ports:
         - protocol: TCP
-          port: 5001
+          port: 19888
   egress:
     # Allow DNS
     - to:

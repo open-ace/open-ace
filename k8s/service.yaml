@@ -31,7 +31,7 @@ spec:
   type: ClusterIP
   clusterIP: None
   ports:
-    - port: 5001
+    - port: 19888
       targetPort: http
       protocol: TCP
       name: http
