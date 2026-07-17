@@ -98,7 +98,7 @@
 - 🚨 **智能告警** — 配额预警、异常检测、超支提醒，风险早知道
 - 📋 **合规审计** — 敏感内容检测、对话记录追溯、合规报告生成和 CSV 下载
 - 👥 **多租户管理** — 部门隔离、权限控制、资源配额，精细化管理
-- 💰 **ROI 分析** — 投入产出比、效率提升量化，让 AI 价值看得见
+- 💰 **ROI 分析** — 基于可见、可配置假设的 ROI 规划估算与效率量化
 
 ---
 
@@ -401,7 +401,7 @@ It is built for teams moving AI coding agents into real engineering workflows, e
 - 🚨 **Smart Alerts** — Quota warnings, anomaly detection, overspending alerts — know risks early
 - 📋 **Compliance Audit** — Sensitive content detection, conversation trails, compliance reports, and CSV downloads
 - 👥 **Multi-tenant Management** — Department isolation, permission control, resource quotas
-- 💰 **ROI Analysis** — Quantify AI value with ROI metrics and efficiency gains
+- 💰 **ROI Analysis** — Configurable ROI planning estimates with transparent assumptions and efficiency metrics
 
 ---
 
