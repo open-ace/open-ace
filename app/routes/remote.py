@@ -1820,6 +1820,7 @@ def start_terminal():
     machine = agent_mgr.get_machine(machine_id)
     machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
     hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    tenant_id = machine.get("tenant_id", 1) if machine else 1
 
     # Generate terminal ID and proxy tokens for multiple providers
     terminal_id = str(uuid.uuid4())
@@ -1832,6 +1833,7 @@ def start_terminal():
         session_id=terminal_id,
         tool_name="claude-code",
         user_id=g.user["id"],
+        tenant_id=tenant_id,
         title=f"Terminal: {machine_name}",
         host_name=hostname,
         project_path=work_dir or "",
@@ -1847,9 +1849,6 @@ def start_terminal():
     logger.info(
         f"Created terminal session {terminal_id} for user {g.user['id']} on machine {machine_id}"
     )
-
-    # Get machine's tenant_id for token generation
-    tenant_id = machine.get("tenant_id", 1) if machine else 1
 
     # Generate proxy tokens for LLM API auth through the terminal
     api_proxy = get_api_key_proxy_service()

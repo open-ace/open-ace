@@ -93,7 +93,8 @@ CREATE TABLE agent_sessions (
  workspace_type text DEFAULT 'local',
  remote_machine_id text,
  paused_at TIMESTAMP,
- cli_session_id text DEFAULT ''
+ cli_session_id text DEFAULT '',
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -695,7 +696,8 @@ CREATE TABLE session_messages (
  source text DEFAULT '' NOT NULL,
  source_timestamp TIMESTAMP,
  external_message_id text DEFAULT '' NOT NULL,
- content_blocks text
+ content_blocks text,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE sessions (
@@ -1168,6 +1170,10 @@ CREATE INDEX idx_agent_sessions_session_type ON agent_sessions (session_type);
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions (status);
 
+CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions (tenant_id, updated_at);
+
+CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions (tenant_id, user_id);
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions (tool_name);
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
@@ -1363,6 +1369,10 @@ CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages (session_id, "timestamp", id);
 
 CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
+
+CREATE INDEX idx_session_messages_tenant_session ON session_messages (tenant_id, session_id);
+
+CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages (tenant_id, session_id, "timestamp", id);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 

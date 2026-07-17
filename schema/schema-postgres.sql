@@ -132,7 +132,8 @@ CREATE TABLE agent_sessions (
     workspace_type text DEFAULT 'local'::text,
     remote_machine_id text,
     paused_at timestamp without time zone,
-    cli_session_id text DEFAULT ''::text
+    cli_session_id text DEFAULT ''::text,
+    tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE SEQUENCE agent_sessions_id_seq
@@ -1062,7 +1063,8 @@ CREATE TABLE session_messages (
     source text DEFAULT ''::text NOT NULL,
     source_timestamp timestamp without time zone,
     external_message_id text DEFAULT ''::text NOT NULL,
-    content_blocks text
+    content_blocks text,
+    tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE SEQUENCE session_messages_id_seq
@@ -2183,6 +2185,14 @@ CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (sess
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
 
+CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
+
+
+--
+--
+
+CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions USING btree (tenant_id, user_id);
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
 
 
@@ -2575,6 +2585,16 @@ CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING bt
 
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
 
+--
+--
+
+CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
+
+CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
+
+
+--
+--
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
 

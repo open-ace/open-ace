@@ -106,6 +106,7 @@ class SessionMessage:
 
     id: Optional[int] = None
     session_id: str = ""
+    tenant_id: int = 1
     role: str = ""  # user, assistant, system, tool
     content: str = ""
     tokens_used: int = 0
@@ -124,6 +125,7 @@ class SessionMessage:
         return {
             "id": self.id,
             "session_id": self.session_id,
+            "tenant_id": self.tenant_id,
             "role": self.role,
             "content": self.content,
             "tokens_used": self.tokens_used,
@@ -143,6 +145,7 @@ class SessionMessage:
         return cls(
             id=data.get("id"),
             session_id=data.get("session_id", ""),
+            tenant_id=int(data.get("tenant_id") or 1),
             role=data.get("role", ""),
             content=data.get("content", ""),
             tokens_used=data.get("tokens_used", 0),
@@ -186,6 +189,7 @@ class AgentSession:
     title: str = ""
     tool_name: str = ""
     host_name: str = "localhost"
+    tenant_id: int = 1
     user_id: Optional[int] = None
     project_id: Optional[int] = None  # Project association for statistics
     project_path: Optional[str] = None  # Project path for quick reference
@@ -222,6 +226,7 @@ class AgentSession:
             "title": self.title,
             "tool_name": self.tool_name,
             "host_name": self.host_name,
+            "tenant_id": self.tenant_id,
             "user_id": self.user_id,
             "project_id": self.project_id,
             "project_path": self.project_path,
@@ -256,6 +261,7 @@ class AgentSession:
             title=data.get("title", ""),
             tool_name=data.get("tool_name", ""),
             host_name=data.get("host_name", "localhost"),
+            tenant_id=int(data.get("tenant_id") or 1),
             user_id=data.get("user_id"),
             project_id=data.get("project_id"),
             project_path=data.get("project_path"),
@@ -386,6 +392,40 @@ class SessionManager:
             )
         return cursor.fetchone() is not None
 
+    @staticmethod
+    def _normalize_tenant_id(value: Any) -> Optional[int]:
+        """Normalize a tenant identifier to a positive integer when possible."""
+        if value in (None, ""):
+            return None
+        try:
+            tenant_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    def _resolve_tenant_id(
+        self,
+        cursor: Any,
+        *,
+        tenant_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+    ) -> int:
+        """Resolve the effective tenant for a session write path."""
+        normalized = self._normalize_tenant_id(tenant_id)
+        if normalized is not None:
+            return normalized
+
+        if user_id is not None:
+            cursor.execute(f"SELECT tenant_id FROM users WHERE id = {_param()}", (user_id,))
+            row = cursor.fetchone()
+            if row:
+                raw_tenant_id = row.get("tenant_id") if isinstance(row, dict) else row[0]
+                normalized = self._normalize_tenant_id(raw_tenant_id)
+                if normalized is not None:
+                    return normalized
+
+        return 1
+
     def _ensure_tables(self) -> None:
         """Ensure required tables exist from the authoritative schema (#1273).
 
@@ -432,6 +472,7 @@ class SessionManager:
         self,
         tool_name: str,
         user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
         session_type: str = SessionType.CHAT.value,
         title: str = "",
         host_name: str = "localhost",
@@ -470,13 +511,30 @@ class SessionManager:
         Returns:
             AgentSession: The created or existing session.
         """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
+        effective_tenant_id = self._resolve_tenant_id(
+            cursor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+
         # Use provided session_id or generate a new one
         session_id = session_id or str(uuid.uuid4())
 
-        # Check if session already exists
-        existing_session = self.get_session(session_id)
+        # Check if session already exists.
+        existing_session = self.get_session(
+            session_id,
+            tenant_id=effective_tenant_id if has_session_tenant else None,
+        )
         if existing_session:
-            logger.info(f"Session {session_id} already exists, returning existing session")
+            conn.close()
+            logger.info(
+                "Session %s already exists in tenant %s, returning existing session",
+                session_id,
+                effective_tenant_id,
+            )
             return existing_session
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -495,6 +553,7 @@ class SessionManager:
             title=title,
             tool_name=tool_name,
             host_name=host_name,
+            tenant_id=effective_tenant_id,
             user_id=user_id,
             project_id=project_id,
             project_path=project_path,
@@ -508,25 +567,47 @@ class SessionManager:
             workspace_type=workspace_type,
             remote_machine_id=remote_machine_id,
         )
-
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            f"""
-            INSERT INTO agent_sessions
-            (session_id, session_type, title, tool_name, host_name, user_id, project_id,
-             project_path, status, context, settings, model, expires_at, created_at, updated_at,
-             request_count, total_tokens, total_input_tokens, total_output_tokens, message_count,
-             workspace_type, remote_machine_id, cli_session_id)
-            VALUES ({_params(23)})
-        """,
-            (
-                session.session_id,
-                session.session_type,
-                session.title,
-                session.tool_name,
-                session.host_name,
+        insert_columns = [
+            "session_id",
+            "session_type",
+            "title",
+            "tool_name",
+            "host_name",
+        ]
+        insert_values: list[Any] = [
+            session.session_id,
+            session.session_type,
+            session.title,
+            session.tool_name,
+            session.host_name,
+        ]
+        if has_session_tenant:
+            insert_columns.append("tenant_id")
+            insert_values.append(session.tenant_id)
+        insert_columns.extend(
+            [
+                "user_id",
+                "project_id",
+                "project_path",
+                "status",
+                "context",
+                "settings",
+                "model",
+                "expires_at",
+                "created_at",
+                "updated_at",
+                "request_count",
+                "total_tokens",
+                "total_input_tokens",
+                "total_output_tokens",
+                "message_count",
+                "workspace_type",
+                "remote_machine_id",
+                "cli_session_id",
+            ]
+        )
+        insert_values.extend(
+            [
                 session.user_id,
                 session.project_id,
                 session.project_path,
@@ -545,7 +626,15 @@ class SessionManager:
                 session.workspace_type or "local",
                 session.remote_machine_id,
                 session.cli_session_id or "",
-            ),
+            ]
+        )
+        cursor.execute(
+            f"""
+            INSERT INTO agent_sessions
+            ({", ".join(insert_columns)})
+            VALUES ({_params(len(insert_values))})
+        """,
+            tuple(insert_values),
         )
 
         session.id = cursor.lastrowid
@@ -560,6 +649,7 @@ class SessionManager:
         session_id: str,
         include_messages: bool = False,
         message_milestone_id: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> Optional[AgentSession]:
         """
         Get a session by ID.
@@ -574,8 +664,16 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
+        has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
-        cursor.execute(f"SELECT * FROM agent_sessions WHERE session_id = {_param()}", (session_id,))
+        conditions = [f"session_id = {_param()}"]
+        params: list[Any] = [session_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None and has_session_tenant:
+            conditions.append(f"tenant_id = {_param()}")
+            params.append(normalized_tenant_id)
+        cursor.execute(f"SELECT * FROM agent_sessions WHERE {' AND '.join(conditions)}", params)
         row = cursor.fetchone()
 
         if not row:
@@ -590,6 +688,9 @@ class SessionManager:
                 WHERE session_id = {_param()}
             """
             params: list[Any] = [session_id]
+            if has_message_tenant and session.tenant_id:
+                query += f" AND tenant_id = {_param()}"
+                params.append(session.tenant_id)
             if message_milestone_id is not None:
                 query += f" AND milestone_id = {_param()}"
                 params.append(message_milestone_id)
@@ -909,6 +1010,7 @@ class SessionManager:
         before_timestamp: Optional[str] = None,
         before_id: Optional[int] = None,
         milestone_id: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict[str, Any]:
         """Return one page of session messages using composite-key keyset paging.
 
@@ -946,9 +1048,14 @@ class SessionManager:
 
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
         conditions = [f"session_id = {_param()}"]
         params: list[Any] = [session_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None and has_message_tenant:
+            conditions.append(f"tenant_id = {_param()}")
+            params.append(normalized_tenant_id)
         if milestone_id is not None:
             conditions.append(f"milestone_id = {_param()}")
             params.append(milestone_id)
@@ -988,7 +1095,12 @@ class SessionManager:
 
         return {"messages": messages, "has_more": has_more, "next_cursor": next_cursor}
 
-    def count_messages(self, session_id: str, milestone_id: Optional[str] = None) -> int:
+    def count_messages(
+        self,
+        session_id: str,
+        milestone_id: Optional[str] = None,
+        tenant_id: Optional[int] = None,
+    ) -> int:
         """Count messages in a session, optionally scoped to a milestone.
 
         Used for the pagination ``total`` indicator. ``agent_sessions.message_count``
@@ -997,16 +1109,24 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
+        conditions = [f"session_id = {_param()}"]
+        params: list[Any] = [session_id]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None and has_message_tenant:
+            conditions.append(f"tenant_id = {_param()}")
+            params.append(normalized_tenant_id)
         if milestone_id is None:
             cursor.execute(
-                f"SELECT COUNT(*) AS c FROM session_messages WHERE session_id = {_param()}",
-                (session_id,),
+                f"SELECT COUNT(*) AS c FROM session_messages WHERE {' AND '.join(conditions)}",
+                params,
             )
         else:
+            conditions.append(f"milestone_id = {_param()}")
+            params.append(milestone_id)
             cursor.execute(
-                f"SELECT COUNT(*) AS c FROM session_messages "
-                f"WHERE session_id = {_param()} AND milestone_id = {_param()}",
-                (session_id, milestone_id),
+                f"SELECT COUNT(*) AS c FROM session_messages WHERE {' AND '.join(conditions)}",
+                params,
             )
         row = cursor.fetchone()
         conn.close()
@@ -1060,23 +1180,35 @@ class SessionManager:
         return json.dumps(value)
 
     def _find_existing_message(
-        self, cursor: Any, session_id: str, role: str, metadata: Optional[dict[str, Any]]
+        self,
+        cursor: Any,
+        session_id: str,
+        tenant_id: int,
+        role: str,
+        metadata: Optional[dict[str, Any]],
     ) -> Optional[SessionMessage]:
         """Find an existing transcript row for a stable external message identity."""
         metadata = metadata or {}
+        has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
         external_message_id = self._extract_external_message_id(metadata)
         if external_message_id:
+            tenant_clause = f" AND tenant_id = {_param()}" if has_message_tenant else ""
+            params: list[Any] = [session_id]
+            if has_message_tenant:
+                params.append(tenant_id)
+            params.extend([role, external_message_id])
             cursor.execute(
                 f"""
                 SELECT *
                 FROM session_messages
                 WHERE session_id = {_param()}
+                  {tenant_clause}
                   AND role = {_param()}
                   AND external_message_id = {_param()}
                 ORDER BY id ASC
                 LIMIT 1
                 """,
-                (session_id, role, external_message_id),
+                params,
             )
             row = cursor.fetchone()
             if row:
@@ -1087,18 +1219,24 @@ class SessionManager:
             if not identity_value:
                 continue
             escaped = escape_like(str(identity_value))
+            tenant_clause = f" AND tenant_id = {_param()}" if has_message_tenant else ""
+            params = [session_id]
+            if has_message_tenant:
+                params.append(tenant_id)
+            params.extend([role, f'%"{identity_key}": "{escaped}"%'])
             cursor.execute(
                 f"""
                 SELECT *
                 FROM session_messages
                 WHERE session_id = {_param()}
+                  {tenant_clause}
                   AND role = {_param()}
                   AND metadata LIKE {_param()}
                   ESCAPE '\\'
                 ORDER BY id ASC
                 LIMIT 1
                 """,
-                (session_id, role, f'%"{identity_key}": "{escaped}"%'),
+                params,
             )
             row = cursor.fetchone()
             if row:
@@ -1181,15 +1319,25 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
+        has_message_tenant = self._column_exists(cursor, "session_messages", "tenant_id")
 
         # Verify session exists
-        cursor.execute(
-            f"SELECT session_id FROM agent_sessions WHERE session_id = {_param()}",
-            (session_id,),
-        )
-        if not cursor.fetchone():
+        session_select = "SELECT session_id"
+        if has_session_tenant:
+            session_select += ", tenant_id"
+        session_select += f" FROM agent_sessions WHERE session_id = {_param()}"
+        cursor.execute(session_select, (session_id,))
+        session_row = cursor.fetchone()
+        if not session_row:
             conn.close()
             return None
+        if has_session_tenant:
+            effective_tenant_id = (
+                session_row.get("tenant_id") if isinstance(session_row, dict) else session_row[1]
+            ) or 1
+        else:
+            effective_tenant_id = 1
 
         # ── Content filter check for AI output ──────────────────────────────
         # For assistant messages, check for sensitive content and apply redaction.
@@ -1205,8 +1353,8 @@ class SessionManager:
                     f"SELECT user_id FROM agent_sessions WHERE session_id = {_param()}",
                     (session_id,),
                 )
-                session_row = cursor.fetchone()
-                filter_user_id = session_row["user_id"] if session_row else None
+                filter_session_row = cursor.fetchone()
+                filter_user_id = filter_session_row["user_id"] if filter_session_row else None
 
                 result = content_filter.check_content(content)
 
@@ -1249,7 +1397,13 @@ class SessionManager:
         external_message_id = self._extract_external_message_id(metadata)
         content_blocks = self._extract_content_blocks(metadata)
 
-        existing = self._find_existing_message(cursor, session_id, role, metadata)
+        existing = self._find_existing_message(
+            cursor,
+            session_id,
+            int(effective_tenant_id),
+            role,
+            metadata,
+        )
         if existing:
             merged_metadata = self._merge_message_metadata(existing.metadata, metadata)
             merged_content = existing.content or _sanitize_text_value(content) or ""
@@ -1316,6 +1470,7 @@ class SessionManager:
 
         message = SessionMessage(
             session_id=session_id,
+            tenant_id=int(effective_tenant_id),
             role=role,
             content=_sanitize_text_value(content) or "",
             tokens_used=tokens_used,
@@ -1332,25 +1487,30 @@ class SessionManager:
         cursor.execute(
             f"""
             INSERT INTO session_messages (
-                session_id, role, content, tokens_used, model, timestamp,
-                source_timestamp, metadata, milestone_id, source,
+                {("tenant_id, " if has_message_tenant else "")}session_id, role, content,
+                tokens_used, model, timestamp, source_timestamp, metadata, milestone_id, source,
                 external_message_id, content_blocks
             )
-            VALUES ({_params(12)})
+            VALUES ({_params(13 if has_message_tenant else 12)})
         """,
-            (
-                message.session_id,
-                message.role,
-                message.content,
-                message.tokens_used,
-                message.model,
-                message.timestamp.isoformat() if message.timestamp else None,
-                message.source_timestamp.isoformat() if message.source_timestamp else None,
-                _sanitize_text_value(json.dumps(message.metadata)),
-                milestone_id,
-                message.source,
-                message.external_message_id,
-                self._serialize_json(message.content_blocks),
+            tuple(
+                (
+                    ([message.tenant_id] if has_message_tenant else [])
+                    + [
+                        message.session_id,
+                        message.role,
+                        message.content,
+                        message.tokens_used,
+                        message.model,
+                        message.timestamp.isoformat() if message.timestamp else None,
+                        message.source_timestamp.isoformat() if message.source_timestamp else None,
+                        _sanitize_text_value(json.dumps(message.metadata)),
+                        milestone_id,
+                        message.source,
+                        message.external_message_id,
+                        self._serialize_json(message.content_blocks),
+                    ]
+                )
             ),
         )
 
@@ -1516,6 +1676,7 @@ class SessionManager:
     def list_sessions(
         self,
         user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
         tool_name: Optional[str] = None,
         status: Optional[str] = None,
         session_type: Optional[str] = None,
@@ -1540,6 +1701,7 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
 
         conditions = []
         params: list[Any] = []
@@ -1547,6 +1709,11 @@ class SessionManager:
         if user_id is not None:
             conditions.append(f"user_id = {_param()}")
             params.append(user_id)
+
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None and has_session_tenant:
+            conditions.append(f"tenant_id = {_param()}")
+            params.append(normalized_tenant_id)
 
         if tool_name:
             conditions.append(f"tool_name = {_param()}")
@@ -1600,7 +1767,9 @@ class SessionManager:
             "total_pages": total_pages,
         }
 
-    def get_active_sessions(self, user_id: Optional[int] = None) -> list[AgentSession]:
+    def get_active_sessions(
+        self, user_id: Optional[int] = None, tenant_id: Optional[int] = None
+    ) -> list[AgentSession]:
         """
         Get all active sessions.
 
@@ -1612,25 +1781,26 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
 
-        if user_id:
-            cursor.execute(
-                f"""
+        conditions = [f"status = {_param()}"]
+        params: list[Any] = [SessionStatus.ACTIVE.value]
+        if user_id is not None:
+            conditions.append(f"user_id = {_param()}")
+            params.append(user_id)
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None and has_session_tenant:
+            conditions.append(f"tenant_id = {_param()}")
+            params.append(normalized_tenant_id)
+
+        cursor.execute(
+            f"""
                 SELECT * FROM agent_sessions
-                WHERE user_id = {_param()} AND status = {_param()}
+                WHERE {' AND '.join(conditions)}
                 ORDER BY updated_at DESC
             """,
-                (user_id, SessionStatus.ACTIVE.value),
-            )
-        else:
-            cursor.execute(
-                f"""
-                SELECT * FROM agent_sessions
-                WHERE status = {_param()}
-                ORDER BY updated_at DESC
-            """,
-                (SessionStatus.ACTIVE.value,),
-            )
+            params,
+        )
 
         rows = cursor.fetchall()
         conn.close()
@@ -1706,7 +1876,9 @@ class SessionManager:
 
         return len(session_ids)
 
-    def get_session_stats(self, user_id: Optional[int] = None) -> dict[str, Any]:
+    def get_session_stats(
+        self, user_id: Optional[int] = None, tenant_id: Optional[int] = None
+    ) -> dict[str, Any]:
         """
         Get session statistics.
 
@@ -1718,9 +1890,17 @@ class SessionManager:
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
+
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if user_id:
             visible_clause, visible_params = visible_session_clause()
+            tenant_clause = ""
+            tenant_params: list[Any] = []
+            if normalized_tenant_id is not None and has_session_tenant:
+                tenant_clause = f" AND tenant_id = {_param()}"
+                tenant_params.append(normalized_tenant_id)
             cursor.execute(
                 f"""
                 SELECT
@@ -1730,12 +1910,17 @@ class SessionManager:
                     SUM(total_tokens) as total_tokens,
                     SUM(message_count) as total_messages
                 FROM agent_sessions
-                WHERE user_id = {_param()} AND {visible_clause}
+                WHERE user_id = {_param()}{tenant_clause} AND {visible_clause}
             """,
-                (user_id, *visible_params),
+                (user_id, *tenant_params, *visible_params),
             )
         else:
             visible_clause, visible_params = visible_session_clause()
+            tenant_clause = ""
+            tenant_params = []
+            if normalized_tenant_id is not None and has_session_tenant:
+                tenant_clause = f"tenant_id = {_param()} AND "
+                tenant_params.append(normalized_tenant_id)
             cursor.execute(
                 f"""
                 SELECT
@@ -1745,9 +1930,9 @@ class SessionManager:
                     SUM(total_tokens) as total_tokens,
                     SUM(message_count) as total_messages
                 FROM agent_sessions
-                WHERE {visible_clause}
+                WHERE {tenant_clause}{visible_clause}
             """,
-                visible_params,
+                (*tenant_params, *visible_params),
             )
 
         row = cursor.fetchone()
@@ -1788,6 +1973,7 @@ class SessionManager:
             title=get_value("title") or "",
             tool_name=get_value("tool_name"),
             host_name=get_value("host_name") or "localhost",
+            tenant_id=int(get_value("tenant_id") or 1),
             user_id=get_value("user_id"),
             status=get_value("status") or SessionStatus.ACTIVE.value,
             context=json.loads(get_value("context")) if get_value("context") else {},
@@ -1834,6 +2020,7 @@ class SessionManager:
         return SessionMessage(
             id=get_value("id"),
             session_id=get_value("session_id"),
+            tenant_id=int(get_value("tenant_id") or 1),
             role=get_value("role"),
             content=get_value("content") or "",
             tokens_used=get_value("tokens_used") or 0,

@@ -140,6 +140,20 @@ class TestOwnershipAnd404:
             resp = workspace_route.get_session(sid)
         assert _status(resp) == 200
 
+    def test_same_owner_wrong_tenant_gets_403(self, app_and_manager):
+        """Tenant mismatch must deny access even when user_id matches."""
+        app, mgr = app_and_manager
+        sid = _make_session(mgr, user_id=1)
+        mgr.update_session_fields(sid, {"user_id": 1})
+        conn = sm_module.sqlite3.connect(mgr.db_path)
+        conn.execute("UPDATE agent_sessions SET tenant_id = ? WHERE session_id = ?", (9, sid))
+        conn.commit()
+        conn.close()
+        with app.test_request_context(f"/api/workspace/sessions/{sid}"):
+            g.user = {"id": 1, "role": "user", "tenant_id": 3}
+            resp = workspace_route.get_session(sid)
+        assert _status(resp) == 403
+
 
 # =================== get_session pagination envelope ========================
 

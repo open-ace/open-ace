@@ -357,6 +357,7 @@ class RemoteSessionManager:
         session = self._session_manager.create_session(
             tool_name=normalize_tool_name(cli_tool),
             user_id=user_id,
+            tenant_id=effective_tenant_id,
             title=title or f"Remote: {machine.get('machine_name', machine_id[:8])}",
             host_name=machine.get("hostname", machine_id),
             model=model,

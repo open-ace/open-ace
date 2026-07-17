@@ -64,6 +64,7 @@ def _load_user_from_token(token: str) -> dict | None:
             "username": result.get("username"),
             "email": result.get("email"),
             "role": result.get("role"),
+            "tenant_id": result.get("tenant_id"),
             "must_change_password": bool(result.get("must_change_password")),
         }
     except Exception as e:
@@ -71,12 +72,12 @@ def _load_user_from_token(token: str) -> dict | None:
         return None
 
 
-def _check_session_ownership(user_id: int, session_id: str) -> bool:
+def _check_session_ownership(user_id: int, session_id: str, tenant_id: int | None = None) -> bool:
     """Check if user owns the given session."""
     from app.modules.workspace.session_manager import get_session_manager
 
     mgr = get_session_manager()
-    session = mgr.get_session(session_id)
+    session = mgr.get_session(session_id, tenant_id=tenant_id)
     if not session:
         return False
     return getattr(session, "user_id", None) == user_id
@@ -185,6 +186,7 @@ def auth_required(f=None, *, ownership=None):
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+            g.tenant_id = user.get("tenant_id")
 
             password_change_response = enforce_password_change_requirement(user)
             if password_change_response is not None:
@@ -199,7 +201,11 @@ def auth_required(f=None, *, ownership=None):
                 if (
                     session_id
                     and isinstance(g.user_id, int)
-                    and not _check_session_ownership(g.user_id, session_id)
+                    and not _check_session_ownership(
+                        g.user_id,
+                        session_id,
+                        user.get("tenant_id"),
+                    )
                 ):
                     return jsonify({"error": "Access denied"}), 403
 
