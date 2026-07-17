@@ -27,25 +27,25 @@ def test_readme_marks_saml_as_planned_not_supported() -> None:
     assert "SAML 2.0 Provider is not implemented yet" in readme
 
 
-def test_dingtalk_docs_limit_scope_to_import_resolution() -> None:
+def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
     readme = read_doc("README.md")
     en_config = read_doc("docs/en/DINGTALK_CONFIG.md")
     cn_config = read_doc("docs/cn/DINGTALK_CONFIG.md")
     config_guide = read_doc("config/CONFIG_GUIDE.md")
 
-    assert "Feishu/DingTalk" not in readme
-    assert "飞书/钉钉" not in readme
-    assert "DingTalk import resolution" in readme
-    assert "钉钉导入解析" in readme
+    assert "#1785" not in readme
+    assert "#1785" not in en_config
+    assert "DingTalk Sync" in readme
+    assert "钉钉同步" in readme
 
-    assert "Current scope is limited to OpenClaw import name resolution" in en_config
-    assert "Out of scope today" in en_config
-    assert "#1785" in en_config
+    assert "local org sync of DingTalk departments and users" in en_config
+    assert "alert delivery to DingTalk custom robot webhooks" in en_config
+    assert "POST /api/admin/dingtalk/sync" in en_config
 
-    assert "当前范围仅限 OpenClaw 导入链路中的名称解析" in cn_config
-    assert "当前不包含" in cn_config
-    assert "#1785" in cn_config
-    assert "当前钉钉能力仅用于 OpenClaw 导入链路" in config_guide
+    assert "将钉钉组织架构同步到 Open ACE" in cn_config
+    assert "钉钉自定义机器人 webhook" in cn_config
+    assert "POST /api/admin/dingtalk/sync" in cn_config
+    assert "当前钉钉能力覆盖 OpenClaw 导入链路" in config_guide
 
 
 def test_terminal_docs_describe_windows_piped_subprocess() -> None:

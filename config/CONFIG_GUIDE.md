@@ -67,8 +67,9 @@
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `alerts.allow_private_webhook_urls` | 是否允许告警 webhook 指向私网 / 回环 / 链路本地地址。默认关闭，用于阻断 SSRF 风险。 | `false` |
+| `alerts.dingtalk_webhook_secret` | 钉钉自定义机器人“加签”密钥。留空时按普通 webhook 发送；配置后发送前自动附加 `timestamp` / `sign`。 | `""` |
 
-> 默认情况下，告警 webhook 仅允许公开可达的 `http(s)` 地址。飞书 / Lark 群机器人 webhook 可直接使用；如果你确实需要向内网地址推送，请显式打开 `alerts.allow_private_webhook_urls`，并在网络层自行控制访问范围。
+> 默认情况下，告警 webhook 仅允许公开可达的 `http(s)` 地址。飞书 / Lark 和钉钉群机器人 webhook 可直接使用；如果你确实需要向内网地址推送，请显式打开 `alerts.allow_private_webhook_urls`，并在网络层自行控制访问范围。
 
 **多用户模式说明：**
 
@@ -131,14 +132,18 @@
 | `feishu.org_sync_tenant_id` | 同步写入的租户 ID | `1` |
 | `feishu.org_sync_interval_minutes` | 自动同步间隔（分钟） | `60` |
 
-#### 钉钉导入解析（可选）
+#### 钉钉集成（可选）
 
-当前钉钉能力仅用于 OpenClaw 导入链路中的用户/群名解析和本地缓存，不包含钉钉通讯录同步或群机器人集成；完整能力跟踪见 [#1785](https://github.com/open-ace/open-ace/issues/1785)。
+当前钉钉能力覆盖 OpenClaw 导入链路中的用户/群名解析、手动或定时的钉钉组织架构同步，以及告警中心向钉钉自定义机器人 webhook 推送告警。
 
-| 参数 | 说明 | 示例值 |
-|------|------|--------|
+| 参数 | 说明 | 默认值 / 示例值 |
+|------|------|----------------|
 | `dingtalk.app_key` | 钉钉内部应用 AppKey | `dingxxxxxxxxxxxxxx` |
 | `dingtalk.app_secret` | 钉钉内部应用 AppSecret | `xxxxxxxxxxxxxxxxx` |
+| `dingtalk.org_sync_enabled` | 是否启用钉钉组织架构自动同步 | `false` |
+| `dingtalk.org_sync_tenant_id` | 同步写入的租户 ID | `1` |
+| `dingtalk.org_sync_interval_minutes` | 自动同步间隔（分钟） | `60` |
+| `dingtalk.org_sync_root_dept_id` | 同步起始部门 ID。钉钉根部门通常为 `1`。 | `"1"` |
 
 ---
 

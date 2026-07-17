@@ -1,8 +1,10 @@
-# 钉钉导入解析配置
+# 钉钉集成配置
 
-本指南说明如何配置钉钉导入解析，使 Open ACE 在导入 OpenClaw 会话日志时能够解析钉钉用户名和群名称。
+本指南说明如何配置钉钉集成，实现以下能力：
 
-当前范围仅限 OpenClaw 导入链路中的名称解析和本地缓存。钉钉通讯录同步、钉钉群机器人或 webhook 能力尚未实现，后续工作见 [#1785](https://github.com/open-ace/open-ace/issues/1785)。
+- 导入会话时把钉钉用户/群组 ID 解析成人名/群名
+- 将钉钉组织架构同步到 Open ACE 的本地用户与团队
+- 将告警中心通知推送到钉钉自定义机器人 webhook
 
 ## 概述
 
@@ -10,23 +12,24 @@ Open ACE 可以调用钉钉 API 以实现：
 
 - 显示真实的钉钉用户名，而不是原始 `userId`
 - 在元数据包含群 `chatId` 时，显示钉钉群名称，而不是原始群标识
+- 将钉钉部门同步为 Open ACE 协作团队
+- 将钉钉用户同步为本地用户与团队成员关系
+- 向钉钉群机器人推送告警中心通知
 
 当前支持范围：
 
 - OpenClaw 消息导入链路
 - 钉钉用户名解析
 - 元数据包含 DingTalk `chatId` 时的群名解析
-
-当前不包含：
-
-- 将钉钉部门/用户同步为 Open ACE 本地用户和团队
-- 钉钉群机器人命令或告警推送
+- 手动或按配置定时同步钉钉组织架构
+- 钉钉自定义机器人 webhook 告警 payload
 
 ## 前置条件
 
 1. 一个钉钉开发者账号
 2. 一个具有 API 调用权限的企业内部应用
 3. 该应用的 AppKey 和 AppSecret
+4. 可选：用于告警推送的钉钉自定义机器人 webhook URL
 
 ## 配置步骤
 
@@ -44,12 +47,16 @@ Open ACE 可以调用钉钉 API 以实现：
 {
   "dingtalk": {
     "app_key": "dingxxxxxxxxxxxxxx",
-    "app_secret": "your_app_secret_here"
+    "app_secret": "your_app_secret_here",
+    "org_sync_enabled": true,
+    "org_sync_tenant_id": 1,
+    "org_sync_interval_minutes": 60,
+    "org_sync_root_dept_id": "1"
   }
 }
 ```
 
-### 3. 测试配置
+### 3. 测试名称解析配置
 
 ```bash
 # 测试用户名解析
@@ -58,6 +65,39 @@ python3 scripts/shared/dingtalk_user_cache.py test manager123 <app_key> <app_sec
 # 测试群名解析
 python3 scripts/shared/dingtalk_group_cache.py test chatabcd1234 <app_key> <app_secret>
 ```
+
+### 4. 同步组织架构
+
+保存配置后：
+
+1. 如果修改了 `config.json`，先重启 Open ACE
+2. 管理员调用 `POST /api/admin/dingtalk/sync`，可选请求体为 `{"tenant_id": 1}`
+
+当 `dingtalk.org_sync_enabled=true` 时，后台数据抓取调度器还会按照 `dingtalk.org_sync_interval_minutes` 周期性执行自动同步。
+
+当前同步行为：
+
+- 部门会映射为协作 `teams`
+- 用户会同步到本地 `users`
+- 钉钉身份会写入 `sso_identities`
+- 钉钉管理的团队成员关系会按最新组织结构对齐
+
+当前暂不处理：
+
+- 用户从钉钉消失后自动禁用/删除本地账号
+- 部门删除后自动删除本地团队
+- 钉钉 SSO 登录流程
+- 入站钉钉机器人命令
+
+### 5. 配置钉钉机器人告警
+
+在 `管理 -> 配额告警 -> 通知偏好` 中，将 webhook URL 设置为钉钉自定义机器人 URL，例如：
+
+```text
+https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx
+```
+
+Open ACE 会为告警通知发送钉钉兼容的 `text` payload。如果钉钉机器人启用了加签，请在 `config.json` 中设置 `alerts.dingtalk_webhook_secret`。如果需要按单个 webhook 配置，也可以在保存的 URL 中加入 `openace_dingtalk_secret=<secret>`；Open ACE 发送前会移除该参数，并自动追加钉钉要求的 `timestamp` / `sign` 参数。
 
 ## 缓存管理
 
@@ -89,4 +129,4 @@ python3 scripts/shared/dingtalk_group_cache.py test chatabcd1234 <app_key> <app_
 
 ## 禁用集成
 
-如需禁用钉钉导入解析，请从配置文件中删除 `dingtalk` 配置段。
+如需禁用钉钉集成，请从配置文件中删除 `dingtalk` 配置段。如需保留名称解析但停止定时组织同步，请设置 `dingtalk.org_sync_enabled=false`。

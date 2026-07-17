@@ -10,17 +10,21 @@ Supports WebSocket push, email, and webhook notifications.
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
 import socket
 import sqlite3
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional, Union
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -40,6 +44,8 @@ logger = logging.getLogger(__name__)
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 _WEBHOOK_TIMEOUT_SECONDS = 5
 _FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
+_DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
+_DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
 
 
 class AlertType(Enum):
@@ -223,6 +229,19 @@ class AlertNotifier:
         host = (urlparse(webhook_url).hostname or "").lower()
         return any(snippet in host for snippet in _FEISHU_WEBHOOK_HOST_SNIPPETS)
 
+    def _matches_webhook_host(self, host: str, domains: tuple[str, ...]) -> bool:
+        """Return whether host is exactly a known domain or one of its subdomains."""
+        return any(host == domain or host.endswith(f".{domain}") for domain in domains)
+
+    def _is_dingtalk_webhook(self, webhook_url: str) -> bool:
+        """Return whether the webhook target looks like a DingTalk bot webhook."""
+        parsed = urlparse(webhook_url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path.lower()
+        return self._matches_webhook_host(host, _DINGTALK_WEBHOOK_HOST_SNIPPETS) and (
+            "/robot/send" in path or "/robot/" in path
+        )
+
     def _format_webhook_text(self, alert: Alert) -> str:
         """Render a plain-text alert summary suitable for chat webhook bots."""
         lines = [
@@ -243,12 +262,39 @@ class AlertNotifier:
         summary = self._format_webhook_text(alert)
         if self._is_feishu_webhook(webhook_url):
             return {"msg_type": "text", "content": {"text": summary}}
+        if self._is_dingtalk_webhook(webhook_url):
+            return {"msgtype": "text", "text": {"content": summary}}
         return {
             "event": "openace.alert",
             "source": "open-ace",
             "summary": summary,
             "alert": alert.to_dict(),
         }
+
+    def _prepare_webhook_url(self, webhook_url: str) -> str:
+        """Return the outbound webhook URL, applying DingTalk signing when configured."""
+        if not self._is_dingtalk_webhook(webhook_url):
+            return webhook_url
+
+        parsed = urlparse(webhook_url)
+        query_items = parse_qsl(parsed.query, keep_blank_values=True)
+        secret = str(get_config_value("alerts", "dingtalk_webhook_secret", "") or "").strip()
+        sanitized_items: list[tuple[str, str]] = []
+        for key, value in query_items:
+            if key in _DINGTALK_SECRET_QUERY_KEYS:
+                if value and not secret:
+                    secret = value
+                continue
+            sanitized_items.append((key, value))
+
+        if secret:
+            timestamp = str(int(time.time() * 1000))
+            string_to_sign = f"{timestamp}\n{secret}".encode()
+            digest = hmac.new(secret.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
+            sign = base64.b64encode(digest).decode("utf-8")
+            sanitized_items.extend([("timestamp", timestamp), ("sign", sign)])
+
+        return urlunparse(parsed._replace(query=urlencode(sanitized_items)))
 
     def _send_webhook_notification(self, alert: Alert, user_id: int) -> None:
         """Send a webhook notification for an alert if user preferences allow."""
@@ -277,8 +323,9 @@ class AlertNotifier:
                 return
 
             payload = self._build_webhook_payload(alert, prefs.webhook_url)
+            outbound_url = self._prepare_webhook_url(prefs.webhook_url)
             response = requests.post(
-                prefs.webhook_url,
+                outbound_url,
                 json=payload,
                 timeout=_WEBHOOK_TIMEOUT_SECONDS,
                 allow_redirects=False,

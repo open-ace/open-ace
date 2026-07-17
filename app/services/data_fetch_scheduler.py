@@ -263,6 +263,9 @@ class DataFetchScheduler:
         # Optionally synchronize Feishu org structure.
         self._maybe_sync_feishu_org()
 
+        # Optionally synchronize DingTalk org structure.
+        self._maybe_sync_dingtalk_org()
+
     def _refresh_materialized_views(self):
         """Refresh materialized views for PostgreSQL performance optimization."""
         from app.repositories.database import Database, is_postgresql
@@ -469,6 +472,22 @@ class DataFetchScheduler:
                 )
         except Exception as e:
             logger.warning(f"Scheduled Feishu org sync failed: {e}")
+
+    def _maybe_sync_dingtalk_org(self):
+        """Synchronize DingTalk org data when auto-sync is enabled."""
+        try:
+            from app.services.dingtalk_org_sync import DingTalkOrgSyncService
+
+            result = DingTalkOrgSyncService().maybe_sync_from_scheduler()
+            if result:
+                logger.info(
+                    "Scheduled DingTalk org sync completed: tenant=%s departments=%s users=%s",
+                    result.tenant_id,
+                    result.departments_seen,
+                    result.users_seen,
+                )
+        except Exception as e:
+            logger.warning(f"Scheduled DingTalk org sync failed: {e}")
 
 
 # Global scheduler instance
