@@ -26,7 +26,7 @@ Open ACE gives teams one self-hosted place for AI work and AI governance:
 - Work Mode for sessions, prompts, history, remote workspaces, terminals, and directory browsing.
 - Manage Mode for token usage, cost, quotas, anomalies, audit trails, compliance reports, and ROI.
 - Remote Agent for running AI CLIs on remote machines from the browser.
-- API Key proxy so real LLM keys stay encrypted on the server while sessions receive short-lived proxy tokens.
+- API Key proxy so real LLM keys stay encrypted on the server while sessions receive short-lived, revocable proxy tokens.
 
 ### Audience
 
@@ -90,7 +90,7 @@ Open ACE has two modes:
 - Work Mode: AI sessions, prompt library, history, remote workspaces, browser terminal, and code-server/VSCode proxy.
 - Manage Mode: token and cost dashboards, quotas, alerts, audit trails, compliance reports, and ROI visibility.
 
-One design detail we care about: Remote Agent lets AI CLIs run on remote machines, while real LLM API keys stay encrypted on the Open ACE server. Remote sessions only receive short-lived proxy tokens.
+One design detail we care about: Remote Agent lets AI CLIs run on remote machines, while real LLM API keys stay encrypted on the Open ACE server. Remote sessions only receive short-lived, revocable proxy tokens.
 
 Repo: https://github.com/open-ace/open-ace
 Website: https://www.open-ace.com
@@ -132,7 +132,7 @@ Open ACE is an Apache 2.0 self-hosted AI workspace and governance platform for t
 
 The goal: give developers one place to work with AI sessions, prompts, history, remote machines, terminals, and code-server/VSCode access, while giving administrators visibility into token usage, cost, quotas, audit trails, compliance reports, and ROI.
 
-One design choice we care about: real LLM API keys stay encrypted on the server. Remote agents receive short-lived proxy tokens instead of long-lived API keys.
+One design choice we care about: real LLM API keys stay encrypted on the server. Remote agents receive short-lived, revocable proxy tokens instead of long-lived API keys.
 
 Repo: https://github.com/open-ace/open-ace
 Website: https://www.open-ace.com
@@ -170,7 +170,7 @@ Open ACE 现在有两个模式：
 - Work 模式：AI 会话、提示词库、历史记录、远程工作区、浏览器终端、目录浏览、code-server/VSCode 代理。
 - Manage 模式：Token/成本、配额、告警、异常、审计、合规报告、ROI。
 
-比较核心的设计是 Remote Agent + API Key proxy：AI CLI 可以跑在远程机器上，但真实 LLM API Key 加密保存在 Open ACE 服务端，远程 Agent 只拿短期代理令牌。
+比较核心的设计是 Remote Agent + API Key proxy：AI CLI 可以跑在远程机器上，但真实 LLM API Key 加密保存在 Open ACE 服务端，远程 Agent 只拿短生命周期、可回收的代理令牌。
 
 项目地址：https://github.com/open-ace/open-ace
 官网：https://www.open-ace.com
@@ -244,7 +244,7 @@ Show that Open ACE is a real product with a workspace, governance dashboard, rel
 
 6. Remote Agent/API Key proxy, 15 seconds
    - Use a simple architecture slide from the docs or the diagram in `REMOTE-WORKSPACE.md`.
-   - Voiceover: "Remote Agent can run AI CLIs on target machines, while real API keys stay encrypted on the Open ACE server. Agents receive short-lived proxy tokens."
+   - Voiceover: "Remote Agent can run AI CLIs on target machines, while real API keys stay encrypted on the Open ACE server. Agents receive short-lived, revocable proxy tokens."
 
 7. Call to action, 5 seconds
    - Show the early adopter discussion.

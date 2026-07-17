@@ -2070,6 +2070,10 @@ def attach_terminal(terminal_id):
 
     # Generate fresh API tokens for LLM proxy auth
     api_proxy = get_api_key_proxy_service()
+    api_proxy.revoke_proxy_tokens_for_session(
+        terminal_id,
+        reason="terminal_tokens_rotated",
+    )
     anthropic_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
         session_id=terminal_id,
