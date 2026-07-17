@@ -24,7 +24,7 @@
     "webui_path": ""
   },
   "autonomous": {
-    "enabled": false
+    "enabled": true
   },
   "run_timeline": {
     "enabled": false

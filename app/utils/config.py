@@ -73,7 +73,7 @@ def get_config_value(section: str, key: str, default=None):
 
 def is_autonomous_enabled() -> bool:
     """Check whether the autonomous development feature is enabled."""
-    return bool(get_config_value("autonomous", "enabled", False))
+    return bool(get_config_value("autonomous", "enabled", True))
 
 
 def is_run_timeline_enabled() -> bool:

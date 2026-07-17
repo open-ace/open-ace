@@ -1828,7 +1828,7 @@ def get_workspace_config():
             "max_instances": 30,
             "idle_timeout_minutes": 30,
             "base_dir": base_dir,  # For path validation in frontend
-            "autonomous_enabled": False,
+            "autonomous_enabled": True,
         }
 
         if os.path.exists(config_path):
@@ -1845,7 +1845,7 @@ def get_workspace_config():
 
             # Expose autonomous feature status
             autonomous_config = config.get("autonomous", {})
-            workspace_config["autonomous_enabled"] = autonomous_config.get("enabled", False)
+            workspace_config["autonomous_enabled"] = autonomous_config.get("enabled", True)
 
         return jsonify(workspace_config)
     except Exception as e:
@@ -1856,7 +1856,7 @@ def get_workspace_config():
                 "url": "",
                 "multi_user_mode": False,
                 "base_dir": get_workspace_base_dir(),
-                "autonomous_enabled": False,
+                "autonomous_enabled": True,
             }
         )
 
