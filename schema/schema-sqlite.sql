@@ -216,7 +216,6 @@ CREATE TABLE audit_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  user_id integer,
- tenant_id integer,
  username text,
  action text NOT NULL,
  severity text DEFAULT 'info',
@@ -227,7 +226,8 @@ CREATE TABLE audit_logs (
  user_agent text,
  session_id text,
  success INTEGER DEFAULT 1,
- error_message text
+ error_message text,
+ tenant_id integer
 );
 
 CREATE TABLE autonomous_workflows (
@@ -388,7 +388,6 @@ CREATE TABLE daily_stats (
 
 CREATE TABLE daily_usage (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- tenant_id integer DEFAULT 1 NOT NULL,
  date TEXT NOT NULL,
  tool_name TEXT NOT NULL,
  host_name TEXT DEFAULT 'localhost' NOT NULL,
@@ -399,6 +398,7 @@ CREATE TABLE daily_usage (
  request_count integer DEFAULT 0,
  models_used text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ tenant_id integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_daily_usage_cache_tokens_positive CHECK ((cache_tokens >= 0)),
     CONSTRAINT chk_daily_usage_input_tokens_positive CHECK ((input_tokens >= 0)),
     CONSTRAINT chk_daily_usage_output_tokens_positive CHECK ((output_tokens >= 0)),
@@ -574,7 +574,6 @@ CREATE TABLE project_categories (
 
 CREATE TABLE projects (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- tenant_id integer DEFAULT 1 NOT NULL,
  path TEXT NOT NULL,
  name TEXT,
  description text,
@@ -582,7 +581,8 @@ CREATE TABLE projects (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
- is_shared INTEGER DEFAULT 0 NOT NULL
+ is_shared INTEGER DEFAULT 0 NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE prompt_templates (
@@ -1208,11 +1208,12 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
 CREATE INDEX idx_audit_action ON audit_logs (action);
-CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
 CREATE INDEX idx_audit_severity ON audit_logs (severity);
+
+CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
@@ -1445,7 +1446,6 @@ CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
 CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
-CREATE INDEX idx_usage_tenant_date ON daily_usage (tenant_id, date);
 
 CREATE INDEX idx_usage_host_name ON daily_usage (host_name);
 
@@ -1454,6 +1454,8 @@ CREATE INDEX idx_usage_summary_host ON usage_summary (host_name);
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name) <> '') AND ((host_name) NOT LIKE '<%>') AND ((length((host_name)) >= 1) AND (length((host_name)) <= 253)));
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary (tool_name);
+
+CREATE INDEX idx_usage_tenant_date ON daily_usage (tenant_id, date);
 
 CREATE INDEX idx_usage_tool_name ON daily_usage (tool_name);
 
