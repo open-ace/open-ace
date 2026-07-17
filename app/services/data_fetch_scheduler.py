@@ -260,6 +260,9 @@ class DataFetchScheduler:
         # Check quotas after data is fresh
         self._check_quotas()
 
+        # Optionally synchronize Feishu org structure.
+        self._maybe_sync_feishu_org()
+
     def _refresh_materialized_views(self):
         """Refresh materialized views for PostgreSQL performance optimization."""
         from app.repositories.database import Database, is_postgresql
@@ -450,6 +453,22 @@ class DataFetchScheduler:
             f"requests={row[req_key]}/{row.get('daily_request_quota' if not month_prefix else 'monthly_request_quota')}, "
             f"tokens={row[tok_key]}/{row.get('daily_token_quota' if not month_prefix else 'monthly_token_quota', 0) * 1_000_000}"
         )
+
+    def _maybe_sync_feishu_org(self):
+        """Synchronize Feishu org data when auto-sync is enabled."""
+        try:
+            from app.services.feishu_org_sync import FeishuOrgSyncService
+
+            result = FeishuOrgSyncService().maybe_sync_from_scheduler()
+            if result:
+                logger.info(
+                    "Scheduled Feishu org sync completed: tenant=%s departments=%s users=%s",
+                    result.tenant_id,
+                    result.departments_seen,
+                    result.users_seen,
+                )
+        except Exception as e:
+            logger.warning(f"Scheduled Feishu org sync failed: {e}")
 
 
 # Global scheduler instance

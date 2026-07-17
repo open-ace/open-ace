@@ -212,8 +212,8 @@ python3 server.py
 |------|------|
 | 多租户 | 支持多部门/团队隔离 |
 | 角色权限 | 管理员/普通用户角色区分 |
-| SSO 集成 | 支持企业单点登录 |
-| 飞书同步 | 自动同步飞书组织架构 |
+| SSO 集成 | 支持 SAML 2.0、OIDC、OAuth2 企业单点登录 |
+| 飞书同步 | 手动触发并可按配置自动同步飞书组织架构 |
 | 钉钉解析 | 导入 OpenClaw 会话时解析钉钉用户名和群名称 |
 
 ### 📋 合规与报表
@@ -517,9 +517,11 @@ python3 server.py
 |---------|-------------|
 | Multi-tenant | Department/team isolation |
 | Role Permissions | Admin/user role distinction |
-| SSO Integration | Enterprise single sign-on support |
-| Feishu Sync | Auto-sync Feishu organization structure |
+| SSO Integration | Enterprise single sign-on via SAML 2.0, OIDC, and OAuth2 |
+| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
 | DingTalk Resolution | Resolve DingTalk user and group names during OpenClaw import |
+| Feishu Sync | Manual and optionally scheduled Feishu organization sync |
+>>>>>>> 997c5054 (Implement Feishu org sync)
 
 ### 📋 Compliance and Reporting
 

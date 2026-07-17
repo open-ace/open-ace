@@ -9,6 +9,7 @@ import {
   useUpdateUser,
   useDeleteUser,
   useResetUserPassword,
+  useSyncFeishuOrg,
   usePageRefresh,
   useSecuritySettings,
   useTenants,
@@ -43,6 +44,7 @@ export const UserManagement: React.FC = () => {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const resetUserPassword = useResetUserPassword();
+  const syncFeishuOrg = useSyncFeishuOrg();
 
   // Temporary password modal state
   const [showTempPasswordModal, setShowTempPasswordModal] = useState(false);
@@ -269,6 +271,26 @@ export const UserManagement: React.FC = () => {
     }
   };
 
+  const handleSyncFeishu = async () => {
+    const buttonLabel = language === 'zh' ? '同步飞书' : 'Sync Feishu';
+    try {
+      const response = await syncFeishuOrg.mutateAsync(selectedTenantId);
+      const summary = response.result;
+      const message =
+        language === 'zh'
+          ? `部门 ${summary.departments_seen}，用户 ${summary.users_seen}，新增团队 ${summary.teams_created}，新增成员关系 ${summary.memberships_added}`
+          : `Departments ${summary.departments_seen}, users ${summary.users_seen}, teams created ${summary.teams_created}, memberships added ${summary.memberships_added}`;
+      toast.success(buttonLabel, message);
+      await refetch();
+    } catch (err) {
+      console.error('Failed to sync Feishu org:', err);
+      toast.error(
+        buttonLabel,
+        (err as Error)?.message || (language === 'zh' ? '飞书同步失败' : 'Feishu sync failed')
+      );
+    }
+  };
+
   const handleCloseTempPasswordModal = () => {
     setShowTempPasswordModal(false);
     setTempPassword('');
@@ -328,6 +350,16 @@ export const UserManagement: React.FC = () => {
             showIntervalSelector={false}
             showLastRefreshTime={true}
           />
+
+          <Button
+            variant="outline-primary"
+            size="sm"
+            onClick={handleSyncFeishu}
+            disabled={syncFeishuOrg.isPending}
+          >
+            <i className="bi bi-cloud-arrow-down me-1" />
+            {language === 'zh' ? '同步飞书' : 'Sync Feishu'}
+          </Button>
 
           {/* 添加用户按钮：柔和圆角主色按钮 */}
           <Button variant="primary" size="sm" onClick={handleOpenCreate}>

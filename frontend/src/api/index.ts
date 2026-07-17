@@ -32,6 +32,7 @@ export type {
   UpdateUserRequest,
   UpdateQuotaRequest,
   QuotaUsage,
+  FeishuSyncResult,
 } from './admin';
 export { governanceApi } from './governance';
 export type {
