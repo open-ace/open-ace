@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -1817,15 +1818,36 @@ class RemoteAgent:
 
     def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
         """Read the port number from terminal server's READY:port stdout."""
-        import select as _select
-
         try:
-            # Use select to avoid blocking indefinitely
-            ready, _, _ = _select.select([proc.stdout], [], [], 10.0)
-            if not ready:
+            if proc.stdout is None:
+                logger.warning("Terminal process %s has no stdout pipe", terminal_id[:8])
+                return None
+
+            result: dict[str, str | Exception] = {}
+            ready = threading.Event()
+
+            def _reader() -> None:
+                try:
+                    raw = proc.stdout.readline()
+                    if isinstance(raw, bytes):
+                        result["line"] = raw.decode(errors="replace").strip()
+                    else:
+                        result["line"] = raw.strip()
+                except Exception as exc:  # pragma: no cover - defensive
+                    result["error"] = exc
+                finally:
+                    ready.set()
+
+            threading.Thread(target=_reader, daemon=True).start()
+            if not ready.wait(10.0):
                 logger.warning("Timeout waiting for terminal port from %s", terminal_id[:8])
                 return None
-            line = proc.stdout.readline().decode().strip()
+
+            error = result.get("error")
+            if isinstance(error, Exception):
+                raise error
+
+            line = str(result.get("line") or "")
             if line.startswith("READY:"):
                 return int(line.split(":")[1])
         except Exception as e:

@@ -168,3 +168,38 @@ def test_clear_active_terminal_metadata(monkeypatch, tmp_path):
     openace_cli._clear_active_terminal()
 
     assert not active_path.exists()
+
+
+def test_cmd_menu_execs_terminal_menu_on_windows(monkeypatch):
+    openace_cli = load_openace_cli()
+    calls = {}
+
+    monkeypatch.setattr(openace_cli.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        openace_cli,
+        "_start_cli_terminal",
+        lambda work_dir: {"session_id": "term-123", "proxy_url": "https://openace.example"},
+    )
+    monkeypatch.setattr(openace_cli, "_apply_local_cli_settings", lambda terminal: None)
+    monkeypatch.setattr(openace_cli, "_write_active_terminal", lambda terminal: None)
+    monkeypatch.setattr(openace_cli, "_session_env", lambda terminal: {"ENV": "1"})
+
+    def fake_execvpe(file, argv, env):
+        calls["file"] = file
+        calls["argv"] = argv
+        calls["env"] = env
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(openace_cli.os, "execvpe", fake_execvpe)
+
+    args = type("Args", (), {"work_dir": "/repo"})()
+    try:
+        openace_cli.cmd_menu(args)
+    except RuntimeError as exc:
+        assert str(exc) == "stop"
+    else:  # pragma: no cover - defensive
+        raise AssertionError("cmd_menu did not attempt to exec the terminal menu")
+
+    assert calls["file"] == openace_cli.sys.executable
+    assert calls["argv"] == [openace_cli.sys.executable, str(openace_cli.MENU_PATH)]
+    assert calls["env"] == {"ENV": "1"}

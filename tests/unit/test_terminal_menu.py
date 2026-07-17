@@ -65,3 +65,29 @@ def test_menu_includes_shell_return_and_permanent_exit(monkeypatch):
     assert any(item.get("is_shell_return") for item in items)
     assert any(item.get("is_shell_exit") for item in items)
     assert any(item["name"] == "Claude Code" and not item["installed"] for item in items)
+
+
+def test_handle_select_runs_command_via_subprocess_on_windows(monkeypatch):
+    terminal_menu = load_terminal_menu()
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(command, shell=False, check=False):
+        calls.append((command, shell, check))
+        return Result()
+
+    monkeypatch.setattr(terminal_menu, "IS_WINDOWS", True)
+    monkeypatch.setattr(terminal_menu.subprocess, "run", fake_run)
+
+    terminal_menu.handle_select(
+        {
+            "name": "Claude Code",
+            "installed": True,
+            "configured": True,
+            "cmd": "claude --bare",
+        }
+    )
+
+    assert calls == [("claude --bare", True, False)]
