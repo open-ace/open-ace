@@ -1450,6 +1450,7 @@ POST /api/sso/providers
 ```
 
 Register a new SSO provider (admin only).
+Provider secrets are encrypted before they are persisted.
 
 ---
 
@@ -1470,6 +1471,7 @@ GET /api/sso/login/<provider_name>
 ```
 
 Start SSO login flow.
+OAuth2/OIDC providers use PKCE and bind the verifier to the callback state.
 
 ---
 

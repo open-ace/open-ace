@@ -9,7 +9,7 @@ import logging
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, Optional, Union, cast
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import OIDCProvider, get_provider_class
@@ -20,6 +20,7 @@ from app.modules.sso.provider import (
     get_provider_config,
 )
 from app.repositories.database import Database, adapt_boolean_condition, adapt_boolean_value
+from app.utils.smtp_crypto import get_password_manager
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,37 @@ class SSOManager:
         self.db = db or Database()
         self._providers: dict[str, SSOProvider] = {}
         self._providers_lock = threading.Lock()
+        self._password_manager = get_password_manager()
+
+    def serialize_provider_config(self, config_data: dict[str, Any]) -> str:
+        """Serialize provider config for storage, encrypting the client secret."""
+        stored = dict(config_data)
+        client_secret = cast("str", stored.pop("client_secret", "") or "")
+        stored.pop("client_secret_encrypted", None)
+        stored["client_secret_encrypted"] = (
+            self._password_manager.encrypt(client_secret) if client_secret else ""
+        )
+        return json.dumps(stored)
+
+    def deserialize_provider_config(self, raw_config: Union[str, dict[str, Any]]) -> dict[str, Any]:
+        """Deserialize provider config and restore the decrypted client secret."""
+        config_data = (
+            cast("dict[str, Any]", json.loads(raw_config))
+            if isinstance(raw_config, str)
+            else dict(raw_config)
+        )
+        encrypted_secret = config_data.pop("client_secret_encrypted", "")
+
+        client_secret = cast("str", config_data.get("client_secret", "") or "")
+        if encrypted_secret:
+            try:
+                client_secret = self._password_manager.decrypt(encrypted_secret)
+            except Exception as e:
+                logger.error(f"Failed to decrypt SSO client_secret: {e}")
+                client_secret = ""
+
+        config_data["client_secret"] = client_secret
+        return config_data
 
     def _ensure_tables(self) -> None:
         """Ensure SSO-related tables exist."""
@@ -177,6 +209,7 @@ class SSOManager:
         )
 
         try:
+            serialized_config = self.serialize_provider_config(config.__dict__)
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             self.db.execute(
                 """
@@ -192,10 +225,10 @@ class SSOManager:
                 (
                     name,
                     provider_type,
-                    json.dumps(config.__dict__),
+                    serialized_config,
                     tenant_id,
                     provider_type,
-                    json.dumps(config.__dict__),
+                    serialized_config,
                     tenant_id,
                     now,
                 ),
@@ -281,7 +314,7 @@ class SSOManager:
             return None
 
         try:
-            config_data = json.loads(row["config"])
+            config_data = self.deserialize_provider_config(row["config"])
             config = SSOProviderConfig(
                 name=config_data.get("name", name),
                 provider_type=config_data.get("provider_type", "oauth2"),
@@ -440,11 +473,16 @@ class SSOManager:
                 error="invalid_state",
             )
 
-        # Get PKCE code verifier
-        auth_state.get("code_verifier")
+        if auth_state.get("provider_name") != provider_name:
+            return SSOAuthResult(
+                success=False,
+                error="invalid_state",
+            )
+
+        code_verifier = cast("Optional[str]", auth_state.get("code_verifier"))
 
         # Exchange code for tokens
-        result = provider.authenticate(code, redirect_uri)
+        result = provider.authenticate(code, redirect_uri, code_verifier)
 
         # Clean up state
         self._delete_auth_state(state)
