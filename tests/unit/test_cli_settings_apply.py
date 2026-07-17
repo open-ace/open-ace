@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import stat
 import sys
 from pathlib import Path
 
@@ -54,3 +55,41 @@ wire_api = "responses"
         == "https://openace.example/api/remote/llm-proxy/v1"
     )
     assert parsed["model_providers"]["openace"]["env_key"] == "OPENAI_API_KEY"
+
+
+def test_write_codex_settings_uses_bearer_token_on_windows(tmp_path):
+    """Verify experimental_bearer_token is used when bearer_token is provided (Windows UWP)."""
+    cli_settings = load_cli_settings()
+    config_path = tmp_path / ".codex" / "config.toml"
+
+    cli_settings.write_codex_settings(
+        {},
+        proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
+        home_dir=tmp_path,
+        bearer_token="test-bearer-token-123",
+    )
+
+    parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
+    # Should use experimental_bearer_token instead of env_key
+    assert parsed["model_providers"]["openace"]["experimental_bearer_token"] == "test-bearer-token-123"
+    assert "env_key" not in parsed["model_providers"]["openace"]
+    # Should have secure file permissions (0600)
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_write_codex_settings_env_key_when_no_bearer_token(tmp_path):
+    """Verify env_key is used when bearer_token is None (non-Windows)."""
+    cli_settings = load_cli_settings()
+    config_path = tmp_path / ".codex" / "config.toml"
+
+    cli_settings.write_codex_settings(
+        {},
+        proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
+        home_dir=tmp_path,
+        bearer_token=None,
+    )
+
+    parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
+    # Should use env_key when no bearer_token
+    assert parsed["model_providers"]["openace"]["env_key"] == "OPENAI_API_KEY"
+    assert "experimental_bearer_token" not in parsed["model_providers"]["openace"]

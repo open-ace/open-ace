@@ -779,9 +779,14 @@ class RemoteAgent:
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
 
         # Apply CLI settings before starting terminal
-        # (non-sensitive config only; API credentials are set via env vars)
+        # Windows UWP: Codex desktop cannot read system environment variables.
+        # Use experimental_bearer_token in config.toml instead of env_key.
+        codex_token = None
+        if os.name == "nt" and openai_token:
+            codex_token = openai_token
+
         if cli_settings:
-            self._apply_cli_settings(cli_settings)
+            self._apply_cli_settings(cli_settings, codex_bearer_token=codex_token)
 
         # Stop existing terminal with same ID if any
         if terminal_id in self._terminal_processes:
@@ -1905,7 +1910,11 @@ class RemoteAgent:
         )
         return bool(hostname_pattern.match(hostname))
 
-    def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
+    def _apply_cli_settings(
+        self,
+        cli_settings: dict[str, Any],
+        codex_bearer_token: str | None = None,
+    ) -> None:
         """
         Write config files for configured CLI tools.
 
@@ -1916,12 +1925,19 @@ class RemoteAgent:
         Args:
             cli_settings: Dict with tool_name -> settings mapping
                          e.g., {"claude-code": {...}, "qwen-code": {...}}
+            codex_bearer_token: Optional bearer token for Codex on Windows UWP.
+                When provided, Codex config uses ``experimental_bearer_token``
+                instead of ``env_key`` to bypass UWP environment variable restrictions.
         """
         if not cli_settings:
             return
 
         proxy_base_url = f"{self.config.server_url.rstrip('/')}/api/remote/llm-proxy/v1"
-        apply_cli_settings(cli_settings, proxy_base_url=proxy_base_url)
+        apply_cli_settings(
+            cli_settings,
+            proxy_base_url=proxy_base_url,
+            codex_bearer_token=codex_bearer_token,
+        )
 
     # ----------------------------------------------------------------
     # Shutdown

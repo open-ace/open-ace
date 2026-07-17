@@ -214,7 +214,19 @@ def _apply_local_cli_settings(terminal: dict[str, Any]) -> None:
     proxy_url = str(terminal.get("proxy_url") or "").rstrip("/")
     if not cli_settings or not proxy_url:
         return
-    apply_cli_settings(cli_settings, proxy_base_url=f"{proxy_url}/v1")
+
+    # Windows UWP: Codex desktop cannot read system environment variables.
+    # Use experimental_bearer_token in config.toml instead of env_key.
+    codex_token = None
+    if os.name == "nt":
+        tokens = terminal.get("tokens") or {}
+        codex_token = tokens.get("openai")
+
+    apply_cli_settings(
+        cli_settings,
+        proxy_base_url=f"{proxy_url}/v1",
+        codex_bearer_token=codex_token,
+    )
 
 
 def _write_active_terminal(terminal: dict[str, Any]) -> None:
