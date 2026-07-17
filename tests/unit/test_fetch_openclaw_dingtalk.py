@@ -64,7 +64,7 @@ def test_process_jsonl_file_resolves_dingtalk_names(monkeypatch, tmp_path):
                         {
                             "type": "text",
                             "text": (
-                                'DingTalk relay text\n\nConversation info\n'
+                                "DingTalk relay text\n\nConversation info\n"
                                 '{"message_source":"dingtalk","sender_id":"user123","conversation_label":"chatabcd1234","is_group_chat":true}'
                             ),
                         }

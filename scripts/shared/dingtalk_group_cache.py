@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Optional, cast
 
 import requests
-
 from dingtalk_user_cache import get_dingtalk_access_token
 
 CACHE_DIR = Path.home() / ".open-ace"
@@ -171,5 +170,7 @@ if __name__ == "__main__":
         print("Usage:")
         print("  python3 dingtalk_group_cache.py clear     - Clear group cache")
         print("  python3 dingtalk_group_cache.py list      - List cached groups")
-        print("  python3 dingtalk_group_cache.py test <conversation_label|chat_id> <app_key> [app_secret]")
+        print(
+            "  python3 dingtalk_group_cache.py test <conversation_label|chat_id> <app_key> [app_secret]"
+        )
         print("                                             - Test fetching group info")

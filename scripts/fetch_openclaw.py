@@ -33,10 +33,10 @@ shared_dir = os.path.join(script_dir, "shared")
 if shared_dir not in sys.path:
     sys.path.insert(0, shared_dir)
 
-import feishu_group_cache
-import feishu_user_cache
 import dingtalk_group_cache
 import dingtalk_user_cache
+import feishu_group_cache
+import feishu_user_cache
 import utils
 
 from shared import db
@@ -1123,8 +1123,8 @@ def process_jsonl_file(
                                 and sender_id
                                 and (not sender_name or sender_name == sender_id)
                             ):
-                                cached_name = (
-                                    dingtalk_user_cache.get_user_display_name_from_cache(sender_id)
+                                cached_name = dingtalk_user_cache.get_user_display_name_from_cache(
+                                    sender_id
                                 )
                                 if cached_name:
                                     sender_name = cached_name

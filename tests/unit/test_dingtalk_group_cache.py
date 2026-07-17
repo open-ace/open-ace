@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 def load_dingtalk_group_cache():
-    module_path = Path(__file__).resolve().parents[2] / "scripts" / "shared" / "dingtalk_group_cache.py"
+    module_path = (
+        Path(__file__).resolve().parents[2] / "scripts" / "shared" / "dingtalk_group_cache.py"
+    )
     module_dir = module_path.parent
     if str(module_dir) not in sys.path:
         sys.path.insert(0, str(module_dir))
@@ -44,5 +46,11 @@ def test_get_group_name_from_conversation_label(monkeypatch, tmp_path):
     monkeypatch.setattr(mod.requests, "get", lambda *args, **kwargs: FakeResponse())
 
     label = "conversation_label=chatabcd1234"
-    assert mod.get_group_name_from_conversation_label(label, "app-key", "app-secret") == "Engineering Group"
-    assert mod.get_group_name_from_conversation_label(label, "app-key", "app-secret") == "Engineering Group"
+    assert (
+        mod.get_group_name_from_conversation_label(label, "app-key", "app-secret")
+        == "Engineering Group"
+    )
+    assert (
+        mod.get_group_name_from_conversation_label(label, "app-key", "app-secret")
+        == "Engineering Group"
+    )

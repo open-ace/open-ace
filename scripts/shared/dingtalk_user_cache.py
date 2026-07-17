@@ -141,10 +141,7 @@ def list_cached_users():
     for user_id, user_cache in cache["users"].items():
         user_data = user_cache.get("data", {})
         name = (
-            user_data.get("name")
-            or user_data.get("nick")
-            or user_data.get("nickname")
-            or "Unknown"
+            user_data.get("name") or user_data.get("nick") or user_data.get("nickname") or "Unknown"
         )
         cached_ago = time.time() - user_cache.get("cached_at", 0)
         print(f"  {user_id}: {name} (cached {cached_ago:.0f}s ago)")
