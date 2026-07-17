@@ -498,6 +498,7 @@ Password: admin123
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Deployment guides (local, Docker, enterprise) |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | Development setup & contribution guide |
 | [FEISHU_CONFIG.md](./FEISHU_CONFIG.md) | Feishu integration configuration |
+| [DINGTALK_CONFIG.md](./DINGTALK_CONFIG.md) | DingTalk integration configuration |
 
 ---
 

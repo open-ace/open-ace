@@ -35,6 +35,8 @@ if shared_dir not in sys.path:
 
 import feishu_group_cache
 import feishu_user_cache
+import dingtalk_group_cache
+import dingtalk_user_cache
 import utils
 
 from shared import db
@@ -703,9 +705,10 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     - Conversation info (untrusted metadata)
     - Sender (untrusted metadata)
     - [message_id: ...]
-    - Channel info from slack/feishu
+    - Channel info from slack/feishu/dingtalk
     - System: [...] Slack message in #channel from User: content
     - System: [...] Feishu[default] message in group XXX: ACTUAL_CONTENT
+    - System: [...] DingTalk[default] message in group XXX: ACTUAL_CONTENT
 
     This function extracts the actual user content and sender information.
     """
@@ -723,7 +726,9 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     is_group_chat = None
 
     # ========== Step 1: Detect message source ==========
-    if "conversation_label" in text or "Feishu" in text:
+    if '"message_source": "dingtalk"' in text or "DingTalk" in text or "钉钉" in text:
+        message_source = "dingtalk"
+    elif "conversation_label" in text or "Feishu" in text:
         message_source = "feishu"
     elif "Slack" in text:
         message_source = "slack"
@@ -756,7 +761,28 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "message_source": "feishu",
         }
 
-    # ========== Step 3: Handle Slack System message format ==========
+    # ========== Step 3: Handle DingTalk System message format ==========
+    dingtalk_system_match = re.search(
+        r"System:\s*\[[^\]]+\]\s*DingTalk\[[^\]]*\]\s*(?:message\s+in\s+group\s+\S+|message\s+from\s+\S+):\s*(.+?)(?:\n\nConversation info|$)",
+        text,
+        re.DOTALL,
+    )
+    if dingtalk_system_match:
+        actual_content = dingtalk_system_match.group(1).strip()
+        sender_name_match = re.search(r'"label":\s*"([^"]+)"', text)
+        if sender_name_match:
+            sender_name = sender_name_match.group(1)
+        sender_id_match = re.search(r'"sender_id":\s*"([^"]+)"', text)
+        if sender_id_match:
+            sender_id = sender_id_match.group(1)
+        return {
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "cleaned_content": actual_content,
+            "message_source": "dingtalk",
+        }
+
+    # ========== Step 4: Handle Slack System message format ==========
     # Pattern: "System: [...] Slack message in #channel from Name: ACTUAL_CONTENT"
     slack_match = re.search(
         r"Slack\s+(?:message\s+in\s+\S+\s+from|DM\s+from)\s+([^:]+):\s*(.+?)(?:\n\nConversation info|$)",
@@ -780,7 +806,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "message_source": "slack",
         }
 
-    # ========== Step 4: Handle simple sender_id: content format ==========
+    # ========== Step 5: Handle simple sender_id: content format ==========
     # Pattern: "ou_xxxxx: content" or "on_xxxxx: content" or "oc_xxxxx: content" or "Uxxxx: content"
     simple_match = re.match(
         r"^(ou_[a-f0-9]+|on_[a-f0-9]+|oc_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$", text.strip(), re.DOTALL
@@ -802,7 +828,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "message_source": message_source,
         }
 
-    # ========== Step 5: Fallback - try to extract content from metadata blocks ==========
+    # ========== Step 6: Fallback - try to extract content from metadata blocks ==========
     # Remove ```json``` code blocks
     content = re.sub(r"```json\s*\n?\s*```", "", text)
     content = re.sub(r"```\s*\n?\s*```", "", content)
@@ -889,8 +915,11 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                         sender_id = data.get("sender_id")
                     if "sender" in data and not sender_id:
                         sender_id = data.get("sender")
+                    source_value = data.get("message_source") or data.get("source")
+                    if isinstance(source_value, str) and source_value.lower() == "dingtalk":
+                        message_source = "dingtalk"
                     # Only extract sender_name from Sender metadata blocks (have 'id' field starting with ou_/on_/oc_)
-                    # This prevents extracting 'name' from other JSON blocks like Gitee repo lists
+                    # or from DingTalk sender metadata once source is known.
                     block_id = data.get("id", "")
                     if (
                         block_id
@@ -899,6 +928,7 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                             block_id.startswith("ou_")
                             or block_id.startswith("on_")
                             or block_id.startswith("oc_")
+                            or message_source == "dingtalk"
                         )
                     ):
                         if "label" in data and data.get("label") != sender_id:
@@ -1051,6 +1081,21 @@ def process_jsonl_file(
                                     if group_name:
                                         group_subject = group_name
 
+                            if message_source == "dingtalk" and (
+                                not group_subject and conversation_label
+                            ):
+                                dingtalk_config = utils.load_config().get("dingtalk", {})
+                                app_key = dingtalk_config.get("app_key")
+                                app_secret = dingtalk_config.get("app_secret")
+                                if app_key and app_secret:
+                                    group_name = (
+                                        dingtalk_group_cache.get_group_name_from_conversation_label(
+                                            conversation_label, app_key, app_secret
+                                        )
+                                    )
+                                    if group_name:
+                                        group_subject = group_name
+
                             # Try to get Feishu user name if not already found
                             if (
                                 message_source == "feishu"
@@ -1069,6 +1114,27 @@ def process_jsonl_file(
                                     if app_id and app_secret:
                                         api_name = feishu_user_cache.get_user_name(
                                             sender_id, app_id, app_secret
+                                        )
+                                        if api_name:
+                                            sender_name = api_name
+
+                            if (
+                                message_source == "dingtalk"
+                                and sender_id
+                                and (not sender_name or sender_name == sender_id)
+                            ):
+                                cached_name = (
+                                    dingtalk_user_cache.get_user_display_name_from_cache(sender_id)
+                                )
+                                if cached_name:
+                                    sender_name = cached_name
+                                else:
+                                    dingtalk_config = utils.load_config().get("dingtalk", {})
+                                    app_key = dingtalk_config.get("app_key")
+                                    app_secret = dingtalk_config.get("app_secret")
+                                    if app_key and app_secret:
+                                        api_name = dingtalk_user_cache.get_user_display_name(
+                                            sender_id, app_key, app_secret
                                         )
                                         if api_name:
                                             sender_name = api_name

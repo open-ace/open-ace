@@ -214,6 +214,7 @@ python3 server.py
 | 角色权限 | 管理员/普通用户角色区分 |
 | SSO 集成 | 支持企业单点登录 |
 | 飞书同步 | 自动同步飞书组织架构 |
+| 钉钉解析 | 导入 OpenClaw 会话时解析钉钉用户名和群名称 |
 
 ### 📋 合规与报表
 
@@ -301,6 +302,7 @@ open-ace/
 | [权限模型](docs/cn/PERMISSION-MODEL.md) | 租户、角色与访问控制 |
 | [Kubernetes](docs/cn/KUBERNETES.md) | K8s 单实例参考部署 |
 | [飞书配置](docs/cn/FEISHU_CONFIG.md) | 飞书集成配置 |
+| [钉钉配置](docs/cn/DINGTALK_CONFIG.md) | 钉钉集成配置 |
 | [API 文档](docs/cn/API.md) | API 接口说明 |
 | [仓库设置](docs/REPOSITORY_SETUP.md) | GitHub topics、labels、分支保护和发布检查清单 |
 
@@ -517,6 +519,7 @@ python3 server.py
 | Role Permissions | Admin/user role distinction |
 | SSO Integration | Enterprise single sign-on support |
 | Feishu Sync | Auto-sync Feishu organization structure |
+| DingTalk Resolution | Resolve DingTalk user and group names during OpenClaw import |
 
 ### 📋 Compliance and Reporting
 
@@ -604,6 +607,7 @@ The `docs/` directory is the source of truth for product documentation. The publ
 | [Permission Model](docs/en/PERMISSION-MODEL.md) | Tenants, roles, and access control |
 | [Kubernetes](docs/en/KUBERNETES.md) | Single-instance K8s deployment reference |
 | [Feishu Config](docs/en/FEISHU_CONFIG.md) | Feishu integration |
+| [DingTalk Config](docs/en/DINGTALK_CONFIG.md) | DingTalk integration |
 | [API Reference](docs/en/API.md) | API documentation |
 | [Repository Setup](docs/REPOSITORY_SETUP.md) | GitHub topics, labels, branch protection, and release checklist |
 

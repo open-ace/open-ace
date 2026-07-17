@@ -112,7 +112,16 @@ def test_tool_accounts_dropdown(ui_screenshot_dir):
 
             # Step 5: 验证选项
             print("Step 5: 验证选项...")
-            expected_values = ["", "qwen", "claude", "openclaw", "feishu", "slack", "other"]
+            expected_values = [
+                "",
+                "qwen",
+                "claude",
+                "openclaw",
+                "feishu",
+                "dingtalk",
+                "slack",
+                "other",
+            ]
             actual_values = [v for v, t in option_values]
 
             for expected in expected_values:

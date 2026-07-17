@@ -498,6 +498,7 @@ docker compose restart
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | 部署指南（本地、Docker、企业） |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | 开发设置和贡献指南 |
 | [FEISHU_CONFIG.md](./FEISHU_CONFIG.md) | 飞书集成配置 |
+| [DINGTALK_CONFIG.md](./DINGTALK_CONFIG.md) | 钉钉集成配置 |
 
 ---
 

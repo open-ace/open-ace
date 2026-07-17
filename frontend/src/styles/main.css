@@ -1750,6 +1750,11 @@ table .latency-row:hover td {
   color: white;
 }
 
+.message-source.dingtalk {
+  background-color: #1677ff;
+  color: white;
+}
+
 .message-source.openclaw {
   background-color: var(--color-info);
   color: white;

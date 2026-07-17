@@ -1404,6 +1404,8 @@ DATA_FILES=(
     "usage.db"
     "config.json"
     "feishu_users.json"
+    "dingtalk_users.json"
+    "dingtalk_groups.json"
     "upload_marker.json"
 )
 
