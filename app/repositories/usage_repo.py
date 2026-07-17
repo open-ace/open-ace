@@ -109,8 +109,8 @@ class UsageRepository:
                 cursor.execute(
                     """
                     INSERT INTO daily_usage
-                    (tenant_id, date, tool_name, host_name, tokens_used, input_tokens,
-                     output_tokens, cache_tokens, request_count, models_used)
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (tenant_id, date, tool_name, host_name) DO UPDATE SET
                         tokens_used = EXCLUDED.tokens_used,
@@ -121,7 +121,6 @@ class UsageRepository:
                         models_used = EXCLUDED.models_used
                 """,
                     (
-                        effective_tenant_id,
                         date,
                         tool_name,
                         host_name,
@@ -131,18 +130,18 @@ class UsageRepository:
                         cache_tokens,
                         request_count,
                         models_json,
+                        effective_tenant_id,
                     ),
                 )
             else:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO daily_usage
-                    (tenant_id, date, tool_name, host_name, tokens_used, input_tokens,
-                     output_tokens, cache_tokens, request_count, models_used)
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
-                        effective_tenant_id,
                         date,
                         tool_name,
                         host_name,
@@ -152,6 +151,7 @@ class UsageRepository:
                         cache_tokens,
                         request_count,
                         models_json,
+                        effective_tenant_id,
                     ),
                 )
             conn.commit()

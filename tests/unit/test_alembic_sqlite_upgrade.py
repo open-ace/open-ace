@@ -101,8 +101,12 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     columns = set()
     if has_session_messages:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(session_messages)")}
+    agent_session_columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_sessions)")}
     user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
     aw_columns = {row[1] for row in conn.execute("PRAGMA table_info(autonomous_workflows)")}
+    project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+    usage_columns = {row[1] for row in conn.execute("PRAGMA table_info(daily_usage)")}
+    audit_log_columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_logs)")}
     conn.close()
 
     assert version is not None
@@ -120,9 +124,14 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     # -> 20260714_001_add_ci_repair_fields_to_workflows (Issue #1647)
     # -> 20260715_001_add_last_ci_failure_head_sha (Issue #1574)
     # -> 20260714_002_add_users_mapping_indexes (Issue #1574)
-    assert version[0] == "20260714_002_add_users_mapping_indexes"
+    # -> 20260717_002_add_workspace_session_tenant_scope (Issue #1760)
+    # -> 20260717_003_add_project_tenant_scope (Issue #1760)
+    # -> 20260717_004_scope_usage_and_audit_to_tenant (Issue #1760)
+    assert version[0] == "20260717_004_scope_usage_and_audit_to_tenant"
     if has_session_messages:
         assert "source" in columns
+        assert "tenant_id" in columns
+    assert "tenant_id" in agent_session_columns
     assert has_mapping_rules is True
     assert has_compliance_reports is True
     assert has_run_timeline is True
@@ -131,6 +140,9 @@ def test_alembic_upgrade_head_succeeds_for_fresh_sqlite(tmp_path, monkeypatch):
     assert has_policy_tables is True
     assert has_sso_auth_states is True
     assert "auto_mapping_enabled" in user_columns
+    assert "tenant_id" in project_columns
+    assert "tenant_id" in usage_columns
+    assert "tenant_id" in audit_log_columns
     # content_language column added by 20260626_002 (#1287)
     assert "content_language" in aw_columns
     assert "preferred_worktree_path" in aw_columns
