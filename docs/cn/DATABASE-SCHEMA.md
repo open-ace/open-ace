@@ -308,7 +308,7 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | name | text | UNIQUE |
-| provider_type | text | NOT NULL (oauth2/oidc) |
+| provider_type | text | NOT NULL (oauth2/oidc/saml) |
 | config | text | NOT NULL（JSON；保存的是加密后的 `client_secret_encrypted`，不是明文 `client_secret`） |
 | tenant_id | integer | FK → tenants(id) |
 | is_active | boolean | DEFAULT true |

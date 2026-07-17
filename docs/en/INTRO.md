@@ -95,7 +95,7 @@ Open ACE provides two distinct interfaces based on user role:
 - Permission granularization
 
 #### Security & Compliance
-- SSO integration (OIDC/OAuth2; SAML 2.0 planned in [#1784](https://github.com/open-ace/open-ace/issues/1784))
+- SSO integration (OIDC/OAuth2 and SAML 2.0)
 - Comprehensive audit logging
 - Content filtering
 - Data retention policies
@@ -465,7 +465,7 @@ Password: admin123
 - Email report generation
 - User authentication & role-based access
 - Quota management & alerts
-- SSO integration (OIDC/OAuth2; SAML 2.0 planned in [#1784](https://github.com/open-ace/open-ace/issues/1784))
+- SSO integration (OIDC/OAuth2 and SAML 2.0)
 - Audit logging & compliance features
 - Tenant management
 - Prompt library & session management
@@ -513,7 +513,7 @@ Open ACE is a comprehensive enterprise AI work platform that provides:
 | **Management** | Users, tenants, quotas, roles, permissions |
 | **Governance** | Audit logs, security, compliance, retention |
 | **Collaboration** | Session sharing, prompt library, team workspaces |
-| **Integration** | OIDC/OAuth2 SSO, tool connector, state sync; SAML 2.0 planned in [#1784](https://github.com/open-ace/open-ace/issues/1784) |
+| **Integration** | OIDC/OAuth2/SAML 2.0 SSO, tool connector, state sync |
 
 **For individual developers**: Track personal usage and optimize costs
 **For teams**: Monitor usage, share prompts, collaborate on sessions

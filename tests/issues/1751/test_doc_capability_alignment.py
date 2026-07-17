@@ -9,22 +9,27 @@ def read_doc(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_readme_marks_saml_as_planned_not_supported() -> None:
+def test_readme_and_docs_advertise_implemented_saml_support() -> None:
     readme = read_doc("README.md")
+    en_config = read_doc("docs/en/SAML_CONFIG.md")
+    cn_config = read_doc("docs/cn/SAML_CONFIG.md")
+    api_doc = read_doc("docs/en/API.md")
+    saml_module = read_doc("app/modules/sso/saml.py")
 
-    unsupported_claims = [
-        "支持 SAML 2.0、OIDC、OAuth2",
-        "Enterprise single sign-on via SAML 2.0, OIDC, and OAuth2",
-        "Supports OAuth2, OIDC, and SAML providers",
-    ]
+    assert "#1784" not in readme
+    assert "SAML 2.0 Provider 尚未实现" not in readme
+    assert "SAML 2.0 Provider is not implemented yet" not in readme
+    assert "OIDC/OAuth2/SAML" in readme
+    assert "SAML 2.0 enterprise single sign-on" not in readme
 
-    for claim in unsupported_claims:
-        assert claim not in readme
-
-    assert "OIDC/OAuth2" in readme
-    assert "#1784" in readme
-    assert "SAML 2.0 Provider 尚未实现" in readme
-    assert "SAML 2.0 Provider is not implemented yet" in readme
+    assert "SAML 2.0 Service Provider" in en_config
+    assert "POST /api/sso/acs/<provider_name>" in en_config
+    assert "XML Signature" in en_config
+    assert "SAML 2.0 Service Provider" in cn_config
+    assert "POST /api/sso/acs/<provider_name>" in cn_config
+    assert "XML Signature" in cn_config
+    assert "SAML Metadata" in api_doc
+    assert "class SAMLProvider" in saml_module
 
 
 def test_dingtalk_docs_advertise_implemented_sync_and_bot_support() -> None:
@@ -63,9 +68,8 @@ def test_terminal_docs_describe_windows_piped_subprocess() -> None:
     assert "piped subprocess on Windows" in marketing
 
 
-def test_sso_module_docstring_does_not_advertise_saml_support() -> None:
+def test_sso_module_docstring_advertises_saml_support() -> None:
     module_init = read_doc("app/modules/sso/__init__.py")
 
-    assert "Supports OAuth2, OIDC, and SAML providers" not in module_init
-    assert "Supports OAuth2 and OIDC providers" in module_init
-    assert "#1784" in module_init
+    assert "Supports OAuth2, OIDC, and SAML 2.0 providers" in module_init
+    assert "#1784" not in module_init

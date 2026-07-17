@@ -27,6 +27,7 @@ Documentation files are in the [en/](en/) directory.
 | [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
 | [**DINGTALK-CONFIG**](en/DINGTALK_CONFIG.md) | DingTalk integration configuration guide |
+| [**SAML-CONFIG**](en/SAML_CONFIG.md) | SAML 2.0 SSO provider configuration guide |
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
 | [**TOKEN-ACCOUNTING**](en/token-accounting.md) | Deep dive into Claude / Codex / ZCode / Qwen token collection, computation, storage, and downstream usage |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist |
@@ -68,6 +69,7 @@ Documentation files are in the [en/](en/) directory.
 | [**DEVELOPMENT**](cn/DEVELOPMENT.md) | 开发环境搭建、项目结构和测试 |
 | [**FEISHU-CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |
 | [**DINGTALK-CONFIG**](cn/DINGTALK_CONFIG.md) | 钉钉集成配置指南 |
+| [**SAML-CONFIG**](cn/SAML_CONFIG.md) | SAML 2.0 SSO Provider 配置指南 |
 | [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
 | [**TOKEN-ACCOUNTING**](cn/token-accounting.md) | Claude / Codex / ZCode / Qwen token 抓取、计算、落库和下游消费链路说明 |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub 仓库 topics、labels、releases 和 Demo 检查清单 |
