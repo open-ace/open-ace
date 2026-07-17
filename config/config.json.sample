@@ -53,6 +53,10 @@
     "app_id": "<FEISHU_APP_ID>",
     "app_secret": "<FEISHU_APP_SECRET>"
   },
+  "dingtalk": {
+    "app_key": "<DINGTALK_APP_KEY>",
+    "app_secret": "<DINGTALK_APP_SECRET>"
+  },
   "auth": {
     "auth_type": "openai",
     "env": {

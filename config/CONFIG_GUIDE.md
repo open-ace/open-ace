@@ -117,6 +117,12 @@
 | `feishu.app_id` | 飞书应用 App ID | `cli_xxxxxxxxxxxxx` |
 | `feishu.app_secret` | 飞书应用 Secret | `xxxxxxxxxxxxxxxxx` |
 
+#### 钉钉集成（可选）
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `dingtalk.app_key` | 钉钉内部应用 AppKey | `dingxxxxxxxxxxxxxx` |
+| `dingtalk.app_secret` | 钉钉内部应用 AppSecret | `xxxxxxxxxxxxxxxxx` |
+
 ---
 
 ## 配置步骤

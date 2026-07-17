@@ -82,6 +82,8 @@ def get_unmapped_tool_accounts():
                 tool_type = "openclaw"
             elif sender_name.startswith("ou_"):
                 tool_type = "feishu"
+            elif "-dingtalk" in sender_name:
+                tool_type = "dingtalk"
 
         result.append(
             {
