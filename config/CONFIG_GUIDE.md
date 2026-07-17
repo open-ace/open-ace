@@ -119,11 +119,14 @@
 | `cron.enabled` | 是否启用定时任务 | `true` |
 | `cron.run_time` | 每日运行时间（HH:MM 格式） | `00:30` |
 
-#### 飞书通知（可选）
-| 参数 | 说明 | 示例值 |
-|------|------|--------|
+#### 飞书集成（可选）
+| 参数 | 说明 | 默认值 / 示例值 |
+|------|------|----------------|
 | `feishu.app_id` | 飞书应用 App ID | `cli_xxxxxxxxxxxxx` |
 | `feishu.app_secret` | 飞书应用 Secret | `xxxxxxxxxxxxxxxxx` |
+| `feishu.org_sync_enabled` | 是否启用飞书组织架构自动同步 | `false` |
+| `feishu.org_sync_tenant_id` | 同步写入的租户 ID | `1` |
+| `feishu.org_sync_interval_minutes` | 自动同步间隔（分钟） | `60` |
 
 #### 钉钉集成（可选）
 | 参数 | 说明 | 示例值 |
