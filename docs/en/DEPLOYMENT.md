@@ -286,6 +286,14 @@ Configuration is stored in `~/.open-ace/config.json`:
 | `OPENACE_CORS_ALLOWED_ORIGINS` | Comma-separated explicit API CORS allowlist for non-loopback WebUI origins |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | Maximum inbound browser WebSocket message size for terminal / VSCode raw bridges (default: `8388608`) |
 
+### Outbound URL Security
+
+Administrator-configured SSO/OIDC endpoint URLs are validated before Open ACE sends
+test, token, userinfo, or JWKS requests. By default, only public `http` and
+`https` destinations are allowed. Loopback, localhost, private networks,
+link-local ranges, metadata service hosts, URL credentials, and non-public DNS
+results are blocked to reduce SSRF risk.
+
 ### Port Configuration
 
 Open ACE listens on port 19888 by default (Issue #1372: AI + ace mnemonic port). To change the port, use the appropriate method based on your deployment type.

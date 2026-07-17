@@ -12,6 +12,8 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+import requests
+
 from app.modules.sso.provider import (
     SSOAuthResult,
     SSOProvider,
@@ -19,6 +21,7 @@ from app.modules.sso.provider import (
     SSOToken,
     SSOUser,
 )
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -98,22 +101,41 @@ class OAuth2Provider(SSOProvider):
             data["code_verifier"] = code_verifier
 
         try:
-            # Use synchronous HTTP request
-            import json
-            import urllib.request
-
-            req = urllib.request.Request(
+            assert_public_http_url(self.config.token_url)
+            response = requests.post(
                 self.config.token_url,
-                data=urllib.parse.urlencode(data).encode("utf-8"),
+                data=urllib.parse.urlencode(data),
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
+                timeout=30,
+                allow_redirects=False,
             )
 
-            with urllib.request.urlopen(req, timeout=30) as response:
-                token_data = json.loads(response.read().decode("utf-8"))
+            if 300 <= response.status_code < 400:
+                return SSOAuthResult(
+                    success=False,
+                    error="token_exchange_blocked",
+                    error_description="Token endpoint redirects are blocked",
+                )
 
+            if response.status_code >= 400:
+                try:
+                    error_data = response.json()
+                    return SSOAuthResult(
+                        success=False,
+                        error=error_data.get("error", "token_exchange_failed"),
+                        error_description=error_data.get("error_description"),
+                    )
+                except ValueError:
+                    return SSOAuthResult(
+                        success=False,
+                        error="token_exchange_failed",
+                        error_description=response.text,
+                    )
+
+            token_data = response.json()
             token = self._parse_token_response(token_data)
 
             return SSOAuthResult(
@@ -121,24 +143,13 @@ class OAuth2Provider(SSOProvider):
                 token=token,
             )
 
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            logger.error(f"OAuth2 token exchange failed: {e.code} - {error_body}")
-
-            try:
-                error_data = json.loads(error_body)
-                return SSOAuthResult(
-                    success=False,
-                    error=error_data.get("error", "token_exchange_failed"),
-                    error_description=error_data.get("error_description"),
-                )
-            except json.JSONDecodeError:
-                return SSOAuthResult(
-                    success=False,
-                    error="token_exchange_failed",
-                    error_description=error_body,
-                )
-
+        except OutboundUrlBlockedError as e:
+            logger.error(f"OAuth2 token endpoint blocked: {e}")
+            return SSOAuthResult(
+                success=False,
+                error="token_exchange_blocked",
+                error_description=str(e),
+            )
         except Exception as e:
             logger.error(f"OAuth2 token exchange error: {e}")
             return SSOAuthResult(
@@ -162,22 +173,29 @@ class OAuth2Provider(SSOProvider):
             return None
 
         try:
-            import json
-            import urllib.request
-
-            req = urllib.request.Request(
+            assert_public_http_url(self.config.userinfo_url)
+            response = requests.get(
                 self.config.userinfo_url,
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Accept": "application/json",
                 },
+                timeout=30,
+                allow_redirects=False,
             )
 
-            with urllib.request.urlopen(req, timeout=30) as response:
-                user_data = json.loads(response.read().decode("utf-8"))
+            if 300 <= response.status_code < 400:
+                logger.error("SSO userinfo endpoint redirect blocked")
+                return None
+
+            response.raise_for_status()
+            user_data = response.json()
 
             return self._parse_user_info(user_data)
 
+        except OutboundUrlBlockedError as e:
+            logger.error(f"SSO userinfo endpoint blocked: {e}")
+            return None
         except Exception as e:
             logger.error(f"Failed to get user info: {e}")
             return None
@@ -200,23 +218,30 @@ class OAuth2Provider(SSOProvider):
         }
 
         try:
-            import json
-            import urllib.request
-
-            req = urllib.request.Request(
+            assert_public_http_url(self.config.token_url)
+            response = requests.post(
                 self.config.token_url,
-                data=urllib.parse.urlencode(data).encode("utf-8"),
+                data=urllib.parse.urlencode(data),
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
+                timeout=30,
+                allow_redirects=False,
             )
 
-            with urllib.request.urlopen(req, timeout=30) as response:
-                token_data = json.loads(response.read().decode("utf-8"))
+            if 300 <= response.status_code < 400:
+                logger.error("SSO token refresh endpoint redirect blocked")
+                return None
+
+            response.raise_for_status()
+            token_data = response.json()
 
             return self._parse_token_response(token_data)
 
+        except OutboundUrlBlockedError as e:
+            logger.error(f"SSO token refresh endpoint blocked: {e}")
+            return None
         except Exception as e:
             logger.error(f"Failed to refresh token: {e}")
             return None
@@ -323,19 +348,24 @@ class GitHubProvider(OAuth2Provider):
         if user and not user.email:
             # Fetch emails endpoint if primary email not in user info
             try:
-                import json
-                import urllib.request
-
-                req = urllib.request.Request(
-                    "https://api.github.com/user/emails",
+                email_url = "https://api.github.com/user/emails"
+                assert_public_http_url(email_url)
+                response = requests.get(
+                    email_url,
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "Accept": "application/json",
                     },
+                    timeout=30,
+                    allow_redirects=False,
                 )
 
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    emails = json.loads(response.read().decode("utf-8"))
+                if 300 <= response.status_code < 400:
+                    logger.warning("GitHub emails endpoint redirect blocked")
+                    return user
+
+                response.raise_for_status()
+                emails = response.json()
 
                 # Find primary verified email
                 for email_info in emails:

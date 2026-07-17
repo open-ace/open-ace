@@ -21,6 +21,7 @@ from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import _get_session_timeout_hours
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -900,23 +901,49 @@ def _test_url_accessible(url: str) -> dict:
         dict: {"success": bool, "error": str or None}
     """
     try:
-        # Try HEAD first
-        response = requests.head(url, timeout=10, allow_redirects=True)
+        current_url = url
+        method = "HEAD"
 
-        # If HEAD not allowed (405), try GET
-        if response.status_code == 405:
-            response = requests.get(url, timeout=10, stream=True, allow_redirects=True)
-            response.close()  # Don't read body
+        for _ in range(6):
+            assert_public_http_url(current_url)
 
-        if response.status_code < 400:
-            return {"success": True}
-        else:
+            if method == "HEAD":
+                response = requests.head(current_url, timeout=10, allow_redirects=False)
+            else:
+                response = requests.get(
+                    current_url,
+                    timeout=10,
+                    stream=True,
+                    allow_redirects=False,
+                )
+                response.close()  # Don't read body
+
+            if response.status_code == 405 and method == "HEAD":
+                method = "GET"
+                continue
+
+            if 300 <= response.status_code < 400:
+                from urllib.parse import urljoin
+
+                location = response.headers.get("Location")
+                if not location:
+                    return {"success": False, "error": "重定向响应缺少 Location"}
+                current_url = urljoin(current_url, location)
+                assert_public_http_url(current_url)
+                continue
+
+            if response.status_code < 400:
+                return {"success": True}
             return {"success": False, "error": f"HTTP {response.status_code}"}
+
+        return {"success": False, "error": "重定向次数过多"}
 
     except requests.Timeout:
         return {"success": False, "error": "连接超时"}
     except requests.ConnectionError:
         return {"success": False, "error": "无法连接到服务器"}
+    except OutboundUrlBlockedError as e:
+        return {"success": False, "error": f"URL 被安全策略拦截: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

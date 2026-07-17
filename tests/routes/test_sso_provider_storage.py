@@ -21,7 +21,8 @@ import app.utils.smtp_crypto as smtp_crypto
 from app.modules.sso.manager import SSOManager
 from app.repositories.database import Database, adapt_boolean_value
 from app.repositories.schema_init import load_schema_from_file
-from app.routes.sso import sso_bp
+from app.routes.sso import _test_url_accessible, sso_bp
+from app.utils.outbound_url_guard import OutboundUrlBlockedError
 
 ADMIN_SESSION = {
     "user_id": 1,
@@ -124,3 +125,27 @@ def test_update_provider_rewrites_legacy_plaintext_secret_as_encrypted(client, s
     assert restored["client_secret"] == "legacy-secret"
     assert restored["client_id"] == "updated-client"
     assert restored["authorization_url"] == "https://example.com/oauth2/authorize"
+
+
+def test_test_url_accessible_blocks_metadata_url_before_request():
+    with patch("app.routes.sso.requests.head") as mock_head:
+        result = _test_url_accessible("http://169.254.169.254/latest/meta-data/")
+
+    assert not result["success"]
+    assert "安全策略" in result["error"]
+    mock_head.assert_not_called()
+
+
+def test_test_url_accessible_blocks_redirect_to_private_address():
+    first_response = MagicMock()
+    first_response.status_code = 302
+    first_response.headers = {"Location": "http://127.0.0.1/admin"}
+
+    with patch("app.routes.sso.requests.head", return_value=first_response) as mock_head:
+        with patch("app.routes.sso.assert_public_http_url") as mock_guard:
+            mock_guard.side_effect = [None, OutboundUrlBlockedError("blocked non-public address")]
+            result = _test_url_accessible("https://sso.example.com/authorize")
+
+    assert not result["success"]
+    assert "blocked non-public address" in result["error"]
+    assert mock_head.call_count == 1
