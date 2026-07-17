@@ -85,7 +85,7 @@ Remote Workspace is safe to run behind the Kubernetes reference deployment, but 
 - If that pod restarts, durable records such as machines, sessions, messages, quotas, and audit entries remain in the database, but live terminal relay sockets and in-memory output buffers are interrupted.
 - Removing sticky routing and supporting active-session failover requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
 
-Tenant isolation currently covers users, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility. Broader tenant-aware schema/query hardening for historical analytics and project tables is tracked in [#1781](https://github.com/open-ace/open-ace/issues/1781).
+Tenant isolation covers users, projects, workspace sessions and messages, daily usage aggregates, audit logs, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility for support and incident response.
 
 ---
 

@@ -127,6 +127,7 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | session_id | text | UNIQUE |
+| tenant_id | integer | DEFAULT 1；用于按租户限定会话查找和写入边界 |
 | session_type | text | DEFAULT 'chat' |
 | title | text | |
 | tool_name | text | NOT NULL |
@@ -160,12 +161,15 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | session_id | text | FK → agent_sessions(session_id) |
+| tenant_id | integer | DEFAULT 1；用于按租户限定消息查找 |
 | role | text | NOT NULL |
 | content | text | |
 | tokens_used | integer | DEFAULT 0 |
 | model | text | |
 | timestamp | timestamp | |
 | metadata | text | |
+
+会话索引包括 `idx_agent_sessions_tenant_user`、`idx_agent_sessions_tenant_updated`、`idx_session_messages_tenant_session` 和 `idx_session_messages_tenant_session_timestamp`。
 
 ## 统计
 

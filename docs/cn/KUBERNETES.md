@@ -155,7 +155,7 @@ k8s/
 - 普通 HTTP/API 请求可以在 Pod 间负载均衡。活跃的远程工作区终端 relay、输出缓冲、命令队列和 WebSocket 对象仍保存在单个进程内。
 - 如果承载某个活跃终端 / relay 会话的 Pod 重启，数据库中的持久记录仍在，但内存缓冲和实时 relay socket 会中断；用户可能需要重新连接、恢复或重建该活跃终端 / 会话。
 - 移除粘性路由需要完成 [#1782](https://github.com/open-ace/open-ace/issues/1782) 中的运行态外置化。
-- 更强的 tenant-aware schema / query 隔离在 [#1781](https://github.com/open-ace/open-ace/issues/1781) 中继续推进。
+- tenant-aware schema / query 边界覆盖用户、项目、工作区会话与消息、用量聚合、审计日志、远程机器、权限和配额；系统管理员保留有意设计的全局可见性。
 
 ### 使用 cert-manager 配置 TLS
 

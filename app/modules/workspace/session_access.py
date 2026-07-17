@@ -35,12 +35,11 @@ def check_session_access(
     if not status:
         return None, (jsonify({"error": "Session not found"}), 404)
     # System admins intentionally have global session visibility for operations.
-    # Tenant-scoped data-model hardening is tracked in issue #1781.
     if g.user.get("role") == "admin":
         return status, None
     # Session owner
-    session = session_mgr._session_manager.get_session(session_id)
     current_tenant_id = g.user.get("tenant_id")
+    session = session_mgr._session_manager.get_session(session_id, tenant_id=current_tenant_id)
     if session and current_tenant_id not in (None, session.tenant_id):
         return None, (jsonify({"error": "Access denied"}), 403)
     if session and session.user_id == g.user["id"]:

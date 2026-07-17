@@ -69,7 +69,7 @@ class TestKubernetesManifestAlignment:
 
         assert "multi-replica reference deployment with sticky routing" in docs
         assert "#1782" in docs
-        assert "#1781" in docs
+        assert "Tenant-aware schema and query boundaries cover users" in docs
         assert "single-instance reference deployment" not in docs
 
 

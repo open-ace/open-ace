@@ -155,7 +155,7 @@ Before deploying, update:
 - Ordinary HTTP/API requests can be balanced across pods. Active Remote Workspace terminal relay, output buffering, command queues, and in-flight WebSocket objects still keep process-local state.
 - If the pod that owns an active terminal/relay session restarts, the persisted database records remain, but in-memory buffers and live relay sockets are interrupted. Users may need to reconnect, resume, or recreate that active terminal/session.
 - Removing sticky routing requires the runtime-state externalization tracked in [#1782](https://github.com/open-ace/open-ace/issues/1782).
-- Stronger tenant-aware schema/query isolation is tracked separately in [#1781](https://github.com/open-ace/open-ace/issues/1781).
+- Tenant-aware schema and query boundaries cover users, projects, workspace sessions/messages, usage aggregates, audit logs, remote machines, permissions, and quotas; system administrators retain intentional global visibility.
 
 ### TLS with cert-manager
 
