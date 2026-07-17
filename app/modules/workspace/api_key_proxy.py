@@ -1523,6 +1523,31 @@ class APIKeyProxyService:
         )
         return token
 
+    def _webui_instance_alive(self, session_id: Optional[str], user_id: Any) -> bool:
+        """Return True when session_id is a webui: token whose instance is alive.
+
+        Used as the authoritative lifecycle signal for WebUI proxy tokens: WebUI
+        tokens are issued exactly once at instance start and baked into the child
+        process env, so once the backing instance is alive the token must keep
+        working for the natural lifetime of that instance even after its fixed
+        TTL elapses. Dead/missing instances fall through to the normal expiry
+        enforcement so stale tokens cannot outlive their instance.
+        """
+        if not (session_id and session_id.startswith("webui:") and user_id):
+            return False
+        from app.services.webui_manager import get_webui_manager
+
+        manager = get_webui_manager()
+        instance = manager.get_user_instance(int(user_id))
+        if instance and instance.is_alive():
+            return True
+        logger.warning(
+            "WebUI instance not alive for session: %s, user_id: %s",
+            session_id,
+            user_id,
+        )
+        return False
+
     def _session_allows_proxy_token(
         self,
         *,
@@ -1533,22 +1558,18 @@ class APIKeyProxyService:
         exp: datetime,
     ) -> bool:
         """Return whether the session lifecycle still allows proxy-token use."""
+        # WebUI tokens are tied to instance lifecycle, not the fixed payload exp.
+        # An alive instance keeps the token valid past exp; a dead/missing one is
+        # rejected here so it cannot outlive its instance, and must NOT fall through
+        # to the generic agent_sessions lookup below.
+        is_webui = bool(session_id and session_id.startswith("webui:") and user_id)
+        if is_webui:
+            return self._webui_instance_alive(session_id, user_id)
+
+        # payload exp is a fast pre-filter; the DB expires_at checked in
+        # validate_proxy_token is authoritative for non-webui sessions.
         if now > exp:
             logger.warning("Proxy token expired")
-            return False
-
-        if session_id and session_id.startswith("webui:") and user_id:
-            from app.services.webui_manager import get_webui_manager
-
-            manager = get_webui_manager()
-            instance = manager.get_user_instance(int(user_id))
-            if instance and instance.is_alive():
-                return True
-            logger.warning(
-                "WebUI instance not alive for session: %s, user_id: %s",
-                session_id,
-                user_id,
-            )
             return False
 
         if not session_id or session_type == "ha_pool":
@@ -1619,15 +1640,18 @@ class APIKeyProxyService:
 
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             exp = datetime.fromisoformat(str(payload["exp"]))
-            record_exp_raw = self._row_get(record, "expires_at")
-            record_exp = datetime.fromisoformat(str(record_exp_raw)) if record_exp_raw else exp
-            if now > record_exp:
-                logger.warning("Proxy token server record expired: %s", jti[:8])
-                return None
-
             session_id = payload.get("session_id")
             session_type = payload.get("session_type", "agent")
             user_id = payload.get("user_id")
+            record_exp_raw = self._row_get(record, "expires_at")
+            record_exp = datetime.fromisoformat(str(record_exp_raw)) if record_exp_raw else exp
+            # WebUI tokens ride the instance lifecycle: an alive instance keeps an
+            # otherwise-expired token valid, so skip the server-record expiry hard
+            # reject for live webui sessions and let _session_allows_proxy_token
+            # (which also gates on instance-alive) make the call.
+            if now > record_exp and not self._webui_instance_alive(session_id, user_id):
+                logger.warning("Proxy token server record expired: %s", jti[:8])
+                return None
 
             if not self._session_allows_proxy_token(
                 session_id=session_id,
