@@ -142,3 +142,8 @@ has_perm = PermissionService.has_permission(user_id, 'export_analysis')
 - 租户配额强制执行每个租户的 token 和请求限制
 - `QuotaEnforcementScheduler` 每 60 秒运行一次，检查并执行限制
 - 超额用户会被终止会话并生成告警
+
+当前边界：
+- 远程机器、远程会话、机器权限、用户身份和配额已经具备租户感知。
+- 系统管理员有意保留全局运维可见性，用于支持和故障处理。
+- 部分历史分析与项目相关表仍通过间接方式获得租户上下文，或尚未显式携带 `tenant_id`；这些 schema / query 边界加固在 [#1781](https://github.com/open-ace/open-ace/issues/1781) 中继续推进。

@@ -59,6 +59,8 @@ k8s/
 
 **HorizontalPodAutoscaler：** 参考清单至少保留 3 个副本，并可根据 CPU 与内存利用率扩展到 10 个副本。
 
+**粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程工作区终端 / relay 的活跃会话仍有部分运行态保存在单个 Web 进程内，因此同一个浏览器 / Agent 会话的请求必须持续回到同一个 Pod。
+
 **多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
@@ -134,7 +136,7 @@ k8s/
 
 ### PodDisruptionBudget
 
-- `minAvailable: 1` — 在单实例支持边界内保护当前应用副本不被自愿驱逐
+- `minAvailable: 2` — 自愿驱逐期间至少保留两个 Web Pod 可用
 
 ## 配置
 
@@ -149,9 +151,11 @@ k8s/
 
 ### 当前支持边界
 
-- 仓库内提供的 Kubernetes 清单是**单实例参考部署**。
-- 远程工作区 / 终端 / 会话协调仍有关键运行时状态保存在进程内，因此这里不再宣称或启用水平扩缩容。
-- 容器当前有意以 root 身份运行，因为 entrypoint 需要动态创建多用户工作区账户；仓库中尚未提供等价的非 root 生产镜像变体。
+- 仓库内提供的 Kubernetes 清单是**带粘性路由的多副本参考部署**，不是完全无状态的活跃会话 HA 设计。
+- 普通 HTTP/API 请求可以在 Pod 间负载均衡。活跃的远程工作区终端 relay、输出缓冲、命令队列和 WebSocket 对象仍保存在单个进程内。
+- 如果承载某个活跃终端 / relay 会话的 Pod 重启，数据库中的持久记录仍在，但内存缓冲和实时 relay socket 会中断；用户可能需要重新连接、恢复或重建该活跃终端 / 会话。
+- 移除粘性路由需要完成 [#1782](https://github.com/open-ace/open-ace/issues/1782) 中的运行态外置化。
+- 更强的 tenant-aware schema / query 隔离在 [#1781](https://github.com/open-ace/open-ace/issues/1781) 中继续推进。
 
 ### 使用 cert-manager 配置 TLS
 
@@ -167,7 +171,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## 扩容
 
-当前参考清单固定为单实例。如需重启或重新调度：
+当前参考清单以三个 Web 副本和粘性路由作为起点。如需重启或重新调度：
 
 ```bash
 kubectl rollout restart deployment open-ace -n open-ace
