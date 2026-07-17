@@ -71,21 +71,16 @@ def create_app(config=None):
     # Load configuration
     app.config["TEMPLATES_AUTO_RELOAD"] = True
 
-    # SECRET_KEY configuration with security checks
-    secret_key = os.environ.get("SECRET_KEY")
-    if not secret_key:
-        flask_env = os.environ.get("FLASK_ENV", "development")
-        if flask_env == "production":
-            raise RuntimeError("SECRET_KEY environment variable must be set in production!")
-        secret_key = "dev-secret-key"
-        logger.warning("Using development SECRET_KEY - DO NOT use in production!")
-    app.config["SECRET_KEY"] = secret_key
-
     if config:
         if isinstance(config, dict):
             app.config.update(config)
         else:
             app.config.from_object(config)
+
+    from app.utils.security_env import get_secret_key_for_app
+
+    # SECRET_KEY configuration with security checks
+    app.config["SECRET_KEY"] = get_secret_key_for_app(app.config.get("SECRET_KEY"))
 
     # Register error handlers
     register_error_handlers(app)

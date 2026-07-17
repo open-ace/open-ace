@@ -240,8 +240,8 @@ It also adds two columns to the `agent_sessions` table:
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `OPENACE_ENCRYPTION_KEY` | Recommended | Encryption key for API keys. When unset, derived from `SECRET_KEY` | SHA-256 of `SECRET_KEY` |
-| `SECRET_KEY` | Yes | Flask session key; also affects API key encryption | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | Yes (production) | Dedicated encryption key for API keys and SMTP passwords | Development-only fallback outside production |
+| `SECRET_KEY` | Yes | Flask session key | `dev-secret-key` (development only) |
 
 ### API Key Management
 
@@ -922,8 +922,8 @@ For unregistered CLI tools, the system falls back to a generic adapter (`Generic
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENACE_ENCRYPTION_KEY` | Encryption key for API keys (recommended to set) | Derived from `SECRET_KEY` |
-| `SECRET_KEY` | Flask session key | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | Dedicated encryption key for API keys / SMTP passwords (required in production) | Development-only fallback outside production |
+| `SECRET_KEY` | Flask session key | `dev-secret-key` (development only) |
 
 ### Remote Agent
 

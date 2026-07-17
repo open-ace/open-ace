@@ -110,7 +110,7 @@ Application configuration keys: `FLASK_APP`, `FLASK_ENV`, `PYTHONUNBUFFERED`, `L
 
 **IMPORTANT:** Change all placeholder values before deploying to production. Use sealed-secrets or an external secret management tool.
 
-Keys: `SECRET_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD`
+Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD`
 
 ### PersistentVolumeClaim
 

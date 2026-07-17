@@ -97,6 +97,12 @@ sudo ./deploy.sh
 
 **重要**：首次登录后请立即修改默认密码！
 
+在启动生产环境前，请先在 `.env` 或密钥管理系统中提供以下密钥：
+
+- `SECRET_KEY` — Flask 会话密钥，必须是强随机唯一值
+- `OPENACE_ENCRYPTION_KEY` — 专用于 API Key / SMTP 密码存储加密的独立密钥
+- `UPLOAD_AUTH_KEY` — 上传接口使用的共享认证密钥
+
 ### 目录结构
 
 ```
@@ -556,7 +562,9 @@ chmod -R 755 ~/.open-ace/
 1. **认证**：在生产环境中启用用户认证
 2. **HTTPS**：使用反向代理（nginx/Apache）配合 SSL
 3. **防火墙**：限制对 19888 端口的访问
-4. **密钥管理**：使用环境变量存储敏感数据
+4. **密钥管理**：使用环境变量或密钥管理系统存储敏感数据
+5. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
+6. **禁止占位密钥**：不要在生产环境使用 `change-me-in-production` 之类的占位值作为 `SECRET_KEY` 或 `UPLOAD_AUTH_KEY`
 
 ## 多用户工作区部署
 

@@ -8,8 +8,9 @@ Uses Fernet (AES-128-CBC) for symmetric encryption, consistent with API key encr
 import base64
 import hashlib
 import logging
-import os
 from typing import Optional, cast
+
+from app.utils.security_env import get_encryption_key_material
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,7 @@ class SMTPPasswordManager:
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
-        key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
-        if not key_env:
-            secret = os.environ.get("SECRET_KEY")
-            if not secret:
-                # Use a default key for development (should not be used in production)
-                logger.warning(
-                    "OPENACE_ENCRYPTION_KEY or SECRET_KEY not set. "
-                    "Using development key - DO NOT use in production!"
-                )
-                key_env = "dev-smtp-password-key"
-            else:
-                key_env = secret
+        key_env = get_encryption_key_material(purpose="SMTP password encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
