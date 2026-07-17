@@ -6,6 +6,7 @@ Caches DingTalk group information to avoid frequent API calls.
 Fetches group details from DingTalk APIs when needed.
 """
 
+import importlib
 import json
 import re
 import time
@@ -13,7 +14,11 @@ from pathlib import Path
 from typing import Optional, cast
 
 import requests
-from dingtalk_user_cache import get_dingtalk_access_token
+
+if __package__:
+    _dingtalk_user_cache = importlib.import_module(f"{__package__}.dingtalk_user_cache")
+else:
+    _dingtalk_user_cache = importlib.import_module("dingtalk_user_cache")
 
 CACHE_DIR = Path.home() / ".open-ace"
 CACHE_FILE = CACHE_DIR / "dingtalk_groups.json"
@@ -69,7 +74,7 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
         if time.time() - group_cache.get("cached_at", 0) < CACHE_TTL:
             return cast(Optional[dict], group_cache.get("data"))
 
-    token = get_dingtalk_access_token(app_key, app_secret)
+    token = _dingtalk_user_cache.get_dingtalk_access_token(app_key, app_secret)
     if not token:
         return None
 
