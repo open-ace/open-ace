@@ -1,7 +1,7 @@
 """Add tenant scope to workspace session tables
 
 Revision ID: 20260717_002_add_workspace_session_tenant_scope
-Revises: 20260717_001_add_proxy_token_jti_registry
+Revises: 20260715_001_add_last_ci_failure_head_sha
 Create Date: 2026-07-17
 
 Issue: #1760
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260717_002_add_workspace_session_tenant_scope"
-down_revision: str | None = "20260717_001_add_proxy_token_jti_registry"
+down_revision: str | None = "20260715_001_add_last_ci_failure_head_sha"
 branch_labels: str | None = None
 depends_on: str | None = None
 
