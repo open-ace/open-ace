@@ -519,6 +519,15 @@ class SSOManager:
             )
 
         code_verifier = cast("Optional[str]", auth_state.get("code_verifier"))
+        if not code_verifier:
+            logger.error(
+                "SSO auth state for provider %s is missing code_verifier; "
+                "rejecting to prevent PKCE downgrade (possible failed state "
+                "storage).",
+                provider_name,
+            )
+            self._delete_auth_state(state)
+            return SSOAuthResult(success=False, error="invalid_state")
 
         # Exchange code for tokens
         result = provider.authenticate(code, redirect_uri, code_verifier)
