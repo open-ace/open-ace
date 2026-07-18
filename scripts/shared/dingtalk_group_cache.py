@@ -8,12 +8,15 @@ Fetches group details from DingTalk APIs when needed.
 
 import importlib
 import json
+import logging
 import re
 import time
 from pathlib import Path
 from typing import Optional, cast
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 if __package__:
     _dingtalk_user_cache = importlib.import_module(f"{__package__}.dingtalk_user_cache")
@@ -84,10 +87,11 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
         return None
 
     url = "https://oapi.dingtalk.com/chat/get"
-    params = {"access_token": token, "chatid": chat_id}
+    headers = {"x-acs-dingtalk-access-token": token}
+    params = {"chatid": chat_id}
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -96,8 +100,9 @@ def get_group_info(chat_id: str, app_key: str, app_secret: str) -> Optional[dict
             cache["groups"][chat_id] = {"data": group_info, "cached_at": time.time()}
             save_cache(cache)
             return cast(Optional[dict], group_info)
-    except Exception as e:
-        print(f"Error getting DingTalk group info: {e}")
+    except Exception:
+        # Never log the raw request: the access_token lives in the URL/headers.
+        logger.exception("Error getting DingTalk group info for chatid %s", chat_id)
 
     return None
 

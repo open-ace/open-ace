@@ -782,6 +782,27 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
             "message_source": "dingtalk",
         }
 
+    # DingTalk user messages that aren't wrapped in the "System: [...] DingTalk[...]"
+    # envelope still carry a sender (either a "sender_id" metadata field or a
+    # "userid: content" prefix). Real DingTalk userids (e.g. "manager123") do not
+    # match the ou_/on_/oc_/U[A-Z0-9]+ prefixes handled later, so resolve them here
+    # rather than silently dropping sender_id and importing with no attribution.
+    if message_source == "dingtalk":
+        dingtalk_sender_match = re.search(r'"sender_id":\s*"([^"]+)"', text)
+        if not dingtalk_sender_match:
+            dingtalk_sender_match = re.match(
+                r"^\s*([a-zA-Z][a-zA-Z0-9_-]{2,63}):\s*(.+)$", text.strip(), re.DOTALL
+            )
+            if dingtalk_sender_match:
+                return {
+                    "sender_id": dingtalk_sender_match.group(1),
+                    "sender_name": None,
+                    "cleaned_content": dingtalk_sender_match.group(2).strip(),
+                    "message_source": "dingtalk",
+                }
+        if dingtalk_sender_match:
+            sender_id = dingtalk_sender_match.group(1)
+
     # ========== Step 4: Handle Slack System message format ==========
     # Pattern: "System: [...] Slack message in #channel from Name: ACTUAL_CONTENT"
     slack_match = re.search(
@@ -808,6 +829,9 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
 
     # ========== Step 5: Handle simple sender_id: content format ==========
     # Pattern: "ou_xxxxx: content" or "on_xxxxx: content" or "oc_xxxxx: content" or "Uxxxx: content"
+    # DingTalk userids (e.g. "manager123", "staff456") are alphanumeric but do NOT
+    # match the ou_/on_/oc_/U[A-Z0-9]+ prefixes used by Feishu/Slack, so they need
+    # their own branch -- otherwise DingTalk user messages silently get sender_id=None.
     simple_match = re.match(
         r"^(ou_[a-f0-9]+|on_[a-f0-9]+|oc_[a-f0-9]+|U[A-Z0-9]+):\s*(.+)$", text.strip(), re.DOTALL
     )

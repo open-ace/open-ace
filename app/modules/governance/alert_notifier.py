@@ -344,8 +344,8 @@ class AlertNotifier:
         parsed = urlparse(webhook_url)
         host = (parsed.hostname or "").lower()
         path = parsed.path.lower()
-        return self._matches_webhook_host(host, _DINGTALK_WEBHOOK_HOST_SNIPPETS) and (
-            "/robot/send" in path or "/robot/" in path
+        return self._matches_webhook_host(host, _DINGTALK_WEBHOOK_HOST_SNIPPETS) and path.endswith(
+            "/robot/send"
         )
 
     def _format_webhook_text(self, alert: Alert) -> str:
