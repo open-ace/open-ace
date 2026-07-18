@@ -229,7 +229,9 @@ def main():
 
         if success:
             logger.info(f"✓ Successfully re-encrypted {count} provider(s)")
-            logger.info("Update OPENACE_ENCRYPTION_KEY environment variable and restart the service")
+            logger.info(
+                "Update OPENACE_ENCRYPTION_KEY environment variable and restart the service"
+            )
         else:
             logger.error(f"✗ {len(failed)} provider(s) failed: {failed}")
             sys.exit(1)

@@ -50,6 +50,7 @@ CLEANUP_BATCH_SIZE = int(os.environ.get("OPENACE_SSO_CLEANUP_BATCH_SIZE", "1000"
 _cleanup_lock_path = "/tmp/openace-sso-cleanup.lock"
 _cleanup_timer: Optional[threading.Timer] = None
 _shutdown_requested = False
+_cleanup_lock_file = None  # type: ignore[var-annotated]  # File handle for lock
 
 
 class SSOManager:
@@ -399,7 +400,7 @@ class SSOManager:
                 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
                 AuditLogger().log(
-                    action=AuditAction.SYSTEM_CONFIG_ERROR.value,
+                    action=AuditAction.SYSTEM_CONFIG_CHANGE.value,
                     resource_type="sso_provider",
                     resource_id=e.provider_name,
                     details={"error": "decryption_failed"},

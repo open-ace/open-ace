@@ -71,9 +71,7 @@ def _index_exists(conn, table_name: str, index_name: str) -> bool:
     else:
         # SQLite
         result = conn.execute(
-            sa.text(
-                "SELECT name FROM sqlite_master WHERE type='index' AND name = :index_name"
-            ),
+            sa.text("SELECT name FROM sqlite_master WHERE type='index' AND name = :index_name"),
             {"index_name": index_name},
         )
         return result.fetchone() is not None
@@ -96,9 +94,7 @@ def upgrade() -> None:
         table_exists = table_exists_result.fetchone()[0]
     else:
         result = conn.execute(
-            sa.text(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='sso_auth_states'"
-            )
+            sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name='sso_auth_states'")
         )
         table_exists = result.fetchone() is not None
 
@@ -112,9 +108,7 @@ def upgrade() -> None:
 
         if conn.dialect.name == "postgresql":
             # PostgreSQL: Add column without default first, then backfill, then set NOT NULL
-            op.execute(
-                "ALTER TABLE sso_auth_states ADD COLUMN expires_at TIMESTAMP"
-            )
+            op.execute("ALTER TABLE sso_auth_states ADD COLUMN expires_at TIMESTAMP")
 
             # Backfill existing rows: expires_at = created_at + 10min
             # Handle NULL created_at by using current timestamp
@@ -130,9 +124,7 @@ def upgrade() -> None:
             )
 
             # Set NOT NULL constraint
-            op.execute(
-                "ALTER TABLE sso_auth_states ALTER COLUMN expires_at SET NOT NULL"
-            )
+            op.execute("ALTER TABLE sso_auth_states ALTER COLUMN expires_at SET NOT NULL")
         else:
             # SQLite: Add column with default for new rows, backfill existing
             op.execute(
@@ -161,9 +153,7 @@ def upgrade() -> None:
     index_name = "idx_sso_auth_states_expires"
     if not _index_exists(conn, "sso_auth_states", index_name):
         log.info(f"Creating index {index_name}")
-        op.execute(
-            f"CREATE INDEX {index_name} ON sso_auth_states(expires_at)"
-        )
+        op.execute(f"CREATE INDEX {index_name} ON sso_auth_states(expires_at)")
     else:
         log.info(f"Index {index_name} already exists, skipping")
 
