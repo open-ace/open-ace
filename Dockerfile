@@ -119,9 +119,14 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
 
 # Create non-root user for security. Keep uid/gid stable so Kubernetes
 # runAsUser/runAsGroup can match the filesystem ownership baked into the image.
+# Pre-create /home/open-ace/.open-ace (uid 1000) so the entrypoint's uid-aware
+# default config dir is writable as soon as the container starts, including
+# when docker-compose mounts the `config-data` named volume there: Docker's
+# named-volume init copies existing uid-1000 ownership into the volume on first
+# run, so `mkdir -p`/config generation won't hit Permission denied under uid 1000.
 RUN groupadd -g 1000 open-ace && \
     useradd -u 1000 -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
-    mkdir -p /home/open-ace && \
+    mkdir -p /home/open-ace/.open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 
 # ============================================================================
