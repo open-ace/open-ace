@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import sqlalchemy as sa
 from alembic import op
 
 if TYPE_CHECKING:
@@ -51,8 +52,23 @@ def _is_postgresql() -> bool:
     return bind.dialect.name == "postgresql"
 
 
+def _index_exists() -> bool:
+    """Return whether the index already exists.
+
+    schema.sql also defines this index, so databases bootstrapped from it (or
+    any environment that ran schema.sql) already have it. A bare
+    ``op.create_index`` would raise ``DuplicateObject`` on those databases.
+    """
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = {idx["name"] for idx in inspector.get_indexes(TABLE)}
+    return INDEX_NAME in existing
+
+
 def upgrade() -> None:
     """Create the status/created_at index (concurrently on PostgreSQL)."""
+    if _index_exists():
+        return
     if _is_postgresql():
         with op.get_context().autocommit_block():
             op.create_index(INDEX_NAME, TABLE, COLUMNS, postgresql_concurrently=True)

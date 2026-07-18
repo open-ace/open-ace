@@ -1,7 +1,7 @@
 """Add proxy_token_jtis lifecycle registry
 
 Revision ID: 20260717_001_add_proxy_token_jti_registry
-Revises: 20260714_002_add_users_mapping_indexes
+Revises: 20260715_002_add_users_mapping_indexes
 Create Date: 2026-07-17
 
 Issue: #1758
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260717_001_add_proxy_token_jti_registry"
-down_revision: Union[str, None] = "20260714_002_add_users_mapping_indexes"
+down_revision: Union[str, None] = "20260715_002_add_users_mapping_indexes"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 

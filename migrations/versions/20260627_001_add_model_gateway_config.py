@@ -33,22 +33,26 @@ def upgrade() -> None:
     # affinity) so the rebuilt snapshots match the committed schema files.
     from alembic import context
 
-    is_pg = context.get_context().dialect.name == "postgresql"
-    prefix_default = sa.text("false" if is_pg else "0")
+    # schema.sql also defines this table, so databases bootstrapped from it
+    # already have it. Guard the create to avoid DuplicateTable.
+    bind = op.get_bind()
+    if not sa.inspect(bind).has_table("model_gateway_config"):
+        is_pg = context.get_context().dialect.name == "postgresql"
+        prefix_default = sa.text("false" if is_pg else "0")
 
-    op.create_table(
-        "model_gateway_config",
-        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("mode", sa.Text, server_default="direct"),
-        sa.Column("base_url", sa.Text),
-        sa.Column("encrypted_api_key", sa.Text),
-        sa.Column("encryption_version", sa.Integer, server_default="1"),
-        sa.Column("model_prefix_mode", sa.Boolean, server_default=prefix_default),
-        sa.Column("model_prefix", sa.Text),
-        sa.Column("created_by", sa.Integer),
-        sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
-    )
+        op.create_table(
+            "model_gateway_config",
+            sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+            sa.Column("mode", sa.Text, server_default="direct"),
+            sa.Column("base_url", sa.Text),
+            sa.Column("encrypted_api_key", sa.Text),
+            sa.Column("encryption_version", sa.Integer, server_default="1"),
+            sa.Column("model_prefix_mode", sa.Boolean, server_default=prefix_default),
+            sa.Column("model_prefix", sa.Text),
+            sa.Column("created_by", sa.Integer),
+            sa.Column("created_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column("updated_at", sa.TIMESTAMP, server_default=sa.text("CURRENT_TIMESTAMP")),
+        )
 
 
 def downgrade() -> None:

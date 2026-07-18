@@ -23,64 +23,91 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    """Create persistent remote-runtime command and output queues."""
-    op.create_table(
-        "remote_runtime_commands",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("command_id", sa.String(length=64), nullable=False, unique=True),
-        sa.Column("machine_id", sa.Text(), nullable=False),
-        sa.Column("session_id", sa.Text(), nullable=True),
-        sa.Column("command_type", sa.Text(), nullable=False, server_default=""),
-        sa.Column("payload", sa.Text(), nullable=False),
-        sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
-        sa.Column("response_payload", sa.Text(), nullable=True),
-        sa.Column(
-            "created_at", sa.DateTime(), nullable=True, server_default=sa.text("CURRENT_TIMESTAMP")
-        ),
-        sa.Column("delivered_at", sa.DateTime(), nullable=True),
-        sa.Column("responded_at", sa.DateTime(), nullable=True),
-        sa.Column("expires_at", sa.DateTime(), nullable=True),
-    )
-    op.create_index(
-        "idx_remote_runtime_commands_machine_status",
-        "remote_runtime_commands",
-        ["machine_id", "status", "id"],
-        unique=False,
-    )
-    op.create_index(
-        "idx_remote_runtime_commands_expires",
-        "remote_runtime_commands",
-        ["expires_at"],
-        unique=False,
-    )
+    """Create persistent remote-runtime command and output queues.
 
-    op.create_table(
-        "remote_runtime_outputs",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("session_id", sa.Text(), nullable=False),
-        sa.Column("event_index", sa.Integer(), nullable=False),
-        sa.Column("stream", sa.Text(), nullable=False, server_default="stdout"),
-        sa.Column("payload", sa.Text(), nullable=False),
-        sa.Column(
-            "created_at", sa.DateTime(), nullable=True, server_default=sa.text("CURRENT_TIMESTAMP")
-        ),
-        sa.Column("expires_at", sa.DateTime(), nullable=True),
-        sa.UniqueConstraint(
-            "session_id", "event_index", name="uq_remote_runtime_outputs_session_index"
-        ),
-    )
-    op.create_index(
-        "idx_remote_runtime_outputs_session_index",
-        "remote_runtime_outputs",
-        ["session_id", "event_index"],
-        unique=False,
-    )
-    op.create_index(
-        "idx_remote_runtime_outputs_expires",
-        "remote_runtime_outputs",
-        ["expires_at"],
-        unique=False,
-    )
+    The schema.sql snapshots also define these tables (so freshly-bootstrapped
+    databases already have them), and the runtime can create them on first
+    use. Guard each create_table/create_index against the existing schema, the
+    same way 20260717_001 does, so this migration no-ops cleanly on databases
+    that already have the tables (Issue #1782).
+    """
+    connection = op.get_bind()
+    inspector = sa.inspect(connection)
+    existing_tables = set(inspector.get_table_names())
+
+    if "remote_runtime_commands" not in existing_tables:
+        op.create_table(
+            "remote_runtime_commands",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("command_id", sa.String(length=64), nullable=False, unique=True),
+            sa.Column("machine_id", sa.Text(), nullable=False),
+            sa.Column("session_id", sa.Text(), nullable=True),
+            sa.Column("command_type", sa.Text(), nullable=False, server_default=""),
+            sa.Column("payload", sa.Text(), nullable=False),
+            sa.Column("status", sa.String(length=32), nullable=False, server_default="pending"),
+            sa.Column("response_payload", sa.Text(), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.DateTime(),
+                nullable=True,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.Column("delivered_at", sa.DateTime(), nullable=True),
+            sa.Column("responded_at", sa.DateTime(), nullable=True),
+            sa.Column("expires_at", sa.DateTime(), nullable=True),
+        )
+
+    commands_indexes = {idx["name"] for idx in inspector.get_indexes("remote_runtime_commands")}
+    if "idx_remote_runtime_commands_machine_status" not in commands_indexes:
+        op.create_index(
+            "idx_remote_runtime_commands_machine_status",
+            "remote_runtime_commands",
+            ["machine_id", "status", "id"],
+            unique=False,
+        )
+    if "idx_remote_runtime_commands_expires" not in commands_indexes:
+        op.create_index(
+            "idx_remote_runtime_commands_expires",
+            "remote_runtime_commands",
+            ["expires_at"],
+            unique=False,
+        )
+
+    if "remote_runtime_outputs" not in existing_tables:
+        op.create_table(
+            "remote_runtime_outputs",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("session_id", sa.Text(), nullable=False),
+            sa.Column("event_index", sa.Integer(), nullable=False),
+            sa.Column("stream", sa.Text(), nullable=False, server_default="stdout"),
+            sa.Column("payload", sa.Text(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(),
+                nullable=True,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.Column("expires_at", sa.DateTime(), nullable=True),
+            sa.UniqueConstraint(
+                "session_id", "event_index", name="uq_remote_runtime_outputs_session_index"
+            ),
+        )
+
+    outputs_indexes = {idx["name"] for idx in inspector.get_indexes("remote_runtime_outputs")}
+    if "idx_remote_runtime_outputs_session_index" not in outputs_indexes:
+        op.create_index(
+            "idx_remote_runtime_outputs_session_index",
+            "remote_runtime_outputs",
+            ["session_id", "event_index"],
+            unique=False,
+        )
+    if "idx_remote_runtime_outputs_expires" not in outputs_indexes:
+        op.create_index(
+            "idx_remote_runtime_outputs_expires",
+            "remote_runtime_outputs",
+            ["expires_at"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:

@@ -1,8 +1,8 @@
 """Add indexes for user mapping optimization
 
-Revision ID: 20260714_002_add_users_mapping_indexes
-Revises: 20260714_001_add_ci_repair_fields_to_workflows
-Create Date: 2026-07-14
+Revision ID: 20260715_002_add_users_mapping_indexes
+Revises: 20260715_001_add_last_ci_failure_head_sha
+Create Date: 2026-07-15
 
 Issue: #1574
 PR #1572 introduced subqueries to resolve user_id from sender_name in both
@@ -29,7 +29,7 @@ from alembic import op
 
 log = logging.getLogger(__name__)
 
-revision: str = "20260714_002_add_users_mapping_indexes"
+revision: str = "20260715_002_add_users_mapping_indexes"
 down_revision: Union[str, None] = "20260715_001_add_last_ci_failure_head_sha"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
