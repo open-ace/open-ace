@@ -11,6 +11,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
@@ -27,8 +29,10 @@ from tests.e2e.regression.test_helpers import (
 )
 
 MODULE_NAME = "navigation"
+pytestmark = pytest.mark.regression
 
 
+@pytest.mark.priority_p0
 def test_sidebar_menu_visible():
     """测试侧边栏菜单显示"""
     with sync_playwright() as p:
@@ -67,6 +71,7 @@ def test_sidebar_menu_visible():
             browser.close()
 
 
+@pytest.mark.priority_p0
 def test_menu_navigation():
     """测试菜单项点击导航"""
     with sync_playwright() as p:

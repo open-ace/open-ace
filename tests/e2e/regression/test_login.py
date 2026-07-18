@@ -12,6 +12,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
@@ -20,6 +22,7 @@ from playwright.sync_api import sync_playwright
 
 from tests.e2e.regression.test_helpers import (
     BASE_URL,
+    PAGE_LOAD_TIMEOUT_MS,
     TestRunner,
     check_element_exists,
     create_browser_context,
@@ -27,6 +30,7 @@ from tests.e2e.regression.test_helpers import (
 )
 
 MODULE_NAME = "login"
+pytestmark = [pytest.mark.regression, pytest.mark.priority_p0]
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -39,7 +43,11 @@ def test_login_page_loads():
         page = context.new_page()
 
         try:
-            page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            page.goto(
+                f"{BASE_URL}/login",
+                wait_until="domcontentloaded",
+                timeout=PAGE_LOAD_TIMEOUT_MS,
+            )
             page.wait_for_selector("#username", state="visible", timeout=10000)
 
             # 验证登录页面元素
@@ -60,7 +68,11 @@ def test_login_success():
         page = context.new_page()
 
         try:
-            page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            page.goto(
+                f"{BASE_URL}/login",
+                wait_until="domcontentloaded",
+                timeout=PAGE_LOAD_TIMEOUT_MS,
+            )
             page.wait_for_selector("#username", state="visible", timeout=10000)
 
             # 输入凭据
@@ -93,7 +105,11 @@ def test_login_failure():
         page = context.new_page()
 
         try:
-            page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            page.goto(
+                f"{BASE_URL}/login",
+                wait_until="domcontentloaded",
+                timeout=PAGE_LOAD_TIMEOUT_MS,
+            )
             page.wait_for_selector("#username", state="visible", timeout=10000)
 
             # 输入错误凭据
@@ -121,7 +137,11 @@ def test_logout():
 
         try:
             # 先登录
-            page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+            page.goto(
+                f"{BASE_URL}/login",
+                wait_until="domcontentloaded",
+                timeout=PAGE_LOAD_TIMEOUT_MS,
+            )
             page.wait_for_selector("#username", state="visible", timeout=10000)
             page.fill("#username", "admin")
             page.fill("#password", "admin123")

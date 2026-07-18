@@ -121,6 +121,14 @@ npm run test
 
 # E2E tests with Playwright
 npx playwright test
+
+# Server-dependent extended tests used by CI PR/release gates
+cd frontend && npm ci && npm run build && cd ..
+python scripts/run_extended_tests.py --category critical --isolated-home
+
+# Full E2E or issue regression shards
+python scripts/run_extended_tests.py --category e2e --isolated-home
+python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
 See [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md) for the complete frontend reference.
