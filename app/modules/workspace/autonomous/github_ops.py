@@ -66,6 +66,38 @@ def _is_transient_error(stderr: str, returncode: int) -> bool:
     return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
 
 
+# Failure markers used to locate the real error lines inside a long pre-commit /
+# pytest / mypy log. The tail-only approach drops errors that sit in the middle
+# of the output (e.g. mypy failing while later hooks keep printing).
+_FAILURE_LINE_RE = re.compile(
+    r"(error:|Error:|ERROR:|Failed|failed|FAIL\b|"
+    r"would reformat|not formatted|not sorted|isort.*skipped|"
+    r"no-any-return|undefined name|"
+    r"\b[FEW]\d{3}\b)",  # flake8/ruff error codes
+    re.IGNORECASE,
+)
+
+
+def _extract_failure_lines(lines: list[str], max_lines: int = 80) -> list[str]:
+    """Return lines that look like failure output, plus 1 line of context.
+
+    Falls back to the tail when no line matches (keeps the original behavior
+    for logs without recognizable markers).
+    """
+    hit_indices: set[int] = set()
+    for i, line in enumerate(lines):
+        if _FAILURE_LINE_RE.search(line):
+            hit_indices.add(i)
+            if i > 0:
+                hit_indices.add(i - 1)
+            if i < len(lines) - 1:
+                hit_indices.add(i + 1)
+    if not hit_indices:
+        return lines[-max_lines:]
+    result = [lines[i] for i in sorted(hit_indices)]
+    return result[-max_lines:] if len(result) > max_lines else result
+
+
 class GitHubOpsError(Exception):
     """Error raised when a GitHub operation fails."""
 
@@ -938,6 +970,12 @@ class GitHubOps:
 
         Currently supports GitHub Actions job URLs. Non-Actions URLs return an
         empty string so callers can degrade gracefully for other CI providers.
+
+        pre-commit / pytest / mypy output interleaves many passing hooks with a
+        few failing ones; taking the last N lines can drop the actual error
+        (e.g. mypy fails in the middle while later hooks continue). Instead we
+        scan every line for failure markers and return those lines (with a
+        little context), falling back to the tail when no markers match.
         """
         parsed = self._parse_github_actions_job_url(str(check.get("link") or ""))
         if not parsed:
@@ -966,7 +1004,7 @@ class GitHubOps:
         if not lines:
             return ""
 
-        excerpt = "\n".join(lines[-max_lines:]).strip()
+        excerpt = "\n".join(_extract_failure_lines(lines, max_lines)).strip()
         if len(excerpt) > max_chars:
             excerpt = excerpt[-max_chars:].lstrip()
         return excerpt
