@@ -287,6 +287,12 @@ def test_alembic_upgrade_head_after_schema_sql_bootstrap_catches_duplicate_table
     (the 20260718_001 DuplicateTable failure mode) for the whole class, not one
     migration at a time. Any future migration whose table is also in schema.sql
     will trip this test unless it guards its create_table/create_index.
+
+    Coverage scope: this exercises the SQLite snapshot (schema-sqlite.sql) only.
+    schema-postgres.sql is kept in lockstep by the schema-sync CI check, so an
+    object missing from one snapshot is almost always missing from both, but a
+    migration creating an object present only in the PG snapshot would not be
+    caught here. The parity check is the backstop; this test is the SQLite leg.
     """
     from app.repositories.schema_init import load_schema_from_file
 
