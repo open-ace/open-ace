@@ -11,7 +11,7 @@ from typing import Optional
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import auth_required
+from app.auth.decorators import auth_required, require_tenant_scope
 from app.modules.analytics.cost_optimizer import CostOptimizer
 from app.modules.analytics.roi_calculator import ROIAssumptions, ROICalculator
 
@@ -71,14 +71,33 @@ def _require_auth():
     pass
 
 
-def _caller_tenant_id() -> Optional[int]:
-    """Return the authenticated caller's tenant_id, or None when unset.
+@roi_bp.before_request
+def _require_tenant_scope():
+    """Fail closed for non-admins with no tenant (Issue #1775 / #1780).
 
-    ``g.tenant_id`` is populated by ``auth_required`` for normal requests; the
-    ``getattr`` guard keeps these routes testable without a full auth pipeline
-    while still scoping every multi-tenant request.
+    Without this gate, ``_caller_tenant_id()`` returns ``None`` for a
+    non-admin whose user row has no ``tenant_id``, and the calculator's
+    ``_normalize_tenant_id(None)`` collapses to "no tenant filter" — a
+    wildcard/global query that leaks cross-tenant ROI data. Admins keep
+    global scope (``tenant_id=None``); tenant-scoped non-admins keep their
+    tenant. Mirrors ``app/routes/usage.py``.
     """
-    return getattr(g, "tenant_id", None)
+    _, error = require_tenant_scope()
+    if error is not None:
+        return error
+
+
+def _caller_tenant_id() -> Optional[int]:
+    """Return the authenticated caller's tenant scope.
+
+    Non-admins reaching this point are guaranteed to have a resolvable
+    tenant (``_require_tenant_scope`` denies the request otherwise); admins
+    may still be ``None`` (global scope). Reading from ``g.user.tenant_id``
+    (rather than ``g.tenant_id``) keeps the source of truth identical to
+    ``usage``/``projects`` so the gate and the read can never disagree.
+    """
+    user = getattr(g, "user", None) or {}
+    return user.get("tenant_id")
 
 
 # ==================== ROI Analysis ====================
