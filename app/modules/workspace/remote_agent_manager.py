@@ -9,6 +9,7 @@ command dispatching, and message routing for remote workspace sessions.
 
 import json
 import logging
+import sqlite3
 import threading
 import time
 import uuid
@@ -29,6 +30,28 @@ from app.modules.workspace.agent_token import (
 from app.repositories.database import DB_PATH, Database, adapt_boolean_value, is_postgresql
 
 logger = logging.getLogger(__name__)
+
+# Bounded retry count for the event_index allocation race. Concurrent producers
+# can both read the same MAX(event_index)+1; the UNIQUE(session_id, event_index)
+# constraint then rejects the second INSERT. We re-read MAX+1 and retry rather
+# than dropping the output chunk.
+_PERSIST_OUTPUT_MAX_RETRIES = 8
+
+
+def _is_unique_violation(exc: Exception) -> bool:
+    """Return True if ``exc`` is a uniqueness-constraint violation.
+
+    Covers both SQLite (``sqlite3.IntegrityError``) and PostgreSQL
+    (``psycopg2.errors.UniqueViolation``). We avoid importing psycopg2 at module
+    load time (it is optional in SQLite-only dev) and instead match by name.
+    """
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    # psycopg2.errors.UniqueViolation (and its pgcode 23505 on the base Error).
+    pgcode = getattr(exc, "pgcode", None) or getattr(getattr(exc, "diag", None), "sqlstate", None)
+    if pgcode == "23505":
+        return True
+    return type(exc).__name__ == "UniqueViolation"
 
 
 def _param() -> str:
@@ -118,6 +141,10 @@ class RemoteAgentManager:
         self._pending_requests: dict[str, dict] = {}
         # Lock for gevent coroutine safety
         self._lock = Semaphore(1)
+        # Serializes the _persist_output read-modify-write on event_index within
+        # this process. Cross-process/cross-pod collisions are handled by the
+        # uniqueness-constraint retry loop in _persist_output.
+        self._persist_output_lock = threading.Lock()
         # Token cleanup lazy-start flag
         self._token_cleanup_started: bool = False
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
@@ -1427,39 +1454,98 @@ class RemoteAgentManager:
             return list(buf)[effective_index:]
 
     def _persist_output(self, session_id: str, output: dict[str, Any]) -> None:
-        """Persist stream output for cross-pod SSE replay and restart recovery."""
+        """Persist stream output for cross-pod SSE replay and restart recovery.
+
+        event_index is allocated per session via ``MAX(event_index)+1``. Under
+        concurrent producers (the multi-pod topology enabled by PR #1790) two
+        writers can read the same next index and the UNIQUE(session_id,
+        event_index) constraint rejects the second INSERT. Rather than swallow
+        that IntegrityError at debug level (which silently drops the output
+        chunk), we serialize the read-modify-write at the DB level and retry on
+        the rare collision: on SQLite we open an ``IMMEDIATE`` transaction (the
+        DB-wide write lock serializes SELECT+INSERT), on PostgreSQL we take a
+        transaction-scoped advisory lock keyed on the session. A per-process
+        lock additionally coalesces in-process producers so the common case
+        needs one attempt.
+        """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        try:
-            with self.db.connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    f"""
-                    SELECT COALESCE(MAX(event_index), 0) + 1 AS next_index
-                    FROM remote_runtime_outputs
-                    WHERE session_id = {_param()}
-                    """,
-                    (session_id,),
-                )
-                row = cursor.fetchone()
-                event_index = int(row["next_index"] if row else 1)
-                cursor.execute(
-                    f"""
-                    INSERT INTO remote_runtime_outputs
-                    (session_id, event_index, stream, payload, created_at, expires_at)
-                    VALUES ({_params(6)})
-                    """,
-                    (
-                        session_id,
-                        event_index,
-                        str(output.get("stream", "stdout")),
-                        json.dumps(output),
-                        now.isoformat(),
-                        (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat(),
-                    ),
-                )
-                conn.commit()
-        except Exception as e:
-            logger.debug("Failed to persist output for session %s: %s", session_id[:8], e)
+        payload = json.dumps(output)
+        stream = str(output.get("stream", "stdout"))
+        expires_at = (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat()
+        # Serialize the read-modify-write within this process; the DB-level
+        # lock below handles cross-process/cross-pod collisions.
+        with self._persist_output_lock:
+            last_exc: Exception | None = None
+            for _attempt in range(_PERSIST_OUTPUT_MAX_RETRIES):
+                try:
+                    with self.db.connection() as conn:
+                        cursor = conn.cursor()
+                        if is_postgresql():
+                            # Transaction-scoped advisory lock keyed on the
+                            # session id hash; held until COMMIT/ROLLBACK.
+                            cursor.execute(
+                                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                                (session_id,),
+                            )
+                            cursor.fetchone()
+                        else:
+                            # SQLite: acquire the write lock BEFORE the SELECT so
+                            # the read-modify-write is serialized across
+                            # connections (default deferred transactions would
+                            # let two readers see the same MAX).
+                            cursor.execute("BEGIN IMMEDIATE")
+                        # Re-read on EVERY attempt so a retried insert does not
+                        # reuse a stale index.
+                        cursor.execute(
+                            f"""
+                            SELECT COALESCE(MAX(event_index), 0) + 1 AS next_index
+                            FROM remote_runtime_outputs
+                            WHERE session_id = {_param()}
+                            """,
+                            (session_id,),
+                        )
+                        row = cursor.fetchone()
+                        event_index = int(row["next_index"] if row else 1)
+                        cursor.execute(
+                            f"""
+                            INSERT INTO remote_runtime_outputs
+                            (session_id, event_index, stream, payload, created_at, expires_at)
+                            VALUES ({_params(6)})
+                            """,
+                            (
+                                session_id,
+                                event_index,
+                                stream,
+                                payload,
+                                now.isoformat(),
+                                expires_at,
+                            ),
+                        )
+                        conn.commit()
+                    return
+                except Exception as e:
+                    if _is_unique_violation(e):
+                        # Lost the event_index race against a concurrent producer;
+                        # roll back and retry with a freshly re-read index.
+                        last_exc = e
+                        continue
+                    # Unexpected failure: do NOT swallow at debug level (the old
+                    # behavior hid real outages). Surface it so callers/ops see it.
+                    logger.warning(
+                        "Failed to persist output for session %s: %s",
+                        session_id[:8],
+                        e,
+                    )
+                    raise
+        # Exhausted retries on a uniqueness collision. Log at error (not debug)
+        # and re-raise so the failure is visible instead of silently dropping output.
+        logger.error(
+            "Could not allocate event_index for session %s after %d retries: %s",
+            session_id[:8],
+            _PERSIST_OUTPUT_MAX_RETRIES,
+            last_exc,
+        )
+        raise last_exc  # type: ignore[misc]
 
     def _get_persisted_output(self, session_id: str, after_index: int = 0) -> list[dict]:
         """Read persisted output events after the delivered event index."""
