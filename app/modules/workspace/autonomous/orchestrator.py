@@ -1313,9 +1313,16 @@ class AutonomousOrchestrator:
         commit_before = ""
         try:
             commit_before = gh.get_pr_head_sha(pr_number)
-        except Exception:
+        except Exception as exc:
             # Fallback to local HEAD if the PR head lookup fails — better than
-            # skipping the check entirely.
+            # skipping the check entirely. Log so ops can see when the fix
+            # degrades to the old (buggy) local-vs-local comparison.
+            logger.warning(
+                "get_pr_head_sha failed for PR #%s, falling back to local HEAD "
+                "for commit_before: %s",
+                pr_number,
+                exc,
+            )
             try:
                 commit_before = gh.get_current_commit()
             except Exception:
