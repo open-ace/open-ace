@@ -93,7 +93,11 @@ def cors_app(clean_cors_env):
 class TestWebSocketFrameCap:
     def test_oversized_64bit_frame_is_rejected_before_payload_read(self, monkeypatch):
         monkeypatch.setenv("OPENACE_WS_MAX_MESSAGE_BYTES", "1024")
-        frame = struct.pack("!BBQ", 0x82, 0x80 | 127, 2048) + b"\x37\xfa\x21\x3d"
+        # Build a properly masked oversized frame
+        mask_key = b"\x37\xfa\x21\x3d"
+        oversized_payload = b"x" * 2048
+        masked_payload = _mask(mask_key, oversized_payload)
+        frame = struct.pack("!BBQ", 0x82, 0x80 | 127, 2048) + mask_key + masked_payload
         sock = FakeSocket(frame)
 
         with pytest.raises(ws_frame.WebSocketMessageTooLarge, match="frame length 2048"):

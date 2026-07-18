@@ -12,6 +12,7 @@ geventwebsocket 0.10.1 and newer gevent versions.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import struct
 from base64 import b64encode
@@ -23,6 +24,12 @@ _WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # forcing unbounded allocation in the raw frame bridge.
 DEFAULT_MAX_MESSAGE_SIZE = 8 * 1024 * 1024
 
+# RFC 6455 §5.5: Control frames payload limit
+MAX_CONTROL_FRAME_PAYLOAD = 125
+
+# Minimum CLOSE frame payload size (status code)
+MIN_CLOSE_PAYLOAD_SIZE = 2
+
 # Opcodes
 OP_CONT = 0x0
 OP_TEXT = 0x1
@@ -31,9 +38,18 @@ OP_CLOSE = 0x8
 OP_PING = 0x9
 OP_PONG = 0xA
 
+# All valid opcodes for validation
+_VALID_OPCODES = (OP_CONT, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG)
+
+logger = logging.getLogger(__name__)
+
 
 class WebSocketMessageTooLarge(ValueError):
     """Raised when an inbound WebSocket message exceeds the configured cap."""
+
+
+class WebSocketProtocolError(ValueError):
+    """Raised when a WebSocket frame violates RFC 6455 protocol rules."""
 
 
 def get_max_message_size() -> int:
@@ -94,6 +110,18 @@ def _recv_exactly(sock, n: int) -> bytes:
     return bytes(buf)
 
 
+def _safe_send_close(sock, code: int, reason: str) -> None:
+    """Send close frame with exception safety.
+
+    Attempts to send a close frame, logging any errors but not raising.
+    This ensures cleanup logic can continue even if the socket is already broken.
+    """
+    try:
+        send_close(sock, code, reason)
+    except Exception:
+        logger.debug("Failed to send close frame", exc_info=True)
+
+
 def recv_message(sock) -> bytes | str | None:
     """Read one complete WebSocket message from *sock*.
 
@@ -106,7 +134,24 @@ def recv_message(sock) -> bytes | str | None:
         - ``str`` for text messages
         - ``None`` on close frame or connection error
 
+    Raises:
+        - ``WebSocketProtocolError`` on RFC 6455 protocol violations
+        - ``WebSocketMessageTooLarge`` when message exceeds size limit
+
     Ping frames are automatically answered with pong.
+
+    State Machine (message_opcode):
+      - None: Initial state or message complete
+      - OP_TEXT/OP_BINARY: Message in progress
+
+    Transitions:
+      1. None + TEXT/BINARY -> message_opcode = opcode
+      2. message_opcode + CONT -> accumulate
+      3. message_opcode + FIN -> return message, message_opcode = None
+      4. message_opcode + TEXT/BINARY -> PROTOCOL ERROR
+      5. message_opcode + CLOSE/PING/PONG -> handle control frame (allowed)
+
+    Control frames can appear at any time and do not affect message_opcode.
     """
     fragments: list[bytes] = []
     message_opcode: int | None = None
@@ -135,11 +180,25 @@ def recv_message(sock) -> bytes | str | None:
                 return None
             length = struct.unpack("!Q", ext)[0]
 
+        # RFC 6455 §5.5: Control frames payload must be <= 125 bytes
+        if opcode in (OP_CLOSE, OP_PING, OP_PONG):
+            if length > MAX_CONTROL_FRAME_PAYLOAD:
+                _safe_send_close(sock, 1002, "Control frame payload exceeds 125 bytes")
+                raise WebSocketProtocolError(
+                    f"Control frame payload {length} exceeds {MAX_CONTROL_FRAME_PAYLOAD} bytes"
+                )
+
+        # Check frame length before reading payload to prevent DoS
         if length > max_message_size:
-            send_close(sock, 1009, "Message too large")
+            _safe_send_close(sock, 1009, "Message too large")
             raise WebSocketMessageTooLarge(
                 f"WebSocket frame length {length} exceeds limit {max_message_size}"
             )
+
+        # RFC 6455 §5.1/§5.2: Client frames must be masked
+        if not masked:
+            _safe_send_close(sock, 1002, "Client frame must be masked")
+            raise WebSocketProtocolError("Client frame must be masked")
 
         mask_key = _recv_exactly(sock, 4) if masked else b""
         if masked and len(mask_key) < 4:
@@ -157,32 +216,62 @@ def recv_message(sock) -> bytes | str | None:
             payload = bytes(payload)
 
         # Control frames can appear between fragments
+        # RFC 6455 §5.5: Control frames MUST NOT be fragmented (FIN must be 1)
         if opcode == OP_CLOSE:
+            # RFC 6455 §5.5.1: CLOSE payload must be empty or >= 2 bytes
+            if 0 < len(payload) < MIN_CLOSE_PAYLOAD_SIZE:
+                _safe_send_close(
+                    sock, 1002, "Close frame payload must be empty or at least 2 bytes"
+                )
+                raise WebSocketProtocolError(
+                    f"Close frame payload {len(payload)} bytes, must be 0 or >= {MIN_CLOSE_PAYLOAD_SIZE}"
+                )
+            # RFC 6455 §5.5: Control frames must have FIN=1
+            if not fin:
+                _safe_send_close(sock, 1002, "Control frame must not be fragmented")
+                raise WebSocketProtocolError("Close frame must not be fragmented")
             return None
         if opcode == OP_PING:
+            # RFC 6455 §5.5: Control frames must have FIN=1
+            if not fin:
+                _safe_send_close(sock, 1002, "Control frame must not be fragmented")
+                raise WebSocketProtocolError("Ping frame must not be fragmented")
             send_pong(sock, payload)
             continue
         if opcode == OP_PONG:
+            # RFC 6455 §5.5: Control frames must have FIN=1
+            if not fin:
+                _safe_send_close(sock, 1002, "Control frame must not be fragmented")
+                raise WebSocketProtocolError("Pong frame must not be fragmented")
             continue
 
         # Data frames
         if opcode in (OP_TEXT, OP_BINARY):
+            # RFC 6455 §5.4: New data frame must not interrupt incomplete message
+            if message_opcode is not None:
+                _safe_send_close(sock, 1002, "Message interrupted by new data frame")
+                raise WebSocketProtocolError(
+                    f"New data frame (opcode {opcode}) interrupts incomplete message"
+                )
             message_opcode = opcode
             fragments = [payload]
             total_length = len(payload)
         elif opcode == OP_CONT:
             if message_opcode is None:
                 return None
+            # Check total length BEFORE append to prevent transient 2x allocation
+            expected_total = total_length + len(payload)
+            if expected_total > max_message_size:
+                _safe_send_close(sock, 1009, "Message too large")
+                raise WebSocketMessageTooLarge(
+                    f"WebSocket message length {expected_total} exceeds limit {max_message_size}"
+                )
             fragments.append(payload)
-            total_length += len(payload)
+            total_length = expected_total
         else:
-            continue
-
-        if total_length > max_message_size:
-            send_close(sock, 1009, "Message too large")
-            raise WebSocketMessageTooLarge(
-                f"WebSocket message length {total_length} exceeds limit {max_message_size}"
-            )
+            # RFC 6455 §5.5: Reserved opcodes must be treated as protocol error
+            _safe_send_close(sock, 1002, "Reserved opcode not allowed")
+            raise WebSocketProtocolError(f"Reserved opcode {opcode} not allowed")
 
         if fin:
             combined = b"".join(fragments)

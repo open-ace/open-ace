@@ -232,13 +232,13 @@ class TestRecvMessage:
         result = ws_frame.recv_message(sock)
         assert result == "data"
 
-    def test_unmasked_frame(self):
-        """Server may receive unmasked frames from misbehaving clients."""
+    def test_unmasked_frame_rejected(self):
+        """Unmasked client frames must be rejected per RFC 6455 §5.1."""
         payload = b"test"
         frame = _build_client_frame(payload, opcode=OP_TEXT, mask=False)
         sock = FakeSocket(frame)
-        result = ws_frame.recv_message(sock)
-        assert result == "test"
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be masked"):
+            ws_frame.recv_message(sock)
 
     def test_medium_payload_126(self):
         """Payload length encoded as 16-bit (126-65535 bytes)."""
@@ -396,9 +396,9 @@ class TestSendPong:
 
 class TestRoundTrip:
     def test_text_round_trip(self):
-        """Send a text message then read it back via unmasked frame."""
+        """Send a text message then read it back via masked frame."""
         payload = b"round trip test"
-        frame = struct.pack("!BB", 0x81, len(payload)) + payload
+        frame = _build_client_frame(payload, opcode=OP_TEXT)
         sock = FakeSocket(frame)
         result = ws_frame.recv_message(sock)
         assert result == "round trip test"
@@ -406,7 +406,7 @@ class TestRoundTrip:
     def test_binary_round_trip(self):
         payload = bytes(range(256))
         # 256 bytes needs 2-byte extended length
-        frame = struct.pack("!BBH", 0x82, 126, len(payload)) + payload
+        frame = _build_client_frame(payload, opcode=OP_BINARY)
         sock = FakeSocket(frame)
         result = ws_frame.recv_message(sock)
         assert result == payload
@@ -499,3 +499,275 @@ class TestFragmentation:
         frame = _build_fragment_frame(b"stray", OP_CONT, fin=True)
         sock = FakeSocket(frame)
         assert ws_frame.recv_message(sock) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 1 (Control frame payload limit)
+# ---------------------------------------------------------------------------
+
+
+class TestControlFramePayloadLimit:
+    """RFC 6455 §5.5: Control frames payload must be <= 125 bytes."""
+
+    def test_ping_payload_126_bytes_rejected(self):
+        """PING with 126 bytes payload must be rejected."""
+        payload = b"x" * 126
+        frame = _build_client_frame(payload, opcode=OP_PING)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="exceeds 125 bytes"):
+            ws_frame.recv_message(sock)
+
+    def test_pong_payload_126_bytes_rejected(self):
+        """PONG with 126 bytes payload must be rejected."""
+        payload = b"x" * 126
+        frame = _build_client_frame(payload, opcode=OP_PONG)
+        sock = FakeSocket(frame)
+        # PONG is ignored, so need a text frame after to complete reading
+        text_frame = _build_client_frame(b"after", opcode=OP_TEXT)
+        sock = FakeSocket(frame + text_frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="exceeds 125 bytes"):
+            ws_frame.recv_message(sock)
+
+    def test_close_payload_126_bytes_rejected(self):
+        """CLOSE with 126 bytes payload must be rejected."""
+        payload = b"\x03\xe8" + b"x" * 124  # 2 bytes status code + 124 bytes reason
+        frame = _build_client_frame(payload, opcode=OP_CLOSE)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="exceeds 125 bytes"):
+            ws_frame.recv_message(sock)
+
+    def test_ping_payload_125_bytes_accepted(self):
+        """PING with 125 bytes payload should be accepted (boundary value)."""
+        payload = b"x" * 125
+        ping_frame = _build_client_frame(payload, opcode=OP_PING)
+        text_frame = _build_client_frame(b"after", opcode=OP_TEXT)
+        sock = FakeSocket(ping_frame + text_frame)
+        result = ws_frame.recv_message(sock)
+        assert result == "after"
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 4 (Control frame FIN bit)
+# ---------------------------------------------------------------------------
+
+
+class TestControlFrameFinValidation:
+    """RFC 6455 §5.5: Control frames MUST NOT be fragmented (FIN must be 1)."""
+
+    def test_ping_fin_zero_rejected(self):
+        """PING with FIN=0 must be rejected."""
+        frame = _build_fragment_frame(b"test", OP_PING, fin=False)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must not be fragmented"):
+            ws_frame.recv_message(sock)
+
+    def test_pong_fin_zero_rejected(self):
+        """PONG with FIN=0 must be rejected."""
+        frame = _build_fragment_frame(b"test", OP_PONG, fin=False)
+        text_frame = _build_fragment_frame(b"after", OP_TEXT, fin=True)
+        sock = FakeSocket(frame + text_frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must not be fragmented"):
+            ws_frame.recv_message(sock)
+
+    def test_close_fin_zero_rejected(self):
+        """CLOSE with FIN=0 must be rejected."""
+        frame = _build_fragment_frame(b"\x03\xe8", OP_CLOSE, fin=False)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must not be fragmented"):
+            ws_frame.recv_message(sock)
+
+    def test_ping_fin_one_accepted(self):
+        """PING with FIN=1 should be accepted."""
+        ping_frame = _build_fragment_frame(b"test", OP_PING, fin=True)
+        text_frame = _build_fragment_frame(b"after", OP_TEXT, fin=True)
+        sock = FakeSocket(ping_frame + text_frame)
+        result = ws_frame.recv_message(sock)
+        assert result == "after"
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 2 (Client frame masking)
+# ---------------------------------------------------------------------------
+
+
+class TestClientFrameMasking:
+    """RFC 6455 §5.1/§5.2: Client frames must be masked."""
+
+    def test_unmasked_text_frame_rejected(self):
+        """Unmasked TEXT frame must be rejected."""
+        frame = _build_client_frame(b"test", opcode=OP_TEXT, mask=False)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be masked"):
+            ws_frame.recv_message(sock)
+
+    def test_unmasked_binary_frame_rejected(self):
+        """Unmasked BINARY frame must be rejected."""
+        frame = _build_client_frame(b"\x00\x01", opcode=OP_BINARY, mask=False)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be masked"):
+            ws_frame.recv_message(sock)
+
+    def test_unmasked_cont_frame_rejected(self):
+        """Unmasked CONT frame must be rejected."""
+        f1 = _build_fragment_frame(b"hel", OP_TEXT, fin=False)
+        f2 = _build_fragment_frame(b"lo", OP_CONT, fin=True, mask=False)
+        sock = FakeSocket(f1 + f2)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be masked"):
+            ws_frame.recv_message(sock)
+
+    def test_unmasked_ping_frame_rejected(self):
+        """Unmasked PING frame must be rejected."""
+        frame = _build_client_frame(b"test", opcode=OP_PING, mask=False)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be masked"):
+            ws_frame.recv_message(sock)
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 3 (Fragment reassembly boundary)
+# ---------------------------------------------------------------------------
+
+
+class TestFragmentReassemblyBoundary:
+    """RFC 6455 §5.4: Fragment reassembly must not transiently exceed message size."""
+
+    def test_fragment_exceeds_limit_before_append(self):
+        """Total length check must happen BEFORE fragments.append."""
+        # Create a fragmented message that would exceed max_message_size
+        # We'll use a smaller limit for testing
+        import os
+
+        original_limit = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES")
+
+        try:
+            # Set a small limit for testing
+            os.environ["OPENACE_WS_MAX_MESSAGE_BYTES"] = "100"
+            max_size = ws_frame.get_max_message_size()
+            assert max_size == 100
+
+            # First fragment: 80 bytes (within limit)
+            f1 = _build_fragment_frame(b"x" * 80, OP_TEXT, fin=False)
+            # Second fragment: 30 bytes (total would be 110, exceeding 100)
+            f2 = _build_fragment_frame(b"y" * 30, OP_CONT, fin=True)
+            sock = FakeSocket(f1 + f2)
+
+            # Should reject before appending second fragment
+            with pytest.raises(ws_frame.WebSocketMessageTooLarge):
+                ws_frame.recv_message(sock)
+        finally:
+            # Restore original limit
+            if original_limit is not None:
+                os.environ["OPENACE_WS_MAX_MESSAGE_BYTES"] = original_limit
+            else:
+                os.environ.pop("OPENACE_WS_MAX_MESSAGE_BYTES", None)
+
+    def test_new_data_frame_interrupts_message(self):
+        """New data frame interrupting incomplete message must be rejected."""
+        # Start a fragmented TEXT message
+        f1 = _build_fragment_frame(b"hel", OP_TEXT, fin=False)
+        # Send a new TEXT frame without completing the first message
+        f2 = _build_fragment_frame(b"lo", OP_TEXT, fin=True)
+        sock = FakeSocket(f1 + f2)
+
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="interrupts incomplete message"):
+            ws_frame.recv_message(sock)
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 5 (Reserved opcodes)
+# ---------------------------------------------------------------------------
+
+
+class TestReservedOpcodes:
+    """RFC 6455 §5.5: Reserved opcodes must be treated as protocol error."""
+
+    def test_reserved_opcode_0x3_rejected(self):
+        """Opcode 0x3 is reserved and must be rejected."""
+        frame = _build_client_frame(b"test", opcode=0x3)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="Reserved opcode"):
+            ws_frame.recv_message(sock)
+
+    def test_reserved_opcode_0x7_rejected(self):
+        """Opcode 0x7 is reserved and must be rejected."""
+        frame = _build_client_frame(b"test", opcode=0x7)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="Reserved opcode"):
+            ws_frame.recv_message(sock)
+
+    def test_reserved_opcode_0xb_rejected(self):
+        """Opcode 0xB is reserved and must be rejected."""
+        frame = _build_client_frame(b"test", opcode=0xB)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="Reserved opcode"):
+            ws_frame.recv_message(sock)
+
+    def test_reserved_opcode_0xf_rejected(self):
+        """Opcode 0xF is reserved and must be rejected."""
+        frame = _build_client_frame(b"test", opcode=0xF)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="Reserved opcode"):
+            ws_frame.recv_message(sock)
+
+
+# ---------------------------------------------------------------------------
+# Tests: RFC 6455 compliance - Finding 6 (CLOSE frame payload format)
+# ---------------------------------------------------------------------------
+
+
+class TestCloseFramePayloadFormat:
+    """RFC 6455 §5.5.1: CLOSE frame payload must be empty or >= 2 bytes."""
+
+    def test_close_payload_0_bytes_accepted(self):
+        """CLOSE with 0 bytes payload is valid."""
+        frame = _build_client_frame(b"", opcode=OP_CLOSE)
+        sock = FakeSocket(frame)
+        assert ws_frame.recv_message(sock) is None
+
+    def test_close_payload_1_byte_rejected(self):
+        """CLOSE with 1 byte payload must be rejected."""
+        frame = _build_client_frame(b"x", opcode=OP_CLOSE)
+        sock = FakeSocket(frame)
+        with pytest.raises(ws_frame.WebSocketProtocolError, match="must be 0 or >="):
+            ws_frame.recv_message(sock)
+
+    def test_close_payload_2_bytes_accepted(self):
+        """CLOSE with 2 bytes payload is valid (status code only)."""
+        frame = _build_client_frame(b"\x03\xe8", opcode=OP_CLOSE)
+        sock = FakeSocket(frame)
+        assert ws_frame.recv_message(sock) is None
+
+    def test_close_payload_125_bytes_accepted(self):
+        """CLOSE with 125 bytes payload is valid (boundary value)."""
+        # 2 bytes status code + 123 bytes reason
+        payload = b"\x03\xe8" + b"x" * 123
+        frame = _build_client_frame(payload, opcode=OP_CLOSE)
+        sock = FakeSocket(frame)
+        assert ws_frame.recv_message(sock) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Exception classes
+# ---------------------------------------------------------------------------
+
+
+class TestExceptionClasses:
+    """Test that custom exception classes are properly defined."""
+
+    def test_websocket_message_too_large_is_value_error(self):
+        """WebSocketMessageTooLarge should inherit from ValueError."""
+        assert issubclass(ws_frame.WebSocketMessageTooLarge, ValueError)
+
+    def test_websocket_protocol_error_is_value_error(self):
+        """WebSocketProtocolError should inherit from ValueError."""
+        assert issubclass(ws_frame.WebSocketProtocolError, ValueError)
+
+    def test_websocket_message_too_large_instantiation(self):
+        """WebSocketMessageTooLarge can be instantiated with message."""
+        exc = ws_frame.WebSocketMessageTooLarge("test message")
+        assert str(exc) == "test message"
+
+    def test_websocket_protocol_error_instantiation(self):
+        """WebSocketProtocolError can be instantiated with message."""
+        exc = ws_frame.WebSocketProtocolError("test message")
+        assert str(exc) == "test message"
