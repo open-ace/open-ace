@@ -218,28 +218,29 @@ def is_valid_path(path: str, allowed_prefixes: list[str] | None = None) -> bool:
     if not path:
         return False
 
+    # Check for path traversal in the original input
+    if ".." in path:
+        return False
+
+    # Platform-specific validation for original path
+    system = platform.system()
+    if system == "Windows":
+        # Windows: must be a valid drive path
+        if not (len(path) >= 2 and path[1] == ":"):
+            return False
+    else:
+        # Mac/Linux: must start with / (absolute path required)
+        if not path.startswith("/"):
+            return False
+
     # Resolve to absolute path, following symlinks to detect traversal
     try:
         abs_path = os.path.realpath(path)
     except Exception:
         return False
 
-    # Check for path traversal in the original input
-    if ".." in path:
-        return False
-
-    # Platform-specific validation
-    system = platform.system()
-    if system == "Windows":
-        # Windows: must be a valid drive path
-        if not (len(abs_path) >= 2 and abs_path[1] == ":"):
-            return False
-    else:
-        # Mac/Linux: must start with /
-        if not abs_path.startswith("/"):
-            return False
-
-        # Blacklist check for Linux/Mac - protect system directories
+    # Blacklist check for Linux/Mac - protect system directories
+    if system != "Windows":
         for blocked in _BLACKLISTED_RESOLVED:
             if abs_path == blocked or abs_path.startswith(blocked + os.sep):
                 return False
