@@ -33,3 +33,11 @@ class TestK8sPlaceholderSecretsFailClosed:
 
     def test_strong_secret_still_accepted(self):
         assert is_weak_secret_value("a-real-randomly-generated-64-char-secret-1234567890") is False
+
+    def test_prefix_variant_detected(self):
+        """Any replace-with-random-* variant must be detected, not just k8s placeholders."""
+        assert is_weak_secret_value("replace-with-random-new-variant-not-in-k8s") is True
+
+    def test_placeholder_with_whitespace(self):
+        """Whitespace around placeholder must not bypass detection."""
+        assert is_weak_secret_value("  replace-with-random-flask-secret  ") is True
