@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
@@ -133,6 +133,7 @@ class APIKeyProxyService:
         self._encryption_key = self._get_encryption_key()
         self._router = APIKeyRouter()
         self._ensure_tables()
+        self._start_proxy_token_cleanup()
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
@@ -141,17 +142,12 @@ class APIKeyProxyService:
         return hashlib.sha256(key_env.encode()).digest()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
-        """Get database connection."""
+        """Get database connection from pool (PostgreSQL) or direct (SQLite)."""
         if is_postgresql():
-            try:
-                import psycopg2
-                from psycopg2.extras import RealDictCursor
+            # Use global connection pool for PostgreSQL
+            from app.repositories.database import get_connection
 
-                url = get_database_url()
-                conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
-                return conn
-            except ImportError:
-                raise ImportError("psycopg2 is required for PostgreSQL")
+            return get_connection()
         else:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
@@ -1584,8 +1580,13 @@ class APIKeyProxyService:
             )
             row = cursor.fetchone()
         except Exception as e:
-            logger.warning("Failed to check session status for proxy token: %s", e)
-            return True
+            # Fail-closed: DB errors must not authorize tokens
+            logger.warning(
+                "DB error during session status check - failing closed: %s (session_id=%s)",
+                type(e).__name__,
+                session_id[:8] if session_id else "N/A",
+            )
+            return False
         finally:
             try:
                 conn.close()
@@ -1618,6 +1619,7 @@ class APIKeyProxyService:
         Returns:
             Dict with token payload or None if invalid/expired.
         """
+        conn = None
         try:
             payload = self._decode_proxy_token(token)
             if not payload:
@@ -1627,7 +1629,12 @@ class APIKeyProxyService:
             if not jti:
                 logger.warning("Proxy token missing jti")
                 return None
-            record = self._get_proxy_token_record(jti)
+
+            # Use single connection for all queries in this validation
+            conn = self._get_connection()
+
+            # Get proxy token record
+            record = self._get_proxy_token_record_with_conn(conn, jti)
             if not record:
                 logger.warning("Proxy token jti not issued by this server: %s", jti[:8])
                 return None
@@ -1653,7 +1660,8 @@ class APIKeyProxyService:
                 logger.warning("Proxy token server record expired: %s", jti[:8])
                 return None
 
-            if not self._session_allows_proxy_token(
+            if not self._session_allows_proxy_token_with_conn(
+                conn,
                 session_id=session_id,
                 session_type=str(session_type),
                 user_id=user_id,
@@ -1666,19 +1674,235 @@ class APIKeyProxyService:
                 self._row_get(record, "reuse_mode", payload.get("reuse_mode"))
             )
             if reuse_mode == "single_use":
-                if not self._consume_single_use_proxy_token(jti, now):
+                if not self._consume_single_use_proxy_token_with_conn(conn, jti, now):
                     logger.warning("Single-use proxy token replay rejected: %s", jti[:8])
                     return None
             else:
                 if self._row_get(record, "consumed_at"):
                     logger.warning("Consumed proxy token replay rejected: %s", jti[:8])
                     return None
-                self._touch_proxy_token_record(jti, now)
+                self._touch_proxy_token_record_with_conn(conn, jti, now)
 
             return cast("Optional[dict[str, Any]]", payload)
         except Exception as e:
             logger.warning(f"Failed to validate proxy token: {e}")
             return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _get_proxy_token_record_with_conn(self, conn: Any, jti: str) -> Optional[dict[str, Any]]:
+        """Load a proxy-token lifecycle record by JTI using provided connection."""
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM proxy_token_jtis
+                WHERE jti = {_param()}
+            """,
+                (jti,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if isinstance(row, dict) else (dict(row) if row else None)
+        except Exception:
+            # sqlite3.Row supports ``dict(row)``, psycopg2 RealDictRow already is dict-like.
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM proxy_token_jtis WHERE jti = {_param()}",
+                (jti,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if isinstance(row, dict):
+                return row
+            try:
+                return dict(row)
+            except Exception:
+                return None
+
+    def _session_allows_proxy_token_with_conn(
+        self,
+        conn: Any,
+        *,
+        session_id: Optional[str],
+        session_type: str,
+        user_id: Any,
+        now: datetime,
+        exp: datetime,
+    ) -> bool:
+        """Return whether the session lifecycle still allows proxy-token use (with connection)."""
+        # WebUI tokens are tied to instance lifecycle, not the fixed payload exp.
+        # An alive instance keeps the token valid past exp; a dead/missing one is
+        # rejected here so it cannot outlive its instance, and must NOT fall through
+        # to the generic agent_sessions lookup below.
+        is_webui = bool(session_id and session_id.startswith("webui:") and user_id)
+        if is_webui:
+            return self._webui_instance_alive(session_id, user_id)
+
+        # payload exp is a fast pre-filter; the DB expires_at checked in
+        # validate_proxy_token is authoritative for non-webui sessions.
+        if now > exp:
+            logger.warning("Proxy token expired")
+            return False
+
+        if not session_id or session_type == "ha_pool":
+            return True
+
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT status FROM agent_sessions WHERE session_id = {_param()}",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+        except Exception as e:
+            # Fail-closed: DB errors must not authorize tokens
+            logger.warning(
+                "DB error during session status check - failing closed: %s (session_id=%s)",
+                type(e).__name__,
+                session_id[:8] if session_id else "N/A",
+            )
+            return False
+
+        if not row:
+            if session_type in {"agent", "terminal", "workflow"}:
+                logger.warning("Proxy token session not found: %s", session_id[:8])
+                return False
+            return True
+
+        status = row[0] if isinstance(row, (list, tuple)) else self._row_get(row, "status")
+        if status not in ("active", "paused"):
+            logger.warning(
+                "Proxy token session not active: %s (status=%s)",
+                session_id[:8],
+                status,
+            )
+            return False
+        return True
+
+    def _touch_proxy_token_record_with_conn(self, conn: Any, jti: str, now: datetime) -> None:
+        """Update last-seen bookkeeping for a multi-use token (with connection)."""
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            UPDATE proxy_token_jtis
+            SET first_used_at = COALESCE(first_used_at, {_param()}),
+                last_used_at = {_param()},
+                use_count = COALESCE(use_count, 0) + 1
+            WHERE jti = {_param()}
+        """,
+            (now.isoformat(), now.isoformat(), jti),
+        )
+        conn.commit()
+
+    def _consume_single_use_proxy_token_with_conn(self, conn: Any, jti: str, now: datetime) -> bool:
+        """Atomically consume a single-use token and reject replays (with connection)."""
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            UPDATE proxy_token_jtis
+            SET first_used_at = COALESCE(first_used_at, {_param()}),
+                last_used_at = {_param()},
+                consumed_at = {_param()},
+                use_count = COALESCE(use_count, 0) + 1
+            WHERE jti = {_param()} AND revoked_at IS NULL AND consumed_at IS NULL
+        """,
+            (now.isoformat(), now.isoformat(), now.isoformat(), jti),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0) > 0
+
+    def cleanup_proxy_token_jtis(self, days_old: int = 7) -> int:
+        """
+        Clean up expired/consumed/revoked proxy token records.
+
+        Args:
+            days_old: Delete records older than this many days (default: 7).
+
+        Returns:
+            int: Number of records deleted.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+            # Delete expired records older than days_old
+            # Delete consumed records older than 1 day
+            # Delete revoked records older than 1 day
+            threshold_expired = (now - timedelta(days=days_old)).isoformat()
+            threshold_consumed = (now - timedelta(days=1)).isoformat()
+
+            if is_postgresql():
+                # PostgreSQL: Use subquery with LIMIT
+                cursor.execute(
+                    f"""
+                    DELETE FROM proxy_token_jtis
+                    WHERE ctid IN (
+                        SELECT ctid FROM proxy_token_jtis
+                        WHERE (expires_at < {_param()})
+                           OR (consumed_at IS NOT NULL AND consumed_at < {_param()})
+                           OR (revoked_at IS NOT NULL AND revoked_at < {_param()})
+                        LIMIT 1000
+                    )
+                """,
+                    (threshold_expired, threshold_consumed, threshold_consumed),
+                )
+            else:
+                # SQLite: Use rowid subquery with LIMIT
+                cursor.execute(
+                    f"""
+                    DELETE FROM proxy_token_jtis
+                    WHERE rowid IN (
+                        SELECT rowid FROM proxy_token_jtis
+                        WHERE (expires_at < {_param()})
+                           OR (consumed_at IS NOT NULL AND consumed_at < {_param()})
+                           OR (revoked_at IS NOT NULL AND revoked_at < {_param()})
+                        LIMIT 1000
+                    )
+                """,
+                    (threshold_expired, threshold_consumed, threshold_consumed),
+                )
+
+            deleted = cursor.rowcount
+            conn.commit()
+
+            if deleted > 0:
+                logger.info("Cleaned up %d expired/consumed/revoked proxy token records", deleted)
+
+            return deleted
+        except Exception as e:
+            logger.error("Failed to cleanup proxy token records: %s", e)
+            return 0
+        finally:
+            conn.close()
+
+    def _start_proxy_token_cleanup(self) -> None:
+        """Start the proxy token cleanup timer (daemon thread)."""
+        # Get cleanup interval from environment variable (default: 24 hours)
+        cleanup_interval = int(
+            os.environ.get("OPENACE_PROXY_TOKEN_CLEANUP_INTERVAL_SECONDS", "86400")
+        )
+
+        def _tick():
+            try:
+                self.cleanup_proxy_token_jtis()
+            except Exception as e:
+                logger.error("Proxy token cleanup error: %s", e)
+            # Reschedule
+            timer = threading.Timer(cleanup_interval, _tick)
+            timer.daemon = True
+            timer.start()
+
+        timer = threading.Timer(cleanup_interval, _tick)
+        timer.daemon = True
+        timer.start()
+        logger.info("Proxy token cleanup timer started (interval=%ds)", cleanup_interval)
 
     def generate_registration_token(self) -> str:
         """

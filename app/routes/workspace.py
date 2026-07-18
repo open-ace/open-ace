@@ -312,7 +312,6 @@ def get_session_models():
         tenant_id=tenant_id,
         provider="openai",
         session_type="ha_pool",
-        expires_minutes=15,
         extra_payload={
             "scope": "remote",
             "tool_name": "qwen-code",
