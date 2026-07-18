@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def load_terminal_server():
@@ -97,12 +98,18 @@ class _FakeWebSocket:
         return None
 
 
-def test_handle_websocket_input_writes_to_pipe_on_windows(monkeypatch):
+@pytest.mark.asyncio
+async def test_handle_websocket_input_writes_to_pipe_on_windows(monkeypatch):
     """Windows pipe path: keystrokes must reach process.stdin.
 
     On the pipe path ``master_fd`` is never assigned (stays None) while
     ``self.process`` holds the subprocess. The top-of-loop guard must be
     path-aware so the loop body can fall through to the pipe write.
+
+    Marked ``asyncio`` so ``SinglePtyTerminalServer()`` (whose ``__init__``
+    eagerly binds an ``asyncio.Lock``) constructs inside the running event
+    loop on Python 3.9, where ``asyncio.run()`` would otherwise close and
+    unset the thread's loop and pollute later tests.
     """
     terminal_server = load_terminal_server()
 
@@ -114,12 +121,13 @@ def test_handle_websocket_input_writes_to_pipe_on_windows(monkeypatch):
     monkeypatch.setattr(server, "process", _FakeProc())
 
     ws = _FakeWebSocket([b"ls\r", b"exit\r"])
-    asyncio.run(server.handle_websocket_input(ws))
+    await server.handle_websocket_input(ws)
 
     assert server.process.stdin.written == [b"ls\r", b"exit\r"]
 
 
-def test_handle_websocket_input_writes_to_master_fd_on_pty(monkeypatch):
+@pytest.mark.asyncio
+async def test_handle_websocket_input_writes_to_master_fd_on_pty(monkeypatch):
     """PTY path regression guard: the path-aware change must keep PTY writes working."""
     terminal_server = load_terminal_server()
 
@@ -144,7 +152,7 @@ def test_handle_websocket_input_writes_to_master_fd_on_pty(monkeypatch):
         monkeypatch.setattr(terminal_server.os, "write", fake_os_write)
 
         ws = _FakeWebSocket([b"pwd\n", b"ls\n"])
-        asyncio.run(server.handle_websocket_input(ws))
+        await server.handle_websocket_input(ws)
     finally:
         terminal_server.os.close(read_fd)
         terminal_server.os.close(write_fd)
