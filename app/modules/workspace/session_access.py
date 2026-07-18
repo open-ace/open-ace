@@ -39,8 +39,13 @@ def check_session_access(
         return status, None
     # Session owner
     current_tenant_id = g.user.get("tenant_id")
+    # Fail closed: a non-admin with no tenant cannot be tenant-scoped. Previously
+    # a null tenant_id silently skipped the cross-tenant check and fell through to
+    # the (untenant-scoped) machine-admin branch, leaking cross-tenant sessions.
+    if current_tenant_id in (None, ""):
+        return None, (jsonify({"error": "Access denied"}), 403)
     session = session_mgr._session_manager.get_session(session_id, tenant_id=current_tenant_id)
-    if session and current_tenant_id not in (None, session.tenant_id):
+    if session and current_tenant_id != session.tenant_id:
         return None, (jsonify({"error": "Access denied"}), 403)
     if session and session.user_id == g.user["id"]:
         return status, None
