@@ -33,6 +33,7 @@ def _normalize_tenant_id(value: object) -> Optional[int]:
         return None
     return tenant_id if tenant_id > 0 else None
 
+
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
 
