@@ -20,6 +20,12 @@ from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for callers that intentionally want GLOBAL scope (system-admin /
+# cross-tenant maintenance paths). It is distinct from ``None``, which now
+# means "tenant scope required but unresolved → fail closed" for write paths.
+# Using a non-int sentinel avoids any collision with a real tenant id.
+GLOBAL_TENANT_SENTINEL = "GLOBAL_TENANT"
+
 # Shared ContentFilter instance for performance (uses cached rules)
 _content_filter_instance = None
 
@@ -394,7 +400,15 @@ class SessionManager:
 
     @staticmethod
     def _normalize_tenant_id(value: Any) -> Optional[int]:
-        """Normalize a tenant identifier to a positive integer when possible."""
+        """Normalize a tenant identifier to a positive integer when possible.
+
+        ``GLOBAL_TENANT_SENTINEL`` is intentionally NOT normalized here — it is
+        handled explicitly by ``_tenant_scope_condition`` to keep global scope
+        opt-in. Anything else that fails to normalize returns None, which write
+        paths treat as "fail closed" (deny) rather than "global".
+        """
+        if value is GLOBAL_TENANT_SENTINEL:
+            return None
         if value in (None, ""):
             return None
         try:
@@ -432,10 +446,31 @@ class SessionManager:
         table: str,
         tenant_id: Optional[int],
         column_ref: str = "tenant_id",
+        require_tenant: bool = False,
     ) -> tuple[str, list[Any]]:
-        """Return a tenant predicate when the table supports tenant_id."""
+        """Return a tenant predicate when the table supports tenant_id.
+
+        - ``GLOBAL_TENANT_SENTINEL`` explicitly opts into global scope (admin /
+          maintenance) → returns ``("", [])`` (no tenant clause).
+        - A positive ``tenant_id`` → ``AND tenant_id = ?``.
+        - ``None`` (unresolved tenant):
+            * ``require_tenant=False`` (default, read paths): returns ``("", [])``
+              preserving historical read behavior. Callers that need fail-closed
+              reads must resolve the tenant themselves before calling.
+            * ``require_tenant=True`` (write paths): returns an unsatisfiable
+              predicate ``AND 1=0`` so the write affects no rows rather than
+              silently mutating across all tenants. This is the fail-closed fix
+              for the null-tenant write bypass.
+        """
+        if tenant_id is GLOBAL_TENANT_SENTINEL:
+            return "", []
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
-        if normalized_tenant_id is None or not self._column_exists(cursor, table, "tenant_id"):
+        if normalized_tenant_id is None:
+            if require_tenant and self._column_exists(cursor, table, "tenant_id"):
+                # Fail closed: match nothing instead of matching every tenant.
+                return " AND 1=0", []
+            return "", []
+        if not self._column_exists(cursor, table, "tenant_id"):
             return "", []
         return f" AND {column_ref} = {_param()}", [normalized_tenant_id]
 
@@ -851,7 +886,11 @@ class SessionManager:
     }
 
     def update_session_fields(
-        self, session_id: str, fields: dict[str, Any], tenant_id: Optional[int] = None
+        self,
+        session_id: str,
+        fields: dict[str, Any],
+        tenant_id: Optional[int] = None,
+        require_tenant: bool = False,
     ) -> bool:
         """
         Update specific fields of a session.
@@ -859,6 +898,10 @@ class SessionManager:
         Args:
             session_id: Session ID to update.
             fields: Dictionary of field names and values to update.
+            require_tenant: When True, an unresolved (None) ``tenant_id`` fails
+                closed (no rows updated) instead of matching across all tenants.
+                Authorization-aware callers should set this so the tenant clause
+                cannot be silently disabled by a null tenant (#1789).
 
         Returns:
             bool: True if update was successful.
@@ -889,7 +932,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         tenant_clause, tenant_params = self._tenant_scope_condition(
-            cursor, "agent_sessions", tenant_id
+            cursor, "agent_sessions", tenant_id, require_tenant=require_tenant
         )
         values.append(session_id)
         values.extend(tenant_params)
@@ -929,6 +972,7 @@ class SessionManager:
         total_output_delta: int = 0,
         message_delta: int = 0,
         tenant_id: Optional[int] = None,
+        require_tenant: bool = False,
     ) -> bool:
         """Increment a session's cumulative usage counters by the given deltas.
 
@@ -940,6 +984,9 @@ class SessionManager:
         per-call ``AgentTaskResult`` counters as deltas. ``message_delta`` lets
         transcript writers (which keep ``add_message`` side-effect-free via
         ``count_usage=False``) own ``message_count`` explicitly (#1128).
+
+        ``require_tenant=True`` fails closed on an unresolved (None) tenant so
+        the tenant clause cannot be silently disabled (#1789).
         """
         if not session_id:
             return False
@@ -947,7 +994,7 @@ class SessionManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         tenant_clause, tenant_params = self._tenant_scope_condition(
-            cursor, "agent_sessions", tenant_id
+            cursor, "agent_sessions", tenant_id, require_tenant=require_tenant
         )
         cursor.execute(
             f"""

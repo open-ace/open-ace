@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, abort, g, jsonify, request
 
 from app.auth.decorators import _extract_token, _load_user_from_token
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -82,9 +82,20 @@ def _tenant_scope_required() -> bool:
 
 
 def _session_lookup_tenant_id() -> Optional[int]:
-    """Return tenant scope for session lookups; system admins stay global."""
+    """Return tenant scope for session lookups; system admins stay global.
+
+    Fail closed for non-admins whose tenant cannot be resolved: returning None
+    here previously meant "global scope", which let a null-tenant non-admin read
+    or mutate any tenant's session. Now we deny (abort 403) instead. Only system
+    admins legitimately keep global scope (None), and callers needing global
+    scope must opt in explicitly (GLOBAL_TENANT_SENTINEL at the manager layer).
+    """
+    if not _tenant_scope_required():
+        return None
     tenant_id = _current_tenant_id()
-    return tenant_id if tenant_id is not None and _tenant_scope_required() else None
+    if tenant_id is None:
+        abort(403)
+    return tenant_id
 
 
 workspace_bp = Blueprint("workspace", __name__)
