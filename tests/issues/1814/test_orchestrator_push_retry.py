@@ -127,9 +127,7 @@ class TestCiRepairPushTransientRetry:
 
     def test_transient_push_propagates_for_retry(self):
         """Transient CI repair push failure should propagate for Layer-2 retry."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         # Test the static method directly
         mock_gh = MagicMock()
@@ -150,9 +148,7 @@ class TestCiRepairPushTransientRetry:
 
     def test_non_transient_push_returns_push_error(self):
         """Non-transient CI repair push failure should return push_error."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
@@ -174,9 +170,7 @@ class TestCiRepairPushTransientRetry:
 
     def test_success_returns_empty_push_error(self):
         """Successful CI repair push should return empty push_error."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
@@ -198,9 +192,7 @@ class TestCiRepairPushTransientRetry:
 
     def test_non_transient_push_with_ssl_keyword_propagates(self):
         """Push with SSL keyword should be treated as transient and propagate."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
@@ -218,9 +210,7 @@ class TestCiRepairPushTransientRetry:
 
     def test_network_unreachable_is_transient(self):
         """Network unreachable should be treated as transient."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
@@ -242,9 +232,7 @@ class TestCiRepairPushExistingTests:
 
     def test_pushes_unpushed_commit_even_without_new_changes(self):
         """Existing test from test_ci_repair_fingerprint.py should still pass."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         gh = MagicMock()
         gh.get_current_commit.return_value = "sha-B"  # local has unpushed commit
@@ -267,9 +255,7 @@ class TestCiRepairPushExistingTests:
 
     def test_no_changes_when_remote_equals_local(self):
         """Existing test from test_ci_repair_fingerprint.py should still pass."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         gh = MagicMock()
         gh.get_current_commit.return_value = "sha-A"  # same as remote
@@ -286,9 +272,7 @@ class TestCiRepairPushExistingTests:
 
     def test_auto_commits_uncommitted_changes(self):
         """Existing test from test_ci_repair_fingerprint.py should still pass."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         gh = MagicMock()
         gh.get_current_commit.return_value = "sha-A"  # initial: same as remote
@@ -309,9 +293,7 @@ class TestCiRepairPushExistingTests:
 
     def test_push_error_captured_not_raised(self):
         """Existing test: non-transient push error should be captured in push_error."""
-        from app.modules.workspace.autonomous.orchestrator import (
-            AutonomousOrchestrator,
-        )
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         gh = MagicMock()
         gh.get_current_commit.return_value = "sha-B"
