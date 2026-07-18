@@ -34,7 +34,7 @@ def _normalize_tenant_id(value: object) -> Optional[int]:
     if value in (None, "", 0, "0"):
         return None
     try:
-        tenant_id = int(cast(Any, value))
+        tenant_id = int(cast("Any", value))
     except (TypeError, ValueError):
         return None
     return tenant_id if tenant_id > 0 else None

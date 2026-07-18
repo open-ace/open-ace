@@ -5,8 +5,9 @@ Tests that project_path is validated server-side before being used
 to create sessions, preventing authorization bypass attacks.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from flask import Flask, g
 
 
@@ -15,24 +16,41 @@ class TestProjectPathValidation:
 
     @pytest.fixture
     def app(self):
-        """Create test Flask app."""
+        """Create test Flask app with workspace blueprint."""
         from app.routes.workspace import workspace_bp
 
         app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.config["SECRET_KEY"] = "test-secret-key"
         app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
         return app
 
     @pytest.fixture
     def mock_user(self):
         """Mock user object."""
-        return {"id": 1, "role": "user", "email": "test@example.com"}
+        return {"id": 1, "role": "user", "email": "test@example.com", "tenant_id": 1}
+
+    def _mock_auth(self, user):
+        """Return a patcher that mocks authentication."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _auth_context():
+            with patch("app.routes.workspace._extract_token", return_value="test-token"):
+                with patch(
+                    "app.routes.workspace._load_user_from_token",
+                    return_value=user,
+                ):
+                    yield
+
+        return _auth_context()
 
     def test_valid_path_accepted(self, app, mock_user):
         """Valid path within workspace base dirs should be accepted."""
-        with app.test_client() as client:
-            with patch("app.routes.workspace.get_session_manager") as mock_manager:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
-                    with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
+                with patch("app.routes.workspace.get_session_manager") as mock_manager:
+                    with patch("app.routes.workspace._current_tenant_id", return_value=1):
                         mock_session = MagicMock()
                         mock_session.to_dict.return_value = {"id": "test-session-id"}
                         mock_manager.return_value.create_session.return_value = mock_session
@@ -63,8 +81,8 @@ class TestProjectPathValidation:
             "/var/log",
         ]
 
-        with app.test_client() as client:
-            with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
                 with patch("app.routes.workspace._current_tenant_id", return_value=1):
                     for path in blacklisted_paths:
                         response = client.post(
@@ -87,8 +105,8 @@ class TestProjectPathValidation:
             "/tmp/../../../root/.ssh",
         ]
 
-        with app.test_client() as client:
-            with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
                 with patch("app.routes.workspace._current_tenant_id", return_value=1):
                     for path in traversal_paths:
                         response = client.post(
@@ -109,8 +127,8 @@ class TestProjectPathValidation:
             "../project",
         ]
 
-        with app.test_client() as client:
-            with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
                 with patch("app.routes.workspace._current_tenant_id", return_value=1):
                     for path in relative_paths:
                         response = client.post(
@@ -125,10 +143,10 @@ class TestProjectPathValidation:
 
     def test_empty_path_allowed(self, app, mock_user):
         """Empty or missing project_path should be allowed."""
-        with app.test_client() as client:
-            with patch("app.routes.workspace.get_session_manager") as mock_manager:
-                with patch("app.routes.workspace._current_tenant_id", return_value=1):
-                    with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
+                with patch("app.routes.workspace.get_session_manager") as mock_manager:
+                    with patch("app.routes.workspace._current_tenant_id", return_value=1):
                         mock_session = MagicMock()
                         mock_session.to_dict.return_value = {"id": "test-session-id"}
                         mock_manager.return_value.create_session.return_value = mock_session
@@ -146,14 +164,14 @@ class TestProjectPathValidation:
                         response = client.post(
                             "/api/workspace/sessions",
                             json={"tool_name": "test-tool"},
-                            headers={"Content_Type": "application/json"},
+                            headers={"Content-Type": "application/json"},
                         )
                         assert response.status_code in [201, 500]
 
     def test_error_message_no_path_disclosure(self, app, mock_user):
         """Error message should not disclose system path list."""
-        with app.test_client() as client:
-            with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
                 with patch("app.routes.workspace._current_tenant_id", return_value=1):
                     response = client.post(
                         "/api/workspace/sessions",
@@ -177,8 +195,8 @@ class TestProjectPathValidation:
     def test_url_parameter_injection_blocked(self, app, mock_user):
         """URL parameter injection should be blocked."""
         # Simulate URL with query parameter injection attempt
-        with app.test_client() as client:
-            with patch("app.routes.workspace.g", user=mock_user):
+        with self._mock_auth(mock_user):
+            with app.test_client() as client:
                 with patch("app.routes.workspace._current_tenant_id", return_value=1):
                     # Attempt to inject path via JSON body
                     response = client.post(
