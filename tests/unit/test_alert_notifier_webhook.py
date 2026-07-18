@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -226,6 +228,56 @@ class TestAlertNotifierWebhook(unittest.TestCase):
         )
 
         mock_session.return_value.post.assert_not_called()
+
+    def test_set_then_get_preferences_strips_dingtalk_secret_from_webhook_url(self):
+        """Persisted and returned webhook_url must never carry the DingTalk signing secret."""
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch("app.repositories.database.is_postgresql", return_value=False),
+            patch("app.modules.governance.alert_notifier.is_postgresql", return_value=False),
+        ):
+            db_path = os.path.join(tmpdir, "test_alerts.db")
+            notifier = AlertNotifier(db_path=db_path)
+            notifier._ensure_tables()
+
+            secret_url = (
+                "https://oapi.dingtalk.com/robot/send"
+                "?access_token=abc&openace_dingtalk_secret=TOPSECRET"
+            )
+            prefs = NotificationPreference(
+                user_id=42,
+                webhook_url=secret_url,
+                alert_types=["quota"],
+            )
+            notifier.set_notification_preferences(prefs)
+
+            stored = notifier.get_notification_preferences(42)
+
+            assert "access_token=abc" in stored.webhook_url
+            assert "TOPSECRET" not in stored.webhook_url
+            assert "openace_dingtalk_secret" not in stored.webhook_url
+            assert "dingtalk_secret" not in stored.webhook_url
+
+    def test_prepare_webhook_url_still_signs_without_in_url_secret(self):
+        """Outbound signing must keep working when the secret lives only in global config."""
+        notifier = AlertNotifier()
+        with (
+            patch("app.modules.governance.alert_notifier.time.time", return_value=1710000000.123),
+            patch(
+                "app.modules.governance.alert_notifier.get_config_value",
+                return_value="global-dingtalk-secret",
+            ),
+        ):
+            url = notifier._prepare_webhook_url(
+                "https://oapi.dingtalk.com/robot/send?access_token=abc"
+            )
+
+        assert "access_token=abc" in url
+        assert "timestamp=1710000000123" in url
+        assert "sign=" in url
+        # The cleaned URL passed in must not gain a secret query key back.
+        assert "openace_dingtalk_secret" not in url
+        assert "dingtalk_secret" not in url
 
 
 if __name__ == "__main__":
