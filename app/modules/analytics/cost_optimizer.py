@@ -10,12 +10,29 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database
 from app.utils.cache import cached
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_tenant_id(value: object) -> Optional[int]:
+    """Normalize a tenant identifier to a positive integer.
+
+    Mirrors ``roi_calculator._normalize_tenant_id``. ``None``/0/blank
+    collapse to ``None`` so single-tenant deployments keep their original
+    query shape (no tenant filter), while multi-tenant callers always scope.
+    """
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        tenant_id = int(cast("Any", value))
+    except (TypeError, ValueError):
+        return None
+    return tenant_id if tenant_id > 0 else None
+
 
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -152,12 +169,16 @@ class CostOptimizer:
         self.db = db or Database()
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def analyze(self, days: int = 30) -> list[OptimizationSuggestion]:
+    def analyze(
+        self, days: int = 30, tenant_id: Optional[int] = None
+    ) -> list[OptimizationSuggestion]:
         """
         Analyze usage and generate optimization suggestions.
 
         Args:
             days: Number of days to analyze.
+            tenant_id: Optional tenant scope (caller's tenant). Included in the
+                cache key so one tenant never reads another's aggregate.
 
         Returns:
             List of OptimizationSuggestion objects.
@@ -170,7 +191,7 @@ class CostOptimizer:
         ).strftime("%Y-%m-%d")
 
         # Get usage data
-        usage_data = self._get_usage_data(start_date, end_date)
+        usage_data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
 
         # Analyze different aspects
         suggestions.extend(self._analyze_model_usage(usage_data, start_date, end_date))
@@ -184,22 +205,36 @@ class CostOptimizer:
 
         return suggestions
 
-    def _get_usage_data(self, start_date: str, end_date: str) -> dict[str, Any]:
+    def _get_usage_data(
+        self, start_date: str, end_date: str, tenant_id: Optional[int] = None
+    ) -> dict[str, Any]:
         """Get comprehensive usage data.
 
         Optimized: Uses a single query to fetch all data, then aggregates in Python.
         This reduces database round trips from 4 to 1.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            tenant_id: Optional tenant scope.
         """
-        # Single query to get all raw data
-        all_data = self.db.fetch_all(
-            """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
+
+        # Build query with optional tenant filter
+        query = """
             SELECT tool_name, models_used as model, date,
                    input_tokens, output_tokens
             FROM daily_usage
             WHERE date >= ? AND date <= ?
-        """,
-            (start_date, end_date),
-        )
+        """
+        params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
+
+        # Single query to get all raw data
+        all_data = self.db.fetch_all(query, tuple(params))
 
         # Aggregate in Python
         total_requests = len(all_data)
@@ -494,33 +529,43 @@ class CostOptimizer:
         return (savings / cost * 100) if cost > 0 else 0
 
     @cached(ttl=60, key_prefix="cost", skip_args=[0])
-    def get_cost_trend(self, days: int = 30) -> list[dict[str, Any]]:
+    def get_cost_trend(
+        self, days: int = 30, tenant_id: Optional[int] = None
+    ) -> list[dict[str, Any]]:
         """
         Get daily cost trend.
 
         Args:
             days: Number of days.
+            tenant_id: Optional tenant scope (caller's tenant). Included in the
+                cache key so one tenant never reads another's aggregate.
 
         Returns:
             List of daily cost data.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
+
         end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         start_date = (
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         ).strftime("%Y-%m-%d")
 
-        rows = self.db.fetch_all(
-            """
+        query = """
             SELECT date,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens
             FROM daily_usage
             WHERE date >= ? AND date <= ?
-            GROUP BY date
-            ORDER BY date
-        """,
-            (start_date, end_date),
-        )
+        """
+        params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
+
+        query += " GROUP BY date ORDER BY date"
+
+        rows = self.db.fetch_all(query, tuple(params))
 
         trend = []
         for row in rows:
@@ -734,12 +779,16 @@ class CostOptimizer:
         return recommendations
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def get_efficiency_report(self, days: int = 30) -> dict[str, Any]:
+    def get_efficiency_report(
+        self, days: int = 30, tenant_id: Optional[int] = None
+    ) -> dict[str, Any]:
         """
         Get efficiency analysis report.
 
         Args:
             days: Number of days to analyze.
+            tenant_id: Optional tenant scope (caller's tenant). Included in the
+                cache key so one tenant never reads another's aggregate.
 
         Returns:
             Dict with efficiency metrics.
@@ -749,7 +798,7 @@ class CostOptimizer:
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         ).strftime("%Y-%m-%d")
 
-        data = self._get_usage_data(start_date, end_date)
+        data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
 
         total_input = data["overall"]["total_input_tokens"] or 0
         total_output = data["overall"]["total_output_tokens"] or 0
