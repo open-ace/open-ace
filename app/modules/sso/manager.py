@@ -9,7 +9,6 @@ import logging
 import os
 import secrets
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
@@ -935,7 +934,7 @@ def _acquire_cleanup_lock() -> bool:
         global _cleanup_lock_file
         _cleanup_lock_file = lock_file
         return True
-    except (IOError, OSError):
+    except OSError:
         return False
 
 

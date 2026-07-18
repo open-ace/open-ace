@@ -26,7 +26,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -37,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def get_current_encryption_key() -> Optional[str]:
+def get_current_encryption_key() -> str | None:
     """Get the current encryption key from environment."""
     return os.environ.get("OPENACE_ENCRYPTION_KEY")
 
