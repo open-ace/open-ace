@@ -382,19 +382,27 @@ def _build_signed_response_with_verified_email(
 # ---------------------------------------------------------------------------
 
 
-def test_app_has_max_content_length_configured():
-    """The Flask app must set MAX_CONTENT_LENGTH to cap unauthenticated POST bodies."""
+def test_no_global_max_content_length_regression():
+    """The app must NOT impose a global MAX_CONTENT_LENGTH.
+
+    A global cap is enforced by Werkzeug before the view runs and would 413
+    authenticated upload endpoints (avatar, /api/upload/messages,
+    /api/upload/batch, remote proxy bodies) that legitimately carry >256KB.
+    The SAML /acs DoS cap is scoped to that route instead. This test guards
+    against re-introducing the regression.
+    """
     from app import create_app
 
     app = create_app()
-    assert app.config.get("MAX_CONTENT_LENGTH"), "MAX_CONTENT_LENGTH must be configured"
-    # A SAMLResponse is well under 1MB; cap should be generous but bounded.
-    assert app.config["MAX_CONTENT_LENGTH"] <= 2 * 1024 * 1024
+    assert not app.config.get(
+        "MAX_CONTENT_LENGTH"
+    ), "global MAX_CONTENT_LENGTH regresses authenticated upload endpoints"
 
 
 def test_oversized_post_body_rejected_with_413():
     """Flask must reject a POST body exceeding MAX_CONTENT_LENGTH with 413 before
-    the ACS handler parses it. This is the mechanism that protects /acs."""
+    the ACS handler parses it. This demonstrates the mechanism that protects /acs;
+    the real app applies it via a per-route content_length check in saml_acs."""
     from flask import Flask, request
 
     app = Flask(__name__)

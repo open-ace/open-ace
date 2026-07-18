@@ -1256,6 +1256,7 @@ def _allow_email_linking(provider_name: str) -> bool:
 def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[str]):
     """Create/link the local user and establish Open ACE sessions after SSO success."""
     user_id = None
+    linked_by_email = False
     if auth_result.user:
         user_id = get_sso_manager().get_user_by_sso_identity(
             provider_name,
@@ -1271,6 +1272,7 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
                 existing_user = user_repo.get_user_by_email(auth_result.user.email)
                 if existing_user:
                     user_id = existing_user.get("id")
+                    linked_by_email = True  # an actual binding happened
 
             # Create new user if not found
             if not user_id:
@@ -1320,11 +1322,12 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
             details={
                 "provider": provider_name,
                 "method": "sso",
-                "email_linked": bool(
-                    auth_result.user
-                    and auth_result.user.email
-                    and _allow_email_linking(provider_name)
-                ),
+                # Reflect the ACTUAL linking outcome for forensic accuracy: True
+                # only when an existing local account was bound to the IdP email.
+                "email_linked": linked_by_email,
+                # Config snapshot so investigators can tell whether linking was
+                # even permitted at login time, independent of the outcome above.
+                "email_linking_enabled": _allow_email_linking(provider_name),
             },
             ip_address=request.remote_addr if request else None,
             user_agent=request.headers.get("User-Agent") if request else None,
@@ -1361,6 +1364,15 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
 @public_endpoint
 def saml_acs(provider_name: str):
     """Handle SAML HTTP-POST Assertion Consumer Service callbacks."""
+    # Scope the parse-DoS cap to this one unauthenticated endpoint (a real
+    # SAMLResponse is well under 100KB; 256KB is a generous ceiling). We check
+    # request.content_length here instead of setting a global MAX_CONTENT_LENGTH
+    # so authenticated upload endpoints that legitimately carry larger bodies
+    # are unaffected.
+    max_saml_response = 256 * 1024
+    if (request.content_length or 0) > max_saml_response:
+        return jsonify({"error": "saml_response_too_large"}), 413
+
     saml_response = request.form.get("SAMLResponse")
     relay_state = request.form.get("RelayState", "")
 

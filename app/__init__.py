@@ -113,13 +113,13 @@ def create_app(config=None):
         else:
             app.config.from_object(config)
 
-    # Cap unauthenticated request bodies (notably SAMLResponse POSTs to /acs) to
-    # bound CPU/memory cost of XML parsing + signature verification against
-    # oversized payloads. A real SAMLResponse is well under 100KB; 256KB is a
-    # generous ceiling. Applied after caller config so an explicit override wins,
-    # but a Flask default of None (no cap) is replaced.
-    if not app.config.get("MAX_CONTENT_LENGTH"):
-        app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
+    # NOTE: do NOT set a global MAX_CONTENT_LENGTH here. A Flask app-wide cap is
+    # enforced by Werkzeug *before* the view runs and would 413 legitimate
+    # authenticated upload endpoints that carry >256KB bodies (avatar uploads,
+    # /api/upload/messages, /api/upload/batch, remote proxy bodies) -- a
+    # functional regression. The SAML ACS parse-DoS cap is instead scoped to the
+    # single unauthenticated /acs route (see app.routes.sso.saml_acs), which
+    # checks request.content_length against a 256KB ceiling and returns 413.
 
     from app.utils.security_env import get_secret_key_for_app
 

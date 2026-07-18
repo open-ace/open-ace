@@ -143,6 +143,92 @@ def test_finalize_sso_login_links_by_email_when_admin_opts_in(app_ctx):
 
 
 # ---------------------------------------------------------------------------
+# Round-2 review suggestion: audit "email_linked" must reflect the *actual*
+# linking outcome, not "email present and linking enabled" (forensic accuracy).
+# ---------------------------------------------------------------------------
+
+
+def _audit_details_for_email_linking(manager, user_repo, *, allow_linking, existing_email_user):
+    """Run _finalize_sso_login under mocks and return the audit `details` dict."""
+    provider = _make_saml_provider(
+        extra_params={"allow_email_linking": True} if allow_linking else None
+    )
+    manager.get_provider.return_value = provider
+    user_repo.get_user_by_email.return_value = existing_email_user
+    user_repo.create_session.return_value = None
+
+    audit_logger = MagicMock()
+    with (
+        patch.object(sso_module, "get_sso_manager", return_value=manager),
+        patch.object(sso_module, "user_repo", user_repo),
+        patch.object(sso_module, "UserRepository", return_value=user_repo),
+        patch.object(sso_module, "get_audit_logger", return_value=audit_logger),
+        patch.object(sso_module, "_create_user_from_sso", return_value=99),
+        patch.object(sso_module, "_get_session_timeout_hours", return_value=1),
+    ):
+        sso_module._finalize_sso_login("corp-saml", _auth_result(email="match@example.com"), None)
+
+    details_calls = [call for call in audit_logger.log.call_args_list if call.kwargs.get("details")]
+    assert details_calls, "expected an audit log call with details"
+    return details_calls[-1].kwargs["details"]
+
+
+def test_audit_email_linked_true_only_when_linking_actually_happened(app_ctx):
+    """email_linked must be True when an existing local user was actually bound by email."""
+    manager = MagicMock()
+    manager.get_user_by_sso_identity.return_value = None  # no prior SSO identity
+    manager.create_sso_session.return_value = "session-token"
+    user_repo = MagicMock()
+
+    details = _audit_details_for_email_linking(
+        manager,
+        user_repo,
+        allow_linking=True,
+        existing_email_user={"id": 7},  # email lookup HITS -> real linking
+    )
+
+    assert details["email_linked"] is True
+    assert details["email_linking_enabled"] is True
+
+
+def test_audit_email_linked_false_when_no_existing_user_matched(app_ctx):
+    """email_linked must be False even with allow_email_linking on, when no local
+    account matched the IdP email (a fresh user was provisioned instead)."""
+    manager = MagicMock()
+    manager.get_user_by_sso_identity.return_value = None
+    manager.create_sso_session.return_value = "session-token"
+    user_repo = MagicMock()
+
+    details = _audit_details_for_email_linking(
+        manager,
+        user_repo,
+        allow_linking=True,
+        existing_email_user=None,  # no match -> no actual linking
+    )
+
+    assert details["email_linked"] is False
+    assert details["email_linking_enabled"] is True
+
+
+def test_audit_email_linked_false_when_gate_disabled(app_ctx):
+    """email_linked must be False when allow_email_linking is off, regardless of email."""
+    manager = MagicMock()
+    manager.get_user_by_sso_identity.return_value = None
+    manager.create_sso_session.return_value = "session-token"
+    user_repo = MagicMock()
+
+    details = _audit_details_for_email_linking(
+        manager,
+        user_repo,
+        allow_linking=False,
+        existing_email_user={"id": 7},  # would match, but gate is closed
+    )
+
+    assert details["email_linked"] is False
+    assert details["email_linking_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
 # Finding 7: SAML login + logout audit-logged.
 # ---------------------------------------------------------------------------
 
