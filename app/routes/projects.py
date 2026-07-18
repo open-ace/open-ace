@@ -15,7 +15,7 @@ from typing import Any, cast
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.auth.decorators import _extract_token, _load_user_from_token, require_tenant_scope
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 
@@ -72,6 +72,20 @@ def _authenticate_user():
                     return None
 
     return jsonify({"error": "Authentication required"}), 401
+
+
+@projects_bp.before_request
+def _require_tenant_scope():
+    """Fail closed for non-admins with no tenant (Issue #1775).
+
+    Without this gate, ``_current_tenant_id()`` returns ``None`` and the
+    project repository treats it as a wildcard/global filter, leaking
+    cross-tenant projects to a no-tenant non-admin. Admins keep global
+    scope; tenant-scoped non-admins keep their tenant.
+    """
+    _, error = require_tenant_scope()
+    if error is not None:
+        return error
 
 
 def get_effective_system_account(system_account: str | None) -> str | None:
