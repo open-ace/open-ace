@@ -179,3 +179,89 @@ class TestCiRepairCommitBeforeFromPrHead:
         # Verify get_pr_head_sha appears BEFORE get_current_commit (primary
         # path first, fallback second).
         assert source.index("get_pr_head_sha") < source.index("get_current_commit")
+
+
+# ── Behavior test: detect_and_push with remote vs local SHA (#1838 review) ─
+
+
+class TestDetectAndPushCiRepairChanges:
+    """The extracted ``_detect_and_push_ci_repair_changes`` must push when the
+    local HEAD is ahead of the PR's remote head — even if the agent made NO
+    new commit this round. This is the exact #1812 scenario: prior round
+    committed locally (B) but didn't push (remote still A); this round the
+    agent does nothing, but commit_before=A (remote), commit_sha=B (local)
+    → sha_changed=True → push B."""
+
+    def test_pushes_unpushed_commit_even_without_new_changes(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.return_value = "sha-B"  # local has unpushed commit
+        gh.has_uncommitted_changes.return_value = False
+        gh.git_push.return_value = None
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh,
+                commit_before="sha-A",  # PR remote head (behind local)
+                attempt=1,
+                branch_name="auto-dev/x",
+                pr_number=1812,
+            )
+        )
+        assert sha_changed is True
+        assert commit_sha == "sha-B"
+        assert push_error == ""
+        gh.git_push.assert_called_once_with(branch="auto-dev/x")
+
+    def test_no_changes_when_remote_equals_local(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.return_value = "sha-A"  # same as remote
+        gh.has_uncommitted_changes.return_value = False
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh, "sha-A", 1, "auto-dev/x", 1812
+            )
+        )
+        assert sha_changed is False
+        assert push_error == ""
+        gh.git_push.assert_not_called()
+
+    def test_auto_commits_uncommitted_changes(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.return_value = "sha-A"  # initial: same as remote
+        gh.has_uncommitted_changes.return_value = True
+        # After auto-commit, HEAD advances
+        gh.git_commit.side_effect = lambda *a, **kw: setattr(
+            gh, "get_current_commit", MagicMock(return_value="sha-C")
+        )
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh, "sha-A", 1, "auto-dev/x", 1812
+            )
+        )
+        assert sha_changed is True
+        gh.git_add_all.assert_called_once()
+        gh.git_push.assert_called_once()
+
+    def test_push_error_captured_not_raised(self):
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        gh = MagicMock()
+        gh.get_current_commit.return_value = "sha-B"
+        gh.has_uncommitted_changes.return_value = False
+        gh.git_push.side_effect = Exception("network error")
+
+        commit_sha, sha_changed, push_error = (
+            AutonomousOrchestrator._detect_and_push_ci_repair_changes(
+                gh, "sha-A", 1, "auto-dev/x", 1812
+            )
+        )
+        assert sha_changed is True
+        assert "network error" in push_error

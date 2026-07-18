@@ -1257,6 +1257,51 @@ class AutonomousOrchestrator:
             f"{context}\n\n"
         )
 
+    @staticmethod
+    def _detect_and_push_ci_repair_changes(
+        gh: GitHubOps,
+        commit_before: str,
+        attempt: int,
+        branch_name: str | None,
+        pr_number: int,
+    ) -> tuple[str, bool, str]:
+        """Detect whether the CI repair agent produced changes and push them.
+
+        Returns ``(commit_sha, sha_changed, push_error)``. Extracted so the
+        "remote A, local B, agent no new commit → still push B" behavior is
+        unit-testable without running the full ``_run_merge_ci_repair`` flow
+        (#1838 review suggestion 1).
+        """
+        commit_sha = ""
+        try:
+            commit_sha = gh.get_current_commit()
+        except Exception:
+            pass
+        sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
+
+        if not sha_changed:
+            try:
+                if gh.has_uncommitted_changes():
+                    gh.git_add_all()
+                    gh.git_commit(
+                        f"auto: ci repair (attempt {attempt})",
+                        no_verify=True,
+                    )
+                    commit_sha = gh.get_current_commit()
+                    sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
+            except Exception as e:
+                logger.warning("CI repair auto-commit failed: %s", e)
+
+        push_error = ""
+        if sha_changed:
+            try:
+                gh.git_push(branch=branch_name)
+            except Exception as e:
+                push_error = str(e)
+                logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
+
+        return commit_sha, sha_changed, push_error
+
     def _run_merge_ci_repair(
         self, wf: dict, gh: GitHubOps, pr_number: int, failed_checks: list[dict]
     ) -> None:
@@ -1371,34 +1416,9 @@ class AutonomousOrchestrator:
 
         self._accumulate_tokens(repair_result)
 
-        commit_sha = ""
-        diff_stats = {}
-        push_error = ""
-        try:
-            commit_sha = gh.get_current_commit()
-        except Exception:
-            pass
-        sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
-
-        if not sha_changed:
-            try:
-                if gh.has_uncommitted_changes():
-                    gh.git_add_all()
-                    gh.git_commit(
-                        f"auto: ci repair (attempt {attempt})",
-                        no_verify=True,
-                    )
-                    commit_sha = gh.get_current_commit()
-                    sha_changed = bool(commit_before and commit_sha and commit_before != commit_sha)
-            except Exception as e:
-                logger.warning("CI repair auto-commit failed: %s", e)
-
-        if sha_changed:
-            try:
-                gh.git_push(branch=branch_name or None)
-            except Exception as e:
-                push_error = str(e)
-                logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
+        commit_sha, sha_changed, push_error = self._detect_and_push_ci_repair_changes(
+            gh, commit_before, attempt, branch_name or None, pr_number
+        )
 
         try:
             diff_stats = gh.get_commit_diff_stats(commit_sha) if commit_sha else {}
@@ -2105,6 +2125,10 @@ class AutonomousOrchestrator:
 
         # Check attempt limit FIRST so the terminal round skips the fingerprint
         # network fetches (gh run view --log-failed for each failing check).
+        # Note: when BOTH "over MAX" and "signature unchanged" would match, this
+        # reports "limit reached" (more accurate — the real stop reason is the
+        # cap, not the unchanged signature). No downstream code depends on the
+        # milestone title wording (verified via grep).
         failure_names = ", ".join(
             check.get("name") or "unknown"
             for check in failed_checks
