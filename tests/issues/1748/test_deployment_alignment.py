@@ -143,7 +143,6 @@ import os as _os
 import re as _re
 import subprocess as _subprocess
 
-
 _CONFIG_DIR_BLOCK_RE = _re.compile(
     r'if \[ -z "\$\{OPENACE_CONFIG_DIR:-\}" \]; then.*?\nfi',
     _re.DOTALL,
@@ -172,10 +171,7 @@ def _run_entrypoint_block(block, env, id_u):
             full_env[key] = value
 
     # id() returns the stubbed uid for `-u`, delegates to the real binary otherwise.
-    id_shim = (
-        'id() { if [ "$1" = "-u" ]; then echo "%s"; else command id "$@"; fi; }'
-        % id_u
-    )
+    id_shim = 'id() { if [ "$1" = "-u" ]; then echo "%s"; else command id "$@"; fi; }' % id_u
     print_shim = 'printf %s "$OPENACE_CONFIG_DIR"'
     script = "\n".join([id_shim, block, print_shim])
 
@@ -185,8 +181,9 @@ def _run_entrypoint_block(block, env, id_u):
         text=True,
         env=full_env,
     )
-    assert proc.returncode == 0, (
-        "entrypoint block exited %d: stderr=%r" % (proc.returncode, proc.stderr)
+    assert proc.returncode == 0, "entrypoint block exited %d: stderr=%r" % (
+        proc.returncode,
+        proc.stderr,
     )
     return proc.stdout
 
@@ -196,9 +193,9 @@ class TestEntrypointNonRootConfigDirDefault:
 
     def test_uid_aware_branch_exists(self):
         entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
-        assert '"$(id -u)" = "0"' in entrypoint, (
-            "entrypoint must branch the config dir default on the runtime uid"
-        )
+        assert (
+            '"$(id -u)" = "0"' in entrypoint
+        ), "entrypoint must branch the config dir default on the runtime uid"
 
     def test_no_unguarded_root_default(self):
         """Every non-comment /root/.open-ace literal must sit inside the
@@ -215,19 +212,15 @@ class TestEntrypointNonRootConfigDirDefault:
             preceding = "\n".join(entrypoint.splitlines()[:lineno])
             assert '"$(id -u)" = "0"' in preceding, (
                 "/root/.open-ace in code at line %d is not behind the root-only "
-                "branch; non-root startup would default to an unwritable path."
-                % lineno
+                "branch; non-root startup would default to an unwritable path." % lineno
             )
 
     def test_non_root_uid_resolves_home_based_default(self):
         entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
         block = _extract_config_dir_default_block(entrypoint)
-        result = _run_entrypoint_block(
-            block, env={"HOME": "/home/open-ace"}, id_u="1000"
-        )
+        result = _run_entrypoint_block(block, env={"HOME": "/home/open-ace"}, id_u="1000")
         assert result == "/home/open-ace/.open-ace", (
-            "non-root default config dir should be /home/open-ace/.open-ace, "
-            "got %r" % result
+            "non-root default config dir should be /home/open-ace/.open-ace, " "got %r" % result
         )
 
     def test_root_uid_keeps_legacy_root_default(self):
@@ -255,8 +248,7 @@ class TestEntrypointNonRootConfigDirDefault:
         block = _extract_config_dir_default_block(entrypoint)
         result = _run_entrypoint_block(block, env={}, id_u="1000")
         assert result == "/home/open-ace/.open-ace", (
-            "missing HOME should fall back to /home/open-ace/.open-ace, "
-            "got %r" % result
+            "missing HOME should fall back to /home/open-ace/.open-ace, " "got %r" % result
         )
 
 
