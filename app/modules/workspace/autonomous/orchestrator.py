@@ -1322,16 +1322,12 @@ class AutonomousOrchestrator:
                 # (Issue #1814).
                 if _is_transient_git_error(e):
                     # Transient: propagate to trigger Layer-2 retry
-                    logger.warning(
-                        "Transient CI repair push failure for PR #%s: %s", pr_number, e
-                    )
+                    logger.warning("Transient CI repair push failure for PR #%s: %s", pr_number, e)
                     raise
                 else:
                     # Non-transient: capture error message for milestone
                     push_error = str(e)
-                    logger.warning(
-                        "CI repair git_push failed for PR #%s: %s", pr_number, e
-                    )
+                    logger.warning("CI repair git_push failed for PR #%s: %s", pr_number, e)
 
         return commit_sha, sha_changed, push_error
 
@@ -4932,9 +4928,7 @@ class AutonomousOrchestrator:
             # for network flakiness (Issue #1814).
             if _is_transient_git_error(e):
                 # Transient: propagate GitHubOpsError to trigger Layer-2 retry
-                logger.warning(
-                    "Transient push failure for branch %s: %s", branch_name, e
-                )
+                logger.warning("Transient push failure for branch %s: %s", branch_name, e)
                 raise
             else:
                 # Non-transient: wrap as RuntimeError to signal permanent failure
@@ -5381,9 +5375,7 @@ class AutonomousOrchestrator:
                     # Non-transient: mark failed, don't post misleading comment
                     push_failed = True
                     push_error_msg = str(e)
-                    logger.error(
-                        "Fix git_push failed (round %d): %s", round_num, e, exc_info=True
-                    )
+                    logger.error("Fix git_push failed (round %d): %s", round_num, e, exc_info=True)
 
         # Clear commit_sha on push failure to avoid referencing unpushed commit
         if push_failed:

@@ -135,9 +135,7 @@ class TestCiRepairPushTransientRetry:
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
         mock_gh.has_uncommitted_changes.return_value = False
-        mock_gh.git_push.side_effect = GitHubOpsError(
-            "git push failed: Connection timed out"
-        )
+        mock_gh.git_push.side_effect = GitHubOpsError("git push failed: Connection timed out")
 
         with pytest.raises(GitHubOpsError) as exc_info:
             AutonomousOrchestrator._detect_and_push_ci_repair_changes(
@@ -159,9 +157,7 @@ class TestCiRepairPushTransientRetry:
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
         mock_gh.has_uncommitted_changes.return_value = False
-        mock_gh.git_push.side_effect = GitHubOpsError(
-            "git push failed: Permission denied"
-        )
+        mock_gh.git_push.side_effect = GitHubOpsError("git push failed: Permission denied")
 
         commit_sha, sha_changed, push_error = (
             AutonomousOrchestrator._detect_and_push_ci_repair_changes(
@@ -209,9 +205,7 @@ class TestCiRepairPushTransientRetry:
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
         mock_gh.has_uncommitted_changes.return_value = False
-        mock_gh.git_push.side_effect = GitHubOpsError(
-            "git push failed: SSL certificate problem"
-        )
+        mock_gh.git_push.side_effect = GitHubOpsError("git push failed: SSL certificate problem")
 
         with pytest.raises(GitHubOpsError):
             AutonomousOrchestrator._detect_and_push_ci_repair_changes(
@@ -231,9 +225,7 @@ class TestCiRepairPushTransientRetry:
         mock_gh = MagicMock()
         mock_gh.get_current_commit.return_value = "sha-new"
         mock_gh.has_uncommitted_changes.return_value = False
-        mock_gh.git_push.side_effect = GitHubOpsError(
-            "git push failed: Network is unreachable"
-        )
+        mock_gh.git_push.side_effect = GitHubOpsError("git push failed: Network is unreachable")
 
         with pytest.raises(GitHubOpsError):
             AutonomousOrchestrator._detect_and_push_ci_repair_changes(
