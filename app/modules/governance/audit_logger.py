@@ -688,6 +688,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "auth": {
             "label": "Authentication",
             "i18n_key": "categoryAuth",
+            "resource_types": ["session"],
             "actions": [
                 {
                     "value": "login",
@@ -714,6 +715,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "user_management": {
             "label": "User Management",
             "i18n_key": "categoryUserManagement",
+            "resource_types": ["user"],
             "actions": [
                 {
                     "value": "user_create",
@@ -750,6 +752,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "permission": {
             "label": "Permission",
             "i18n_key": "categoryPermission",
+            "resource_types": ["user"],
             "actions": [
                 {
                     "value": "permission_grant",
@@ -766,6 +769,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "quota": {
             "label": "Quota",
             "i18n_key": "categoryQuota",
+            "resource_types": ["quota_alert"],
             "actions": [
                 {
                     "value": "quota_update",
@@ -787,6 +791,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "data": {
             "label": "Data",
             "i18n_key": "categoryData",
+            "resource_types": ["analytics_report", "analytics", "data"],
             "actions": [
                 {
                     "value": "data_view",
@@ -813,6 +818,12 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "system": {
             "label": "System",
             "i18n_key": "categorySystem",
+            "resource_types": [
+                "content_filter",
+                "filter_rule",
+                "security_settings",
+                "ai_agent_settings",
+            ],
             "actions": [
                 {
                     "value": "system_config_change",
@@ -834,6 +845,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "content": {
             "label": "Content",
             "i18n_key": "categoryContent",
+            "resource_types": ["content"],
             "actions": [
                 {
                     "value": "content_blocked",
@@ -860,6 +872,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
         "agent": {
             "label": "Agent",
             "i18n_key": "categoryAgent",
+            "resource_types": ["remote_machine", "agent_token"],
             "actions": [
                 {
                     "value": "agent_register",

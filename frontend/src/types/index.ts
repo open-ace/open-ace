@@ -397,15 +397,20 @@ export interface AuditActionItem {
   label: string;
   category: string;
   i18n_key: string;
+  resource_types?: string[];
 }
 
 export interface AuditCategory {
   key: string;
   label: string;
   i18n_key: string;
+  resource_types?: string[];
 }
 
 export interface AuditActionsResponse {
   actions: AuditActionItem[];
   categories: AuditCategory[];
+  actionToCategory?: Record<string, string>;
+  actionToResourceTypes?: Record<string, string[]>;
+  resourceToCategories?: Record<string, string[]>;
 }

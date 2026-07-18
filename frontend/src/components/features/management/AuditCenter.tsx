@@ -146,7 +146,11 @@ export const AuditCenter: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
   // --- Audit Actions Hook ---
-  const { actions: auditActions, categories: auditCategories } = useAuditActions();
+  const {
+    actions: auditActions,
+    categories: auditCategories,
+    actionToResourceTypes,
+  } = useAuditActions();
 
   const handleAnomalyStatusUpdate = async (
     anomalyType: string,
@@ -272,10 +276,45 @@ export const AuditCenter: React.FC = () => {
     [language]
   );
 
+  const allowedResourceTypesForAction = useMemo(
+    () => (filters.action ? (actionToResourceTypes[filters.action] ?? []) : []),
+    [actionToResourceTypes, filters.action]
+  );
+  const isResourceTypeLinked = Boolean(filters.action && allowedResourceTypesForAction.length > 0);
+
+  const filteredResourceTypeOptions = useMemo(() => {
+    if (!isResourceTypeLinked) {
+      return resourceTypeOptions;
+    }
+    return resourceTypeOptions.filter(
+      (option) => option.value === '' || allowedResourceTypesForAction.includes(option.value)
+    );
+  }, [allowedResourceTypesForAction, isResourceTypeLinked, resourceTypeOptions]);
+
   const handleFilterChange = (key: keyof AuditLogFilters, value: string) => {
-    setFilters((prev) => ({ ...prev, [key]: value || undefined }));
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value || undefined };
+      if (key === 'action' && value && prev.resource_type) {
+        const allowed = actionToResourceTypes[value] ?? [];
+        if (allowed.length > 0 && !allowed.includes(prev.resource_type)) {
+          next.resource_type = undefined;
+        }
+      }
+      return next;
+    });
     setPage(1);
   };
+
+  useEffect(() => {
+    if (!filters.action || !filters.resource_type) {
+      return;
+    }
+    const allowed = actionToResourceTypes[filters.action] ?? [];
+    if (allowed.length > 0 && !allowed.includes(filters.resource_type)) {
+      setFilters((prev) => ({ ...prev, resource_type: undefined }));
+      setPage(1);
+    }
+  }, [actionToResourceTypes, filters.action, filters.resource_type]);
 
   const handleReset = () => {
     setFilters(getDefaultAuditFilters());
@@ -389,10 +428,15 @@ export const AuditCenter: React.FC = () => {
             <div className="col-md-3">
               <label className="form-label">{t('resourceType', language)}</label>
               <Select
-                options={resourceTypeOptions}
+                options={filteredResourceTypeOptions}
                 value={filters.resource_type ?? ''}
                 onChange={(value) => handleFilterChange('resource_type', value)}
               />
+              {isResourceTypeLinked && (
+                <div className="form-text" aria-live="polite">
+                  {t('resourceTypesFilteredByAction', language)}
+                </div>
+              )}
             </div>
             <div className="col-md-3">
               <label className="form-label">{t('startDate', language)}</label>
