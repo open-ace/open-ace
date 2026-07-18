@@ -273,6 +273,7 @@ export const translations: Record<Language, Translations> = {
     // Audit Log
     allActions: 'All Actions',
     allResourceTypes: 'All Resource Types',
+    resourceTypesFilteredByAction: 'Resource types are filtered by the selected action.',
     tableAction: 'Action',
     resourceType: 'Resource Type',
     resourceId: 'Resource ID',
@@ -1951,6 +1952,7 @@ export const translations: Record<Language, Translations> = {
     // Audit Log
     allActions: '所有操作',
     allResourceTypes: '所有资源类型',
+    resourceTypesFilteredByAction: '资源类型已根据所选操作自动过滤。',
     tableAction: '操作',
     resourceType: '资源类型',
     resourceId: '资源 ID',
@@ -3803,6 +3805,8 @@ export const translations: Record<Language, Translations> = {
     // Audit Log
     allActions: 'すべてのアクション',
     allResourceTypes: 'すべてのリソースタイプ',
+    resourceTypesFilteredByAction:
+      'リソースタイプは選択したアクションに基づいて絞り込まれています。',
     tableAction: 'アクション',
     resourceType: 'リソースタイプ',
     resourceId: 'リソースID',
@@ -5304,6 +5308,7 @@ export const translations: Record<Language, Translations> = {
     // Audit Log
     allActions: '모든 작업',
     allResourceTypes: '모든 리소스 유형',
+    resourceTypesFilteredByAction: '선택한 작업에 따라 리소스 유형이 필터링됩니다.',
     tableAction: '작업',
     resourceType: '리소스 유형',
     resourceId: '리소스 ID',

@@ -132,20 +132,34 @@ def api_audit_actions():
 
     # Build flat list of all actions
     all_actions = []
+    action_to_category: dict[str, str] = {}
+    action_to_resource_types: dict[str, list[str]] = {}
+    resource_to_categories: dict[str, list[str]] = {}
     for category_key, category_data in categories_data.items():
+        resource_types = category_data.get("resource_types", [])
         for action in category_data["actions"]:
+            action_to_category[action["value"]] = category_key
+            action_to_resource_types[action["value"]] = resource_types
             all_actions.append(
                 {
                     "value": action["value"],
                     "label": action["label"],
                     "category": category_key,
                     "i18n_key": action["i18n_key"],
+                    "resource_types": resource_types,
                 }
             )
+        for resource_type in resource_types:
+            resource_to_categories.setdefault(resource_type, []).append(category_key)
 
     # Build categories list
     categories = [
-        {"key": key, "label": data["label"], "i18n_key": data["i18n_key"]}
+        {
+            "key": key,
+            "label": data["label"],
+            "i18n_key": data["i18n_key"],
+            "resource_types": data.get("resource_types", []),
+        }
         for key, data in categories_data.items()
     ]
 
@@ -153,6 +167,9 @@ def api_audit_actions():
         {
             "actions": all_actions,
             "categories": categories,
+            "actionToCategory": action_to_category,
+            "actionToResourceTypes": action_to_resource_types,
+            "resourceToCategories": resource_to_categories,
         }
     )
 

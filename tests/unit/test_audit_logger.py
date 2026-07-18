@@ -525,6 +525,8 @@ class TestGetActionCategories:
         for category_key, category_data in categories.items():
             assert "label" in category_data
             assert "i18n_key" in category_data
+            assert "resource_types" in category_data
+            assert isinstance(category_data["resource_types"], list)
             assert "actions" in category_data
             for action in category_data["actions"]:
                 assert "value" in action
@@ -562,3 +564,14 @@ class TestGetActionCategories:
         action_values = [a["value"] for a in content_actions]
         assert "content_warned" in action_values
         assert "content_redacted" in action_values
+
+    def test_get_action_categories_declares_related_resource_types(self):
+        """Test action categories expose resource mappings for linked UI filters."""
+        from app.modules.governance.audit_logger import get_action_categories
+
+        categories = get_action_categories()
+        assert categories["auth"]["resource_types"] == ["session"]
+        assert categories["user_management"]["resource_types"] == ["user"]
+        assert categories["data"]["resource_types"] == ["analytics_report", "analytics", "data"]
+        assert categories["agent"]["resource_types"] == ["remote_machine", "agent_token"]
+        assert "security_settings" in categories["system"]["resource_types"]

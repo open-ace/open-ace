@@ -215,15 +215,76 @@ export const AUDIT_ACTION_OPTIONS_FALLBACK: AuditActionItem[] = [
 ];
 
 export const AUDIT_CATEGORIES_FALLBACK: AuditCategory[] = [
-  { key: 'auth', label: 'Authentication', i18n_key: 'categoryAuth' },
-  { key: 'user_management', label: 'User Management', i18n_key: 'categoryUserManagement' },
-  { key: 'permission', label: 'Permission', i18n_key: 'categoryPermission' },
-  { key: 'quota', label: 'Quota', i18n_key: 'categoryQuota' },
-  { key: 'data', label: 'Data', i18n_key: 'categoryData' },
-  { key: 'system', label: 'System', i18n_key: 'categorySystem' },
-  { key: 'content', label: 'Content', i18n_key: 'categoryContent' },
-  { key: 'agent', label: 'Agent', i18n_key: 'categoryAgent' },
+  { key: 'auth', label: 'Authentication', i18n_key: 'categoryAuth', resource_types: ['session'] },
+  {
+    key: 'user_management',
+    label: 'User Management',
+    i18n_key: 'categoryUserManagement',
+    resource_types: ['user'],
+  },
+  {
+    key: 'permission',
+    label: 'Permission',
+    i18n_key: 'categoryPermission',
+    resource_types: ['user'],
+  },
+  {
+    key: 'quota',
+    label: 'Quota',
+    i18n_key: 'categoryQuota',
+    resource_types: ['quota_alert'],
+  },
+  {
+    key: 'data',
+    label: 'Data',
+    i18n_key: 'categoryData',
+    resource_types: ['analytics_report', 'analytics', 'data'],
+  },
+  {
+    key: 'system',
+    label: 'System',
+    i18n_key: 'categorySystem',
+    resource_types: ['content_filter', 'filter_rule', 'security_settings', 'ai_agent_settings'],
+  },
+  {
+    key: 'content',
+    label: 'Content',
+    i18n_key: 'categoryContent',
+    resource_types: ['content'],
+  },
+  {
+    key: 'agent',
+    label: 'Agent',
+    i18n_key: 'categoryAgent',
+    resource_types: ['remote_machine', 'agent_token'],
+  },
 ];
+
+export function buildAuditActionMappings(actions: AuditActionItem[], categories: AuditCategory[]) {
+  const categoryResourceTypes = Object.fromEntries(
+    categories.map((category) => [category.key, category.resource_types ?? []])
+  );
+  const actionToCategory: Record<string, string> = {};
+  const actionToResourceTypes: Record<string, string[]> = {};
+  const resourceToCategories: Record<string, string[]> = {};
+
+  actions.forEach((action) => {
+    actionToCategory[action.value] = action.category;
+    actionToResourceTypes[action.value] =
+      action.resource_types ?? categoryResourceTypes[action.category] ?? [];
+  });
+
+  categories.forEach((category) => {
+    (category.resource_types ?? []).forEach((resourceType) => {
+      resourceToCategories[resourceType] = resourceToCategories[resourceType] ?? [];
+      if (!resourceToCategories[resourceType].includes(category.key)) {
+        resourceToCategories[resourceType].push(category.key);
+      }
+    });
+  });
+
+  return { actionToCategory, actionToResourceTypes, resourceToCategories };
+}
 
 /**
  * Fetches audit actions from the backend API.
@@ -256,6 +317,11 @@ export function useAuditActions() {
   // Use API data if available, otherwise fall back to hardcoded constants
   const actions = data?.actions ?? AUDIT_ACTION_OPTIONS_FALLBACK;
   const categories = data?.categories ?? AUDIT_CATEGORIES_FALLBACK;
+  const fallbackMappings = buildAuditActionMappings(actions, categories);
+  const actionToCategory = data?.actionToCategory ?? fallbackMappings.actionToCategory;
+  const actionToResourceTypes =
+    data?.actionToResourceTypes ?? fallbackMappings.actionToResourceTypes;
+  const resourceToCategories = data?.resourceToCategories ?? fallbackMappings.resourceToCategories;
 
   // Log when using fallback data
   if (!data) {
@@ -265,6 +331,9 @@ export function useAuditActions() {
   return {
     actions,
     categories,
+    actionToCategory,
+    actionToResourceTypes,
+    resourceToCategories,
     isLoading,
     error,
     refetch,
