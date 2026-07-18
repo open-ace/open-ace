@@ -18,6 +18,7 @@ import json
 import logging
 import socket
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -45,35 +46,98 @@ logger = logging.getLogger(__name__)
 
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 _WEBHOOK_TIMEOUT_SECONDS = 5
+# Cap concurrent outbound webhook deliveries so a burst of alerts can't spawn an
+# unbounded number of background threads. Waiters block (off the request path)
+# until a slot frees.
+_WEBHOOK_MAX_WORKERS = 4
+_webhook_delivery_semaphore = threading.BoundedSemaphore(_WEBHOOK_MAX_WORKERS)
 _FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
 _DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
 _DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
+# Feishu/Lark bot webhooks carry the bot token in the final path segment:
+#   https://open.feishu.cn/open-apis/bot/v2/hook/<TOKEN>
+# When masking, we only consider these known bot-hook path prefixes so we never
+# touch unrelated query strings or paths.
+_FEISHU_BOT_HOOK_PATH_PREFIXES = (
+    "/open-apis/bot/v2/hook/",
+    "/bot/v2/hook/",
+    "/open-apis/bot/v1/hook/",
+)
+# Fields shipped to third-party generic webhook receivers. ``alert.metadata`` is
+# free-form and has historically carried usage_percent/quota_type/username; it
+# could equally carry tokens/IPs/emails at future call sites, so it is never
+# forwarded wholesale.
+_WEBHOOK_ALERT_ALLOWLIST = (
+    "alert_id",
+    "alert_type",
+    "severity",
+    "title",
+    "message",
+    "created_at",
+)
 
 
-def _redact_dingtalk_secret(webhook_url):
-    """Strip any DingTalk signing secret query param from a webhook URL.
+def _redact_webhook_credentials(webhook_url, *, mask_feishu=True):
+    """Strip embedded webhook credentials from a webhook URL.
 
-    The per-webhook signing secret must never be persisted in, or echoed back
-    from, the stored webhook URL. Outbound signing reads the secret from the
-    global ``alerts.dingtalk_webhook_secret`` config instead. This helper is the
-    single chokepoint used on both write (before persistence) and read
-    (defensive redaction) so the credential cannot leak through the URL.
+    Two credential shapes are handled:
+
+    * DingTalk signing secret query params (``openace_dingtalk_secret`` /
+      ``dingtalk_secret``) — always stripped. The outbound signer reads the
+      secret from the global ``alerts.dingtalk_webhook_secret`` config instead,
+      so stripping it is lossless on the write path.
+    * Feishu/Lark bot webhooks, which carry the bot token in the final URL path
+      segment (``/open-apis/bot/v2/hook/<TOKEN>``). When ``mask_feishu`` is true
+      the token is replaced with ``<redacted>``.
+
+    The two credential shapes are *not* symmetric on the persistence path. The
+    DingTalk secret lives in the query string and is rebuilt from global config
+    on outbound signing, so it can safely be stripped before writing to the DB.
+    The Feishu token lives only in the path and has no global-config equivalent
+    (``alerts.webhook_secret``/``alerts.dingtalk_webhook_secret`` are unrelated),
+    so it must NOT be masked on the write path — otherwise it is destroyed and
+    every Feishu/Lark delivery silently fails. ``mask_feishu=False`` is therefore
+    used at the persistence chokepoint (``set_notification_preferences``), while
+    the default (``mask_feishu=True``) is used on every read/echo/log path so the
+    token is never surfaced to the frontend or to logs.
     """
     if not webhook_url:
         return webhook_url
+
+    # 1. DingTalk secret query params (always; lossless on the write path).
     try:
         parsed = urlparse(webhook_url)
     except ValueError:
         return webhook_url
-    if not parsed.query:
-        return webhook_url
-    original_items = parse_qsl(parsed.query, keep_blank_values=True)
-    sanitized = [
-        (key, value) for key, value in original_items if key not in _DINGTALK_SECRET_QUERY_KEYS
-    ]
-    if len(sanitized) == len(original_items):
-        return webhook_url
-    return urlunparse(parsed._replace(query=urlencode(sanitized)))
+    if parsed.query:
+        original_items = parse_qsl(parsed.query, keep_blank_values=True)
+        sanitized = [
+            (key, value) for key, value in original_items if key not in _DINGTALK_SECRET_QUERY_KEYS
+        ]
+        if len(sanitized) != len(original_items):
+            webhook_url = urlunparse(parsed._replace(query=urlencode(sanitized)))
+            parsed = urlparse(webhook_url)
+
+    # 2. Feishu/Lark path-based bot token (display/echo/log only).
+    if mask_feishu:
+        path = parsed.path or ""
+        for prefix in _FEISHU_BOT_HOOK_PATH_PREFIXES:
+            # ``len(path) > len(prefix)`` skips an empty token (URL ending exactly
+            # at the prefix): an empty tail is not a real credential, so it is
+            # left untouched rather than turned into ``.../hook/<redacted>``.
+            if path.startswith(prefix) and len(path) > len(prefix):
+                masked = prefix + "<redacted>"
+                webhook_url = urlunparse(parsed._replace(path=masked))
+                parsed = urlparse(webhook_url)
+                break
+    return webhook_url
+
+
+# Back-compat alias: earlier code imported ``_redact_dingtalk_secret``. Keep the
+# old name working for the read/echo path (full masking, including the Feishu
+# path token). The write path now calls ``_redact_webhook_credentials(...,
+# mask_feishu=False)`` directly so the Feishu token survives persistence.
+_redact_dingtalk_secret = _redact_webhook_credentials
 
 
 def _pin_host_to_url(url: str, pinned_ip: str) -> str:
@@ -331,9 +395,15 @@ class AlertNotifier:
         return allowed_ips, None
 
     def _is_feishu_webhook(self, webhook_url: str) -> bool:
-        """Return whether the webhook target looks like a Feishu/Lark bot webhook."""
+        """Return whether the webhook target looks like a Feishu/Lark bot webhook.
+
+        Detection is exact-host-or-suffix anchored (reusing the shared
+        ``_matches_webhook_host`` helper) so lookalike hosts such as
+        ``notfeishu.cn`` or ``feishu.cn.evil.com`` are NOT misclassified as
+        Feishu — an unanchored ``snippet in host`` check would match both.
+        """
         host = (urlparse(webhook_url).hostname or "").lower()
-        return any(snippet in host for snippet in _FEISHU_WEBHOOK_HOST_SNIPPETS)
+        return self._matches_webhook_host(host, _FEISHU_WEBHOOK_HOST_SNIPPETS)
 
     def _matches_webhook_host(self, host: str, domains: tuple[str, ...]) -> bool:
         """Return whether host is exactly a known domain or one of its subdomains."""
@@ -363,6 +433,18 @@ class AlertNotifier:
             lines.append(f"Action: {alert.action_url}")
         return "\n".join(line for line in lines if line)
 
+    def _webhook_alert_view(self, alert: Alert) -> dict[str, Any]:
+        """Return an allowlisted view of the alert for generic webhook payloads.
+
+        ``alert.metadata`` is free-form and is already populated by some call
+        sites with usage_percent / quota_type / username; future call sites
+        could stuff tokens, IPs, or emails into it. To prevent a third-party
+        webhook receiver from ever receiving that blob, the generic payload
+        ships only an explicit, stable allowlist of alert fields.
+        """
+        full = alert.to_dict()
+        return {field: full[field] for field in _WEBHOOK_ALERT_ALLOWLIST if field in full}
+
     def _build_webhook_payload(self, alert: Alert, webhook_url: str) -> dict[str, Any]:
         """Build the outbound webhook payload for the given target."""
         summary = self._format_webhook_text(alert)
@@ -374,7 +456,8 @@ class AlertNotifier:
             "event": "openace.alert",
             "source": "open-ace",
             "summary": summary,
-            "alert": alert.to_dict(),
+            # Allowlisted view only — never the raw to_dict()/metadata blob.
+            "alert": self._webhook_alert_view(alert),
         }
 
     def _prepare_webhook_url(self, webhook_url: str) -> str:
@@ -402,8 +485,32 @@ class AlertNotifier:
 
         return urlunparse(parsed._replace(query=urlencode(sanitized_items)))
 
+    def _sign_webhook_body(self, body: bytes) -> Optional[str]:
+        """Return an HMAC-SHA256 hex signature of ``body`` using the configured
+        generic webhook secret, or ``None`` if no secret is configured.
+
+        The signature is sent as the ``X-OpenACE-Signature`` header so generic
+        (non-Feishu/non-DingTalk) webhook receivers can verify the payload is
+        genuinely from this Open ACE instance. Feishu and DingTalk use their
+        own provider-specific signing schemes and are unaffected.
+        """
+        secret = str(get_config_value("alerts", "webhook_secret", "") or "").strip()
+        if not secret:
+            return None
+        return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
     def _send_webhook_notification(self, alert: Alert, user_id: int) -> None:
-        """Send a webhook notification for an alert if user preferences allow."""
+        """Send a webhook notification for an alert if user preferences allow.
+
+        This runs on a background worker thread (see :meth:`create_alert`) so a
+        slow or hanging receiver never blocks the user-facing request that
+        triggered the alert.
+        """
+        # Bound ``prefs`` before the try so the broad-except handler below can
+        # safely read it even when ``get_notification_preferences`` itself
+        # raises (e.g. a DB error). Otherwise referencing ``prefs`` there would
+        # raise UnboundLocalError and mask the real exception.
+        prefs: Optional[NotificationPreference] = None
         try:
             prefs = self.get_notification_preferences(user_id)
 
@@ -432,19 +539,25 @@ class AlertNotifier:
                 return
 
             payload = self._build_webhook_payload(alert, prefs.webhook_url)
+            body = json.dumps(payload).encode("utf-8")
             outbound_url = self._prepare_webhook_url(prefs.webhook_url)
             pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
             headers = {
                 "User-Agent": "Open-ACE Alert Webhook",
                 "Host": urlparse(outbound_url).hostname,
+                "Content-Type": "application/json",
             }
+            # Sign generic payloads so receivers can verify authenticity.
+            signature = self._sign_webhook_body(body)
+            if signature is not None:
+                headers["X-OpenACE-Signature"] = signature
             session = requests.Session()
             try:
                 session.mount("https://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
                 session.mount("http://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
                 response = session.post(
                     pinned_url,
-                    json=payload,
+                    data=body,
                     timeout=_WEBHOOK_TIMEOUT_SECONDS,
                     allow_redirects=False,
                     headers=headers,
@@ -458,11 +571,21 @@ class AlertNotifier:
                 user_id,
             )
         except Exception as e:
+            # Log the exception TYPE + a redacted host only. ``requests``
+            # ConnectionError / HTTPError embed the full request URL, which for
+            # Feishu/Lark contains the bot token in the path — never interpolate
+            # the raw exception. ``prefs`` is pre-bound to None above so this is
+            # safe even when get_notification_preferences itself raised.
+            webhook_url = prefs.webhook_url if prefs and prefs.webhook_url else None
+            redacted_host = _redact_webhook_credentials(webhook_url) if webhook_url else None
+            host = (urlparse(redacted_host).hostname if redacted_host else None) or "unknown"
             logger.warning(
-                "Failed to deliver webhook notification for alert %s to user %s: %s",
+                "Failed to deliver webhook notification for alert %s to user %s "
+                "(host=%s, error=%s)",
                 alert.alert_id,
                 user_id,
-                e,
+                host,
+                type(e).__name__,
             )
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
@@ -672,10 +795,48 @@ class AlertNotifier:
         # Send email notification if user preferences allow
         if user_id:
             self._send_email_notification(alert, user_id, language)
-            self._send_webhook_notification(alert, user_id)
+            # Deliver the webhook off the request path: a slow/hanging receiver
+            # must never add up to _WEBHOOK_TIMEOUT_SECONDS of latency to the
+            # user-facing request that created the alert (e.g. the LLM proxy
+            # 429 handler calling create_quota_alert). The daemon worker thread
+            # logs any delivery error itself.
+            self._dispatch_webhook_async(alert, user_id)
 
         logger.info(f"Created alert: [{severity}] {title}")
         return alert
+
+    def _dispatch_webhook_async(self, alert: Alert, user_id: int) -> None:
+        """Deliver ``_send_webhook_notification`` on a background daemon thread.
+
+        Runs out of band with the request that created the alert. Concurrency is
+        capped by a process-wide bounded semaphore so a burst of alerts can't
+        spawn unbounded threads. Any exception raised by the worker is already
+        swallowed/logged inside ``_send_webhook_notification``; the thread body
+        also releases the semaphore in a ``finally`` so a slot is never leaked.
+        """
+
+        def _worker():
+            acquired = False
+            try:
+                _webhook_delivery_semaphore.acquire()
+                acquired = True
+                self._send_webhook_notification(alert, user_id)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.error(
+                    "Unexpected error dispatching webhook for alert %s: %s",
+                    alert.alert_id,
+                    e,
+                )
+            finally:
+                if acquired:
+                    _webhook_delivery_semaphore.release()
+
+        thread = threading.Thread(
+            target=_worker,
+            name=f"openace-webhook-{alert.alert_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
 
     def _send_email_notification(
         self,
@@ -1082,7 +1243,11 @@ class AlertNotifier:
                 user_id=row["user_id"],
                 email_enabled=bool(row["email_enabled"]),
                 push_enabled=bool(row["push_enabled"]),
-                webhook_url=_redact_dingtalk_secret(row["webhook_url"]),
+                # Strip only the (rebuildable) DingTalk query secret here so the
+                # Feishu/Lark path token survives for delivery. The frontend
+                # echo re-masks both credentials (full masking) at the route
+                # layer (app/routes/alerts.py GET /alerts/preferences).
+                webhook_url=_redact_webhook_credentials(row["webhook_url"], mask_feishu=False),
                 alert_types=(
                     json.loads(row["alert_types"])
                     if row["alert_types"]
@@ -1110,10 +1275,16 @@ class AlertNotifier:
         Returns:
             True if successful.
         """
-        # Never persist the DingTalk signing secret inside the webhook URL;
-        # strip it before writing so the DB never holds the credential. The
-        # outbound signer reads the secret from global config instead.
-        preferences.webhook_url = _redact_dingtalk_secret(preferences.webhook_url)
+        # On the persistence path strip only the DingTalk query signing secret —
+        # it is rebuildable from global config on outbound signing. The Feishu/
+        # Lark bot token lives in the URL path and has no global-config
+        # equivalent, so it must be preserved verbatim here or every Feishu
+        # delivery would POST to ``/.../<redacted>`` and be rejected. The token
+        # is masked only on the read/echo path (get_notification_preferences)
+        # and in delivery-failure logs.
+        preferences.webhook_url = _redact_webhook_credentials(
+            preferences.webhook_url, mask_feishu=False
+        )
 
         conn = self._get_connection()
         cursor = conn.cursor()

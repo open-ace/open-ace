@@ -68,6 +68,7 @@
 |------|------|--------|
 | `alerts.allow_private_webhook_urls` | 是否允许告警 webhook 指向私网 / 回环 / 链路本地地址。默认关闭，用于阻断 SSRF 风险。 | `false` |
 | `alerts.dingtalk_webhook_secret` | 钉钉自定义机器人“加签”密钥。留空时按普通 webhook 发送；配置后发送前自动附加 `timestamp` / `sign`。 | `""` |
+| `alerts.webhook_secret` | 通用 webhook（非飞书 / 非钉钉）的 HMAC-SHA256 共享密钥。配置后对发送的请求体签名并把签名写入 `X-OpenACE-Signature` 头，接收方可据此校验请求来源；留空则不签名。 | `""` |
 
 > 默认情况下，告警 webhook 仅允许公开可达的 `http(s)` 地址。飞书 / Lark 和钉钉群机器人 webhook 可直接使用；如果你确实需要向内网地址推送，请显式打开 `alerts.allow_private_webhook_urls`，并在网络层自行控制访问范围。
 
