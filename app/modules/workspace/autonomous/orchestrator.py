@@ -658,7 +658,7 @@ _TRANSIENT_API_ERROR_RE = re.compile(
 # Test failure retry configuration.
 MAX_TEST_RETRIES = 2  # max retries when test agent itself fails
 MAX_DEV_RETRIES_ON_TEST_FAIL = 2  # max dev round retries for unfixable test failures
-MAX_CI_REPAIR_ATTEMPTS = 2  # max automatic dev-round retries for merge-phase CI failures
+MAX_CI_REPAIR_ATTEMPTS = 3  # max automatic dev-round retries for merge-phase CI failures
 
 
 def _next_phase(current_phase: str) -> str:
@@ -1141,6 +1141,70 @@ class AutonomousOrchestrator:
                 )
             )
         return "\n".join(sorted(parts))
+
+    def _ci_failure_fingerprint(self, gh: GitHubOps, checks: list[dict]) -> str:
+        """Fine-grained failure signature including the actual error lines.
+
+        ``_ci_failure_signature`` only captures the CI check NAME, which is too
+        coarse for Actions jobs that bundle multiple tools (one ``lint`` job
+        runs black/isort/ruff/mypy). When the agent fixes one sub-tool but
+        another still fails, the coarse signature stays identical and the
+        exhausted-unchanged guard wrongly gives up. This fingerprint appends a
+        normalized hash of the per-check error excerpt so partial fixes change
+        the signature and earn another repair attempt.
+        """
+        import hashlib
+
+        parts = []
+        for check in checks or []:
+            if check.get("bucket") != "fail":
+                continue
+            name = str(check.get("name") or "").strip()
+            try:
+                excerpt = gh.get_check_failure_excerpt(check)
+            except Exception:
+                excerpt = ""
+            # Normalize: strip volatile bits (timestamps, absolute paths,
+            # run/job ids) so the hash is stable across re-runs of the same
+            # error but differs when the error set changes.
+            normalized = self._normalize_failure_excerpt(excerpt)
+            digest = hashlib.sha256(normalized.encode()).hexdigest()[:12]
+            parts.append(f"{name}::{digest}")
+        return "\n".join(sorted(parts))
+
+    @staticmethod
+    def _normalize_failure_excerpt(excerpt: str) -> str:
+        """Reduce an excerpt to its error-bearing essence for fingerprinting.
+
+        Keeps only lines that look like real errors (strips CI chrome, blank
+        lines, hook banners) and normalizes file paths so the hash captures
+        *which* errors remain, not their line numbers or local paths.
+        """
+        if not excerpt:
+            return ""
+        lines = []
+        for raw in excerpt.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            # Keep lines that carry an error marker; drop pre-commit banners
+            # ("black....Passed", "mypy....Failed") which are too noisy.
+            if not re.search(
+                r"error:|Error:|ERROR:|Failed|failed|FAIL\b|"
+                r"would reformat|not formatted|not sorted|"
+                r"no-any-return|undefined name|\b[FEW]\d{3}\b",
+                line,
+                re.IGNORECASE,
+            ):
+                continue
+            # Normalize file paths: /abs/path/to/file.py:12:3 → file.py
+            line = re.sub(
+                r"(?<![\w/])[\w./-]+\.py(?=:\d+)", lambda m: m.group(0).split("/")[-1], line
+            )
+            # Drop line:col numbers (file.py:10:5 or file.py:99)
+            line = re.sub(r":\d+(:\d+)?(?=:|\s|$)", "", line)
+            lines.append(line)
+        return "\n".join(lines)
 
     def _get_preferred_worktree_path(self, wf: dict) -> str:
         """Return the canonical worktree path the workflow should reuse."""
@@ -2034,14 +2098,6 @@ class AutonomousOrchestrator:
         dev_round = int(wf.get("dev_round", 1) or 1)
         previous_attempts = int(wf.get("ci_repair_attempts", 0) or 0)
         next_attempt = previous_attempts + 1
-        signature = self._ci_failure_signature(failed_checks)
-        previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
-        previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
-        failure_names = ", ".join(
-            check.get("name") or "unknown"
-            for check in failed_checks
-            if check.get("bucket") == "fail"
-        )
         preferred_worktree_path = self._get_preferred_worktree_path(wf)
         gh = self._get_gh()
         current_head_sha = ""
@@ -2051,6 +2107,22 @@ class AutonomousOrchestrator:
             logger.warning(
                 "Failed to resolve PR head SHA for CI repair on PR #%s: %s", pr_number, e
             )
+
+        # Fine-grained fingerprint: check name + the specific error lines from
+        # the CI log excerpt. The coarse-grained _ci_failure_signature only
+        # captures the check NAME (e.g. "lint"), so a single Actions job that
+        # runs black/isort/ruff/mypy shows the same signature even when the
+        # failing sub-tool changes (black fixed but mypy still fails). Including
+        # the actual error lines makes the fingerprint react to partial fixes,
+        # so the agent gets another attempt instead of being marked exhausted.
+        signature = self._ci_failure_fingerprint(gh, failed_checks)
+        previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
+        previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
+        failure_names = ", ".join(
+            check.get("name") or "unknown"
+            for check in failed_checks
+            if check.get("bucket") == "fail"
+        )
 
         if (
             previous_signature
