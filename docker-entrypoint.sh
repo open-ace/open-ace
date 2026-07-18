@@ -5,14 +5,61 @@
 set -e
 
 # ============================================================================
+# 0. Non-root runtime guard (PR #1780 review / docker-root)
+# ============================================================================
+# The image defaults to the non-root open-ace user (uid 1000). Single-user
+# mode works fine as uid 1000. Multi-user workspace mode genuinely needs root
+# (it runs useradd/chown and `sudo -u <user>` across /home), so it must opt
+# back into root explicitly via OPENACE_ALLOW_ROOT_MULTI_USER=1 AND run as
+# uid 0 (`docker run --user 0` / manifest `runAsUser: 0`). Fail fast instead
+# of silently swallowing the useradd/chown permission errors that a naive
+# non-root multi-user deployment would hit.
+require_root_for_multi_user() {
+    if [ "$(id -u)" != "0" ]; then
+        echo "ERROR: multi-user workspace mode requires root to create system users."
+        echo "       The image defaults to the non-root open-ace user (uid 1000)."
+        echo "       To run multi-user mode, start the container as root AND set"
+        echo "       OPENACE_ALLOW_ROOT_MULTI_USER=1, e.g.:"
+        echo "         docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
+        echo "       or set runAsUser: 0 in your manifest. Otherwise keep"
+        echo "       single-user mode (the default)."
+        exit 1
+    fi
+    if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+        echo "ERROR: multi-user workspace mode is running as root but the explicit"
+        echo "       opt-in OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set."
+        echo "       Set OPENACE_ALLOW_ROOT_MULTI_USER=1 (and run as uid 0) to"
+        echo "       acknowledge that multi-user mode requires root, or keep"
+        echo "       single-user mode (the default, non-root)."
+        exit 1
+    fi
+}
+
+# Early fail-fast for the env-var trigger (before any setup work runs).
+if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+    require_root_for_multi_user
+fi
+
+# ============================================================================
 # 0. Pre-flight Setup
 # ============================================================================
 # Create logs directory (Issue #1205)
 mkdir -p /app/logs
 
-# Keep the legacy Docker path by default, but let non-root deployments (K8s)
-# mount and write config under the application user's home.
-OPENACE_CONFIG_DIR="${OPENACE_CONFIG_DIR:-/root/.open-ace}"
+# Default the config dir to a path the current uid can actually write.
+# The image runs as the non-root open-ace user (uid 1000) by default
+# (Dockerfile `USER 1000`). /root is root:root 0700, so defaulting to
+# /root/.open-ace made `generate_default_config`'s `mkdir -p /root/.open-ace`
+# fail with Permission denied under `set -e`, breaking bare `docker run` and
+# the default docker-compose single-user path. Pick a writable home-based dir
+# unless the caller overrides OPENACE_CONFIG_DIR (e.g. K8s sets it explicitly).
+if [ -z "${OPENACE_CONFIG_DIR:-}" ]; then
+    if [ "$(id -u)" = "0" ]; then
+        OPENACE_CONFIG_DIR="/root/.open-ace"
+    else
+        OPENACE_CONFIG_DIR="${HOME:-/home/open-ace}/.open-ace"
+    fi
+fi
 OPENACE_CONFIG_FILE="${OPENACE_CONFIG_FILE:-${OPENACE_CONFIG_DIR}/config.json}"
 export OPENACE_CONFIG_DIR OPENACE_CONFIG_FILE
 
@@ -421,6 +468,9 @@ fi
 
 if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" ]; then
     echo "Configuring multi-user workspace mode (env=$WORKSPACE_MULTI_USER_MODE, config=$CONFIG_MULTI_USER)..."
+    # Fail fast if multi-user mode was enabled via config.json but the container
+    # is not running as root with the explicit opt-in (see top-of-file guard).
+    require_root_for_multi_user
 
     # Ensure workspace base directory exists
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"

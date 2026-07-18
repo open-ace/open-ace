@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- The Docker image now defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive in the production stage, so `docker run`, docker-compose, and Kubernetes all run non-root without relying solely on the manifest `securityContext`. Multi-user workspace mode (which needs root for `useradd`/`chown`/`sudo -u`) is now an explicit, fail-fast opt-in: run as uid 0 (`docker run --user 0` / manifest `runAsUser: 0`) and set `OPENACE_ALLOW_ROOT_MULTI_USER=1`, otherwise the entrypoint exits with a clear error instead of silently swallowing permission failures.
 - Kubernetes reference manifests now run the web pod as non-root with 3 replicas, HPA, and Prometheus scrape annotations restored; multi-user workspace deployments that require root must opt in via an explicit overlay.
 - Docker-generated default config now enables AI autonomous development by default and only enables multi-user workspace mode when `WORKSPACE_MULTI_USER_MODE=true`.
 - Documented the encrypted-secret upgrade path: existing deployments should set `OPENACE_ENCRYPTION_KEY` to the previous `SECRET_KEY` value before first restart after the security-hardening upgrade, then rotate in a planned maintenance window if desired.
