@@ -1,8 +1,16 @@
 """Add indexes for user mapping optimization
 
-Revision ID: 20260715_002_add_users_mapping_indexes
+Revision ID: 20260714_002_add_users_mapping_indexes
 Revises: 20260715_001_add_last_ci_failure_head_sha
-Create Date: 2026-07-15
+Create Date: 2026-07-14
+
+Note: the file-name date prefix (20260714) predates this revision's position
+in the migration chain — it sits between 20260715_001 and 20260717_001.
+Alembic orders migrations by the revision/down_revision graph, not by file
+name, so ``alembic history`` shows the chain correctly regardless. The id is
+kept as-is because it has already shipped to environments on origin/main;
+renaming it would break ``alembic upgrade head`` for any DB stamped with
+this id (alembic resolves the current revision before computing the path).
 
 Issue: #1574
 PR #1572 introduced subqueries to resolve user_id from sender_name in both
@@ -29,7 +37,7 @@ from alembic import op
 
 log = logging.getLogger(__name__)
 
-revision: str = "20260715_002_add_users_mapping_indexes"
+revision: str = "20260714_002_add_users_mapping_indexes"
 down_revision: Union[str, None] = "20260715_001_add_last_ci_failure_head_sha"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
