@@ -90,7 +90,10 @@ class TestRoiAssumptionRoutes:
             ("/api/roi/daily-costs", "get_daily_costs"),
         ],
     )
-    def test_display_routes_pass_overrides_to_calculator(self, client, path, method_name):
+    def test_display_routes_ignore_assumption_overrides(self, client, path, method_name):
+        """Cost breakdown and daily costs are derived from token usage and
+        default pricing; they never consume ROI assumptions, so override
+        params must be ignored (previously parsed and silently discarded)."""
         fake_calc = MagicMock()
         getattr(fake_calc, method_name).return_value = []
 
@@ -108,11 +111,12 @@ class TestRoiAssumptionRoutes:
                 )
 
         assert resp.status_code == 200
-        assumptions = calc_cls.call_args.kwargs["assumptions"]
-        assert assumptions.hourly_labor_cost == 90.0
-        assert assumptions.productivity_multiplier == 3.0
-        assert assumptions.avg_time_saved_per_request == 8.0
-        assert assumptions.currency == "EUR"
+        # The calculator is built without assumption overrides (no kwargs).
+        calc_cls.assert_called_once_with()
+        # And the override values are NOT forwarded to the underlying method.
+        forwarded_kwargs = getattr(fake_calc, method_name).call_args.kwargs
+        assert "hourly_labor_cost" not in forwarded_kwargs
+        assert "productivity_multiplier" not in forwarded_kwargs
 
     def test_invalid_roi_assumption_returns_400(self, client):
         with patch("app.auth.decorators._authenticate", return_value=(True, MOCK_ADMIN_SESSION)):

@@ -5,10 +5,11 @@ API endpoints for ROI analysis and cost optimization.
 """
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
 from app.modules.analytics.cost_optimizer import CostOptimizer
@@ -28,7 +29,7 @@ def _parse_positive_float_arg(name: str) -> tuple[Optional[float], Optional[str]
         parsed = float(raw_value)
     except ValueError:
         return None, f"{name} must be a positive number"
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         return None, f"{name} must be a positive number"
     return parsed, None
 
@@ -70,6 +71,16 @@ def _require_auth():
     pass
 
 
+def _caller_tenant_id() -> Optional[int]:
+    """Return the authenticated caller's tenant_id, or None when unset.
+
+    ``g.tenant_id`` is populated by ``auth_required`` for normal requests; the
+    ``getattr`` guard keeps these routes testable without a full auth pipeline
+    while still scoping every multi-tenant request.
+    """
+    return getattr(g, "tenant_id", None)
+
+
 # ==================== ROI Analysis ====================
 
 
@@ -94,7 +105,9 @@ def get_roi():
             return jsonify({"success": False, "error": error}), 400
 
         calculator = ROICalculator(assumptions=assumptions)
-        roi = calculator.calculate_roi(start_date, end_date, user_id, tool_name)
+        roi = calculator.calculate_roi(
+            start_date, end_date, user_id, tool_name, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": roi.to_dict() if roi else None})
     except Exception as e:
@@ -114,7 +127,7 @@ def get_roi_trend():
             return jsonify({"success": False, "error": error}), 400
 
         calculator = ROICalculator(assumptions=assumptions)
-        trends = calculator.get_roi_trend(months, user_id)
+        trends = calculator.get_roi_trend(months, user_id, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
     except Exception as e:
@@ -140,7 +153,9 @@ def get_roi_by_tool():
             return jsonify({"success": False, "error": error}), 400
 
         calculator = ROICalculator(assumptions=assumptions)
-        roi_by_tool = calculator.get_roi_by_tool(start_date, end_date)
+        roi_by_tool = calculator.get_roi_by_tool(
+            start_date, end_date, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": {k: v.to_dict() for k, v in roi_by_tool.items()}})
     except Exception as e:
@@ -166,7 +181,9 @@ def get_roi_by_user():
             return jsonify({"success": False, "error": error}), 400
 
         calculator = ROICalculator(assumptions=assumptions)
-        roi_by_user = calculator.get_roi_by_user(start_date, end_date)
+        roi_by_user = calculator.get_roi_by_user(
+            start_date, end_date, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify(
             {"success": True, "data": {str(k): v.to_dict() for k, v in roi_by_user.items()}}
@@ -178,7 +195,12 @@ def get_roi_by_user():
 
 @roi_bp.route("/roi/cost-breakdown", methods=["GET"])
 def get_cost_breakdown():
-    """Get detailed cost breakdown."""
+    """Get detailed cost breakdown.
+
+    Cost breakdown is derived purely from token usage and model pricing; it
+    does not consume ROI assumptions, so assumption override params are not
+    accepted here (they were previously parsed and silently discarded).
+    """
     try:
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
@@ -190,12 +212,10 @@ def get_cost_breakdown():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
-
-        calculator = ROICalculator(assumptions=assumptions)
-        breakdown = calculator.get_cost_breakdown(start_date, end_date, user_id)
+        calculator = ROICalculator()
+        breakdown = calculator.get_cost_breakdown(
+            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify(
             {
@@ -213,7 +233,12 @@ def get_cost_breakdown():
 
 @roi_bp.route("/roi/daily-costs", methods=["GET"])
 def get_daily_costs():
-    """Get daily cost data for charting."""
+    """Get daily cost data for charting.
+
+    Daily costs are derived purely from token usage and default pricing; they
+    do not consume ROI assumptions, so assumption override params are not
+    accepted here (they were previously parsed and silently discarded).
+    """
     try:
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
@@ -225,12 +250,10 @@ def get_daily_costs():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
 
-        assumptions, error = _build_roi_assumptions()
-        if error:
-            return jsonify({"success": False, "error": error}), 400
-
-        calculator = ROICalculator(assumptions=assumptions)
-        daily_costs = calculator.get_daily_costs(start_date, end_date, user_id)
+        calculator = ROICalculator()
+        daily_costs = calculator.get_daily_costs(
+            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": daily_costs})
     except Exception as e:
@@ -257,7 +280,9 @@ def get_roi_summary():
             return jsonify({"success": False, "error": error}), 400
 
         calculator = ROICalculator(assumptions=assumptions)
-        summary = calculator.get_summary_stats(start_date, end_date, user_id)
+        summary = calculator.get_summary_stats(
+            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": summary})
     except Exception as e:

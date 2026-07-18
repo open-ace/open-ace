@@ -225,10 +225,33 @@ export const ROIAnalysis: React.FC = () => {
     setStartDate(start.toISOString().split('T')[0]);
   }, []);
 
+  // Seed the baseline assumptions from a dedicated, non-overridden call so the
+  // Reset button always restores the server/env default. Capturing the baseline
+  // from the first roiMetrics payload was fragile: if that payload already
+  // reflected an active override (e.g. an override leaked into the first fetch),
+  // Reset would restore the override instead of the true default.
   useEffect(() => {
-    if (baselineAssumptions || !roiMetrics?.assumptions) return;
-    setBaselineAssumptions(roiMetrics.assumptions);
-    setDraftAssumptions(toAssumptionDraft(roiMetrics.assumptions));
+    let cancelled = false;
+    if (baselineAssumptions) return;
+    (async () => {
+      try {
+        const summary = (await roiApi.getROISummary({})) as {
+          assumptions?: ROIAssumptions;
+        };
+        const defaults = summary?.assumptions;
+        if (cancelled || !defaults) return;
+        setBaselineAssumptions(defaults);
+        setDraftAssumptions(toAssumptionDraft(defaults));
+      } catch {
+        // Fall back to the first roiMetrics payload if the summary call fails.
+        if (cancelled || !roiMetrics?.assumptions) return;
+        setBaselineAssumptions(roiMetrics.assumptions);
+        setDraftAssumptions(toAssumptionDraft(roiMetrics.assumptions));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [baselineAssumptions, roiMetrics]);
 
   // Translate suggestion title/description based on suggestion_type + dynamic params.

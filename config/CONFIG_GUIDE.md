@@ -145,6 +145,19 @@
 | `dingtalk.org_sync_interval_minutes` | 自动同步间隔（分钟） | `60` |
 | `dingtalk.org_sync_root_dept_id` | 同步起始部门 ID。钉钉根部门通常为 `1`。 | `"1"` |
 
+#### ROI 分析假设（可选）
+
+ROI 分析页（`/manage/analysis/roi`）展示的成本节省与生产力收益是**可配置的规划估算**，而非已实现的节省。底层假设通过以下环境变量全局配置；前端“Apply”按钮发起的按请求覆盖仅作用于当次查询，不会修改这些默认值。
+
+| 环境变量 | 说明 | 默认值 |
+|------|------|--------|
+| `OPENACE_ROI_HOURLY_LABOR_COST` | 每小时人工成本（用于估算节省）。 | `50.0` |
+| `OPENACE_ROI_PRODUCTIVITY_MULTIPLIER` | 生产力乘数（如 `10` 表示 10 倍提升）。 | `10.0` |
+| `OPENACE_ROI_AVG_TIME_SAVED_PER_REQUEST` | 每次请求平均节省的分钟数。 | `5.0` |
+| `OPENACE_ROI_CURRENCY` | 展示货币代码（ISO 4217 风格，最多 8 字符）。 | `USD` |
+
+> 注意：非法值（负数、零、`inf`/`Infinity`、非数字）会被忽略并回退到上表默认值。各变量必须为有限正数。
+
 ---
 
 ## 配置步骤
