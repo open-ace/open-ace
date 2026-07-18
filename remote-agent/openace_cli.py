@@ -340,6 +340,10 @@ def cmd_shell(args: argparse.Namespace) -> int:
             subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
     finally:
         _clear_active_terminal()
+        # Defensive cleanup: the SSH-CLI shell path passes the token via env
+        # (_session_env) and does not normally persist it to config.toml, so
+        # this is usually a no-op. We still call it in case some upstream path
+        # wrote a bearer token, so no terminal exit leaves one on disk.
         clear_codex_bearer_token()
     return 0
 

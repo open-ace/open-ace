@@ -898,8 +898,13 @@ class RemoteAgent:
         finally:
             # Scrub the persisted Codex bearer token (Windows-UWP launch path)
             # so a stopped/abandoned terminal does not leave a still-valid
-            # proxy token behind in ~/.codex/config.toml.
-            clear_codex_bearer_token()
+            # proxy token behind in ~/.codex/config.toml. Only do this once no
+            # other terminal remains: the bearer token lives in a single shared
+            # config file, and other still-running terminals may depend on it
+            # (the UWP path cannot read it from the environment). The current id
+            # has already been popped by _stop_terminal_process above.
+            if not self._terminal_processes:
+                clear_codex_bearer_token()
         self._http_send(
             {
                 "type": "terminal_status",

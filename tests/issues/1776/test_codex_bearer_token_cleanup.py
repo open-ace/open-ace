@@ -301,6 +301,11 @@ def _bare_agent(agent_module):
         machine_id = "machine-123"
 
     agent.config = _FakeConfig()
+    # _cmd_stop_terminal's finally now checks whether any other terminal is
+    # still active before scrubbing the shared token, so the agent must carry
+    # the active-terminal map. Default to empty (no other terminals) so the
+    # single-stop path still clears the token.
+    agent._terminal_processes = {}
     return agent
 
 
@@ -345,6 +350,140 @@ def test_cmd_stop_terminal_clears_token_even_when_process_stop_fails(monkeypatch
     assert cleared == [
         None
     ], "bearer-token cleanup must run in the finally path of _cmd_stop_terminal"
+
+
+# ---------------------------------------------------------------------------
+# Severe#1 (round-2 review): multi-terminal concurrency
+# Stopping one terminal must NOT scrub the shared ~/.codex/config.toml token
+# while other terminals are still running (they may depend on it via the
+# Windows-UWP file-only path). Cleanup is only safe when no active terminal
+# remains. _stop_terminal_process pops the current id, so the finally branch
+# can simply check ``not self._terminal_processes``.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_stop_terminal_skips_clear_when_other_terminals_active(monkeypatch):
+    """Stopping terminal A while terminal B still runs must keep the token."""
+    agent_module = load_agent_module()
+    agent = _bare_agent(agent_module)
+    # Two terminals are active; _stop_terminal_process (real pop) removes the
+    # one being stopped, leaving the other in the map.
+    agent._terminal_processes = {"term-a": object(), "term-b": object()}
+
+    cleared = []
+
+    def fake_stop(terminal_id):
+        agent._terminal_processes.pop(terminal_id, None)
+
+    monkeypatch.setattr(agent, "_stop_terminal_process", fake_stop)
+    monkeypatch.setattr(agent, "_http_send", lambda payload: None)
+    monkeypatch.setattr(
+        agent_module, "clear_codex_bearer_token", lambda home_dir=None: cleared.append(home_dir)
+    )
+
+    agent._cmd_stop_terminal({"terminal_id": "term-a"})
+
+    assert (
+        cleared == []
+    ), "must NOT clear the shared bearer token while another terminal is still active"
+    assert "term-b" in agent._terminal_processes, "the other terminal must remain tracked"
+
+
+def test_cmd_stop_terminal_clears_token_when_last_terminal_stops(monkeypatch):
+    """Stopping the only/last terminal must scrub the token (regression guard)."""
+    agent_module = load_agent_module()
+    agent = _bare_agent(agent_module)
+    agent._terminal_processes = {"term-solo": object()}
+
+    cleared = []
+
+    def fake_stop(terminal_id):
+        agent._terminal_processes.pop(terminal_id, None)
+
+    monkeypatch.setattr(agent, "_stop_terminal_process", fake_stop)
+    monkeypatch.setattr(agent, "_http_send", lambda payload: None)
+    monkeypatch.setattr(
+        agent_module, "clear_codex_bearer_token", lambda home_dir=None: cleared.append(home_dir)
+    )
+
+    agent._cmd_stop_terminal({"terminal_id": "term-solo"})
+
+    assert cleared == [None], "must clear the shared bearer token once no active terminal remains"
+    assert agent._terminal_processes == {}
+
+
+# ---------------------------------------------------------------------------
+# Severe#2 (round-2 review): clear_codex_bearer_token / write_codex_settings
+# read-modify-write races. A process-wide threading.Lock must serialize all
+# access to ~/.codex/config.toml so a concurrent writer cannot lose fields.
+# ---------------------------------------------------------------------------
+
+
+def test_codex_config_writes_are_serialized(tmp_path, monkeypatch):
+    """Concurrent write_codex_settings + clear_codex_bearer_token must not lose
+    fields. Without a process lock, a slow reader's stale snapshot can clobber a
+    concurrent writer's newly-added field (lost update).
+
+    This is made deterministic by intercepting ``_load_toml_file`` inside
+    ``clear_codex_bearer_token``: the clearer reads a stale snapshot, then yields
+    so the writer can persist a fresh config, then the clearer writes its stale
+    snapshot back - clobbering the writer's change. A process-wide lock must
+    make the whole read-modify-write atomic so no field is lost.
+    """
+    cli_settings = load_cli_settings()
+
+    config_path = _seed_codex_token(cli_settings, tmp_path, "proxy-token-123")
+    assert config_path.exists()
+
+    import threading
+
+    real_load = cli_settings._load_toml_file
+    clearer_ready = threading.Event()
+    clearer_read = threading.Event()
+    writer_done = threading.Event()
+    in_clearer = threading.local()
+
+    def racing_load(filepath):
+        # Only inject the stall for reads issued by the clearer thread.
+        if getattr(in_clearer, "value", False) and not clearer_read.is_set():
+            clearer_read.set()
+            # Let the writer land its fresh config while we hold a stale snapshot.
+            writer_done.wait(timeout=5)
+        return real_load(filepath)
+
+    monkeypatch.setattr(cli_settings, "_load_toml_file", racing_load)
+
+    def clearer():
+        in_clearer.value = True
+        clearer_ready.set()
+        cli_settings.clear_codex_bearer_token(home_dir=tmp_path)
+
+    def writer():
+        # Wait until the clearer has captured its stale snapshot, then write a
+        # fresh config carrying a brand-new field the clearer never saw.
+        clearer_read.wait(timeout=5)
+        cli_settings.write_codex_settings(
+            {"model_provider": "openace"},
+            proxy_base_url="https://openace.example/api/remote/llm-proxy/v1",
+            home_dir=tmp_path,
+            bearer_token="writer-token-999",
+        )
+        writer_done.set()
+
+    t_clear = threading.Thread(target=clearer)
+    t_write = threading.Thread(target=writer)
+    t_clear.start()
+    t_write.start()
+    t_clear.join(timeout=10)
+    t_write.join(timeout=10)
+
+    parsed = cli_settings.tomllib.loads(config_path.read_text(encoding="utf-8"))
+    openace = parsed["model_providers"]["openace"]
+    # The writer's bearer token must survive the clearer's stale rewrite.
+    assert openace.get("experimental_bearer_token") == "writer-token-999", (
+        "writer's field was lost to a concurrent read-modify-write race "
+        "(missing serialization lock on ~/.codex/config.toml)"
+    )
 
 
 def _ns(work_dir: str | None = None):
