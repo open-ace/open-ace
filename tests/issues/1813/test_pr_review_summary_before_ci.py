@@ -82,16 +82,22 @@ class TestPrReviewSummaryBeforeCiCheck:
             mock_repo = MagicMock()
             mock_repo.get_workflow.return_value = wf
             mock_repo.list_milestones.return_value = []
-            mock_repo.create_milestone.return_value = {
-                "milestone_id": "ms-summary",
-                "workflow_id": "wf-1813",
-            }
+
+            # Return a distinct milestone_id per type so we can filter
+            # update_milestone calls by the SUMMARY milestone only.
+            def fake_create(kwargs):
+                return {
+                    "milestone_id": f"ms-{kwargs.get('milestone_type', '')}",
+                    "workflow_id": "wf-1813",
+                }
+
+            mock_repo.create_milestone.side_effect = fake_create
             mock_repo.create_event.return_value = {"id": 1}
             mock_repo.update_workflow.return_value = wf
 
-            # Track update_milestone calls to capture review_content.
+            # Track update_milestone calls WITH ms_id to distinguish milestones.
             def track_update(ms_id, fields):
-                call_order.append(("update_milestone", dict(fields)))
+                call_order.append(("update_milestone", ms_id, dict(fields)))
 
             mock_repo.update_milestone.side_effect = track_update
             mock_repo.update_workflow_tokens.return_value = None
@@ -143,20 +149,26 @@ class TestPrReviewSummaryBeforeCiCheck:
             ):
                 orch._do_pr_review(wf)
 
-        # Find the update_milestone call that set review_content.
-        review_updates = [
-            c for c in call_order if c[0] == "update_milestone" and c[1].get("review_content")
+        # Find the update_milestone call for pr_review_summary (by id) that
+        # set review_content. Using ms_id avoids false-positives from
+        # pr_reviewed milestones which also carry review_content.
+        summary_updates = [
+            c
+            for c in call_order
+            if c[0] == "update_milestone"
+            and c[1] == "ms-pr_review_summary"
+            and c[2].get("review_content")
         ]
-        assert review_updates, (
+        assert summary_updates, (
             "pr_review_summary must be updated with non-empty review_content " "even when CI fails"
         )
-        assert review_updates[0][1]["review_content"].strip(), "review_content must be non-empty"
-        assert review_updates[0][1]["status"] == "completed", "pr_review_summary must be completed"
+        assert summary_updates[0][2]["review_content"].strip(), "review_content must be non-empty"
+        assert summary_updates[0][2]["status"] == "completed", "pr_review_summary must be completed"
 
         # Verify review_content update happened BEFORE ci_repair.
-        review_idx = call_order.index(review_updates[0])
+        summary_idx = call_order.index(summary_updates[0])
         ci_repair_calls = [i for i, c in enumerate(call_order) if c[0] == "ci_repair"]
         assert ci_repair_calls, "ci_repair should have been called"
         assert (
-            review_idx < ci_repair_calls[0]
+            summary_idx < ci_repair_calls[0]
         ), "review_content must be filled BEFORE entering CI repair"
