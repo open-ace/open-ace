@@ -9,7 +9,9 @@ def test_critical_category_selects_pr_gate_targets():
     cmd = run_extended_tests.build_pytest_command(args)
 
     assert "tests/e2e/regression/test_login.py" in cmd
-    assert "tests/e2e/regression/test_navigation.py" in cmd
+    assert "tests/e2e/regression/test_navigation.py::test_sidebar_menu_visible" in cmd
+    assert "tests/e2e/regression/test_navigation.py::test_menu_navigation" in cmd
+    assert "tests/e2e/regression/test_navigation.py::test_page_title_updates" not in cmd
     assert "-m" in cmd
     assert "not postgres" in cmd
 

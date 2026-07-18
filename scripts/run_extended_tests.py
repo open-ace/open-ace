@@ -41,7 +41,8 @@ SERVER_CATEGORIES = {
 CATEGORY_TARGETS = {
     "critical": [
         "tests/e2e/regression/test_login.py",
-        "tests/e2e/regression/test_navigation.py",
+        "tests/e2e/regression/test_navigation.py::test_sidebar_menu_visible",
+        "tests/e2e/regression/test_navigation.py::test_menu_navigation",
     ],
     "regression": ["tests/e2e/regression"],
     "ui": ["tests/e2e/ui"],
@@ -129,8 +130,12 @@ def parse_issue_numbers(args: argparse.Namespace) -> list[str]:
     return clean
 
 
+def target_path(target: str) -> str:
+    return target.split("::", 1)[0]
+
+
 def target_exists(target: str) -> bool:
-    return (PROJECT_ROOT / target).exists()
+    return (PROJECT_ROOT / target_path(target)).exists()
 
 
 def select_targets(args: argparse.Namespace) -> list[str]:
@@ -158,7 +163,7 @@ def select_targets(args: argparse.Namespace) -> list[str]:
 def discover_test_files(targets: list[str]) -> list[str]:
     files: list[Path] = []
     for target in targets:
-        path = PROJECT_ROOT / target
+        path = PROJECT_ROOT / target_path(target)
         if path.is_file():
             files.append(path)
             continue
