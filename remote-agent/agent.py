@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
-from cli_settings import apply_cli_settings
+from cli_settings import apply_cli_settings, clear_codex_bearer_token
 from executor import ProcessExecutor
 from session_sync import SessionSyncService
 from system_info import get_capabilities
@@ -893,7 +893,18 @@ class RemoteAgent:
         """Handle a stop_terminal command."""
         terminal_id = data.get("terminal_id", "")
         logger.info("Stopping terminal %s", terminal_id[:8])
-        self._stop_terminal_process(terminal_id)
+        try:
+            self._stop_terminal_process(terminal_id)
+        finally:
+            # Scrub the persisted Codex bearer token (Windows-UWP launch path)
+            # so a stopped/abandoned terminal does not leave a still-valid
+            # proxy token behind in ~/.codex/config.toml. Only do this once no
+            # other terminal remains: the bearer token lives in a single shared
+            # config file, and other still-running terminals may depend on it
+            # (the UWP path cannot read it from the environment). The current id
+            # has already been popped by _stop_terminal_process above.
+            if not self._terminal_processes:
+                clear_codex_bearer_token()
         self._http_send(
             {
                 "type": "terminal_status",

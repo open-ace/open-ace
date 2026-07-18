@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,14 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
 logger = logging.getLogger(__name__)
 
 _BARE_TOML_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# Serializes all read-modify-write access to ~/.codex/config.toml within this
+# process. write_codex_settings and clear_codex_bearer_token each do a
+# load -> mutate -> _atomic_write cycle; without a lock, a concurrent caller's
+# stale snapshot can clobber another's freshly written field (lost update) even
+# though each individual write is atomic. RemoteAgent is a long-lived process
+# driving multiple terminals concurrently, so this race is reachable.
+_CODEX_CONFIG_LOCK = threading.Lock()
 
 
 def _atomic_write_json(filepath: Path, data: dict | list) -> None:
@@ -283,15 +292,71 @@ def write_codex_settings(
         proxy_base_url,
         bearer_token=bearer_token,
     )
-    merged = _deep_merge_dicts(_load_toml_file(config_path), normalized)
-    provider = merged.get("model_providers", {}).get("openace")
-    if isinstance(provider, dict):
-        _set_codex_auth_mode(provider, bearer_token=bearer_token)
-    _atomic_write_text(config_path, dump_toml(merged))
-    # Ensure config file has secure permissions (0600) when containing bearer token
-    if bearer_token:
+    # Hold the process-wide lock across load->mutate->write so a concurrent
+    # clear_codex_bearer_token (or another write_codex_settings) cannot interleave
+    # and lose fields via a stale-snapshot overwrite.
+    with _CODEX_CONFIG_LOCK:
+        merged = _deep_merge_dicts(_load_toml_file(config_path), normalized)
+        provider = merged.get("model_providers", {}).get("openace")
+        if isinstance(provider, dict):
+            _set_codex_auth_mode(provider, bearer_token=bearer_token)
+        _atomic_write_text(config_path, dump_toml(merged))
+    # Ensure config file has secure permissions when it carries a bearer token.
+    # chmod(0o600) only enforces ACLs on POSIX; on Windows it merely toggles the
+    # read-only attribute and leaves the file world-readable, so callers relying
+    # on file-permission isolation on Windows must layer a Win32 ACL (icacls /
+    # pywin32) on top rather than trusting the POSIX bits here.
+    if bearer_token and os.name == "posix":
         config_path.chmod(0o600)
     return config_path
+
+
+def clear_codex_bearer_token(home_dir: Path | None = None) -> None:
+    """Remove a persisted Codex bearer token from ``~/.codex/config.toml``.
+
+    The Windows-UWP launch path writes ``experimental_bearer_token`` into the
+    on-disk Codex config because Codex desktop cannot read environment
+    variables. That token is a still-valid proxy token until server-side
+    expiry, so it must be scrubbed as soon as the terminal session that needed
+    it stops or exits. This helper rewrites the config to drop the bearer
+    token and fall back to ``env_key`` auth, preserving all non-sensitive
+    user preferences and proxy routing.
+
+    Args:
+        home_dir: Optional home directory path; defaults to ``Path.home()``.
+
+    This is idempotent: a missing config file or a config without a bearer
+    token is a no-op.
+    """
+    base_dir = home_dir or Path.home()
+    config_path = base_dir / ".codex" / "config.toml"
+    if not config_path.exists():
+        return
+    # Hold the process-wide lock across load->mutate->write so a concurrent
+    # write_codex_settings cannot interleave and lose fields via a stale-snapshot
+    # overwrite. The early-return no-op checks stay outside the lock only when
+    # the file is absent; once it exists we serialize the full RMW.
+    with _CODEX_CONFIG_LOCK:
+        try:
+            merged = _load_toml_file(config_path)
+        except OSError:
+            return
+        providers = merged.get("model_providers")
+        if not isinstance(providers, dict):
+            logger.warning(
+                "Codex config %s is missing model_providers; cannot scrub bearer token",
+                config_path,
+            )
+            return
+        openace = providers.get("openace")
+        if not isinstance(openace, dict) or "experimental_bearer_token" not in openace:
+            return
+        # Re-apply env-key auth, which also pops the bearer token, then persist.
+        _set_codex_auth_mode(openace, bearer_token=None)
+        try:
+            _atomic_write_text(config_path, dump_toml(merged))
+        except OSError as exc:
+            logger.warning("Failed to clear Codex bearer token from %s: %s", config_path, exc)
 
 
 def write_zcode_settings(
