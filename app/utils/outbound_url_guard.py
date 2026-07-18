@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import socket
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Union
 from urllib.parse import urlparse, urlunparse
@@ -29,11 +31,112 @@ Resolver = Callable[..., Iterable[tuple]]
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
 BLOCKED_HOSTNAMES = {
+    # IPv4 loopback
     "localhost",
     "localhost.localdomain",
+    # IPv6 loopback
+    "ip6-localhost",
+    "ip6-loopback",
+    # Broadcast
+    "broadcasthost",
+    # AWS/GCP/Azure metadata
     "metadata",
     "metadata.google.internal",
+    "metadata.azure",
+    # Vultr metadata
+    "metadata.vultr",
+    # Kubernetes/OpenShift/Docker internal DNS
+    "kubernetes",
+    "kubernetes.default",
+    "openshift",
+    "docker",
+    # IP 字面量形式（辅助防御）
+    "169.254.169.254",
 }
+
+# Default port whitelist for outbound HTTP(S) requests
+# Covers standard HTTP/HTTPS, common alternative ports (Keycloak, GitLab), Authentik
+_DEFAULT_ALLOWED_PORTS = {80, 443, 8080, 8443, 9000, 9443}
+
+
+def _get_allowed_ports() -> set[int]:
+    """Parse OPENACE_OUTBOUND_ALLOWED_PORTS or return defaults.
+
+    Security consideration: empty value = defaults, non-empty = explicit list.
+    Admin must explicitly add ports beyond defaults.
+    """
+    raw = os.environ.get("OPENACE_OUTBOUND_ALLOWED_PORTS", "").strip()
+    if not raw:
+        return _DEFAULT_ALLOWED_PORTS.copy()
+
+    ports: set[int] = set()
+    for p in raw.split(","):
+        try:
+            port = int(p.strip())
+            if 1 <= port <= 65535:
+                ports.add(port)
+            else:
+                logger.warning(f"Invalid port '{p}' in OPENACE_OUTBOUND_ALLOWED_PORTS (out of range)")
+        except ValueError:
+            logger.warning(f"Non-integer port '{p}' in OPENACE_OUTBOUND_ALLOWED_PORTS")
+    return ports or {80, 443}  # Fallback to minimal safe set
+
+
+# Cache for allowed ports
+_ALLOWED_PORTS_CACHE: set[int] | None = None
+
+
+def get_allowed_ports() -> set[int]:
+    """Get allowed ports for outbound requests (cached)."""
+    global _ALLOWED_PORTS_CACHE
+    if _ALLOWED_PORTS_CACHE is None:
+        _ALLOWED_PORTS_CACHE = _get_allowed_ports()
+    return _ALLOWED_PORTS_CACHE
+
+
+def _normalize_hostname(host: str) -> str:
+    """Normalize hostname with security checks.
+
+    Decodes percent-encoding once and checks for dangerous characters.
+
+    Raises:
+        ValueError: If hostname contains dangerous characters after decoding.
+    """
+    # 1. Percent-decode once
+    try:
+        decoded = urllib.parse.unquote(host, errors='strict')
+    except UnicodeDecodeError as exc:
+        raise ValueError("Hostname contains invalid percent-encoding") from exc
+
+    # 2. Security checks
+    if '%' in decoded:
+        raise ValueError("Hostname contains unexpected percent-encoding (possible double-encoding)")
+    if '\x00' in decoded:
+        raise ValueError("Hostname contains NULL character")
+
+    # 3. Normalization
+    normalized = decoded.rstrip('.').lower()
+
+    return normalized
+
+
+def _check_username_password_for_dangerous_chars(username: str | None, password: str | None) -> str | None:
+    """Check username/password for dangerous characters after decoding.
+
+    Returns:
+        Error message if dangerous characters found, None otherwise.
+    """
+    for name, value in [("username", username), ("password", password)]:
+        if not value:
+            continue
+        # Decode percent-encoding
+        decoded = urllib.parse.unquote(value, errors='strict')
+        # Check for dangerous characters
+        if '\x00' in decoded:
+            return f"URL {name} contains NULL character"
+        if '@' in decoded:
+            return f"URL {name} contains '@' character (possible parser confusion)"
+    return None
 
 # Networks that must be rejected even though ``ipaddress.is_global`` returns
 # ``True`` for them. These cover NAT64 encodings of private/metadata IPs
@@ -96,12 +199,33 @@ def validate_public_http_url(
     if not parsed.hostname:
         return OutboundUrlValidationResult(False, "URL host is required")
 
+    # Enhanced username/password check with decoding
     if parsed.username or parsed.password:
+        # Check for dangerous characters after decoding
+        error = _check_username_password_for_dangerous_chars(parsed.username, parsed.password)
+        if error:
+            return OutboundUrlValidationResult(False, error)
         return OutboundUrlValidationResult(False, "URL credentials are not allowed")
 
-    host = parsed.hostname.rstrip(".").lower()
+    # Normalize hostname with security checks
+    try:
+        host = _normalize_hostname(parsed.hostname)
+    except ValueError as exc:
+        return OutboundUrlValidationResult(False, str(exc))
+
     if host in BLOCKED_HOSTNAMES:
         return OutboundUrlValidationResult(False, f"Blocked non-public host: {host}")
+
+    # Port validation
+    allowed_ports = get_allowed_ports()
+    if parsed.port is not None:
+        # Explicit port must be in whitelist
+        if parsed.port not in allowed_ports:
+            return OutboundUrlValidationResult(
+                False,
+                f"Port {parsed.port} not in allowed ports: {sorted(allowed_ports)}"
+            )
+    # If port is None, it's inferred from scheme (80/443) and is allowed
 
     try:
         ascii_host = host.encode("idna").decode("ascii")

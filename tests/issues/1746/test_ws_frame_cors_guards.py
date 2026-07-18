@@ -15,6 +15,7 @@ if project_root not in sys.path:
 
 import app.ws_frame as ws_frame
 from app import register_error_handlers
+from app.__init__ import _reset_cors_origins_cache
 
 
 class FakeSocket:
@@ -61,6 +62,8 @@ def _build_client_frame(payload: bytes, opcode: int = ws_frame.OP_TEXT, fin: boo
 @pytest.fixture(autouse=True)
 def _clear_cors_env(monkeypatch):
     monkeypatch.delenv("OPENACE_CORS_ALLOWED_ORIGINS", raising=False)
+    # Reset cache to ensure clean state
+    _reset_cors_origins_cache()
 
 
 @pytest.fixture
@@ -125,12 +128,29 @@ class TestCorsPolicy:
         assert "Access-Control-Allow-Origin" not in resp.headers
         assert "Access-Control-Allow-Credentials" not in resp.headers
 
-    def test_preflight_honors_explicit_allowlist(self, cors_app, monkeypatch):
-        monkeypatch.setenv(
-            "OPENACE_CORS_ALLOWED_ORIGINS",
-            "https://workspace.internal.example, https://ops.example",
-        )
-        client = cors_app.test_client()
+    def test_preflight_honors_explicit_allowlist(self, monkeypatch, request):
+        # Use monkeypatch to set env - this happens AFTER autouse fixture clears it
+        # Create a fresh app for this test to avoid state pollution
+        from flask import Flask, jsonify
+        import os
+
+        # Clear any existing state first
+        os.environ.pop("OPENACE_CORS_ALLOWED_ORIGINS", None)
+        _reset_cors_origins_cache()
+
+        # Set the environment variable
+        os.environ["OPENACE_CORS_ALLOWED_ORIGINS"] = "https://workspace.internal.example, https://ops.example"
+        _reset_cors_origins_cache()
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        register_error_handlers(app)
+
+        @app.route("/api/ping", methods=["GET"])
+        def ping():
+            return jsonify({"ok": True})
+
+        client = app.test_client()
 
         resp = client.options(
             "/api/ping",
@@ -138,5 +158,10 @@ class TestCorsPolicy:
         )
 
         assert resp.status_code == 200
+        assert "Access-Control-Allow-Origin" in resp.headers, f"Expected CORS headers, got: {dict(resp.headers)}"
         assert resp.headers["Access-Control-Allow-Origin"] == "https://workspace.internal.example"
         assert resp.headers["Access-Control-Allow-Credentials"] == "true"
+
+        # Clean up
+        os.environ.pop("OPENACE_CORS_ALLOWED_ORIGINS", None)
+        _reset_cors_origins_cache()

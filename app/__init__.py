@@ -30,6 +30,9 @@ REQUEST_ID_MAX_LENGTH = 128
 _REQUEST_ID_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _LOCAL_CORS_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
+# Cache for CORS allowed origins (populated at startup)
+_CORS_ALLOWED_ORIGINS_CACHE: set[str] | None = None
+
 
 def _sanitize_request_id(value: str | None) -> str:
     """Make a client-supplied request id safe to echo back and log.
@@ -45,10 +48,75 @@ def _sanitize_request_id(value: str | None) -> str:
     return cleaned[:REQUEST_ID_MAX_LENGTH]
 
 
-def _get_allowed_cors_origins() -> set[str]:
-    """Return explicitly allowed cross-origin API callers."""
+def _normalize_origin(origin: str) -> str | None:
+    """Normalize origin to scheme://host:port format.
+
+    Returns:
+        Normalized origin string, or None if invalid.
+    """
+    try:
+        parsed = urlparse(origin)
+    except Exception:
+        return None
+
+    # Validate scheme
+    if parsed.scheme not in ('http', 'https'):
+        return None
+
+    # Normalize host
+    host = parsed.hostname
+    if not host:
+        return None
+    host = host.rstrip('.').lower()
+
+    # Infer port if missing
+    if parsed.port:
+        port = parsed.port
+    else:
+        port = 443 if parsed.scheme == 'https' else 80
+
+    return f"{parsed.scheme}://{host}:{port}"
+
+
+def _build_cors_origins_cache() -> set[str]:
+    """Build and validate CORS origins cache at startup.
+
+    Parses OPENACE_CORS_ALLOWED_ORIGINS, validates scheme, normalizes each origin,
+    and logs warnings for invalid entries.
+    """
     raw_value = os.environ.get("OPENACE_CORS_ALLOWED_ORIGINS", "")
-    return {origin.strip() for origin in raw_value.split(",") if origin.strip()}
+    raw_origins = {origin.strip() for origin in raw_value.split(",") if origin.strip()}
+
+    normalized_origins: set[str] = set()
+    for origin in raw_origins:
+        normalized = _normalize_origin(origin)
+        if normalized is None:
+            logger.warning(
+                f"CORS origin '{origin}' is invalid (must be http/https URL), skipping"
+            )
+            continue
+        if normalized != origin:
+            logger.warning(
+                f"CORS origin '{origin}' normalized to '{normalized}', "
+                f"please update your config to use the normalized form"
+            )
+        normalized_origins.add(normalized)
+
+    return normalized_origins
+
+
+def _get_allowed_cors_origins() -> set[str]:
+    """Return explicitly allowed cross-origin API callers (cached)."""
+    global _CORS_ALLOWED_ORIGINS_CACHE
+    if _CORS_ALLOWED_ORIGINS_CACHE is None:
+        _CORS_ALLOWED_ORIGINS_CACHE = _build_cors_origins_cache()
+    return _CORS_ALLOWED_ORIGINS_CACHE
+
+
+def _reset_cors_origins_cache():
+    """Reset CORS origins cache (for testing)."""
+    global _CORS_ALLOWED_ORIGINS_CACHE
+    _CORS_ALLOWED_ORIGINS_CACHE = None
 
 
 def _is_allowed_local_webui_origin(origin: str) -> bool:
@@ -74,7 +142,11 @@ def _is_allowed_cors_origin(origin: str) -> bool:
     """Return whether an Origin should receive credentialed API CORS headers."""
     if not origin:
         return False
-    if origin in _get_allowed_cors_origins():
+    # Normalize the incoming origin for comparison
+    normalized = _normalize_origin(origin)
+    if not normalized:
+        return False
+    if normalized in _get_allowed_cors_origins():
         return True
     return _is_allowed_local_webui_origin(origin)
 
