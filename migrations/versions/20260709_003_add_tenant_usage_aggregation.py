@@ -35,182 +35,236 @@ def upgrade() -> None:
     # Check if we're using PostgreSQL
     is_postgres = bool(conn.dialect.name == "postgresql")
 
+    # schema.sql also defines these tables and indexes, so databases
+    # bootstrapped from it already have them. Snapshot the existing schema once
+    # and guard each create_table/create_index to avoid DuplicateTable /
+    # DuplicateObject on those databases.
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+
+    def _indexes(table_name: str) -> set[str]:
+        if table_name not in existing_tables:
+            return set()
+        return {idx["name"] for idx in inspector.get_indexes(table_name)}
+
     # 0. Create aggregation_locks table for SQLite locking mechanism
     # This table is used by tenant_aggregation.py to implement distributed locking
-    op.create_table(
-        "aggregation_locks",
-        sa.Column("lock_key", sa.String(100), primary_key=True, comment="Lock key identifier"),
-        sa.Column(
-            "acquired_at", sa.DateTime(), nullable=False, comment="Lock acquisition timestamp"
-        ),
-        sa.Column(
-            "timeout_seconds", sa.Integer(), nullable=False, comment="Lock timeout in seconds"
-        ),
-    )
+    if "aggregation_locks" not in existing_tables:
+        op.create_table(
+            "aggregation_locks",
+            sa.Column("lock_key", sa.String(100), primary_key=True, comment="Lock key identifier"),
+            sa.Column(
+                "acquired_at", sa.DateTime(), nullable=False, comment="Lock acquisition timestamp"
+            ),
+            sa.Column(
+                "timeout_seconds", sa.Integer(), nullable=False, comment="Lock timeout in seconds"
+            ),
+        )
 
     # 1. Create aggregation_history table
-    op.create_table(
-        "aggregation_history",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("type", sa.String(50), nullable=False, comment="Aggregation type"),
-        sa.Column("start_date", sa.Date(), nullable=False, comment="Start date of aggregation"),
-        sa.Column("end_date", sa.Date(), nullable=False, comment="End date of aggregation"),
-        sa.Column(
-            "status",
-            sa.String(20),
-            nullable=False,
-            default="pending",
-            comment="Status: pending, running, completed, failed",
-        ),
-        sa.Column("records_count", sa.Integer(), default=0, comment="Number of records processed"),
-        sa.Column(
-            "quality_report", sa.Text(), nullable=True, comment="Data quality report in JSON"
-        ),
-        sa.Column("error_message", sa.Text(), nullable=True, comment="Error message if failed"),
-        sa.Column("started_at", sa.DateTime(), nullable=True, comment="Start timestamp"),
-        sa.Column("completed_at", sa.DateTime(), nullable=True, comment="Completion timestamp"),
-        sa.Column(
-            "created_at", sa.DateTime(), default=datetime.utcnow, comment="Creation timestamp"
-        ),
-    )
+    if "aggregation_history" not in existing_tables:
+        op.create_table(
+            "aggregation_history",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("type", sa.String(50), nullable=False, comment="Aggregation type"),
+            sa.Column("start_date", sa.Date(), nullable=False, comment="Start date of aggregation"),
+            sa.Column("end_date", sa.Date(), nullable=False, comment="End date of aggregation"),
+            sa.Column(
+                "status",
+                sa.String(20),
+                nullable=False,
+                default="pending",
+                comment="Status: pending, running, completed, failed",
+            ),
+            sa.Column(
+                "records_count", sa.Integer(), default=0, comment="Number of records processed"
+            ),
+            sa.Column(
+                "quality_report", sa.Text(), nullable=True, comment="Data quality report in JSON"
+            ),
+            sa.Column("error_message", sa.Text(), nullable=True, comment="Error message if failed"),
+            sa.Column("started_at", sa.DateTime(), nullable=True, comment="Start timestamp"),
+            sa.Column("completed_at", sa.DateTime(), nullable=True, comment="Completion timestamp"),
+            sa.Column(
+                "created_at", sa.DateTime(), default=datetime.utcnow, comment="Creation timestamp"
+            ),
+        )
 
     # Create indexes for aggregation_history
-    op.create_index(
-        "idx_aggregation_history_type_date",
-        "aggregation_history",
-        ["type", "start_date", "end_date"],
-    )
-    op.create_index("idx_aggregation_history_status", "aggregation_history", ["status"])
+    ah_indexes = _indexes("aggregation_history")
+    if "idx_aggregation_history_type_date" not in ah_indexes:
+        op.create_index(
+            "idx_aggregation_history_type_date",
+            "aggregation_history",
+            ["type", "start_date", "end_date"],
+        )
+    if "idx_aggregation_history_status" not in ah_indexes:
+        op.create_index("idx_aggregation_history_status", "aggregation_history", ["status"])
 
     # 2. Create tenant_period_history table
-    op.create_table(
-        "tenant_period_history",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "tenant_id",
-            sa.Integer(),
-            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("period_start", sa.Date(), nullable=False, comment="Period start date"),
-        sa.Column("period_end", sa.Date(), nullable=False, comment="Period end date"),
-        sa.Column("tokens_used", sa.BigInteger(), default=0, comment="Total tokens used in period"),
-        sa.Column(
-            "requests_made", sa.BigInteger(), default=0, comment="Total requests made in period"
-        ),
-        sa.Column("reset_at", sa.DateTime(), nullable=False, comment="Reset timestamp"),
-        sa.Column("reset_by", sa.String(100), nullable=True, comment="User who triggered reset"),
-        sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
-    )
+    if "tenant_period_history" not in existing_tables:
+        op.create_table(
+            "tenant_period_history",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column(
+                "tenant_id",
+                sa.Integer(),
+                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("period_start", sa.Date(), nullable=False, comment="Period start date"),
+            sa.Column("period_end", sa.Date(), nullable=False, comment="Period end date"),
+            sa.Column(
+                "tokens_used", sa.BigInteger(), default=0, comment="Total tokens used in period"
+            ),
+            sa.Column(
+                "requests_made", sa.BigInteger(), default=0, comment="Total requests made in period"
+            ),
+            sa.Column("reset_at", sa.DateTime(), nullable=False, comment="Reset timestamp"),
+            sa.Column(
+                "reset_by", sa.String(100), nullable=True, comment="User who triggered reset"
+            ),
+            sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
+        )
 
     # Create indexes for tenant_period_history
-    op.create_index("idx_tenant_period_history_tenant", "tenant_period_history", ["tenant_id"])
-    op.create_index(
-        "idx_tenant_period_history_dates", "tenant_period_history", ["period_start", "period_end"]
-    )
+    tph_indexes = _indexes("tenant_period_history")
+    if "idx_tenant_period_history_tenant" not in tph_indexes:
+        op.create_index("idx_tenant_period_history_tenant", "tenant_period_history", ["tenant_id"])
+    if "idx_tenant_period_history_dates" not in tph_indexes:
+        op.create_index(
+            "idx_tenant_period_history_dates",
+            "tenant_period_history",
+            ["period_start", "period_end"],
+        )
 
     # 3. Create tenant_plans table
-    op.create_table(
-        "tenant_plans",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("name", sa.String(100), nullable=False, unique=True, comment="Plan name"),
-        sa.Column("slug", sa.String(50), nullable=False, unique=True, comment="Plan slug"),
-        sa.Column(
-            "quota_defaults",
-            sa.Text() if not is_postgres else JSONB(),
-            nullable=True,
-            comment="Default quota configuration (JSON)",
-        ),
-        sa.Column("price_monthly", sa.Numeric(10, 2), default=0, comment="Monthly price"),
-        sa.Column("price_quarterly", sa.Numeric(10, 2), default=0, comment="Quarterly price"),
-        sa.Column("price_yearly", sa.Numeric(10, 2), default=0, comment="Yearly price"),
-        sa.Column(
-            "features",
-            sa.Text() if not is_postgres else JSONB(),
-            nullable=True,
-            comment="Plan features (JSON)",
-        ),
-        sa.Column("is_active", sa.Boolean(), default=True, comment="Whether plan is active"),
-        sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
-        sa.Column("updated_at", sa.DateTime(), default=datetime.utcnow, onupdate=datetime.utcnow),
-    )
+    if "tenant_plans" not in existing_tables:
+        op.create_table(
+            "tenant_plans",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("name", sa.String(100), nullable=False, unique=True, comment="Plan name"),
+            sa.Column("slug", sa.String(50), nullable=False, unique=True, comment="Plan slug"),
+            sa.Column(
+                "quota_defaults",
+                sa.Text() if not is_postgres else JSONB(),
+                nullable=True,
+                comment="Default quota configuration (JSON)",
+            ),
+            sa.Column("price_monthly", sa.Numeric(10, 2), default=0, comment="Monthly price"),
+            sa.Column("price_quarterly", sa.Numeric(10, 2), default=0, comment="Quarterly price"),
+            sa.Column("price_yearly", sa.Numeric(10, 2), default=0, comment="Yearly price"),
+            sa.Column(
+                "features",
+                sa.Text() if not is_postgres else JSONB(),
+                nullable=True,
+                comment="Plan features (JSON)",
+            ),
+            sa.Column("is_active", sa.Boolean(), default=True, comment="Whether plan is active"),
+            sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
+            sa.Column(
+                "updated_at", sa.DateTime(), default=datetime.utcnow, onupdate=datetime.utcnow
+            ),
+        )
 
     # Create indexes for tenant_plans
-    op.create_index("idx_tenant_plans_slug", "tenant_plans", ["slug"])
-    op.create_index("idx_tenant_plans_active", "tenant_plans", ["is_active"])
+    tp_indexes = _indexes("tenant_plans")
+    if "idx_tenant_plans_slug" not in tp_indexes:
+        op.create_index("idx_tenant_plans_slug", "tenant_plans", ["slug"])
+    if "idx_tenant_plans_active" not in tp_indexes:
+        op.create_index("idx_tenant_plans_active", "tenant_plans", ["is_active"])
 
     # 4. Create alerts_history table
-    op.create_table(
-        "alerts_history",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("alert_type", sa.String(50), nullable=False, comment="Alert type"),
-        sa.Column(
-            "tenant_id",
-            sa.Integer(),
-            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
-            nullable=True,
-            comment="Tenant ID if tenant-specific",
-        ),
-        sa.Column(
-            "severity",
-            sa.String(20),
-            default="warning",
-            comment="Alert severity: info, warning, critical",
-        ),
-        sa.Column("message", sa.Text(), nullable=False, comment="Alert message"),
-        sa.Column(
-            "details",
-            sa.Text() if not is_postgres else JSONB(),
-            nullable=True,
-            comment="Additional details (JSON)",
-        ),
-        sa.Column("recipients", sa.Text(), nullable=True, comment="Alert recipients"),
-        sa.Column("channels", sa.String(100), nullable=True, comment="Notification channels used"),
-        sa.Column("status", sa.String(20), default="sent", comment="Alert status: sent, failed"),
-        sa.Column("sent_at", sa.DateTime(), default=datetime.utcnow, comment="Sent timestamp"),
-        sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
-    )
+    if "alerts_history" not in existing_tables:
+        op.create_table(
+            "alerts_history",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("alert_type", sa.String(50), nullable=False, comment="Alert type"),
+            sa.Column(
+                "tenant_id",
+                sa.Integer(),
+                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+                nullable=True,
+                comment="Tenant ID if tenant-specific",
+            ),
+            sa.Column(
+                "severity",
+                sa.String(20),
+                default="warning",
+                comment="Alert severity: info, warning, critical",
+            ),
+            sa.Column("message", sa.Text(), nullable=False, comment="Alert message"),
+            sa.Column(
+                "details",
+                sa.Text() if not is_postgres else JSONB(),
+                nullable=True,
+                comment="Additional details (JSON)",
+            ),
+            sa.Column("recipients", sa.Text(), nullable=True, comment="Alert recipients"),
+            sa.Column(
+                "channels", sa.String(100), nullable=True, comment="Notification channels used"
+            ),
+            sa.Column(
+                "status", sa.String(20), default="sent", comment="Alert status: sent, failed"
+            ),
+            sa.Column("sent_at", sa.DateTime(), default=datetime.utcnow, comment="Sent timestamp"),
+            sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
+        )
 
     # Create indexes for alerts_history
-    op.create_index("idx_alerts_history_type", "alerts_history", ["alert_type"])
-    op.create_index("idx_alerts_history_tenant", "alerts_history", ["tenant_id"])
-    op.create_index("idx_alerts_history_sent_at", "alerts_history", ["sent_at"])
+    alh_indexes = _indexes("alerts_history")
+    if "idx_alerts_history_type" not in alh_indexes:
+        op.create_index("idx_alerts_history_type", "alerts_history", ["alert_type"])
+    if "idx_alerts_history_tenant" not in alh_indexes:
+        op.create_index("idx_alerts_history_tenant", "alerts_history", ["tenant_id"])
+    if "idx_alerts_history_sent_at" not in alh_indexes:
+        op.create_index("idx_alerts_history_sent_at", "alerts_history", ["sent_at"])
 
     # 5. Create consistency_violations table
-    op.create_table(
-        "consistency_violations",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "tenant_id",
-            sa.Integer(),
-            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
-            nullable=True,
-            comment="Tenant ID",
-        ),
-        sa.Column("violation_type", sa.String(50), nullable=False, comment="Violation type"),
-        sa.Column("expected_value", sa.BigInteger(), nullable=True, comment="Expected value"),
-        sa.Column("actual_value", sa.BigInteger(), nullable=True, comment="Actual value"),
-        sa.Column("difference", sa.BigInteger(), nullable=True, comment="Difference"),
-        sa.Column("details", sa.Text(), nullable=True, comment="Additional details"),
-        sa.Column(
-            "status",
-            sa.String(20),
-            default="detected",
-            comment="Status: detected, repaired, ignored",
-        ),
-        sa.Column(
-            "detected_at", sa.DateTime(), default=datetime.utcnow, comment="Detection timestamp"
-        ),
-        sa.Column("repaired_at", sa.DateTime(), nullable=True, comment="Repair timestamp"),
-        sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
-    )
+    if "consistency_violations" not in existing_tables:
+        op.create_table(
+            "consistency_violations",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column(
+                "tenant_id",
+                sa.Integer(),
+                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+                nullable=True,
+                comment="Tenant ID",
+            ),
+            sa.Column("violation_type", sa.String(50), nullable=False, comment="Violation type"),
+            sa.Column("expected_value", sa.BigInteger(), nullable=True, comment="Expected value"),
+            sa.Column("actual_value", sa.BigInteger(), nullable=True, comment="Actual value"),
+            sa.Column("difference", sa.BigInteger(), nullable=True, comment="Difference"),
+            sa.Column("details", sa.Text(), nullable=True, comment="Additional details"),
+            sa.Column(
+                "status",
+                sa.String(20),
+                default="detected",
+                comment="Status: detected, repaired, ignored",
+            ),
+            sa.Column(
+                "detected_at",
+                sa.DateTime(),
+                default=datetime.utcnow,
+                comment="Detection timestamp",
+            ),
+            sa.Column("repaired_at", sa.DateTime(), nullable=True, comment="Repair timestamp"),
+            sa.Column("created_at", sa.DateTime(), default=datetime.utcnow),
+        )
 
     # Create indexes for consistency_violations
-    op.create_index("idx_consistency_violations_tenant", "consistency_violations", ["tenant_id"])
-    op.create_index("idx_consistency_violations_status", "consistency_violations", ["status"])
-    op.create_index(
-        "idx_consistency_violations_detected", "consistency_violations", ["detected_at"]
-    )
+    cv_indexes = _indexes("consistency_violations")
+    if "idx_consistency_violations_tenant" not in cv_indexes:
+        op.create_index(
+            "idx_consistency_violations_tenant", "consistency_violations", ["tenant_id"]
+        )
+    if "idx_consistency_violations_status" not in cv_indexes:
+        op.create_index("idx_consistency_violations_status", "consistency_violations", ["status"])
+    if "idx_consistency_violations_detected" not in cv_indexes:
+        op.create_index(
+            "idx_consistency_violations_detected", "consistency_violations", ["detected_at"]
+        )
 
     # 6. Add new fields to tenants table
     # Note: SQLite doesn't support COMMENT, so we use comment parameter only for PostgreSQL
@@ -334,7 +388,9 @@ def upgrade() -> None:
     )
 
     # Create indexes for new tenants fields
-    op.create_index("idx_tenants_billing_cycle", "tenants", ["billing_cycle_end"])
+    tenants_indexes = _indexes("tenants")
+    if "idx_tenants_billing_cycle" not in tenants_indexes:
+        op.create_index("idx_tenants_billing_cycle", "tenants", ["billing_cycle_end"])
 
     print("Migration 20260709_003_add_tenant_usage_aggregation completed successfully")
 
