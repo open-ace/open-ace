@@ -27,7 +27,7 @@ AGENT_DIR = Path(__file__).resolve().parent
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
-from cli_settings import apply_cli_settings
+from cli_settings import apply_cli_settings, clear_codex_bearer_token
 
 AGENT_CONFIG_PATH = AGENT_DIR / "config.json"
 CLI_CONFIG_DIR = Path.home() / ".open-ace-cli"
@@ -307,7 +307,21 @@ def cmd_menu(args: argparse.Namespace) -> int:
     _apply_local_cli_settings(terminal)
     _write_active_terminal(terminal)
     env = _session_env(terminal)
-    os.execvpe(sys.executable, [sys.executable, str(MENU_PATH)], env)
+    # Run the menu as a child process we wait on so a ``finally`` block can
+    # scrub the persisted Codex bearer token and the active-terminal pointer
+    # when the menu exits. ``os.execvpe`` would replace the process image and
+    # leave the bearer token orphaned on disk indefinitely.
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(MENU_PATH)],
+            env=env,
+            cwd=work_dir,
+            check=False,
+        )
+        return int(completed.returncode)
+    finally:
+        clear_codex_bearer_token()
+        _clear_active_terminal()
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
@@ -326,6 +340,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
             subprocess.run([shell, "-l"], env=env, cwd=work_dir, check=False)
     finally:
         _clear_active_terminal()
+        clear_codex_bearer_token()
     return 0
 
 
