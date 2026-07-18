@@ -71,7 +71,7 @@ def _is_transient_error(stderr: str, returncode: int) -> bool:
 # of the output (e.g. mypy failing while later hooks keep printing).
 _FAILURE_LINE_RE = re.compile(
     r"(error:|Error:|ERROR:|Failed|failed|FAIL\b|"
-    r"would reformat|not formatted|not sorted|isort.*skipped|"
+    r"would reformat|not formatted|not sorted|"
     r"no-any-return|undefined name|"
     r"\b[FEW]\d{3}\b)",  # flake8/ruff error codes
     re.IGNORECASE,
