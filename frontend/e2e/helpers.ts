@@ -35,11 +35,15 @@ export async function login(page: Page, username = 'admin', password = 'admin123
   const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
   const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
 
-  // Wait for modal to appear (up to 5s for CI environments), then handle it
-  const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+  // Wait for modal to appear (up to 15s for CI environments with slow networks)
+  // Playwright's waitFor polls every ~100ms, so it returns immediately when visible
+  const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+
   if (modalVisible) {
     // Wait for Skip button to be visible and clickable
-    await skipButton.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+    await skipButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
     // Click Skip button to dismiss the modal
     await skipButton.click({ force: true });
     // Wait for modal to disappear completely
