@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional, Union
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from app.repositories.database import (
     DB_PATH,
@@ -38,6 +39,7 @@ from app.repositories.database import (
 )
 from app.services.email_notification_service import get_email_notification_service
 from app.utils.config import get_config_value
+from app.utils.outbound_url_guard import is_public_address
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,49 @@ _WEBHOOK_TIMEOUT_SECONDS = 5
 _FEISHU_WEBHOOK_HOST_SNIPPETS = ("feishu.cn", "larksuite.com", "larkoffice.com")
 _DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
 _DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
+
+
+def _pin_host_to_url(url: str, pinned_ip: str) -> str:
+    """Rewrite ``url`` so its host is the IP literal ``pinned_ip``.
+
+    The original hostname is preserved separately as the ``Host`` header (set by
+    the caller) so TLS SNI / virtual-host routing keeps working. Because the
+    rewritten URL's host is an IP literal, ``urllib3`` will not re-resolve via
+    the system resolver, which closes the DNS-rebinding TOCTOU window.
+    """
+    parsed = urlparse(url)
+    host_header = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    port_suffix = f":{parsed.port}" if parsed.port else ""
+    netloc = f"{host_header}{port_suffix}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+class _PinnedWebhookAdapter(HTTPAdapter):
+    """HTTPAdapter that refuses to connect to any IP outside the allowlist.
+
+    Defense in depth on top of ``_pin_host_to_url``: even if a proxy or future
+    urllib3 change re-introduces a resolution step, this adapter blocks any
+    dial whose target IP literal is not on the verified allowlist.
+    """
+
+    def __init__(self, *args: Any, allowed_ips: list[str], **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._allowed_ips = set(allowed_ips)
+
+    def get_connection(self, url, proxies=None):
+        self._assert_pinned(url)
+        return super().get_connection(url, proxies=proxies)
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        self._assert_pinned(request.url)
+        return super().get_connection_with_tls_context(  # type: ignore[call-arg]
+            request, verify, proxies=proxies, cert=cert
+        )
+
+    def _assert_pinned(self, url: str) -> None:
+        host = (urlparse(url).hostname or "").strip("[]")
+        if host not in self._allowed_ips:
+            raise ValueError(f"Webhook request would reach unpinned or rebound IP: {host!r}")
 
 
 class AlertType(Enum):
@@ -166,15 +211,13 @@ class AlertNotifier:
         return bool(get_config_value("alerts", "allow_private_webhook_urls", False))
 
     def _is_disallowed_webhook_ip(self, ip: ipaddress._BaseAddress) -> bool:
-        """Return whether the resolved webhook IP is blocked by default."""
-        return (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        )
+        """Return whether the resolved webhook IP is blocked by default.
+
+        Uses the shared denylist predicate from :mod:`outbound_url_guard` so the
+        webhook path rejects the same NAT64/CGNAT/multicast ranges as the SSO
+        outbound guard, not just ``is_private``/``is_loopback``.
+        """
+        return not is_public_address(ip)
 
     def validate_webhook_url(
         self, webhook_url: Optional[str], resolve_dns: bool = True
@@ -223,6 +266,43 @@ class AlertNotifier:
                 return False, "Private and loopback webhook targets are blocked by default"
 
         return True, None
+
+    def _resolve_webhook_target_ips(
+        self, webhook_url: str
+    ) -> tuple[Optional[list[str]], Optional[str]]:
+        """Resolve and validate a webhook URL, returning the verified public IPs.
+
+        Returns ``(ips, error)``. ``ips`` is non-empty when the URL is safe. The
+        returned IPs are pinned into the actual request (see
+        :meth:`_send_webhook_notification`) so the system resolver cannot rebind
+        the destination to a private address between validation and the dial.
+        """
+        parsed = urlparse(webhook_url.strip())
+        host = parsed.hostname.strip().lower() if parsed.hostname else ""
+        try:
+            literal_ip = ipaddress.ip_address(host.split("%", 1)[0])
+            if self._is_disallowed_webhook_ip(literal_ip):
+                return None, "Private and loopback webhook targets are blocked by default"
+            return [str(literal_ip)], None
+        except ValueError:
+            pass
+
+        try:
+            resolved = socket.getaddrinfo(
+                parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+        except OSError:
+            return None, "Webhook hostname could not be resolved"
+
+        allowed_ips: list[str] = []
+        for entry in resolved:
+            resolved_ip = ipaddress.ip_address(entry[4][0].split("%", 1)[0])
+            if self._is_disallowed_webhook_ip(resolved_ip):
+                return None, "Private and loopback webhook targets are blocked by default"
+            allowed_ips.append(str(resolved_ip))
+        if not allowed_ips:
+            return None, "Webhook hostname could not be resolved"
+        return allowed_ips, None
 
     def _is_feishu_webhook(self, webhook_url: str) -> bool:
         """Return whether the webhook target looks like a Feishu/Lark bot webhook."""
@@ -312,8 +392,11 @@ class AlertNotifier:
             if not self._matches_notification_preferences(alert, prefs, "webhook"):
                 return
 
-            valid, error = self.validate_webhook_url(prefs.webhook_url, resolve_dns=True)
-            if not valid:
+            # Pin the validated IP into the actual request so the system resolver
+            # cannot rebind the destination to a private address between
+            # validation and the dial (DNS-rebinding / SSRF TOCTOU).
+            pinned_ips, error = self._resolve_webhook_target_ips(prefs.webhook_url)
+            if not pinned_ips:
                 logger.warning(
                     "Skipping webhook notification for user %s alert %s: %s",
                     user_id,
@@ -324,13 +407,24 @@ class AlertNotifier:
 
             payload = self._build_webhook_payload(alert, prefs.webhook_url)
             outbound_url = self._prepare_webhook_url(prefs.webhook_url)
-            response = requests.post(
-                outbound_url,
-                json=payload,
-                timeout=_WEBHOOK_TIMEOUT_SECONDS,
-                allow_redirects=False,
-                headers={"User-Agent": "Open-ACE Alert Webhook"},
-            )
+            pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
+            headers = {
+                "User-Agent": "Open-ACE Alert Webhook",
+                "Host": urlparse(outbound_url).hostname,
+            }
+            session = requests.Session()
+            try:
+                session.mount("https://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
+                session.mount("http://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
+                response = session.post(
+                    pinned_url,
+                    json=payload,
+                    timeout=_WEBHOOK_TIMEOUT_SECONDS,
+                    allow_redirects=False,
+                    headers=headers,
+                )
+            finally:
+                session.close()
             response.raise_for_status()
             logger.info(
                 "Webhook notification delivered for alert %s to user %s",

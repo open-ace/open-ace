@@ -128,11 +128,19 @@ def test_update_provider_rewrites_legacy_plaintext_secret_as_encrypted(client, s
 
 
 def test_test_url_accessible_blocks_metadata_url_before_request():
+    # ``_test_url_accessible`` resolves+validates and sends via ``safe_request``.
+    # A metadata target fails the single pinned resolution, so the request is
+    # refused before any dial.
     with patch("app.routes.sso.requests.head") as mock_head:
-        result = _test_url_accessible("http://169.254.169.254/latest/meta-data/")
+        with patch("app.routes.sso.safe_request") as mock_safe:
+            mock_safe.side_effect = OutboundUrlBlockedError(
+                "Blocked non-public address: 169.254.169.254"
+            )
+            result = _test_url_accessible("http://169.254.169.254/latest/meta-data/")
 
     assert not result["success"]
     assert "安全策略" in result["error"]
+    # No raw requests call is ever made — the pinned guard refuses first.
     mock_head.assert_not_called()
 
 
@@ -141,11 +149,15 @@ def test_test_url_accessible_blocks_redirect_to_private_address():
     first_response.status_code = 302
     first_response.headers = {"Location": "http://127.0.0.1/admin"}
 
-    with patch("app.routes.sso.requests.head", return_value=first_response) as mock_head:
-        with patch("app.routes.sso.assert_public_http_url") as mock_guard:
-            mock_guard.side_effect = [None, OutboundUrlBlockedError("blocked non-public address")]
-            result = _test_url_accessible("https://sso.example.com/authorize")
+    # First hop succeeds (public), redirect target is private -> second
+    # ``safe_request`` call fails the pinned resolution and is refused.
+    with patch("app.routes.sso.safe_request") as mock_safe:
+        mock_safe.side_effect = [
+            first_response,
+            OutboundUrlBlockedError("blocked non-public address"),
+        ]
+        result = _test_url_accessible("https://sso.example.com/authorize")
 
     assert not result["success"]
     assert "blocked non-public address" in result["error"]
-    assert mock_head.call_count == 1
+    assert mock_safe.call_count == 2

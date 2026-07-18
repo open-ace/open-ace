@@ -23,20 +23,22 @@ class TestAlertNotifierWebhook(unittest.TestCase):
         assert valid
         assert error is None
 
-    @patch("app.modules.governance.alert_notifier.AlertNotifier.validate_webhook_url")
-    @patch("app.modules.governance.alert_notifier.requests.post")
+    @patch("app.modules.governance.alert_notifier.AlertNotifier._resolve_webhook_target_ips")
+    @patch("app.modules.governance.alert_notifier.requests.Session")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     def test_create_alert_triggers_generic_webhook(
-        self, mock_save, mock_get_prefs, mock_post, mock_validate
+        self, mock_save, mock_get_prefs, mock_session, mock_resolve
     ):
         notifier = AlertNotifier()
         notifier._subscribers = []
 
-        mock_validate.return_value = (True, None)
+        # IP-pinned delivery path: resolve returns a verified public IP, and the
+        # session's POST is captured instead of dialing the network.
+        mock_resolve.return_value = (["93.184.216.34"], None)
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+        mock_session.return_value.post.return_value = mock_response
         mock_get_prefs.return_value = NotificationPreference(
             user_id=1,
             email_enabled=False,
@@ -55,27 +57,34 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        mock_post.assert_called_once()
-        assert mock_post.call_args.kwargs["allow_redirects"] is False
-        payload = mock_post.call_args.kwargs["json"]
+        mock_session.return_value.post.assert_called_once()
+        post_args = mock_session.return_value.post.call_args
+        post_kwargs = post_args.kwargs
+        assert post_kwargs["allow_redirects"] is False
+        # The verified IP is pinned into the outbound URL (first positional arg).
+        pinned_url = post_args.args[0]
+        assert "93.184.216.34" in pinned_url.split("/")[2]
+        # The original hostname is preserved as Host for SNI / virtual hosting.
+        assert post_kwargs["headers"]["Host"] == "alerts.example.com"
+        payload = post_kwargs["json"]
         assert payload["event"] == "openace.alert"
         assert payload["alert"]["title"] == "Quota Warning"
         assert "Usage reached 80%" in payload["summary"]
 
-    @patch("app.modules.governance.alert_notifier.AlertNotifier.validate_webhook_url")
-    @patch("app.modules.governance.alert_notifier.requests.post")
+    @patch("app.modules.governance.alert_notifier.AlertNotifier._resolve_webhook_target_ips")
+    @patch("app.modules.governance.alert_notifier.requests.Session")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     def test_create_alert_uses_feishu_payload(
-        self, mock_save, mock_get_prefs, mock_post, mock_validate
+        self, mock_save, mock_get_prefs, mock_session, mock_resolve
     ):
         notifier = AlertNotifier()
         notifier._subscribers = []
 
-        mock_validate.return_value = (True, None)
+        mock_resolve.return_value = (["93.184.216.34"], None)
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+        mock_session.return_value.post.return_value = mock_response
         mock_get_prefs.return_value = NotificationPreference(
             user_id=1,
             email_enabled=False,
@@ -94,25 +103,25 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_post.call_args.kwargs["json"]
+        payload = mock_session.return_value.post.call_args.kwargs["json"]
         assert payload["msg_type"] == "text"
         assert "System Alert" in payload["content"]["text"]
         assert "Service unavailable" in payload["content"]["text"]
 
-    @patch("app.modules.governance.alert_notifier.AlertNotifier.validate_webhook_url")
-    @patch("app.modules.governance.alert_notifier.requests.post")
+    @patch("app.modules.governance.alert_notifier.AlertNotifier._resolve_webhook_target_ips")
+    @patch("app.modules.governance.alert_notifier.requests.Session")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     def test_create_alert_uses_dingtalk_payload(
-        self, mock_save, mock_get_prefs, mock_post, mock_validate
+        self, mock_save, mock_get_prefs, mock_session, mock_resolve
     ):
         notifier = AlertNotifier()
         notifier._subscribers = []
 
-        mock_validate.return_value = (True, None)
+        mock_resolve.return_value = (["93.184.216.34"], None)
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+        mock_session.return_value.post.return_value = mock_response
         mock_get_prefs.return_value = NotificationPreference(
             user_id=1,
             email_enabled=False,
@@ -131,25 +140,25 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_post.call_args.kwargs["json"]
+        payload = mock_session.return_value.post.call_args.kwargs["json"]
         assert payload["msgtype"] == "text"
         assert "System Alert" in payload["text"]["content"]
         assert "Service unavailable" in payload["text"]["content"]
 
-    @patch("app.modules.governance.alert_notifier.AlertNotifier.validate_webhook_url")
-    @patch("app.modules.governance.alert_notifier.requests.post")
+    @patch("app.modules.governance.alert_notifier.AlertNotifier._resolve_webhook_target_ips")
+    @patch("app.modules.governance.alert_notifier.requests.Session")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     def test_create_alert_does_not_treat_lookalike_host_as_dingtalk(
-        self, mock_save, mock_get_prefs, mock_post, mock_validate
+        self, mock_save, mock_get_prefs, mock_session, mock_resolve
     ):
         notifier = AlertNotifier()
         notifier._subscribers = []
 
-        mock_validate.return_value = (True, None)
+        mock_resolve.return_value = (["93.184.216.34"], None)
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+        mock_session.return_value.post.return_value = mock_response
         mock_get_prefs.return_value = NotificationPreference(
             user_id=1,
             email_enabled=False,
@@ -168,7 +177,7 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_post.call_args.kwargs["json"]
+        payload = mock_session.return_value.post.call_args.kwargs["json"]
         assert payload["event"] == "openace.alert"
         assert "System Alert" in payload["summary"]
 
@@ -188,17 +197,17 @@ class TestAlertNotifierWebhook(unittest.TestCase):
         assert "timestamp=1710000000123" in url
         assert "sign=" in url
 
-    @patch("app.modules.governance.alert_notifier.AlertNotifier.validate_webhook_url")
-    @patch("app.modules.governance.alert_notifier.requests.post")
+    @patch("app.modules.governance.alert_notifier.AlertNotifier._resolve_webhook_target_ips")
+    @patch("app.modules.governance.alert_notifier.requests.Session")
     @patch("app.modules.governance.alert_notifier.AlertNotifier.get_notification_preferences")
     @patch("app.modules.governance.alert_notifier.AlertNotifier._save_alert")
     def test_create_alert_skips_webhook_when_push_disabled(
-        self, mock_save, mock_get_prefs, mock_post, mock_validate
+        self, mock_save, mock_get_prefs, mock_session, mock_resolve
     ):
         notifier = AlertNotifier()
         notifier._subscribers = []
 
-        mock_validate.return_value = (True, None)
+        mock_resolve.return_value = (["93.184.216.34"], None)
         mock_get_prefs.return_value = NotificationPreference(
             user_id=1,
             email_enabled=False,
@@ -216,7 +225,7 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             user_id=1,
         )
 
-        mock_post.assert_not_called()
+        mock_session.return_value.post.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import _get_session_timeout_hours
-from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -965,13 +965,19 @@ def _test_url_accessible(url: str) -> dict:
         current_url = url
         method = "HEAD"
 
-        for _ in range(6):
-            assert_public_http_url(current_url)
-
+        # Tight redirect budget (was 6): each hop is independently vulnerable to
+        # DNS rebinding and a server-supplied protocol-relative ``Location``
+        # (``//attacker.com``) can re-target the fetch. Two hops covers the
+        # common HTTPS-upgrade / trailing-slash redirect case without leaving a
+        # wide SSRF-amplification loop open.
+        for _ in range(2):
+            # ``safe_request`` resolves+validates the IP AND sends the request
+            # pinned to that verified IP, closing the rebinding window per hop.
             if method == "HEAD":
-                response = requests.head(current_url, timeout=10, allow_redirects=False)
+                response = safe_request("HEAD", current_url, timeout=10, allow_redirects=False)
             else:
-                response = requests.get(
+                response = safe_request(
+                    "GET",
                     current_url,
                     timeout=10,
                     stream=True,
@@ -989,8 +995,14 @@ def _test_url_accessible(url: str) -> dict:
                 location = response.headers.get("Location")
                 if not location:
                     return {"success": False, "error": "重定向响应缺少 Location"}
+                # Reject protocol-relative Location (``//attacker.com``) before
+                # urljoin turns it into a fetch of an attacker-controlled host.
+                if location.startswith("//"):
+                    return {
+                        "success": False,
+                        "error": "不支持协议相对的重定向地址",
+                    }
                 current_url = urljoin(current_url, location)
-                assert_public_http_url(current_url)
                 continue
 
             if response.status_code < 400:
