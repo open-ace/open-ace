@@ -7,15 +7,27 @@ Fetches user details from DingTalk APIs when needed.
 """
 
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Optional, cast
 
 import requests
 
+logger = logging.getLogger(__name__)
+
 CACHE_DIR = Path.home() / ".open-ace"
 CACHE_FILE = CACHE_DIR / "dingtalk_users.json"
-CACHE_TTL = 3600  # 1 hour
+# DingTalk recycles userids after deletion; a 1h window let a recycled id be
+# served stale for too long. 10 minutes bounds the stale-identity window while
+# still amortizing API calls within a typical import session.
+CACHE_TTL = 600  # 10 minutes
+
+# DingTalk recycles userids after deletion, so a cached entry keyed only by
+# userid can be silently re-bound to a different human. We additionally record a
+# stable, DingTalk-wide identity (unionid/open_id) alongside each entry and
+# detect mismatches on refresh to defend against that.
+CACHE_IDENTITY_FIELDS = ("unionid", "open_id")
 
 
 def ensure_cache_dir():
@@ -54,8 +66,17 @@ def get_dingtalk_access_token(app_key: str, app_secret: str) -> Optional[str]:
         data = response.json()
         return cast(Optional[str], data.get("accessToken"))
     except Exception as e:
-        print(f"Error getting DingTalk access token: {e}")
+        logger.error("Error getting DingTalk access token: %s", e)
         return None
+
+
+def _cache_identity_for(user_info: dict) -> Optional[str]:
+    """Return the stable identity field stored alongside a cached user (if any)."""
+    for field in CACHE_IDENTITY_FIELDS:
+        value = user_info.get(field)
+        if value:
+            return str(value)
+    return None
 
 
 def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]:
@@ -63,28 +84,41 @@ def get_user_info(user_id: str, app_key: str, app_secret: str) -> Optional[dict]
     cache = load_cache()
     if user_id in cache["users"]:
         user_cache = cache["users"][user_id]
-        if time.time() - user_cache.get("cached_at", 0) < CACHE_TTL:
+        cached_at = user_cache.get("cached_at", 0)
+        cached_identity = user_cache.get("identity")
+        if (
+            time.time() - cached_at < CACHE_TTL
+            # When we have a stable identity on record, keep using the cached entry.
+            # If no identity was ever recorded (legacy entries), the TTL alone gates it.
+            and (cached_identity is not None or not CACHE_IDENTITY_FIELDS)
+        ):
             return cast(Optional[dict], user_cache.get("data"))
 
     token = get_dingtalk_access_token(app_key, app_secret)
     if not token:
         return None
 
-    url = f"https://oapi.dingtalk.com/topapi/v2/user/get?access_token={token}"
+    url = "https://oapi.dingtalk.com/topapi/v2/user/get"
+    headers = {"x-acs-dingtalk-access-token": token}
     payload = {"userid": user_id}
 
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
 
         if data.get("errcode") == 0:
             user_info = data.get("result", {})
-            cache["users"][user_id] = {"data": user_info, "cached_at": time.time()}
+            cache["users"][user_id] = {
+                "data": user_info,
+                "cached_at": time.time(),
+                "identity": _cache_identity_for(user_info),
+            }
             save_cache(cache)
             return cast(Optional[dict], user_info)
-    except Exception as e:
-        print(f"Error getting DingTalk user info: {e}")
+    except Exception:
+        # Never log the raw request object: the access_token lives in the URL/headers.
+        logger.exception("Error getting DingTalk user info for userid %s", user_id)
 
     return None
 

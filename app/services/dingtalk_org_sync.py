@@ -130,7 +130,9 @@ class DingTalkOrgSyncService:
         with self._sync_lock:
             self._ensure_supporting_tables()
             token = self._get_access_token(app_key, app_secret)
-            departments, users = self._fetch_directory_snapshot(token, root_department_id)
+            departments, users = self._fetch_directory_snapshot(
+                token, root_department_id, warnings=result.warnings
+            )
             result.departments_seen = len(departments)
             result.users_seen = len(users)
 
@@ -144,6 +146,7 @@ class DingTalkOrgSyncService:
                     result.teams_updated += 1
 
             expected_memberships: set[tuple[str, int]] = set()
+            seen_provider_user_ids: set[str] = set()
             for user in users:
                 user_id, created, linked, updated = self._resolve_local_user(
                     user=user,
@@ -152,6 +155,7 @@ class DingTalkOrgSyncService:
                 )
                 if user_id is None:
                     continue
+                seen_provider_user_ids.add(user.user_id)
                 if created:
                     result.users_created += 1
                 elif linked:
@@ -167,6 +171,15 @@ class DingTalkOrgSyncService:
             self._sync_memberships(
                 expected_memberships=expected_memberships,
                 synced_team_ids=set(team_ids_by_department.values()),
+                result=result,
+            )
+
+            # Deactivate/unlink DingTalk users that were synced previously but are no
+            # longer in the directory. DingTalk recycles userids, so leaving a stale
+            # SSO identity row would let a recycled id re-resolve to the old account.
+            self._deactivate_departed_users(
+                tenant_id=effective_tenant_id,
+                seen_provider_user_ids=seen_provider_user_ids,
                 result=result,
             )
 
@@ -241,7 +254,10 @@ class DingTalkOrgSyncService:
         return str(token)
 
     def _fetch_directory_snapshot(
-        self, token: str, root_department_id: str
+        self,
+        token: str,
+        root_department_id: str,
+        warnings: list[str] | None = None,
     ) -> tuple[list[DingTalkDepartment], list[DingTalkUser]]:
         """Recursively fetch departments and users starting from the configured root."""
         departments: dict[str, DingTalkDepartment] = {}
@@ -262,7 +278,9 @@ class DingTalkOrgSyncService:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
-            direct_users = self._fetch_department_users(token, current_department_id)
+            direct_users = self._fetch_department_users(
+                token, current_department_id, warnings=warnings
+            )
             for user in direct_users:
                 existing = users.get(user.user_id)
                 if existing is None:
@@ -321,7 +339,12 @@ class DingTalkOrgSyncService:
 
         return departments
 
-    def _fetch_department_users(self, token: str, department_id: str) -> list[DingTalkUser]:
+    def _fetch_department_users(
+        self,
+        token: str,
+        department_id: str,
+        warnings: list[str] | None = None,
+    ) -> list[DingTalkUser]:
         """Fetch users directly under a DingTalk department."""
         user_ids: list[str] = []
         cursor = 0
@@ -351,7 +374,16 @@ class DingTalkOrgSyncService:
 
         users: list[DingTalkUser] = []
         for user_id in sorted(set(user_ids)):
-            user_info = self._fetch_user_info(token, user_id)
+            try:
+                user_info = self._fetch_user_info(token, user_id)
+            except Exception as exc:
+                # A transient DingTalk error (rate-limit, quota) on one user must not
+                # abort the whole sync; warn and skip that user.
+                msg = f"Skipped DingTalk user {user_id}: {exc}"
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
+                continue
             if not user_info:
                 continue
 
@@ -407,9 +439,14 @@ class DingTalkOrgSyncService:
             timeout=15,
         )
         response.raise_for_status()
-        payload = cast(dict[str, Any], response.json())
+        payload = cast("dict[str, Any]", response.json())
         if payload.get("errcode", 0) != 0:
-            raise RuntimeError(f"DingTalk API request failed: {payload}")
+            # Surface only the errcode/errmsg (not the whole payload, which callers may
+            # log) so transient errors (rate-limit -1, quota 88) are debuggable without
+            # echoing request bodies.
+            errcode = payload.get("errcode")
+            errmsg = payload.get("errmsg") or payload.get("message") or "unknown error"
+            raise RuntimeError(f"DingTalk API request failed (errcode={errcode}): {errmsg}")
         return payload
 
     @staticmethod
@@ -439,11 +476,28 @@ class DingTalkOrgSyncService:
         existing = existing_teams.get(department.department_id)
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-        settings = {
+        settings: dict[str, Any] = {
             "sync_source": DINGTALK_PROVIDER_NAME,
             "dingtalk_department_id": department.department_id,
             "dingtalk_parent_department_id": department.parent_department_id,
         }
+        # Preserve the promoted-role stash across team updates so transient dept
+        # moves don't lose manually-assigned owner/leader roles.
+        if existing:
+            existing_settings: Any = None
+            existing_settings_raw = existing.get("settings")
+            try:
+                existing_settings = (
+                    json.loads(existing_settings_raw)
+                    if isinstance(existing_settings_raw, str)
+                    else existing_settings_raw
+                )
+            except (TypeError, json.JSONDecodeError):
+                existing_settings = {}
+            if isinstance(existing_settings, dict):
+                preserved = existing_settings.get("dingtalk_preserved_roles")
+                if isinstance(preserved, dict) and preserved:
+                    settings["dingtalk_preserved_roles"] = preserved
         settings_json = json.dumps(settings, ensure_ascii=False)
 
         if existing:
@@ -533,24 +587,34 @@ class DingTalkOrgSyncService:
         if existing_user is None and user.email:
             email_user = self.user_repo.get_user_by_email(user.email)
             if email_user:
+                # Do NOT silently bind a DingTalk SSO identity to a pre-existing local
+                # account just because the (unverified) email matches. DingTalk emails
+                # are not confirmed, so auto-linking is a privilege-escalation footgun.
                 if email_user.get("tenant_id") not in (None, tenant_id):
                     result.warnings.append(
                         f"Skipped DingTalk user {user.user_id}: email {user.email} is already "
                         f"owned by tenant {email_user.get('tenant_id')}"
                     )
                     return None, False, False, False
-                existing_user = email_user
-                existing_user_id = int(email_user["id"])
-                linked = True
+                result.warnings.append(
+                    f"Skipped linking DingTalk user {user.user_id} to existing account "
+                    f"{email_user.get('username')!r}: email {user.email} is unverified; "
+                    f"provisioned a separate local user instead."
+                )
+                # Fall through to provisioning a distinct local user below.
 
         if existing_user is None:
             username = self._build_username(user.name, user.email, user.user_id)
             email = user.email or f"{user.user_id}@{DINGTALK_PLACEHOLDER_EMAIL_DOMAIN}"
+            # Provision as inactive with an unusable password hash. The DingTalk SSO
+            # identity link is what authorizes them; an active account with an empty
+            # password would be a passwordless-login bypass.
             existing_user_id = self.user_repo.create_user(
                 username=username,
                 email=email,
-                password_hash="",
+                password_hash="!",
                 role="user",
+                is_active=False,
                 tenant_id=tenant_id,
             )
             if existing_user_id is None:
@@ -585,6 +649,11 @@ class DingTalkOrgSyncService:
             "department_ids": list(user.department_ids),
             "status": user.status,
             "synced_by": "dingtalk_org_sync",
+            # Record the tenant this identity was synced under so the departed-user
+            # deactivation pass can scope itself to the syncing tenant. Without this
+            # marker a multi-tenant deployment would let tenant A's sync deactivate
+            # tenant B's DingTalk identities (cross-tenant leak).
+            "tenant_id": tenant_id,
             "synced_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
         self.sso_manager.link_identity(
@@ -605,12 +674,27 @@ class DingTalkOrgSyncService:
         if not synced_team_ids:
             return
 
-        all_rows = self.db.fetch_all("SELECT team_id, user_id FROM team_members")
+        all_rows = self.db.fetch_all("SELECT team_id, user_id, role FROM team_members")
         current_memberships = {
             (str(row["team_id"]), int(row["user_id"]))
             for row in all_rows
             if str(row["team_id"]) in synced_team_ids
         }
+
+        # Persist any manually-promoted role for members we are about to remove, so a
+        # user who leaves then rejoins a synced department does not silently lose an
+        # owner/leader role. Stored on the team's settings JSON (keyed by user_id).
+        preserved_by_team = self._load_preserved_roles(synced_team_ids)
+        for row in all_rows:
+            team_id = str(row["team_id"])
+            if team_id not in synced_team_ids:
+                continue
+            role = str(row.get("role") or "member")
+            if role == "member":
+                continue
+            key = (team_id, int(row["user_id"]))
+            if key in (current_memberships - expected_memberships):
+                preserved_by_team.setdefault(team_id, {})[str(int(row["user_id"]))] = role
 
         to_remove = current_memberships - expected_memberships
         for team_id, user_id in sorted(to_remove):
@@ -624,6 +708,7 @@ class DingTalkOrgSyncService:
         for team_id, user_id in sorted(to_add):
             local_user = self.user_repo.get_user_by_id(user_id)
             username = str(local_user.get("username") or "") if local_user else ""
+            role = preserved_by_team.get(team_id, {}).get(str(user_id), "member")
             self.db.execute(
                 """
                 INSERT INTO team_members (team_id, user_id, username, role, joined_at)
@@ -633,11 +718,170 @@ class DingTalkOrgSyncService:
                     team_id,
                     user_id,
                     username,
-                    "member",
+                    role,
                     datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 ),
             )
             result.memberships_added += 1
+
+        # Persist any newly-stashed promoted roles so they survive across runs, and
+        # clear a team's stash once every preserved member is back on the team.
+        self._save_preserved_roles(preserved_by_team, synced_team_ids, expected_memberships)
+
+    def _load_preserved_roles(self, synced_team_ids: set[str]) -> dict[str, dict[str, str]]:
+        """Load the promoted-role stash (per-team, keyed by user_id) from team settings."""
+        if not synced_team_ids:
+            return {}
+        placeholders = ",".join("?" for _ in synced_team_ids)
+        rows = self.db.fetch_all(
+            f"SELECT team_id, settings FROM teams WHERE team_id IN ({placeholders})",
+            tuple(synced_team_ids),
+        )
+        stash: dict[str, dict[str, str]] = {}
+        for row in rows:
+            team_id = str(row["team_id"])
+            settings_raw = row.get("settings")
+            try:
+                settings = (
+                    json.loads(settings_raw) if isinstance(settings_raw, str) else settings_raw
+                )
+            except (TypeError, json.JSONDecodeError):
+                settings = {}
+            if isinstance(settings, dict):
+                preserved = settings.get("dingtalk_preserved_roles")
+                if isinstance(preserved, dict) and preserved:
+                    stash[team_id] = {
+                        str(k): str(v) for k, v in preserved.items() if v and v != "member"
+                    }
+        return stash
+
+    def _save_preserved_roles(
+        self,
+        preserved_by_team: dict[str, dict[str, str]],
+        synced_team_ids: set[str],
+        expected_memberships: set[tuple[str, int]],
+    ) -> None:
+        """Persist the promoted-role stash back onto team settings JSON.
+
+        Drops a team's entry once all its preserved members are back in the expected
+        membership set (so the stash doesn't grow unbounded).
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        for team_id in synced_team_ids:
+            stash = dict(preserved_by_team.get(team_id, {}))
+            rejoin = {str(uid) for (tid, uid) in expected_memberships if str(tid) == team_id}
+            for uid in list(stash.keys()):
+                if uid in rejoin:
+                    stash.pop(uid, None)
+
+            row = self.db.fetch_one("SELECT settings FROM teams WHERE team_id = ?", (team_id,))
+            settings_raw = row.get("settings") if row else None
+            try:
+                settings = (
+                    json.loads(settings_raw) if isinstance(settings_raw, str) else settings_raw
+                )
+            except (TypeError, json.JSONDecodeError):
+                settings = {}
+            if not isinstance(settings, dict):
+                settings = {}
+
+            if stash:
+                settings["dingtalk_preserved_roles"] = stash
+            else:
+                settings.pop("dingtalk_preserved_roles", None)
+
+            settings_json = json.dumps(settings, ensure_ascii=False)
+            self.db.execute(
+                "UPDATE teams SET settings = ?, updated_at = ? WHERE team_id = ?",
+                (settings_json, now, team_id),
+            )
+
+    def _deactivate_departed_users(
+        self,
+        tenant_id: int,
+        seen_provider_user_ids: set[str],
+        result: DingTalkOrgSyncResult,
+    ) -> None:
+        """Deactivate and unlink DingTalk-synced users absent from the current snapshot.
+
+        DingTalk recycles userids after deletion, so a stale SSO identity row would
+        let a recycled id re-resolve to the previous local account on a later sync.
+        We detect previously-synced identities via the ``synced_by`` marker stored in
+        ``provider_data`` and drop the ones whose provider_user_id is no longer seen.
+
+        The pass is scoped to the syncing tenant: only identities whose
+        ``provider_data.tenant_id`` matches (or, for legacy rows without that marker,
+        whose linked local user belongs to this tenant) are eligible. Without this
+        filter a multi-tenant deployment would let tenant A's sync deactivate tenant
+        B's DingTalk identities.
+        """
+        rows = self.db.fetch_all(
+            """
+            SELECT user_id, provider_user_id, provider_data
+            FROM sso_identities
+            WHERE provider_name = ?
+            """,
+            (DINGTALK_PROVIDER_NAME,),
+        )
+        for row in rows:
+            provider_user_id = str(row.get("provider_user_id") or "")
+            if not provider_user_id or provider_user_id in seen_provider_user_ids:
+                continue
+
+            # Only touch identities this org sync created (avoid clobbering identities
+            # linked by interactive SSO login flows).
+            provider_data_raw = row.get("provider_data")
+            try:
+                provider_data = (
+                    json.loads(provider_data_raw)
+                    if isinstance(provider_data_raw, str)
+                    else provider_data_raw
+                )
+            except (TypeError, json.JSONDecodeError):
+                provider_data = {}
+            if not isinstance(provider_data, dict):
+                provider_data = {}
+            if provider_data.get("synced_by") != "dingtalk_org_sync":
+                continue
+
+            local_user_id = row.get("user_id")
+            local_user = (
+                self.user_repo.get_user_by_id(int(local_user_id))
+                if local_user_id is not None
+                else None
+            )
+
+            # Scope deactivation to the syncing tenant. Prefer the tenant_id stamp
+            # recorded in provider_data; fall back to the linked local user's
+            # tenant_id for legacy identity rows that predate the stamp (and treat
+            # a missing/None tenant as belonging to this tenant, preserving the
+            # original lenient behavior for single-tenant deployments).
+            identity_tenant_id = provider_data.get("tenant_id")
+            if identity_tenant_id is None and local_user is not None:
+                identity_tenant_id = local_user.get("tenant_id")
+            if identity_tenant_id is not None:
+                try:
+                    identity_tenant_id = int(identity_tenant_id)
+                except (TypeError, ValueError):
+                    identity_tenant_id = None
+            if identity_tenant_id is not None and identity_tenant_id != int(tenant_id):
+                # Belongs to a different tenant; must not be touched here.
+                continue
+
+            if (
+                local_user_id is not None
+                and local_user is not None
+                and local_user.get("tenant_id") in (None, tenant_id)
+            ):
+                self.user_repo.update_user(user_id=int(local_user_id), is_active=False)
+
+            self.db.execute(
+                "DELETE FROM sso_identities WHERE provider_name = ? AND provider_user_id = ?",
+                (DINGTALK_PROVIDER_NAME, provider_user_id),
+            )
+            result.warnings.append(
+                f"Deactivated and unlinked departed DingTalk user {provider_user_id}"
+            )
 
     def _build_username(self, display_name: str, email: str | None, user_id: str) -> str:
         """Generate a stable, unique username for a synced DingTalk user."""
