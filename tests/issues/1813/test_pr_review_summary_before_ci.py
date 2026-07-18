@@ -1,62 +1,162 @@
 """Tests for pr_review_summary created before CI check (issue #1813).
 
 When PR review passes but CI fails, the workflow enters the CI repair loop
-and returns early. Previously the ``pr_review_summary`` milestone was created
-AFTER the CI check — so when CI failed, the summary was never created, and
-the frontend "PR Review Summary" button stayed permanently disabled even
-after the workflow completed successfully.
+and returns early. Previously the ``pr_review_summary`` milestone's agent run
++ ``review_content`` fill happened AFTER the CI check — so when CI failed,
+the summary was never generated (empty ``review_content``), and the frontend
+"PR Review Summary" button stayed permanently disabled.
 
-The fix moves the ``pr_review_summary`` creation BEFORE the CI check.
+The fix moves the ENTIRE summary block (create → run agent → fill
+review_content → post comment) BEFORE the CI check.
 """
+
+from unittest.mock import MagicMock, patch
+
+from app.modules.workspace.autonomous.models import AgentTaskResult
+
+
+def _make_workflow(**overrides):
+    base = {
+        "workflow_id": "wf-1813",
+        "user_id": 1,
+        "title": "Test",
+        "status": "pr_review",
+        "requirements_text": "Build feature",
+        "requirements_issue_url": "",
+        "project_path": "/tmp/p",
+        "project_repo_url": "",
+        "is_new_project": False,
+        "cli_tool": "claude-code",
+        "model": "glm-5",
+        "permission_mode": "auto-edit",
+        "branch_name": "auto-dev/x",
+        "branch_strategy": "worktree",
+        "workspace_type": "local",
+        "remote_machine_id": "",
+        "worktree_path": "/tmp/p",
+        "github_issue_number": 1813,
+        "github_pr_number": 99,
+        "github_pr_url": "",
+        "current_phase": "pr_review",
+        "current_round": 0,
+        "dev_round": 1,
+        "max_plan_rounds": 3,
+        "max_pr_review_rounds": 3,
+        "require_full_review_rounds": False,
+        "total_tokens": 0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_requests": 0,
+        "error_message": "",
+        "content_language": "zh",
+    }
+    base.update(overrides)
+    return base
 
 
 class TestPrReviewSummaryBeforeCiCheck:
-    """``pr_review_summary`` must be created BEFORE the CI failure check so
-    that a CI failure (which redirects to CI repair and returns) doesn't skip
-    the summary milestone.
+    """The ENTIRE summary block (create → agent → review_content → completed)
+    must run BEFORE the CI failure check. When CI fails, the summary must
+    still be completed with non-empty review_content — otherwise the frontend
+    "PR Review Summary" button stays disabled (#1813)."""
 
-    Verified by source inspection: in ``_do_pr_review``, the
-    ``pr_review_summary`` milestone creation must appear textually before the
-    ``ci_failed_before_report`` milestone creation (and the ``return`` that
-    follows it). A full integration test is impractical here because
-    ``_do_pr_review`` requires extensive mocking of CI polling, agent runs,
-    diff inspection, and JSON-serializable milestone fields."""
+    def test_review_content_filled_before_ci_return(self):
+        """When review passes but CI fails, the pr_review_summary milestone
+        must be updated with non-empty review_content AND status=completed
+        BEFORE the CI failure path returns.
 
-    def test_summary_creation_appears_before_ci_check_in_source(self):
-        import inspect
-
+        We mock the agent runner to return summary text, then verify
+        update_milestone was called with review_content before
+        _start_ci_repair_round."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
-        source = inspect.getsource(AutonomousOrchestrator._do_pr_review)
-        summary_pos = source.find('"pr_review_summary"')
-        ci_fail_pos = source.find('"ci_failed_before_report"')
-        assert summary_pos != -1, "pr_review_summary milestone creation not found"
-        assert ci_fail_pos != -1, "ci_failed_before_report milestone creation not found"
-        assert summary_pos < ci_fail_pos, (
-            "pr_review_summary must be created BEFORE ci_failed_before_report "
-            "so CI failure doesn't skip the summary (#1813 regression)"
+        wf = _make_workflow()
+        call_order = []  # track method call order
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+            ) as mock_repo_cls,
+        ):
+            mock_repo = MagicMock()
+            mock_repo.get_workflow.return_value = wf
+            mock_repo.list_milestones.return_value = []
+            mock_repo.create_milestone.return_value = {
+                "milestone_id": "ms-summary",
+                "workflow_id": "wf-1813",
+            }
+            mock_repo.create_event.return_value = {"id": 1}
+            mock_repo.update_workflow.return_value = wf
+
+            # Track update_milestone calls to capture review_content.
+            def track_update(ms_id, fields):
+                call_order.append(("update_milestone", dict(fields)))
+
+            mock_repo.update_milestone.side_effect = track_update
+            mock_repo.update_workflow_tokens.return_value = None
+            mock_repo_cls.return_value = mock_repo
+
+            orch = AutonomousOrchestrator("wf-1813")
+            orch.repo = mock_repo
+            orch.emitter = MagicMock()
+            # Bypass _emit's json.dumps to avoid MagicMock serialization issues.
+            orch._emit = MagicMock()
+            orch._accumulate_tokens = MagicMock()
+            orch._gh = MagicMock()
+            orch._gh.get_current_commit.return_value = "abc"
+            orch._gh.get_current_branch.return_value = "auto-dev/x"
+            orch._gh.get_pr_head_sha.return_value = "abc"
+            orch._gh.get_diff.return_value = "diff content"
+            orch._gh.get_diff_stats.return_value = {
+                "additions": 10,
+                "deletions": 2,
+                "files": 3,
+                "commits": 1,
+            }
+            orch._gh.create_pr.return_value = {
+                "number": 99,
+                "url": "https://github.com/pull/99",
+            }
+            orch._post_github_comment = MagicMock()
+            # Skip the PR review fix path — we only care about the summary
+            # ordering relative to the CI check, not the fix mechanics.
+            orch._apply_pr_review_fix = MagicMock()
+
+            orch._runner = MagicMock()
+            orch._runner.run_agent_task.return_value = AgentTaskResult(
+                session_id="s",
+                response_text="代码审查通过",
+                visible_response_text="代码审查通过",
+                success=True,
+            )
+
+            # Track CI repair call order.
+            def track_ci_repair(*a, **kw):
+                call_order.append(("ci_repair",))
+
+            with (
+                patch.object(
+                    orch, "_poll_ci_status", return_value=[{"name": "lint", "bucket": "fail"}]
+                ),
+                patch.object(orch, "_start_ci_repair_round", side_effect=track_ci_repair),
+            ):
+                orch._do_pr_review(wf)
+
+        # Find the update_milestone call that set review_content.
+        review_updates = [
+            c for c in call_order if c[0] == "update_milestone" and c[1].get("review_content")
+        ]
+        assert review_updates, (
+            "pr_review_summary must be updated with non-empty review_content " "even when CI fails"
         )
+        assert review_updates[0][1]["review_content"].strip(), "review_content must be non-empty"
+        assert review_updates[0][1]["status"] == "completed", "pr_review_summary must be completed"
 
-    def test_summary_creation_not_inside_ci_failure_block(self):
-        """The summary creation must NOT be inside the ``if ci_failures:``
-        block that creates ci_failed_before_report — it must run
-        unconditionally when review passes."""
-        import inspect
-
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
-
-        source = inspect.getsource(AutonomousOrchestrator._do_pr_review)
-        summary_pos = source.find('"pr_review_summary"')
-        # Find the "if ci_failures:" that immediately precedes
-        # ci_failed_before_report (the one that returns to CI repair).
-        ci_fail_milestone_pos = source.find('"ci_failed_before_report"')
-        assert ci_fail_milestone_pos != -1
-        # Search backwards from ci_failed_before_report to find its enclosing
-        # "if ci_failures:" block.
-        ci_block_start = source.rfind("if ci_failures:", 0, ci_fail_milestone_pos)
-        assert ci_block_start != -1
-        # The summary must appear BEFORE this CI-failure block.
-        assert summary_pos < ci_block_start, (
-            "pr_review_summary must be created before the `if ci_failures:` "
-            "block that creates ci_failed_before_report"
-        )
+        # Verify review_content update happened BEFORE ci_repair.
+        review_idx = call_order.index(review_updates[0])
+        ci_repair_calls = [i for i, c in enumerate(call_order) if c[0] == "ci_repair"]
+        assert ci_repair_calls, "ci_repair should have been called"
+        assert (
+            review_idx < ci_repair_calls[0]
+        ), "review_content must be filled BEFORE entering CI repair"
