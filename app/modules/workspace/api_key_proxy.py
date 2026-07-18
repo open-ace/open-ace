@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
-from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.repositories.database import DB_PATH, is_postgresql
 from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
