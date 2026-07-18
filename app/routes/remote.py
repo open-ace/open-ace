@@ -24,7 +24,7 @@ from typing import Any
 
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from app.auth.decorators import _extract_token, admin_required
+from app.auth.decorators import _extract_token, admin_required, enforce_password_change_requirement
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.modules.workspace.agent_token import token_hash_prefix
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
@@ -98,6 +98,13 @@ def load_user():
 
     # Shared session/Authorization-token loading.
     if _set_user_from_token():
+        # Enforce the forced-password-change lockdown before letting the
+        # request reach the ~40 before_request-only remote endpoints (only a
+        # handful carry @admin_required/@machine_access_required, which re-run
+        # their own checks). Mirrors auth_required/admin_required.
+        password_change_response = enforce_password_change_requirement(getattr(g, "user", None))
+        if password_change_response is not None:
+            return password_change_response
         return None  # Authenticated
 
     # Special case: WebSocket proxy token for terminal status endpoint.
@@ -128,6 +135,9 @@ def load_user():
 
     # Shared WebUI URL-token fallback (iframe requests from qwen-code-webui).
     if _set_user_from_webui_token():
+        password_change_response = enforce_password_change_requirement(getattr(g, "user", None))
+        if password_change_response is not None:
+            return password_change_response
         return None
 
     return jsonify({"error": "Authentication required"}), 401

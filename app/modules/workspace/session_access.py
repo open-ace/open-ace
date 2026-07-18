@@ -19,7 +19,11 @@ from typing import Any
 
 from flask import g, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.auth.decorators import (
+    _extract_token,
+    _load_user_from_token,
+    enforce_password_change_requirement,
+)
 from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
 from app.modules.workspace.remote_session_manager import get_remote_session_manager
 
@@ -103,6 +107,7 @@ def _set_user_from_webui_token() -> bool:
                         "email": user_data.get("email"),
                         "role": user_data.get("role"),
                         "tenant_id": user_data.get("tenant_id"),
+                        "must_change_password": bool(user_data.get("must_change_password")),
                     }
                 )
                 return True
@@ -121,9 +126,17 @@ def load_remote_user() -> tuple | None:
     """
     if request.method == "OPTIONS":
         return None
-    if _set_user_from_token():
-        return None
-    if _set_user_from_webui_token():
+    if _set_user_from_token() or _set_user_from_webui_token():
+        # Enforce the forced-password-change lockdown here (the shared
+        # chokepoint for remote_bp and run_timeline_bp) so a user flagged
+        # must_change_password=True cannot reach the ~40 before_request-only
+        # remote endpoints or either run-timeline endpoint. Mirrors the gate
+        # used in auth_required/admin_required. The proxy-token path sets
+        # g.user without must_change_password, which the gate treats as falsy
+        # (allow), so proxy auth is unaffected.
+        password_change_response = enforce_password_change_requirement(getattr(g, "user", None))
+        if password_change_response is not None:
+            return password_change_response
         return None
     return jsonify({"error": "Authentication required"}), 401
 

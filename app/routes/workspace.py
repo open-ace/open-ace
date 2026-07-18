@@ -15,7 +15,11 @@ from typing import Any, Optional
 
 from flask import Blueprint, abort, g, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.auth.decorators import (
+    _extract_token,
+    _load_user_from_token,
+    enforce_password_change_requirement,
+)
 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 from app.modules.workspace.collaboration import SharePermission, get_collaboration_manager
 from app.modules.workspace.llm_proxy_handler import handle_llm_proxy_request
@@ -123,6 +127,9 @@ def load_user():
             g.user_role = user.get("role")
             g.tenant_id = user.get("tenant_id")
             _refresh_session(token)
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
             return None
 
         # Session token failed — try WebUI token validation
@@ -143,11 +150,15 @@ def load_user():
                         "email": user_data.get("email"),
                         "role": user_data.get("role"),
                         "tenant_id": user_data.get("tenant_id"),
+                        "must_change_password": bool(user_data.get("must_change_password")),
                     }
                     g.user_id = user_id
                     g.user_role = user_data.get("role")
                     g.tenant_id = user_data.get("tenant_id")
                     _refresh_session(token, user_repo=user_repo)
+                    password_change_response = enforce_password_change_requirement(g.user)
+                    if password_change_response is not None:
+                        return password_change_response
                     return None
         except Exception as e:
             logger.warning(f"Failed to validate URL token: {e}")

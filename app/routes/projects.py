@@ -15,7 +15,12 @@ from typing import Any, cast
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token, require_tenant_scope
+from app.auth.decorators import (
+    _extract_token,
+    _load_user_from_token,
+    enforce_password_change_requirement,
+    require_tenant_scope,
+)
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 
@@ -52,6 +57,9 @@ def _authenticate_user():
                 g.user_id = user.get("id")
                 g.user_role = user.get("role")
                 g.tenant_id = user.get("tenant_id")
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
                 return None
 
     # Fallback: try WebUI token from query param
@@ -69,6 +77,9 @@ def _authenticate_user():
                     g.user_id = user_id
                     g.user_role = user.get("role")
                     g.tenant_id = user.get("tenant_id")
+                    password_change_response = enforce_password_change_requirement(user)
+                    if password_change_response is not None:
+                        return password_change_response
                     return None
 
     return jsonify({"error": "Authentication required"}), 401
