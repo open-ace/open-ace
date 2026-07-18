@@ -13,6 +13,7 @@ import re
 import threading
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 FEISHU_PROVIDER_NAME = "feishu"
 FEISHU_ROOT_DEPARTMENT_ID = "0"
 FEISHU_PLACEHOLDER_EMAIL_DOMAIN = "feishu.local"
+# Provenance marker written to users.system_account for auto-provisioned users
+# so they can be distinguished from human-created accounts.
+FEISHU_PROVISIONED_SYSTEM_ACCOUNT = "feishu_org_sync"
+# Stable key for the Postgres advisory lock guarding sync_org so that multiple
+# workers cannot run concurrent syncs. Picked as a fixed constant so all
+# workers contend on the same lock; fits in a signed int64.
+_FEISHU_SYNC_LOCK_KEY = 88342611905720321
 
 
 @dataclass
@@ -97,6 +105,8 @@ class FeishuOrgSyncService:
     _sync_lock = threading.Lock()
     _schedule_lock = threading.Lock()
     _last_scheduled_sync_at: datetime | None = None
+    # Class-level handle exposed for tests/observability; see _acquire_sync_lock.
+    _DB_SYNC_LOCK_KEY: int = _FEISHU_SYNC_LOCK_KEY
 
     def __init__(
         self,
@@ -128,7 +138,7 @@ class FeishuOrgSyncService:
             started_at=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         )
 
-        with self._sync_lock:
+        with self._acquire_sync_lock():
             self._ensure_supporting_tables()
             token = self._get_tenant_access_token(app_id, app_secret)
             departments, users = self._fetch_directory_snapshot(token)
@@ -145,7 +155,9 @@ class FeishuOrgSyncService:
                     result.teams_updated += 1
 
             expected_memberships: set[tuple[str, int]] = set()
+            seen_provider_user_ids: set[str] = set()
             for user in users:
+                seen_provider_user_ids.add(user.open_id)
                 user_id, created, linked, updated = self._resolve_local_user(
                     user=user,
                     tenant_id=effective_tenant_id,
@@ -168,6 +180,13 @@ class FeishuOrgSyncService:
             self._sync_memberships(
                 expected_memberships=expected_memberships,
                 synced_team_ids=set(team_ids_by_department.values()),
+                result=result,
+            )
+
+            self._reconcile_removed_users(
+                provider_name=FEISHU_PROVIDER_NAME,
+                seen_provider_user_ids=seen_provider_user_ids,
+                tenant_id=effective_tenant_id,
                 result=result,
             )
 
@@ -197,6 +216,82 @@ class FeishuOrgSyncService:
         """Ensure dependent tables exist before syncing."""
         self.sso_manager._ensure_tables()
         self.collaboration_manager._ensure_tables()
+
+    @contextmanager
+    def _acquire_sync_lock(self):
+        """Acquire mutual-exclusion for sync_org.
+
+        On PostgreSQL a transaction-level advisory lock is taken so that
+        concurrent workers (separate processes) cannot run overlapping syncs.
+        The in-process threading.Lock is still held as a cheap first fence to
+        avoid needless DB round-trips within a single worker. On SQLite (and
+        other non-Postgres backends) the advisory lock is unavailable, so the
+        threading.Lock remains the only guard; SQLite deployments are
+        single-process by nature.
+        """
+        with self._sync_lock:
+            if self.db.is_postgresql:
+                # pg_try_advisory_xact_lock returns immediately; 0 means another
+                # worker holds the lock, in which case we skip this run.
+                row = self.db.fetch_one(
+                    "SELECT pg_try_advisory_xact_lock(?) AS ok", (self._DB_SYNC_LOCK_KEY,)
+                )
+                if row and row.get("ok") is False:
+                    raise RuntimeError("Another Feishu org sync is already running")
+            try:
+                yield
+            finally:
+                # Transaction-level advisory locks release at commit; the
+                # Database connection context commits per statement, so nothing
+                # explicit is required here.
+                pass
+
+    def _reconcile_removed_users(
+        self,
+        provider_name: str,
+        seen_provider_user_ids: set[str],
+        tenant_id: int,
+        result: FeishuOrgSyncResult,
+    ) -> None:
+        """Deactivate Feishu-provisioned users who disappeared from the directory.
+
+        Users previously linked via the Feishu SSO provider but absent from the
+        current snapshot are considered departed; their local accounts are
+        deactivated so they can no longer authenticate, shrinking the stale
+        access surface. Identities for other providers are left untouched.
+        """
+        if not seen_provider_user_ids:
+            # Nothing was seen this run; do not mass-deactivate on an empty
+            # snapshot (likely an API outage) to avoid a destructive blunder.
+            return
+
+        rows = self.db.fetch_all(
+            """
+            SELECT si.provider_user_id, si.user_id
+            FROM sso_identities si
+            WHERE si.provider_name = ?
+            """,
+            (provider_name,),
+        )
+        for row in rows:
+            provider_user_id = row.get("provider_user_id")
+            if not provider_user_id or provider_user_id in seen_provider_user_ids:
+                continue
+            user_id = row.get("user_id")
+            if user_id is None:
+                continue
+            existing = self.user_repo.get_user_by_id(int(user_id))
+            if not existing:
+                continue
+            if existing.get("tenant_id") not in (None, tenant_id):
+                continue
+            if existing.get("is_active") in (False, 0):
+                continue
+            self.user_repo.update_user(user_id=int(user_id), is_active=False)
+            result.warnings.append(
+                f"Deactivated Feishu user {provider_user_id}: no longer present "
+                f"in directory snapshot"
+            )
 
     def _get_feishu_config(self) -> dict[str, Any]:
         """Load Feishu config from override or app config."""
@@ -533,15 +628,18 @@ class FeishuOrgSyncService:
         if existing_user is None and user.email:
             email_user = self.user_repo.get_user_by_email(user.email)
             if email_user:
+                # SECURITY: Feishu emails are NOT verified, so we must not bind
+                # an SSO identity onto an unrelated pre-existing password
+                # account (account takeover via unverified email). Skip
+                # auto-linking; a fresh local user is provisioned below. We do
+                # surface a warning when the email is already claimed by another
+                # tenant so the operator can investigate the collision.
                 if email_user.get("tenant_id") not in (None, tenant_id):
                     result.warnings.append(
                         f"Skipped Feishu user {user.open_id}: email {user.email} is already "
                         f"owned by tenant {email_user.get('tenant_id')}"
                     )
                     return None, False, False, False
-                existing_user = email_user
-                existing_user_id = int(email_user["id"])
-                linked = True
 
         if existing_user is None:
             username = self._build_username(user.name, user.email, user.open_id)
@@ -551,6 +649,12 @@ class FeishuOrgSyncService:
                 email=email,
                 password_hash="",
                 role="user",
+                # Provision inactive until the account is explicitly activated
+                # (e.g. via a verified Feishu SSO login flow). Auto-provisioned
+                # users have no password and must not be usable for login out
+                # of the box.
+                is_active=False,
+                system_account=FEISHU_PROVISIONED_SYSTEM_ACCOUNT,
                 tenant_id=tenant_id,
             )
             if existing_user_id is None:
@@ -603,7 +707,7 @@ class FeishuOrgSyncService:
         if not synced_team_ids:
             return
 
-        all_rows = self.db.fetch_all("SELECT team_id, user_id FROM team_members")
+        all_rows = self.db.fetch_all("SELECT team_id, user_id, role FROM team_members")
         current_memberships = {
             (str(row["team_id"]), int(row["user_id"]))
             for row in all_rows
@@ -611,7 +715,22 @@ class FeishuOrgSyncService:
         }
 
         to_remove = current_memberships - expected_memberships
+        # Preserve any manually-promoted role (owner/leader/...) so that when a
+        # user is removed from one synced team and (re)added to another within
+        # the same run, the promotion is not silently downgraded to 'member'.
+        # Promotions are tracked per user (a leader is a leader of the person,
+        # not of a single row) and restored when that user is re-inserted.
+        preserved_roles: dict[int, str] = {}
         for team_id, user_id in sorted(to_remove):
+            prior_role = None
+            for row in all_rows:
+                if str(row["team_id"]) == team_id and int(row["user_id"]) == user_id:
+                    prior_role = row.get("role")
+                    break
+            if prior_role and prior_role != "member":
+                existing = preserved_roles.get(user_id)
+                if not existing or str(prior_role) != "member":
+                    preserved_roles[user_id] = str(prior_role)
             self.db.execute(
                 "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
                 (team_id, user_id),
@@ -622,6 +741,7 @@ class FeishuOrgSyncService:
         for team_id, user_id in sorted(to_add):
             local_user = self.user_repo.get_user_by_id(user_id)
             username = str(local_user.get("username") or "") if local_user else ""
+            role = preserved_roles.get(user_id, "member")
             self.db.execute(
                 """
                 INSERT INTO team_members (team_id, user_id, username, role, joined_at)
@@ -631,7 +751,7 @@ class FeishuOrgSyncService:
                     team_id,
                     user_id,
                     username,
-                    "member",
+                    role,
                     datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 ),
             )

@@ -471,7 +471,7 @@ class DataFetchScheduler:
                     result.users_seen,
                 )
         except Exception as e:
-            logger.warning(f"Scheduled Feishu org sync failed: {e}")
+            logger.exception("Scheduled Feishu org sync failed: %s", e)
 
     def _maybe_sync_dingtalk_org(self):
         """Synchronize DingTalk org data when auto-sync is enabled."""

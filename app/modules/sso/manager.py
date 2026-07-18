@@ -559,13 +559,33 @@ class SSOManager:
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             provider_data_json = json.dumps(provider_data) if provider_data else None
+
+            # SECURITY: never silently re-bind an SSO identity from one local
+            # user to another. If the (provider, provider_user_id) row already
+            # exists for a *different* local user, refuse so the original
+            # binding is preserved and the operator can investigate. This
+            # prevents silent identity migration (e.g. via the unverified-email
+            # linking path) with no audit trail.
+            existing = self.db.fetch_one(
+                """
+                SELECT user_id FROM sso_identities
+                WHERE provider_name = ? AND provider_user_id = ?
+            """,
+                (provider_name, provider_user_id),
+            )
+            if existing and int(existing["user_id"]) != int(user_id):
+                logger.error(
+                    f"Refused to rebind SSO identity {provider_name}:"
+                    f"{provider_user_id} from user {existing['user_id']} to user {user_id}"
+                )
+                return False
+
             self.db.execute(
                 """
                 INSERT INTO sso_identities
                 (user_id, provider_name, provider_user_id, provider_data, last_used_at)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(provider_name, provider_user_id) DO UPDATE SET
-                    user_id = ?,
                     provider_data = ?,
                     last_used_at = ?
             """,
@@ -575,7 +595,6 @@ class SSOManager:
                     provider_user_id,
                     provider_data_json,
                     now,
-                    user_id,
                     provider_data_json,
                     now,
                 ),
