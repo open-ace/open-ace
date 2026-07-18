@@ -77,27 +77,34 @@ _WEBHOOK_ALERT_ALLOWLIST = (
 )
 
 
-def _redact_webhook_credentials(webhook_url):
-    """Strip any embedded webhook credentials from a stored/echoed webhook URL.
+def _redact_webhook_credentials(webhook_url, *, mask_feishu=True):
+    """Strip embedded webhook credentials from a webhook URL.
 
     Two credential shapes are handled:
 
     * DingTalk signing secret query params (``openace_dingtalk_secret`` /
-      ``dingtalk_secret``) — stripped from the query string. The outbound
-      signer reads the secret from the global
-      ``alerts.dingtalk_webhook_secret`` config instead.
+      ``dingtalk_secret``) — always stripped. The outbound signer reads the
+      secret from the global ``alerts.dingtalk_webhook_secret`` config instead,
+      so stripping it is lossless on the write path.
     * Feishu/Lark bot webhooks, which carry the bot token in the final URL path
-      segment (``/open-apis/bot/v2/hook/<TOKEN>``). The token is replaced with
-      ``<redacted>`` so the credential is not persisted in, or echoed back
-      from, the stored webhook URL.
+      segment (``/open-apis/bot/v2/hook/<TOKEN>``). When ``mask_feishu`` is true
+      the token is replaced with ``<redacted>``.
 
-    This is the single chokepoint used on both write (before persistence) and
-    read (defensive redaction) so neither credential can leak through the URL.
+    The two credential shapes are *not* symmetric on the persistence path. The
+    DingTalk secret lives in the query string and is rebuilt from global config
+    on outbound signing, so it can safely be stripped before writing to the DB.
+    The Feishu token lives only in the path and has no global-config equivalent
+    (``alerts.webhook_secret``/``alerts.dingtalk_webhook_secret`` are unrelated),
+    so it must NOT be masked on the write path — otherwise it is destroyed and
+    every Feishu/Lark delivery silently fails. ``mask_feishu=False`` is therefore
+    used at the persistence chokepoint (``set_notification_preferences``), while
+    the default (``mask_feishu=True``) is used on every read/echo/log path so the
+    token is never surfaced to the frontend or to logs.
     """
     if not webhook_url:
         return webhook_url
 
-    # 1. DingTalk secret query params.
+    # 1. DingTalk secret query params (always; lossless on the write path).
     try:
         parsed = urlparse(webhook_url)
     except ValueError:
@@ -111,20 +118,25 @@ def _redact_webhook_credentials(webhook_url):
             webhook_url = urlunparse(parsed._replace(query=urlencode(sanitized)))
             parsed = urlparse(webhook_url)
 
-    # 2. Feishu/Lark path-based bot token.
-    path = parsed.path or ""
-    for prefix in _FEISHU_BOT_HOOK_PATH_PREFIXES:
-        if path.startswith(prefix) and len(path) > len(prefix):
-            masked = prefix + "<redacted>"
-            webhook_url = urlunparse(parsed._replace(path=masked))
-            parsed = urlparse(webhook_url)
-            break
+    # 2. Feishu/Lark path-based bot token (display/echo/log only).
+    if mask_feishu:
+        path = parsed.path or ""
+        for prefix in _FEISHU_BOT_HOOK_PATH_PREFIXES:
+            # ``len(path) > len(prefix)`` skips an empty token (URL ending exactly
+            # at the prefix): an empty tail is not a real credential, so it is
+            # left untouched rather than turned into ``.../hook/<redacted>``.
+            if path.startswith(prefix) and len(path) > len(prefix):
+                masked = prefix + "<redacted>"
+                webhook_url = urlunparse(parsed._replace(path=masked))
+                parsed = urlparse(webhook_url)
+                break
     return webhook_url
 
 
-# Back-compat alias: earlier code imported ``_redact_dingtalk_secret``; the
-# helper now masks all webhook-credential shapes (DingTalk query secret +
-# Feishu/Lark path token), so keep the old name working.
+# Back-compat alias: earlier code imported ``_redact_dingtalk_secret``. Keep the
+# old name working for the read/echo path (full masking, including the Feishu
+# path token). The write path now calls ``_redact_webhook_credentials(...,
+# mask_feishu=False)`` directly so the Feishu token survives persistence.
 _redact_dingtalk_secret = _redact_webhook_credentials
 
 
@@ -494,6 +506,11 @@ class AlertNotifier:
         slow or hanging receiver never blocks the user-facing request that
         triggered the alert.
         """
+        # Bound ``prefs`` before the try so the broad-except handler below can
+        # safely read it even when ``get_notification_preferences`` itself
+        # raises (e.g. a DB error). Otherwise referencing ``prefs`` there would
+        # raise UnboundLocalError and mask the real exception.
+        prefs: Optional[NotificationPreference] = None
         try:
             prefs = self.get_notification_preferences(user_id)
 
@@ -557,8 +574,10 @@ class AlertNotifier:
             # Log the exception TYPE + a redacted host only. ``requests``
             # ConnectionError / HTTPError embed the full request URL, which for
             # Feishu/Lark contains the bot token in the path — never interpolate
-            # the raw exception.
-            redacted_host = _redact_webhook_credentials(prefs.webhook_url) if prefs else None
+            # the raw exception. ``prefs`` is pre-bound to None above so this is
+            # safe even when get_notification_preferences itself raised.
+            webhook_url = prefs.webhook_url if prefs and prefs.webhook_url else None
+            redacted_host = _redact_webhook_credentials(webhook_url) if webhook_url else None
             host = (urlparse(redacted_host).hostname if redacted_host else None) or "unknown"
             logger.warning(
                 "Failed to deliver webhook notification for alert %s to user %s "
@@ -1224,7 +1243,11 @@ class AlertNotifier:
                 user_id=row["user_id"],
                 email_enabled=bool(row["email_enabled"]),
                 push_enabled=bool(row["push_enabled"]),
-                webhook_url=_redact_dingtalk_secret(row["webhook_url"]),
+                # Strip only the (rebuildable) DingTalk query secret here so the
+                # Feishu/Lark path token survives for delivery. The frontend
+                # echo re-masks both credentials (full masking) at the route
+                # layer (app/routes/alerts.py GET /alerts/preferences).
+                webhook_url=_redact_webhook_credentials(row["webhook_url"], mask_feishu=False),
                 alert_types=(
                     json.loads(row["alert_types"])
                     if row["alert_types"]
@@ -1252,10 +1275,16 @@ class AlertNotifier:
         Returns:
             True if successful.
         """
-        # Never persist the DingTalk signing secret inside the webhook URL;
-        # strip it before writing so the DB never holds the credential. The
-        # outbound signer reads the secret from global config instead.
-        preferences.webhook_url = _redact_dingtalk_secret(preferences.webhook_url)
+        # On the persistence path strip only the DingTalk query signing secret —
+        # it is rebuildable from global config on outbound signing. The Feishu/
+        # Lark bot token lives in the URL path and has no global-config
+        # equivalent, so it must be preserved verbatim here or every Feishu
+        # delivery would POST to ``/.../<redacted>`` and be rejected. The token
+        # is masked only on the read/echo path (get_notification_preferences)
+        # and in delivery-failure logs.
+        preferences.webhook_url = _redact_webhook_credentials(
+            preferences.webhook_url, mask_feishu=False
+        )
 
         conn = self._get_connection()
         cursor = conn.cursor()
