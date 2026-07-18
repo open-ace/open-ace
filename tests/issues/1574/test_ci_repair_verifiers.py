@@ -133,19 +133,33 @@ def test_start_ci_repair_round_stays_in_merge_and_runs_merge_repair():
 
 
 def test_start_ci_repair_round_fails_when_signature_unchanged_after_new_head():
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
     failed_checks = [
         {"name": "lint", "state": "failure", "bucket": "fail", "link": "https://example.com"}
     ]
+    # Use the new fine-grained fingerprint format (lint::<digest>). The digest
+    # must match what _ci_failure_fingerprint produces for the same excerpt.
+    # We mock get_check_failure_excerpt so the fingerprint is deterministic.
+    import hashlib
+
+    excerpt = "mypy....Failed\napp/baz.py:5 error: no-any-return\n"
+    expected_digest = hashlib.sha256(
+        AutonomousOrchestrator._normalize_failure_excerpt(excerpt).encode()
+    ).hexdigest()[:12]
+    expected_fingerprint = f"lint::{expected_digest}"
+
     wf = _make_workflow(
         status="merging",
         current_phase="merge",
         ci_repair_attempts=1,
-        last_ci_failure_signature="lint|failure|fail",
+        last_ci_failure_signature=expected_fingerprint,
         last_ci_failure_head_sha="sha-old",
     )
     orch, mock_repo = _make_orchestrator(wf)
     gh = MagicMock()
     gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = excerpt
     orch._get_gh = MagicMock(return_value=gh)
     orch._run_merge_ci_repair = MagicMock()
 

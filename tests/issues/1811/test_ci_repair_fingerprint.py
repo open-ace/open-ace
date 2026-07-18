@@ -148,3 +148,34 @@ class TestCiFailureFingerprint:
         # After normalization both should collapse to the same error text
         # (path → basename, line:col stripped).
         assert n1 == n2, "same error at different line/path must normalize equal"
+
+
+# ── CI repair commit_before from PR head (not local worktree) ────────────
+
+
+class TestCiRepairCommitBeforeFromPrHead:
+    """``_run_merge_ci_repair`` must capture ``commit_before`` from the PR's
+    remote head SHA, not the local worktree HEAD. If a prior repair round
+    committed locally but didn't push, the local HEAD already includes that
+    commit — making the SHA comparison report "no changes" and falsely failing
+    the workflow (#1812 regression)."""
+
+    def test_commit_before_uses_pr_head_sha(self):
+        """The source code must use get_pr_head_sha for commit_before, with
+        get_current_commit only as fallback. Verified by inspecting the method
+        source (avoids a heavy integration test)."""
+        import inspect
+
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        source = inspect.getsource(AutonomousOrchestrator._run_merge_ci_repair)
+        # The primary path must be get_pr_head_sha (the PR's remote head).
+        assert "get_pr_head_sha" in source, (
+            "commit_before must use get_pr_head_sha to compare against the "
+            "remote PR head, not the local worktree HEAD"
+        )
+        # get_current_commit should only appear as a fallback.
+        assert "get_current_commit" in source, "fallback to local HEAD expected"
+        # Verify get_pr_head_sha appears BEFORE get_current_commit (primary
+        # path first, fallback second).
+        assert source.index("get_pr_head_sha") < source.index("get_current_commit")

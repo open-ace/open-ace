@@ -27,7 +27,7 @@ from app.modules.workspace.autonomous.artifact_text import (
     sanitize_artifact_text,
 )
 from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
-from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
+from app.modules.workspace.autonomous.github_ops import _FAILURE_LINE_RE, GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
@@ -1124,31 +1124,13 @@ class AutonomousOrchestrator:
             f"{feedback}\n\n"
         )
 
-    @staticmethod
-    def _ci_failure_signature(checks: list[dict]) -> str:
-        """Build a stable signature for the current set of failed CI checks."""
-        parts = []
-        for check in checks or []:
-            if check.get("bucket") != "fail":
-                continue
-            parts.append(
-                "|".join(
-                    [
-                        str(check.get("name") or "").strip(),
-                        str(check.get("state") or "").strip(),
-                        str(check.get("bucket") or "").strip(),
-                    ]
-                )
-            )
-        return "\n".join(sorted(parts))
-
     def _ci_failure_fingerprint(self, gh: GitHubOps, checks: list[dict]) -> str:
         """Fine-grained failure signature including the actual error lines.
 
-        ``_ci_failure_signature`` only captures the CI check NAME, which is too
-        coarse for Actions jobs that bundle multiple tools (one ``lint`` job
-        runs black/isort/ruff/mypy). When the agent fixes one sub-tool but
-        another still fails, the coarse signature stays identical and the
+        The coarse-grained approach (check name only) is too coarse for Actions
+        jobs that bundle multiple tools (one ``lint`` job runs
+        black/isort/ruff/mypy). When the agent fixes one sub-tool but another
+        still fails, a name-only signature stays identical and the
         exhausted-unchanged guard wrongly gives up. This fingerprint appends a
         normalized hash of the per-check error excerpt so partial fixes change
         the signature and earn another repair attempt.
@@ -1189,13 +1171,8 @@ class AutonomousOrchestrator:
                 continue
             # Keep lines that carry an error marker; drop pre-commit banners
             # ("black....Passed", "mypy....Failed") which are too noisy.
-            if not re.search(
-                r"error:|Error:|ERROR:|Failed|failed|FAIL\b|"
-                r"would reformat|not formatted|not sorted|"
-                r"no-any-return|undefined name|\b[FEW]\d{3}\b",
-                line,
-                re.IGNORECASE,
-            ):
+            # Reuse the shared _FAILURE_LINE_RE from github_ops to avoid drift.
+            if not _FAILURE_LINE_RE.search(line):
                 continue
             # Normalize file paths: /abs/path/to/file.py:12:3 → file.py
             line = re.sub(
@@ -1327,11 +1304,22 @@ class AutonomousOrchestrator:
                 repair_prompt += f"## 当前失败检查\n{failure_list}\n\n"
         repair_prompt += self._get_user_feedback_prompt(wf)
 
+        # Capture the PR's remote head SHA (not the local worktree HEAD) as the
+        # baseline. If a prior repair round committed locally but didn't push
+        # (or pushed after this capture), the local HEAD would already include
+        # that commit, making commit_sha == commit_before and falsely reporting
+        # "no code changes". Using the remote PR head as baseline ensures we
+        # measure against what's actually on the PR branch on GitHub.
         commit_before = ""
         try:
-            commit_before = gh.get_current_commit()
+            commit_before = gh.get_pr_head_sha(pr_number)
         except Exception:
-            pass
+            # Fallback to local HEAD if the PR head lookup fails — better than
+            # skipping the check entirely.
+            try:
+                commit_before = gh.get_current_commit()
+            except Exception:
+                pass
 
         repair_result = self._run_agent(
             wf=wf,
@@ -2108,21 +2096,38 @@ class AutonomousOrchestrator:
                 "Failed to resolve PR head SHA for CI repair on PR #%s: %s", pr_number, e
             )
 
-        # Fine-grained fingerprint: check name + the specific error lines from
-        # the CI log excerpt. The coarse-grained _ci_failure_signature only
-        # captures the check NAME (e.g. "lint"), so a single Actions job that
-        # runs black/isort/ruff/mypy shows the same signature even when the
-        # failing sub-tool changes (black fixed but mypy still fails). Including
-        # the actual error lines makes the fingerprint react to partial fixes,
-        # so the agent gets another attempt instead of being marked exhausted.
-        signature = self._ci_failure_fingerprint(gh, failed_checks)
-        previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
-        previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
+        # Check attempt limit FIRST so the terminal round skips the fingerprint
+        # network fetches (gh run view --log-failed for each failing check).
         failure_names = ", ".join(
             check.get("name") or "unknown"
             for check in failed_checks
             if check.get("bucket") == "fail"
         )
+
+        if next_attempt > MAX_CI_REPAIR_ATTEMPTS:
+            message = (
+                f"PR #{pr_number} CI failed after {MAX_CI_REPAIR_ATTEMPTS} automatic repair rounds: "
+                f"{failure_names}"
+            )
+            self._create_milestone(
+                phase="merge",
+                dev_round=dev_round,
+                milestone_type="ci_repair_exhausted",
+                status="failed",
+                title="CI automatic repair limit reached",
+                error_message=message,
+            )
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        # Fine-grained fingerprint: check name + the specific error lines from
+        # the CI log excerpt. A name-only signature is too coarse for Actions
+        # jobs that bundle multiple tools (one ``lint`` job runs
+        # black/isort/ruff/mypy) — fixing one sub-tool while another still
+        # fails would leave the signature identical and wrongly give up.
+        signature = self._ci_failure_fingerprint(gh, failed_checks)
+        previous_signature = (wf.get("last_ci_failure_signature") or "").strip()
+        previous_head_sha = (wf.get("last_ci_failure_head_sha") or "").strip()
 
         if (
             previous_signature
@@ -2139,22 +2144,6 @@ class AutonomousOrchestrator:
                 milestone_type="ci_repair_exhausted",
                 status="failed",
                 title="CI failures unchanged after automatic repair",
-                error_message=message,
-            )
-            self._update_workflow({"status": "failed", "error_message": message})
-            return
-
-        if next_attempt > MAX_CI_REPAIR_ATTEMPTS:
-            message = (
-                f"PR #{pr_number} CI failed after {MAX_CI_REPAIR_ATTEMPTS} automatic repair rounds: "
-                f"{failure_names or signature}"
-            )
-            self._create_milestone(
-                phase="merge",
-                dev_round=dev_round,
-                milestone_type="ci_repair_exhausted",
-                status="failed",
-                title="CI automatic repair limit reached",
                 error_message=message,
             )
             self._update_workflow({"status": "failed", "error_message": message})
