@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -114,6 +114,77 @@ def test_complete_authentication_passes_pkce_verifier_to_provider(sso_manager):
         "verifier-1",
     )
     assert sso_manager._get_auth_state("state-1") is None
+
+
+def test_complete_authentication_rejects_missing_pkce_verifier(sso_manager):
+    """A stored auth state without a code_verifier must hard-fail, not silently
+    degrade PKCE by omitting the verifier from the token request."""
+    provider = MagicMock()
+    provider.authenticate.return_value = SSOAuthResult(success=True)
+
+    with sso_manager._providers_lock:
+        sso_manager._providers["google"] = provider
+
+    # The fixture uses SQLite; force the SQLite placeholder path so the INSERT
+    # below is not mis-adapted to '%s' by a leaked global PostgreSQL config.
+    with patch("app.repositories.database.is_postgresql", return_value=False):
+        # Simulate the upstream failure mode flagged by the review: state storage
+        # produced a row but the verifier never landed in it.
+        sso_manager.db.execute(
+            "INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce) "
+            "VALUES (?, ?, ?, ?)",
+            ("state-no-verifier", "", "google", "nonce-x"),  # empty verifier
+        )
+
+        result = sso_manager.complete_authentication(
+            provider_name="google",
+            code="auth-code",
+            state="state-no-verifier",
+            redirect_uri="https://app.example.com/api/sso/callback/google",
+        )
+
+    assert result.success is False
+    assert result.error == "invalid_state"
+    provider.authenticate.assert_not_called()  # the load-bearing assertion
+    with patch("app.repositories.database.is_postgresql", return_value=False):
+        assert sso_manager._get_auth_state("state-no-verifier") is None
+
+
+def test_complete_authentication_rejects_missing_pkce_verifier_key(sso_manager):
+    """A stored auth state whose row lacks the code_verifier key entirely (e.g. a
+    future schema regression or a partially-written state) must hard-fail."""
+    provider = MagicMock()
+    provider.authenticate.return_value = SSOAuthResult(success=True)
+
+    with sso_manager._providers_lock:
+        sso_manager._providers["google"] = provider
+
+    # Inject a row-shaped auth state that carries no code_verifier at all, to
+    # exercise the dict-miss path (auth_state.get("code_verifier") -> None).
+    sso_manager._get_auth_state = lambda state: {  # type: ignore[assignment]
+        "state": state,
+        "provider_name": "google",
+        "nonce": "nonce-y",
+    }
+
+    captured = {}
+
+    def _fail_delete(state):
+        captured["deleted"] = state
+
+    sso_manager._delete_auth_state = _fail_delete  # type: ignore[assignment]
+
+    result = sso_manager.complete_authentication(
+        provider_name="google",
+        code="auth-code",
+        state="state-missing-key",
+        redirect_uri="https://app.example.com/api/sso/callback/google",
+    )
+
+    assert result.success is False
+    assert result.error == "invalid_state"
+    provider.authenticate.assert_not_called()
+    assert captured.get("deleted") == "state-missing-key"
 
 
 def test_complete_authentication_rejects_state_bound_to_other_provider(sso_manager):
