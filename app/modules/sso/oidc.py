@@ -19,7 +19,7 @@ import requests
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOUser
 from app.modules.sso.saml import SAMLProvider
-from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +157,7 @@ class OIDCProvider(OAuth2Provider):
         jwks_url = f"{self.config.issuer_url.rstrip('/')}/.well-known/jwks.json"
 
         try:
-            assert_public_http_url(jwks_url)
-            response = requests.get(jwks_url, timeout=10, allow_redirects=False)
+            response = safe_request("GET", jwks_url, timeout=10, allow_redirects=False)
             status_code = response.status_code if isinstance(response.status_code, int) else 200
             if 300 <= status_code < 400:
                 raise ValueError("JWKS endpoint redirects are blocked")

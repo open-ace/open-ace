@@ -12,8 +12,6 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-import requests
-
 from app.modules.sso.provider import (
     SSOAuthResult,
     SSOProvider,
@@ -21,7 +19,7 @@ from app.modules.sso.provider import (
     SSOToken,
     SSOUser,
 )
-from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +99,8 @@ class OAuth2Provider(SSOProvider):
             data["code_verifier"] = code_verifier
 
         try:
-            assert_public_http_url(self.config.token_url)
-            response = requests.post(
+            response = safe_request(
+                "POST",
                 self.config.token_url,
                 data=urllib.parse.urlencode(data),
                 headers={
@@ -173,8 +171,8 @@ class OAuth2Provider(SSOProvider):
             return None
 
         try:
-            assert_public_http_url(self.config.userinfo_url)
-            response = requests.get(
+            response = safe_request(
+                "GET",
                 self.config.userinfo_url,
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -218,8 +216,8 @@ class OAuth2Provider(SSOProvider):
         }
 
         try:
-            assert_public_http_url(self.config.token_url)
-            response = requests.post(
+            response = safe_request(
+                "POST",
                 self.config.token_url,
                 data=urllib.parse.urlencode(data),
                 headers={
@@ -349,8 +347,8 @@ class GitHubProvider(OAuth2Provider):
             # Fetch emails endpoint if primary email not in user info
             try:
                 email_url = "https://api.github.com/user/emails"
-                assert_public_http_url(email_url)
-                response = requests.get(
+                response = safe_request(
+                    "GET",
                     email_url,
                     headers={
                         "Authorization": f"Bearer {access_token}",
