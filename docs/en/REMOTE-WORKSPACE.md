@@ -76,6 +76,19 @@ The Agent tries WebSocket first and falls back to HTTP polling on failure. For t
 
 ---
 
+## Deployment Topology and Runtime State
+
+Remote Workspace is safe to run behind the Kubernetes reference deployment. The shareable control-plane state is persisted, while live socket bridges remain process-local:
+
+- HTTP-polling command queues, command responses, session-to-machine bindings, session output replay, machines, sessions, messages, quotas, and audit entries are persisted.
+- Remote session control APIs such as send, pause, resume, stop, abort, model update, and permission response can be served by any web pod; the next agent poll claims the persisted command.
+- SSE reconnects can replay persisted session output after a browser disconnect or web-pod restart.
+- Live terminal relay WebSocket objects are still process-local. An active browser-to-agent terminal bridge should use sticky routing or reconnect after failover.
+
+Tenant isolation covers users, projects, workspace sessions and messages, daily usage aggregates, audit logs, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility for support and incident response.
+
+---
+
 ## Deployment Checklist
 
 From zero to working, complete these steps in order:

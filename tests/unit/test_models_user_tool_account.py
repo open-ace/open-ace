@@ -72,7 +72,7 @@ class TestUserToolAccount:
         assert d["description"] is None
 
     def test_different_tool_types(self):
-        for tool_type in ["qwen", "claude", "openclaw", "feishu", "slack"]:
+        for tool_type in ["qwen", "claude", "openclaw", "feishu", "dingtalk", "slack"]:
             uta = UserToolAccount(id=1, user_id=1, tool_account="acc", tool_type=tool_type)
             assert uta.tool_type == tool_type
 
@@ -94,6 +94,9 @@ class TestGetToolTypeDisplay:
 
     def test_slack(self):
         assert get_tool_type_display("slack") == "Slack"
+
+    def test_dingtalk(self):
+        assert get_tool_type_display("dingtalk") == "钉钉"
 
     def test_other(self):
         assert get_tool_type_display("other") == "其他"
@@ -126,6 +129,9 @@ class TestToolTypes:
     def test_has_feishu(self):
         assert "feishu" in TOOL_TYPES
 
+    def test_has_dingtalk(self):
+        assert "dingtalk" in TOOL_TYPES
+
     def test_has_slack(self):
         assert "slack" in TOOL_TYPES
 
@@ -133,7 +139,7 @@ class TestToolTypes:
         assert "other" in TOOL_TYPES
 
     def test_total_count(self):
-        assert len(TOOL_TYPES) == 8
+        assert len(TOOL_TYPES) == 9
 
     def test_all_values_are_strings(self):
         for key, value in TOOL_TYPES.items():

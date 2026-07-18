@@ -4,7 +4,7 @@
 
 - Kubernetes cluster (1.24+)
 - `kubectl` configured
-- StorageClass available (default: `standard`)
+- StorageClass available with `ReadWriteMany` support for the shared app PVC
 - Ingress controller (nginx-ingress recommended)
 - cert-manager (optional, for TLS)
 
@@ -38,11 +38,11 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 
 | Setting | Value |
 |---------|-------|
-| Replicas | 1 |
+| Replicas | 3 |
 | Image | `open-ace:latest` |
 | Container port | 19888 |
 | Strategy | RollingUpdate (maxSurge=1, maxUnavailable=0) |
-| Security context | `runAsUser: 0` (required by the current multi-user workspace entrypoint) |
+| Security context | `runAsNonRoot: true`, `runAsUser: 1000`, `allowPrivilegeEscalation: false` |
 
 **Resource Limits:**
 
@@ -55,7 +55,13 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 - Liveness: HTTP GET `/health`, initialDelay=10s, period=10s
 - Readiness: HTTP GET `/health`, initialDelay=5s, period=5s
 
-**Pod Anti-Affinity:** Kept as a preference only. The current manifest is a single-instance reference deployment.
+**Pod Anti-Affinity:** Preferred across nodes to preserve availability when capacity allows.
+
+**HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
+
+**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
+
+**Multi-user workspace note:** The default Kubernetes manifest runs the web container as a non-root user. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root and document that exception in your cluster change process.
 
 ### Service & Ingress
 
@@ -105,10 +111,10 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 - Name: `open-ace-data`
 - Size: 10Gi
-- Access: ReadWriteOnce
+- Access: ReadWriteMany
 - Mounts:
   - `/workspace` via subPath `workspace`
-  - `/root/.open-ace` via subPath `config`
+  - `/home/open-ace/.open-ace` via subPath `config`
 
 ### RBAC
 
@@ -130,7 +136,7 @@ Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_
 
 ### PodDisruptionBudget
 
-- `minAvailable: 1` — Protects the single supported application replica during voluntary disruptions
+- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
 
 ## Configuration
 
@@ -145,9 +151,11 @@ Before deploying, update:
 
 ### Current support boundary
 
-- The shipped Kubernetes manifest is a **single-instance reference deployment**.
-- Remote workspace / terminal / session coordination still keeps important runtime state in-process, so horizontal scaling is not advertised or enabled here.
-- The container intentionally runs as root because the current entrypoint provisions per-user workspace accounts dynamically. A hardened non-root image variant is not shipped yet.
+- The shipped Kubernetes manifest is a **multi-replica reference deployment with sticky routing** because that is still the safest default for live terminal relay WebSockets.
+- Ordinary HTTP/API requests can be balanced across pods. Remote session commands, command responses, session output replay, session-machine bindings, machines, sessions, messages, quotas, and audit records are persisted.
+- If the pod that owns an active terminal/relay socket restarts, persisted remote-session state remains available, but that live terminal bridge must reconnect.
+- Browser SSE reconnects can replay persisted remote session output after a web-pod restart.
+- Tenant-aware schema and query boundaries cover users, projects, workspace sessions/messages, usage aggregates, audit logs, remote machines, permissions, and quotas; system administrators retain intentional global visibility.
 
 ### TLS with cert-manager
 
@@ -163,7 +171,7 @@ The `/health` endpoint returns service status and git commit hash.
 
 ## Scaling
 
-This reference manifest intentionally stays at one application replica. For manual restarts or rescheduling:
+The reference manifest starts with three web replicas plus sticky routing. For manual restarts or rescheduling:
 
 ```bash
 kubectl rollout restart deployment open-ace -n open-ace

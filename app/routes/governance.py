@@ -34,6 +34,12 @@ def get_client_info():
     }
 
 
+def _current_tenant_id():
+    """Return the authenticated user's tenant scope when available."""
+    user = getattr(g, "user", None) or {}
+    return user.get("tenant_id")
+
+
 # ============================================================================
 # Audit Log Routes
 # ============================================================================
@@ -68,6 +74,7 @@ def api_get_audit_logs():
         severity=severity,
         start_time=start_time,
         end_time=end_time,
+        tenant_id=_current_tenant_id(),
         limit=min(limit, 1000),  # Cap at 1000
         offset=offset,
     )
@@ -81,6 +88,7 @@ def api_get_audit_logs():
         severity=severity,
         start_time=start_time,
         end_time=end_time,
+        tenant_id=_current_tenant_id(),
     )
 
     return jsonify(
@@ -172,7 +180,10 @@ def api_export_audit_logs():
 
     # Export logs
     exported_data = audit_logger.export_logs(
-        start_time=start_time, end_time=end_time, format=format_type
+        start_time=start_time,
+        end_time=end_time,
+        format=format_type,
+        tenant_id=_current_tenant_id(),
     )
 
     # Log the export action
@@ -183,6 +194,7 @@ def api_export_audit_logs():
         username=g.user.get("username"),
         resource_type="audit_logs",
         details={"format": format_type, "start": start_date, "end": end_date},
+        tenant_id=_current_tenant_id(),
         **client_info,
     )
 
@@ -214,7 +226,7 @@ def api_user_activity(user_id):
 
     days = request.args.get("days", default=30, type=int)
 
-    activity = audit_logger.get_user_activity(user_id, days=days)
+    activity = audit_logger.get_user_activity(user_id, days=days, tenant_id=_current_tenant_id())
 
     return jsonify(activity)
 

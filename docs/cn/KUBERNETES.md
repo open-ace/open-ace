@@ -4,7 +4,7 @@
 
 - Kubernetes 集群（1.24+）
 - 已配置 `kubectl`
-- 可用的 StorageClass（默认：`standard`）
+- 可用且支持 `ReadWriteMany` 的 StorageClass（用于共享应用 PVC）
 - Ingress 控制器（推荐 nginx-ingress）
 - cert-manager（可选，用于 TLS）
 
@@ -38,11 +38,11 @@ k8s/
 
 | 设置 | 值 |
 |------|-----|
-| 副本数 | 1 |
+| 副本数 | 3 |
 | 镜像 | `open-ace:latest` |
 | 容器端口 | 19888 |
 | 更新策略 | RollingUpdate（maxSurge=1, maxUnavailable=0） |
-| 安全上下文 | `runAsUser: 0`（当前多用户工作区 entrypoint 需要） |
+| 安全上下文 | `runAsNonRoot: true`、`runAsUser: 1000`、`allowPrivilegeEscalation: false` |
 
 **资源限制：**
 
@@ -55,7 +55,13 @@ k8s/
 - 存活检查：HTTP GET `/health`，initialDelay=10s，period=10s
 - 就绪检查：HTTP GET `/health`，initialDelay=5s，period=5s
 
-**Pod 反亲和性：** 仅保留为调度偏好。当前清单是单实例参考部署。
+**Pod 反亲和性：** 优先分散到不同节点，以便在容量允许时保持可用性。
+
+**HorizontalPodAutoscaler：** 参考清单至少保留 3 个副本，并可根据 CPU 与内存利用率扩展到 10 个副本。
+
+**粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程会话 HTTP 控制态已经持久化并可跨 Pod，但实时终端 relay WebSocket bridge 仍属于单个 Web 进程；对活跃终端会话而言，粘性路由仍是最稳妥的默认配置。
+
+**多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 
@@ -105,10 +111,10 @@ k8s/
 
 - 名称：`open-ace-data`
 - 大小：10Gi
-- 访问模式：ReadWriteOnce
+- 访问模式：ReadWriteMany
 - 挂载路径：
   - `/workspace`（subPath `workspace`）
-  - `/root/.open-ace`（subPath `config`）
+  - `/home/open-ace/.open-ace`（subPath `config`）
 
 ### RBAC
 
@@ -130,7 +136,7 @@ k8s/
 
 ### PodDisruptionBudget
 
-- `minAvailable: 1` — 在单实例支持边界内保护当前应用副本不被自愿驱逐
+- `minAvailable: 2` — 自愿驱逐期间至少保留两个 Web Pod 可用
 
 ## 配置
 
@@ -145,9 +151,11 @@ k8s/
 
 ### 当前支持边界
 
-- 仓库内提供的 Kubernetes 清单是**单实例参考部署**。
-- 远程工作区 / 终端 / 会话协调仍有关键运行时状态保存在进程内，因此这里不再宣称或启用水平扩缩容。
-- 容器当前有意以 root 身份运行，因为 entrypoint 需要动态创建多用户工作区账户；仓库中尚未提供等价的非 root 生产镜像变体。
+- 仓库内提供的 Kubernetes 清单仍是**带粘性路由的多副本参考部署**，因为这对实时终端 relay WebSocket 仍是最稳妥的默认配置。
+- 普通 HTTP/API 请求可以在 Pod 间负载均衡。远程会话命令、命令响应、会话输出回放、session-machine 绑定、远程机器、会话、消息、配额和审计记录均已持久化。
+- 如果承载某个活跃终端 / relay socket 的 Pod 重启，已持久化的远程会话状态仍可用，但该实时终端 bridge 需要重新连接。
+- 浏览器 SSE 重连可以在 Web Pod 重启后回放已持久化的远程会话输出。
+- tenant-aware schema / query 边界覆盖用户、项目、工作区会话与消息、用量聚合、审计日志、远程机器、权限和配额；系统管理员保留有意设计的全局可见性。
 
 ### 使用 cert-manager 配置 TLS
 
@@ -163,7 +171,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## 扩容
 
-当前参考清单固定为单实例。如需重启或重新调度：
+当前参考清单以三个 Web 副本和粘性路由作为起点。如需重启或重新调度：
 
 ```bash
 kubectl rollout restart deployment open-ace -n open-ace

@@ -142,3 +142,8 @@ When multi-tenant mode is enabled:
 - Tenant quotas enforce per-tenant token and request limits
 - `QuotaEnforcementScheduler` runs every 60s to check and enforce limits
 - Exceeded users get sessions terminated and alerts generated
+
+Current boundary:
+- Users, projects, workspace sessions, session messages, daily usage aggregates, audit logs, remote machines, machine permissions, and quotas are tenant-aware.
+- Non-admin user-facing APIs apply the authenticated tenant scope to session, project, usage, and audit queries. Workspace session mutations also include the session tenant in the write boundary.
+- System administrators intentionally retain global operational visibility for support and incident response.

@@ -18,6 +18,8 @@ import requests
 
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOUser
+from app.modules.sso.saml import SAMLProvider
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +157,11 @@ class OIDCProvider(OAuth2Provider):
         jwks_url = f"{self.config.issuer_url.rstrip('/')}/.well-known/jwks.json"
 
         try:
-            response = requests.get(jwks_url, timeout=10)
+            assert_public_http_url(jwks_url)
+            response = requests.get(jwks_url, timeout=10, allow_redirects=False)
+            status_code = response.status_code if isinstance(response.status_code, int) else 200
+            if 300 <= status_code < 400:
+                raise ValueError("JWKS endpoint redirects are blocked")
             response.raise_for_status()
             jwks = response.json()
 
@@ -166,6 +172,9 @@ class OIDCProvider(OAuth2Provider):
             logger.debug(f"Successfully fetched JWKS from {jwks_url}")
             return cast("dict[str, Any]", jwks)
 
+        except OutboundUrlBlockedError as e:
+            logger.error(f"JWKS endpoint blocked: {e}")
+            raise ValueError(f"JWKS endpoint blocked: {e}")
         except requests.RequestException as e:
             logger.error(f"Failed to fetch JWKS from {jwks_url}: {e}")
             raise ValueError(f"Failed to fetch JWKS: {e}")
@@ -417,6 +426,7 @@ PROVIDER_CLASSES = {
     "github": OAuth2Provider,  # GitHub uses OAuth2, not OIDC
     "okta": OktaProvider,
     "auth0": Auth0Provider,
+    "saml": SAMLProvider,
 }
 
 

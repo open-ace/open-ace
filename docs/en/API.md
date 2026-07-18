@@ -281,6 +281,44 @@ Update a user's token/request quotas.
 
 ---
 
+### Sync Feishu Organization
+
+```
+POST /api/admin/feishu/sync
+```
+
+Manually sync Feishu departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `feishu.org_sync_tenant_id`.
+
+---
+
+### Sync DingTalk Organization
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+Manually sync DingTalk departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `dingtalk.org_sync_tenant_id`.
+
+---
+
 ### Get Quota Usage
 
 ```
@@ -1467,6 +1505,10 @@ POST /api/sso/providers
 
 Register a new SSO provider (admin only).
 Provider secrets are encrypted before they are persisted.
+For SAML providers, use `provider_type: "saml"` with `client_id` as the SP entity ID,
+`authorization_url` or `extra_params.idp_metadata_url`, `redirect_uri` as the ACS URL,
+and `extra_params.idp_x509_cert` or `extra_params.idp_metadata_xml` for IdP signature
+verification. SAML providers do not require `client_secret`.
 
 ---
 
@@ -1488,6 +1530,7 @@ GET /api/sso/login/<provider_name>
 
 Start SSO login flow.
 OAuth2/OIDC providers use PKCE and bind the verifier to the callback state.
+SAML providers generate an AuthnRequest and bind `RelayState` to the stored request ID.
 
 ---
 
@@ -1498,6 +1541,26 @@ GET /api/sso/callback/<provider_name>
 ```
 
 Handle SSO callback.
+
+---
+
+### SAML Metadata
+
+```
+GET /api/sso/providers/<provider_name>/metadata
+```
+
+Return Service Provider metadata XML for configuring a SAML IdP.
+
+---
+
+### SAML ACS
+
+```
+POST /api/sso/acs/<provider_name>
+```
+
+Handle SAML HTTP-POST ACS callbacks containing `SAMLResponse` and `RelayState`.
 
 ---
 

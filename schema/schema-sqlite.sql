@@ -93,7 +93,8 @@ CREATE TABLE agent_sessions (
  workspace_type text DEFAULT 'local',
  remote_machine_id text,
  paused_at TIMESTAMP,
- cli_session_id text DEFAULT ''
+ cli_session_id text DEFAULT '',
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -225,7 +226,8 @@ CREATE TABLE audit_logs (
  user_agent text,
  session_id text,
  success INTEGER DEFAULT 1,
- error_message text
+ error_message text,
+ tenant_id integer
 );
 
 CREATE TABLE autonomous_workflows (
@@ -396,6 +398,7 @@ CREATE TABLE daily_usage (
  request_count integer DEFAULT 0,
  models_used text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ tenant_id integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_daily_usage_cache_tokens_positive CHECK ((cache_tokens >= 0)),
     CONSTRAINT chk_daily_usage_input_tokens_positive CHECK ((input_tokens >= 0)),
     CONSTRAINT chk_daily_usage_output_tokens_positive CHECK ((output_tokens >= 0)),
@@ -578,7 +581,8 @@ CREATE TABLE projects (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
- is_shared INTEGER DEFAULT 0 NOT NULL
+ is_shared INTEGER DEFAULT 0 NOT NULL,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE prompt_templates (
@@ -684,6 +688,31 @@ CREATE TABLE remote_machines (
  legacy_mode INTEGER DEFAULT 0
 );
 
+CREATE TABLE remote_runtime_commands (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ command_id TEXT NOT NULL,
+ machine_id text NOT NULL,
+ session_id text,
+ command_type text DEFAULT '' NOT NULL,
+ payload text NOT NULL,
+ status TEXT DEFAULT 'pending' NOT NULL,
+ response_payload text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ delivered_at TIMESTAMP,
+ responded_at TIMESTAMP,
+ expires_at TIMESTAMP
+);
+
+CREATE TABLE remote_runtime_outputs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id text NOT NULL,
+ event_index integer NOT NULL,
+ stream text DEFAULT 'stdout' NOT NULL,
+ payload text NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP
+);
+
 CREATE TABLE retention_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -718,7 +747,8 @@ CREATE TABLE session_messages (
  source text DEFAULT '' NOT NULL,
  source_timestamp TIMESTAMP,
  external_message_id text DEFAULT '' NOT NULL,
- content_blocks text
+ content_blocks text,
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE sessions (
@@ -1117,6 +1147,8 @@ CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (t
 
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
 
+CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
+
 CREATE UNIQUE INDEX role_permissions_role_permission_key ON role_permissions (role, permission);
 
 CREATE UNIQUE INDEX security_settings_setting_key_key ON security_settings (setting_key);
@@ -1151,13 +1183,15 @@ CREATE UNIQUE INDEX uq_daily_messages_date_tool_msg_host ON daily_messages (date
 
 CREATE UNIQUE INDEX uq_daily_stats_date_tool_host_sender ON daily_stats (date, tool_name, host_name, sender_name);
 
-CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE UNIQUE INDEX uq_daily_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE UNIQUE INDEX uq_hourly_stats_date_hour_tool_host ON hourly_stats (date, hour, tool_name, host_name);
 
 CREATE UNIQUE INDEX uq_mapping_rule_user_pattern ON tool_account_mapping_rules (user_id, pattern, match_type);
 
 CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id, date, period);
+
+CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
 
@@ -1195,6 +1229,10 @@ CREATE INDEX idx_agent_sessions_session_type ON agent_sessions (session_type);
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions (status);
 
+CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions (tenant_id, updated_at);
+
+CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions (tenant_id, user_id);
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions (tool_name);
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
@@ -1230,6 +1268,8 @@ CREATE INDEX idx_audit_action ON audit_logs (action);
 CREATE INDEX idx_audit_resource ON audit_logs (resource_type, resource_id);
 
 CREATE INDEX idx_audit_severity ON audit_logs (severity);
+
+CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
@@ -1347,7 +1387,9 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
-CREATE INDEX idx_projects_path ON projects (path);
+CREATE INDEX idx_projects_path ON projects (tenant_id, path);
+
+CREATE INDEX idx_projects_tenant_created_by ON projects (tenant_id, created_by);
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
@@ -1379,6 +1421,14 @@ CREATE INDEX idx_remote_machines_machine_id ON remote_machines (machine_id);
 
 CREATE INDEX idx_remote_machines_status ON remote_machines (status);
 
+CREATE INDEX idx_remote_runtime_commands_expires ON remote_runtime_commands (expires_at);
+
+CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_commands (machine_id, status, id);
+
+CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expires_at);
+
+CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
+
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
@@ -1396,6 +1446,10 @@ CREATE INDEX idx_session_messages_session_id ON session_messages (session_id);
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages (session_id, "timestamp", id);
 
 CREATE INDEX idx_session_messages_source ON session_messages (session_id, source);
+
+CREATE INDEX idx_session_messages_tenant_session ON session_messages (tenant_id, session_id);
+
+CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages (tenant_id, session_id, "timestamp", id);
 
 CREATE INDEX idx_sessions_active ON sessions (is_active, expires_at);
 
@@ -1461,7 +1515,7 @@ CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
-CREATE INDEX idx_usage_date_tool_host ON daily_usage (date, tool_name, host_name);
+CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
 
 CREATE INDEX idx_usage_host_name ON daily_usage (host_name);
 
@@ -1470,6 +1524,8 @@ CREATE INDEX idx_usage_summary_host ON usage_summary (host_name);
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name) <> '') AND ((host_name) NOT LIKE '<%>') AND ((length((host_name)) >= 1) AND (length((host_name)) <= 253)));
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary (tool_name);
+
+CREATE INDEX idx_usage_tenant_date ON daily_usage (tenant_id, date);
 
 CREATE INDEX idx_usage_tool_name ON daily_usage (tool_name);
 
@@ -1509,6 +1565,6 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decisi
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
-CREATE UNIQUE INDEX uq_projects_path ON projects (path) WHERE (is_active IS TRUE);
+CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);

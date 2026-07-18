@@ -127,6 +127,7 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | session_id | text | UNIQUE |
+| tenant_id | integer | DEFAULT 1；用于按租户限定会话查找和写入边界 |
 | session_type | text | DEFAULT 'chat' |
 | title | text | |
 | tool_name | text | NOT NULL |
@@ -160,12 +161,15 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | session_id | text | FK → agent_sessions(session_id) |
+| tenant_id | integer | DEFAULT 1；用于按租户限定消息查找 |
 | role | text | NOT NULL |
 | content | text | |
 | tokens_used | integer | DEFAULT 0 |
 | model | text | |
 | timestamp | timestamp | |
 | metadata | text | |
+
+会话索引包括 `idx_agent_sessions_tenant_user`、`idx_agent_sessions_tenant_updated`、`idx_session_messages_tenant_session` 和 `idx_session_messages_tenant_session_timestamp`。
 
 ## 统计
 
@@ -212,6 +216,7 @@ AI 代理会话追踪。
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer PK | |
+| tenant_id | integer | DEFAULT 1；租户级用量聚合键 |
 | date | date | NOT NULL |
 | tool_name | varchar | NOT NULL |
 | host_name | varchar | DEFAULT 'localhost' |
@@ -222,7 +227,9 @@ AI 代理会话追踪。
 | request_count | integer | DEFAULT 0 |
 | models_used | text | |
 
-唯一约束：`(date, tool_name, host_name)`
+唯一约束：`(tenant_id, date, tool_name, host_name)`
+
+索引：`idx_usage_date`、`idx_usage_date_tool_host(tenant_id, date, tool_name, host_name)`、`idx_usage_tenant_date`
 
 ### usage_summary
 
@@ -305,7 +312,7 @@ AI 代理会话追踪。
 |------|------|------|
 | id | integer PK | |
 | name | text | UNIQUE |
-| provider_type | text | NOT NULL (oauth2/oidc) |
+| provider_type | text | NOT NULL (oauth2/oidc/saml) |
 | config | text | NOT NULL（JSON；保存的是加密后的 `client_secret_encrypted`，不是明文 `client_secret`） |
 | tenant_id | integer | FK → tenants(id) |
 | is_active | boolean | DEFAULT true |
@@ -342,6 +349,7 @@ AI 代理会话追踪。
 | id | integer PK | |
 | timestamp | timestamp | DEFAULT CURRENT_TIMESTAMP |
 | user_id | integer | |
+| tenant_id | integer | 尽可能从操作者解析，用于租户级审计查询 |
 | username | text | |
 | action | text | NOT NULL |
 | severity | text | DEFAULT 'info' |
@@ -351,7 +359,7 @@ AI 代理会话追踪。
 | ip_address | text | |
 | success | boolean | DEFAULT true |
 
-索引：`idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_action`, `idx_audit_severity`
+索引：`idx_audit_timestamp`、`idx_audit_user_id`、`idx_audit_tenant_id`、`idx_audit_action`、`idx_audit_severity`
 
 ### content_filter_rules
 
@@ -467,12 +475,15 @@ AI 生成的使用洞察报告。
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer PK | |
-| path | varchar(500) | UNIQUE |
+| tenant_id | integer | DEFAULT 1；用于按租户限定项目查找和唯一性 |
+| path | varchar(500) | 对活动项目按 `(tenant_id, path)` 唯一 |
 | name | varchar(200) | |
 | description | text | |
 | created_by | integer | |
 | is_active | boolean | DEFAULT true |
 | is_shared | boolean | DEFAULT false |
+
+索引：`idx_projects_created_by`、`idx_projects_is_active`、`idx_projects_path(tenant_id, path)`、`idx_projects_tenant_created_by`
 
 ### user_projects
 
@@ -527,6 +538,45 @@ AI 生成的使用洞察报告。
 | created_at | timestamp | 创建时间 |
 | updated_at | timestamp | 更新时间 |
 | last_heartbeat | timestamp | 最后心跳时间 |
+
+### remote_runtime_commands
+
+远程 Agent 的持久化 HTTP polling 命令队列。
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer PK | |
+| command_id | varchar(64) | UNIQUE；同步命令响应路径使用 request_id |
+| machine_id | text | 目标远程机器 |
+| session_id | text | 可选远程会话 |
+| command_type | text | 命令名称 |
+| payload | text | JSON 命令载荷 |
+| status | varchar(32) | `pending`、`delivered` 或 `responded` |
+| response_payload | text | 同步命令的 JSON 响应载荷 |
+| created_at | timestamp | 创建时间 |
+| delivered_at | timestamp | Agent poll claim 时间 |
+| responded_at | timestamp | 响应到达时间 |
+| expires_at | timestamp | 保留截止时间 |
+
+索引：`idx_remote_runtime_commands_machine_status`、`idx_remote_runtime_commands_expires`
+
+### remote_runtime_outputs
+
+远程会话输出的持久化 SSE 回放缓冲。
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer PK | |
+| session_id | text | 远程会话 ID |
+| event_index | integer | 每个会话内单调递增的输出序号 |
+| stream | text | stdout、stderr、system、permission、request_state |
+| payload | text | JSON 输出载荷 |
+| created_at | timestamp | 创建时间 |
+| expires_at | timestamp | 保留截止时间 |
+
+唯一约束：`(session_id, event_index)`
+
+索引：`idx_remote_runtime_outputs_session_index`、`idx_remote_runtime_outputs_expires`
 
 ### machine_assignments
 

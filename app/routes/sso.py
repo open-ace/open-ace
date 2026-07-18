@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
-from flask import Blueprint, g, jsonify, make_response, redirect, request, url_for
+from flask import Blueprint, Response, g, jsonify, make_response, redirect, request, url_for
 
 from app.auth.decorators import admin_required, auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
@@ -21,6 +21,7 @@ from app.modules.sso.provider import get_provider_config, list_providers
 from app.repositories.database import adapt_boolean_value
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import _get_session_timeout_hours
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, assert_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,8 @@ def sanitize_config_for_audit(config: dict[str, Any]) -> dict[str, Any]:
     # Mask client_secret
     if "client_secret" in sanitized:
         sanitized["client_secret"] = "***"
+    if "idp_x509_cert" in sanitized:
+        sanitized["idp_x509_cert"] = "***"
 
     # Check extra_params for sensitive fields
     extra_params = sanitized.get("extra_params", {})
@@ -342,6 +345,7 @@ def get_provider_detail(provider_name: str):
             "token_url": config_data.get("token_url", ""),
             "userinfo_url": config_data.get("userinfo_url"),
             "issuer_url": config_data.get("issuer_url"),
+            "extra_params": sanitize_config_for_audit(config_data.get("extra_params", {})),
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
         }
@@ -367,10 +371,14 @@ def register_provider():
         return jsonify({"error": "Provider name is required"}), 400
 
     client_id = data.get("client_id")
-    client_secret = data.get("client_secret")
+    provider_type = data.get("provider_type", "oauth2")
+    client_secret = data.get("client_secret", "")
     redirect_uri = data.get("redirect_uri")
 
-    if not client_id or not client_secret:
+    if provider_type == "saml":
+        if not client_id:
+            return jsonify({"error": "client_id is required as the SAML SP entity ID"}), 400
+    elif not client_id or not client_secret:
         return jsonify({"error": "client_id and client_secret are required"}), 400
 
     # Validate tenant access
@@ -409,7 +417,7 @@ def register_provider():
         # Custom provider
         success = get_sso_manager().register_provider(
             name=provider_name,
-            provider_type=data.get("provider_type", "oauth2"),
+            provider_type=provider_type,
             client_id=client_id,
             client_secret=client_secret,
             authorization_url=data.get("authorization_url", ""),
@@ -733,6 +741,21 @@ def reset_provider_to_defaults(provider_name: str):
     return jsonify({"message": f"Provider {provider_name} reset to defaults"})
 
 
+@sso_bp.route("/providers/<provider_name>/metadata", methods=["GET"])
+@public_endpoint
+def saml_metadata(provider_name: str):
+    """Return SAML Service Provider metadata for an enabled SAML provider."""
+    provider = get_sso_manager().get_provider(provider_name)
+    if not provider or provider.provider_type != "saml":
+        return jsonify({"error": "SAML provider not found"}), 404
+    if not hasattr(provider, "get_service_provider_metadata"):
+        return jsonify({"error": "Provider does not support metadata"}), 400
+
+    acs_url = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
+    metadata = provider.get_service_provider_metadata(acs_url=acs_url)
+    return Response(metadata, mimetype="application/samlmetadata+xml")
+
+
 @sso_bp.route("/providers/<provider_name>/test", methods=["POST"])
 @admin_required
 def test_provider_connection(provider_name: str):
@@ -776,6 +799,11 @@ def test_provider_connection(provider_name: str):
         results = []
         all_passed = True
 
+        provider_type = existing.get("provider_type") or config.get("provider_type")
+        extra_params = (
+            config.get("extra_params") if isinstance(config.get("extra_params"), dict) else {}
+        )
+
         # Test authorization_url
         auth_url = config.get("authorization_url", "")
         if auth_url:
@@ -784,6 +812,18 @@ def test_provider_connection(provider_name: str):
                 {
                     "check": "authorization_url",
                     "url": auth_url,
+                    "success": url_result["success"],
+                    "error": url_result.get("error"),
+                }
+            )
+            if not url_result["success"]:
+                all_passed = False
+        elif provider_type == "saml" and extra_params.get("idp_metadata_url"):
+            url_result = _test_url_accessible(str(extra_params["idp_metadata_url"]))
+            results.append(
+                {
+                    "check": "idp_metadata_url",
+                    "url": extra_params["idp_metadata_url"],
                     "success": url_result["success"],
                     "error": url_result.get("error"),
                 }
@@ -800,9 +840,29 @@ def test_provider_connection(provider_name: str):
             )
             all_passed = False
 
-        # Test token_url
+        # Test token_url for OAuth/OIDC. SAML validates its IdP certificate instead.
         token_url = config.get("token_url", "")
-        if token_url:
+        if provider_type == "saml":
+            idp_cert = (
+                extra_params.get("idp_x509_cert") or extra_params.get("x509cert")
+                if isinstance(extra_params, dict)
+                else None
+            )
+            cert_ok = bool(
+                idp_cert
+                or extra_params.get("idp_metadata_xml")
+                or extra_params.get("idp_metadata_url")
+            )
+            results.append(
+                {
+                    "check": "idp_x509_cert",
+                    "success": cert_ok,
+                    "error": None if cert_ok else "IdP signing certificate not configured",
+                }
+            )
+            if not cert_ok:
+                all_passed = False
+        elif token_url:
             url_result = _test_url_accessible(token_url)
             results.append(
                 {
@@ -845,7 +905,9 @@ def test_provider_connection(provider_name: str):
 
         # Validate scope
         scope = config.get("scope", [])
-        if not scope or not isinstance(scope, list) or len(scope) == 0:
+        if provider_type == "saml":
+            results.append({"check": "scope", "success": True})
+        elif not scope or not isinstance(scope, list) or len(scope) == 0:
             results.append(
                 {
                     "check": "scope",
@@ -900,23 +962,49 @@ def _test_url_accessible(url: str) -> dict:
         dict: {"success": bool, "error": str or None}
     """
     try:
-        # Try HEAD first
-        response = requests.head(url, timeout=10, allow_redirects=True)
+        current_url = url
+        method = "HEAD"
 
-        # If HEAD not allowed (405), try GET
-        if response.status_code == 405:
-            response = requests.get(url, timeout=10, stream=True, allow_redirects=True)
-            response.close()  # Don't read body
+        for _ in range(6):
+            assert_public_http_url(current_url)
 
-        if response.status_code < 400:
-            return {"success": True}
-        else:
+            if method == "HEAD":
+                response = requests.head(current_url, timeout=10, allow_redirects=False)
+            else:
+                response = requests.get(
+                    current_url,
+                    timeout=10,
+                    stream=True,
+                    allow_redirects=False,
+                )
+                response.close()  # Don't read body
+
+            if response.status_code == 405 and method == "HEAD":
+                method = "GET"
+                continue
+
+            if 300 <= response.status_code < 400:
+                from urllib.parse import urljoin
+
+                location = response.headers.get("Location")
+                if not location:
+                    return {"success": False, "error": "重定向响应缺少 Location"}
+                current_url = urljoin(current_url, location)
+                assert_public_http_url(current_url)
+                continue
+
+            if response.status_code < 400:
+                return {"success": True}
             return {"success": False, "error": f"HTTP {response.status_code}"}
+
+        return {"success": False, "error": "重定向次数过多"}
 
     except requests.Timeout:
         return {"success": False, "error": "连接超时"}
     except requests.ConnectionError:
         return {"success": False, "error": "无法连接到服务器"}
+    except OutboundUrlBlockedError as e:
+        return {"success": False, "error": f"URL 被安全策略拦截: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -978,6 +1066,7 @@ def export_providers():
                     "token_url": config.get("token_url", ""),
                     "userinfo_url": config.get("userinfo_url"),
                     "issuer_url": config.get("issuer_url"),
+                    "extra_params": sanitize_config_for_audit(config.get("extra_params", {})),
                     "created_at": row.get("created_at"),
                     "updated_at": row.get("updated_at"),
                 }
@@ -1032,10 +1121,17 @@ def start_login(provider_name: str):
     # Get frontend redirect URI (for post-auth redirect)
     frontend_redirect_uri = request.args.get("redirect_uri")
 
-    # Build OAuth callback URL (this is where the provider redirects back to)
-    oauth_callback_uri = url_for("sso.callback", provider_name=provider_name, _external=True)
+    provider = get_sso_manager().get_provider(provider_name)
+    is_saml = bool(provider and provider.provider_type == "saml")
 
-    result = get_sso_manager().start_authentication(provider_name, oauth_callback_uri)
+    # Build callback/ACS URL (this is where the provider redirects/posts back to)
+    callback_uri = url_for(
+        "sso.saml_acs" if is_saml else "sso.callback",
+        provider_name=provider_name,
+        _external=True,
+    )
+
+    result = get_sso_manager().start_authentication(provider_name, callback_uri)
 
     if not result:
         return jsonify({"error": f"Failed to start authentication for {provider_name}"}), 500
@@ -1047,7 +1143,8 @@ def start_login(provider_name: str):
         # Update authorization_url with new state
         parsed = urllib.parse.urlparse(result["authorization_url"])
         query_params = urllib.parse.parse_qs(parsed.query)
-        query_params["state"] = [encoded_state]
+        state_key = "RelayState" if "SAMLRequest" in query_params else "state"
+        query_params[state_key] = [encoded_state]
         new_query = urllib.parse.urlencode(query_params, doseq=True)
         result["authorization_url"] = urllib.parse.urlunparse(
             (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
@@ -1066,6 +1163,7 @@ def start_login(provider_name: str):
 
 
 @sso_bp.route("/callback/<provider_name>", methods=["GET"])
+@public_endpoint
 def callback(provider_name: str):
     """
     Handle SSO callback.
@@ -1126,7 +1224,11 @@ def callback(provider_name: str):
             400,
         )
 
-    # Get or create local user
+    return _finalize_sso_login(provider_name, auth_result, frontend_url)
+
+
+def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[str]):
+    """Create/link the local user and establish Open ACE sessions after SSO success."""
     user_id = None
     if auth_result.user:
         user_id = get_sso_manager().get_user_by_sso_identity(
@@ -1198,6 +1300,44 @@ def callback(provider_name: str):
             "session_token": session_token,
         }
     )
+
+
+@sso_bp.route("/acs/<provider_name>", methods=["POST"])
+@public_endpoint
+def saml_acs(provider_name: str):
+    """Handle SAML HTTP-POST Assertion Consumer Service callbacks."""
+    saml_response = request.form.get("SAMLResponse")
+    relay_state = request.form.get("RelayState", "")
+
+    original_state, frontend_url = _decode_state(relay_state)
+    if not saml_response or not original_state:
+        if frontend_url and _validate_redirect_uri(frontend_url):
+            return redirect(f"{frontend_url}?sso_error=invalid_request")
+        return jsonify({"error": "Missing SAMLResponse or RelayState"}), 400
+
+    acs_url = url_for("sso.saml_acs", provider_name=provider_name, _external=True)
+    auth_result = get_sso_manager().complete_saml_authentication(
+        provider_name=provider_name,
+        saml_response=saml_response,
+        relay_state=original_state,
+        acs_url=acs_url,
+    )
+
+    if not auth_result.success:
+        if frontend_url and _validate_redirect_uri(frontend_url):
+            error_type = auth_result.error or "auth_failed"
+            return redirect(f"{frontend_url}?sso_error={error_type}")
+        return (
+            jsonify(
+                {
+                    "error": auth_result.error,
+                    "error_description": auth_result.error_description,
+                }
+            ),
+            400,
+        )
+
+    return _finalize_sso_login(provider_name, auth_result, frontend_url)
 
 
 @sso_bp.route("/session", methods=["GET"])

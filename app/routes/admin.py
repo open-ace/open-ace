@@ -453,3 +453,53 @@ def api_quota_stats():
             },
         }
     )
+
+
+@admin_bp.route("/admin/feishu/sync", methods=["POST"])
+@admin_required
+def api_sync_feishu_org():
+    """Manually trigger a Feishu organization sync."""
+    data = request.get_json(silent=True) or {}
+    tenant_id = data.get("tenant_id")
+
+    if tenant_id is not None:
+        try:
+            tenant_id = int(tenant_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "tenant_id must be an integer"}), 400
+
+    try:
+        from app.services.feishu_org_sync import FeishuOrgSyncService
+
+        result = FeishuOrgSyncService().sync_org(tenant_id=tenant_id)
+        return jsonify({"success": True, "result": result.to_dict()})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception("Failed to sync Feishu org: %s", e)
+        return jsonify({"error": "Failed to sync Feishu org"}), 500
+
+
+@admin_bp.route("/admin/dingtalk/sync", methods=["POST"])
+@admin_required
+def api_sync_dingtalk_org():
+    """Manually trigger a DingTalk organization sync."""
+    data = request.get_json(silent=True) or {}
+    tenant_id = data.get("tenant_id")
+
+    if tenant_id is not None:
+        try:
+            tenant_id = int(tenant_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "tenant_id must be an integer"}), 400
+
+    try:
+        from app.services.dingtalk_org_sync import DingTalkOrgSyncService
+
+        result = DingTalkOrgSyncService().sync_org(tenant_id=tenant_id)
+        return jsonify({"success": True, "result": result.to_dict()})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.exception("Failed to sync DingTalk org: %s", e)
+        return jsonify({"error": "Failed to sync DingTalk org"}), 500

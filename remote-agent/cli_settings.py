@@ -190,7 +190,19 @@ def parse_codex_settings(raw_settings: dict[str, Any] | str | None) -> dict[str,
     return {}
 
 
-def _normalize_codex_settings(settings: dict[str, Any], proxy_base_url: str) -> dict[str, Any]:
+def _normalize_codex_settings(
+    settings: dict[str, Any],
+    proxy_base_url: str,
+    bearer_token: str | None = None,
+) -> dict[str, Any]:
+    """Normalize Codex settings for config.toml.
+
+    Args:
+        settings: Raw Codex settings dict.
+        proxy_base_url: LLM proxy base URL.
+        bearer_token: Optional bearer token for Windows UWP compatibility.
+            When provided, uses ``experimental_bearer_token`` instead of ``env_key``.
+    """
     cleaned = _strip_sensitive_env(settings)
     if "model_reasoning_summary" not in cleaned:
         cleaned["model_reasoning_summary"] = "auto"
@@ -210,10 +222,20 @@ def _normalize_codex_settings(settings: dict[str, Any], proxy_base_url: str) -> 
         "name": openace_provider.get("name", "Open ACE Proxy"),
         "wire_api": openace_provider.get("wire_api", "responses"),
         "base_url": proxy_base_url,
-        "env_key": "OPENAI_API_KEY",
     }
+    _set_codex_auth_mode(openace_provider, bearer_token=bearer_token)
     providers["openace"] = openace_provider
     return cleaned
+
+
+def _set_codex_auth_mode(provider: dict[str, Any], bearer_token: str | None) -> None:
+    """Keep Codex auth fields mutually exclusive across repeated rewrites."""
+    if bearer_token:
+        provider["experimental_bearer_token"] = bearer_token
+        provider.pop("env_key", None)
+    else:
+        provider["env_key"] = "OPENAI_API_KEY"
+        provider.pop("experimental_bearer_token", None)
 
 
 def write_claude_settings(settings: dict[str, Any], home_dir: Path | None = None) -> Path:
@@ -243,13 +265,32 @@ def write_codex_settings(
     settings: dict[str, Any] | str,
     proxy_base_url: str,
     home_dir: Path | None = None,
+    bearer_token: str | None = None,
 ) -> Path:
-    """Merge and write ~/.codex/config.toml."""
+    """Merge and write ~/.codex/config.toml.
+
+    Args:
+        settings: Codex settings dict or TOML string.
+        proxy_base_url: LLM proxy base URL.
+        home_dir: Optional home directory path.
+        bearer_token: Optional bearer token for Windows UWP compatibility.
+            When provided, uses ``experimental_bearer_token`` instead of ``env_key``.
+    """
     base_dir = home_dir or Path.home()
     config_path = base_dir / ".codex" / "config.toml"
-    normalized = _normalize_codex_settings(parse_codex_settings(settings), proxy_base_url)
+    normalized = _normalize_codex_settings(
+        parse_codex_settings(settings),
+        proxy_base_url,
+        bearer_token=bearer_token,
+    )
     merged = _deep_merge_dicts(_load_toml_file(config_path), normalized)
+    provider = merged.get("model_providers", {}).get("openace")
+    if isinstance(provider, dict):
+        _set_codex_auth_mode(provider, bearer_token=bearer_token)
     _atomic_write_text(config_path, dump_toml(merged))
+    # Ensure config file has secure permissions (0600) when containing bearer token
+    if bearer_token:
+        config_path.chmod(0o600)
     return config_path
 
 
@@ -308,8 +349,18 @@ def apply_cli_settings(
     cli_settings: dict[str, Any],
     proxy_base_url: str,
     home_dir: Path | None = None,
+    codex_bearer_token: str | None = None,
 ) -> None:
-    """Apply CLI settings for supported tools to local config files."""
+    """Apply CLI settings for supported tools to local config files.
+
+    Args:
+        cli_settings: Dict mapping tool names to their settings.
+        proxy_base_url: LLM proxy base URL.
+        home_dir: Optional home directory path.
+        codex_bearer_token: Optional bearer token for Codex on Windows UWP.
+            When provided, Codex config uses ``experimental_bearer_token``
+            instead of ``env_key`` to bypass UWP environment variable restrictions.
+    """
     if not cli_settings:
         return
 
@@ -320,7 +371,12 @@ def apply_cli_settings(
             elif tool_name == "qwen-code" and isinstance(settings, dict):
                 write_qwen_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
             elif tool_name in {"codex", "codex-cli"}:
-                write_codex_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
+                write_codex_settings(
+                    settings,
+                    proxy_base_url=proxy_base_url,
+                    home_dir=home_dir,
+                    bearer_token=codex_bearer_token,
+                )
             elif tool_name in {"zcode", "zcode-code"} and isinstance(settings, dict):
                 write_zcode_settings(settings, proxy_base_url=proxy_base_url, home_dir=home_dir)
             else:

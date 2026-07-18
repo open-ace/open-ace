@@ -47,10 +47,11 @@ metadata:
     app.kubernetes.io/component: secrets
 type: Opaque
 stringData:
-  # These should be changed in production
-  SECRET_KEY: "change-me-in-production-use-strong-secret"
-  OPENACE_ENCRYPTION_KEY: "change-me-in-production-use-dedicated-encryption-key"
-  UPLOAD_AUTH_KEY: "change-me-in-production"
+  # Placeholder values for local manifest smoke tests only.
+  # Replace every value below with a strong generated secret before production use.
+  SECRET_KEY: "replace-with-random-flask-secret"
+  OPENACE_ENCRYPTION_KEY: "replace-with-random-dedicated-encryption-key"
+  UPLOAD_AUTH_KEY: "replace-with-random-upload-auth-key"
   DB_USER: "openace"
-  DB_PASSWORD: "change-me-in-production"
+  DB_PASSWORD: "replace-with-random-database-password"
   REDIS_PASSWORD: ""

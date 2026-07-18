@@ -286,6 +286,13 @@ cd /home/open-ace/open-ace
 | `OPENACE_CORS_ALLOWED_ORIGINS` | 非 loopback WebUI 源的显式 API CORS 白名单，多个值用逗号分隔 |
 | `OPENACE_WS_MAX_MESSAGE_BYTES` | 浏览器侧终端 / VSCode 原始桥接允许的入站 WebSocket 最大消息大小（默认 `8388608`） |
 
+### 出站 URL 安全
+
+管理员配置的 SSO/OIDC 端点 URL 会在 Open ACE 发起测试、token、userinfo 或 JWKS
+请求前进行校验。默认仅允许公网 `http` 和 `https` 目标；loopback、localhost、内网地址、
+link-local 网段、云 metadata 服务主机、带账号密码的 URL，以及解析到非公网地址的 DNS
+结果都会被拦截，以降低 SSRF 风险。
+
 ### 端口配置
 
 Open ACE 默认监听 19888 端口。如需修改端口，可根据部署方式选择以下方法。
@@ -567,6 +574,12 @@ chmod -R 755 ~/.open-ace/
 4. **密钥管理**：使用环境变量或密钥管理系统存储敏感数据
 5. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
 6. **禁止占位密钥**：不要在生产环境使用 `change-me-in-production` 之类的占位值作为 `SECRET_KEY` 或 `UPLOAD_AUTH_KEY`
+
+### 升级注意：已加密敏感数据
+
+近期安全加固将 Flask 会话签名与敏感数据加密拆分。已有部署如果已经保存了加密的 SSO client secret、SMTP 密码或 API Key，升级前请先把 `OPENACE_ENCRYPTION_KEY` 设置为旧版曾用于 `SECRET_KEY` 的同一个值。确认服务启动后能读取既有密文，再在计划维护窗口中按需轮换为新的专用加密密钥。
+
+Docker Compose 现在要求显式设置 `SECRET_KEY`、`OPENACE_ENCRYPTION_KEY` 和 `UPLOAD_AUTH_KEY`。重启 stack 前，请先更新 `.env` 或密钥管理系统。
 
 ## 多用户工作区部署
 

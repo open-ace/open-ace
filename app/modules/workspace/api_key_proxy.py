@@ -1533,6 +1533,10 @@ class APIKeyProxyService:
         exp: datetime,
     ) -> bool:
         """Return whether the session lifecycle still allows proxy-token use."""
+        if now > exp:
+            logger.warning("Proxy token expired")
+            return False
+
         if session_id and session_id.startswith("webui:") and user_id:
             from app.services.webui_manager import get_webui_manager
 
@@ -1545,10 +1549,6 @@ class APIKeyProxyService:
                 session_id,
                 user_id,
             )
-            return False
-
-        if now > exp:
-            logger.warning("Proxy token expired")
             return False
 
         if not session_id or session_type == "ha_pool":
@@ -1621,7 +1621,7 @@ class APIKeyProxyService:
             exp = datetime.fromisoformat(str(payload["exp"]))
             record_exp_raw = self._row_get(record, "expires_at")
             record_exp = datetime.fromisoformat(str(record_exp_raw)) if record_exp_raw else exp
-            if now > record_exp and not str(payload.get("session_id") or "").startswith("webui:"):
+            if now > record_exp:
                 logger.warning("Proxy token server record expired: %s", jti[:8])
                 return None
 

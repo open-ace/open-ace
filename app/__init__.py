@@ -331,7 +331,7 @@ def start_background_services():
         else:
             logger.info("Autonomous scheduler disabled by configuration")
             logger.info(
-                "To enable: set autonomous.enabled=true in config.json and restart the server"
+                "To enable it again: set autonomous.enabled=true in config.json and restart the server"
             )
     except Exception as e:
         logger.warning(f"Failed to start autonomous scheduler: {e}")

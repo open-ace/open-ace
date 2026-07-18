@@ -281,6 +281,44 @@ PUT /api/admin/users/<user_id>/quota
 
 ---
 
+### 同步飞书组织架构
+
+```
+POST /api/admin/feishu/sync
+```
+
+手动将飞书部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `feishu.org_sync_tenant_id` 配置。
+
+---
+
+### 同步钉钉组织架构
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+手动将钉钉部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `dingtalk.org_sync_tenant_id` 配置。
+
+---
+
 ### 获取配额使用情况
 
 ```
@@ -1467,6 +1505,10 @@ POST /api/sso/providers
 
 注册新的 SSO 提供商（仅管理员）。
 Provider 的密钥在持久化前会先加密。
+SAML Provider 使用 `provider_type: "saml"`；`client_id` 是 SP entity ID，
+`authorization_url` 或 `extra_params.idp_metadata_url` 指向 IdP 登录/metadata，
+`redirect_uri` 是 ACS URL，`extra_params.idp_x509_cert` 或
+`extra_params.idp_metadata_xml` 用于校验 IdP 签名。SAML 不要求 `client_secret`。
 
 ---
 
@@ -1488,6 +1530,7 @@ GET /api/sso/login/<provider_name>
 
 发起 SSO 登录流程。
 对于 OAuth2/OIDC Provider，登录流程会启用 PKCE，并将 verifier 绑定到回调 state。
+对于 SAML Provider，系统会生成 AuthnRequest，并将 `RelayState` 绑定到已保存的 request ID。
 
 ---
 
@@ -1498,6 +1541,26 @@ GET /api/sso/callback/<provider_name>
 ```
 
 处理 SSO 回调。
+
+---
+
+### SAML Metadata
+
+```
+GET /api/sso/providers/<provider_name>/metadata
+```
+
+返回用于配置 SAML IdP 的 Service Provider metadata XML。
+
+---
+
+### SAML ACS
+
+```
+POST /api/sso/acs/<provider_name>
+```
+
+处理包含 `SAMLResponse` 与 `RelayState` 的 SAML HTTP-POST ACS 回调。
 
 ---
 

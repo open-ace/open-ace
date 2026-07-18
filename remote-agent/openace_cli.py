@@ -13,6 +13,7 @@ import getpass
 import json
 import logging
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -213,7 +214,19 @@ def _apply_local_cli_settings(terminal: dict[str, Any]) -> None:
     proxy_url = str(terminal.get("proxy_url") or "").rstrip("/")
     if not cli_settings or not proxy_url:
         return
-    apply_cli_settings(cli_settings, proxy_base_url=f"{proxy_url}/v1")
+
+    # Windows UWP: Codex desktop cannot read system environment variables.
+    # Use experimental_bearer_token in config.toml instead of env_key.
+    codex_token = None
+    if os.name == "nt":
+        tokens = terminal.get("tokens") or {}
+        codex_token = tokens.get("openai")
+
+    apply_cli_settings(
+        cli_settings,
+        proxy_base_url=f"{proxy_url}/v1",
+        codex_bearer_token=codex_token,
+    )
 
 
 def _write_active_terminal(terminal: dict[str, Any]) -> None:
@@ -231,6 +244,22 @@ def _clear_active_terminal() -> None:
         ACTIVE_TERMINAL_PATH.unlink()
     except FileNotFoundError:
         pass
+
+
+def _windows_shell_args() -> list[str]:
+    for candidate in (
+        shutil.which("pwsh"),
+        shutil.which("powershell"),
+        os.environ.get("COMSPEC"),
+        "cmd.exe",
+    ):
+        if not candidate:
+            continue
+        shell_name = os.path.basename(candidate).lower()
+        if shell_name in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            return [candidate, "-NoLogo"]
+        return [candidate]
+    return ["cmd.exe"]
 
 
 def cmd_login(args: argparse.Namespace) -> int:
@@ -273,13 +302,6 @@ def cmd_status(_: argparse.Namespace) -> int:
 
 
 def cmd_menu(args: argparse.Namespace) -> int:
-    # Windows does not support termios module used by terminal_menu.py
-    # Fall back to shell mode on Windows
-    if os.name == "nt":
-        print("Note: Interactive menu is not supported on Windows.")
-        print("Starting shell instead. You can run AI tools directly from the shell.\n")
-        return cmd_shell(args)
-
     work_dir = os.path.abspath(args.work_dir or os.getcwd())
     terminal = _start_cli_terminal(work_dir)
     _apply_local_cli_settings(terminal)
@@ -296,10 +318,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
     env = _session_env(terminal)
 
     try:
-        # Windows: use COMSPEC (cmd.exe)
         if os.name == "nt":
-            shell = os.environ.get("COMSPEC") or "cmd.exe"
-            subprocess.run([shell], env=env, cwd=work_dir, check=False)
+            subprocess.run(_windows_shell_args(), env=env, cwd=work_dir, check=False)
         else:
             # Unix/Linux: login shell
             shell = os.environ.get("SHELL") or "/bin/sh"

@@ -82,10 +82,10 @@ class TestGetConfigValue:
 
 
 class TestIsAutonomousEnabled:
-    def test_default_false(self, config_file, config_dir):
+    def test_default_true(self, config_file, config_dir):
         config_file.write_text(json.dumps({}))
         with _patch_config_dir(config_dir):
-            assert cfg_mod.is_autonomous_enabled() is False
+            assert cfg_mod.is_autonomous_enabled() is True
 
     def test_explicit_true(self, config_file, config_dir):
         config_file.write_text(json.dumps({"autonomous": {"enabled": True}}))
@@ -194,15 +194,15 @@ class TestWorkspaceConfigAutonomousField:
             result = autonomous_config.get("enabled", False)
             assert result is True
 
-    def test_autonomous_enabled_false_when_missing(self, config_file, config_dir):
+    def test_autonomous_enabled_true_when_missing(self, config_file, config_dir):
         config_file.write_text(json.dumps({"workspace": {"enabled": False}}))
         with _patch_config_dir(config_dir):
             config_path = os.path.join(str(config_dir), "config.json")
             with open(config_path) as f:
                 config = json.load(f)
             autonomous_config = config.get("autonomous", {})
-            result = autonomous_config.get("enabled", False)
-            assert result is False
+            result = autonomous_config.get("enabled", True)
+            assert result is True
 
     def test_autonomous_enabled_false_when_explicit(self, config_file, config_dir):
         config_file.write_text(

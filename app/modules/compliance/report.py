@@ -793,10 +793,16 @@ class ReportGenerator:
         """Generate usage summary report."""
         start_date = period_start.strftime("%Y-%m-%d")
         end_date = period_end.strftime("%Y-%m-%d")
+        params: list[Any] = [start_date, end_date]
+        usage_conditions = ["date >= ?", "date <= ?"]
+
+        if tenant_id:
+            usage_conditions.append("tenant_id = ?")
+            params.append(tenant_id)
 
         # Get usage data from daily_usage (aggregated by tool/host)
         usage_data = self.db.fetch_all(
-            """
+            f"""
             SELECT
                 date,
                 tool_name,
@@ -806,21 +812,27 @@ class ReportGenerator:
                 SUM(tokens_used) as total_tokens,
                 SUM(request_count) as total_requests
             FROM daily_usage
-            WHERE date >= ? AND date <= ?
+            WHERE {" AND ".join(usage_conditions)}
             GROUP BY date, tool_name, host_name
             ORDER BY date DESC, tool_name
         """,
-            (start_date, end_date),
+            tuple(params),
         )
 
         # Get unique users count from user_daily_stats table
+        unique_user_conditions = ["uds.date >= ?", "uds.date <= ?"]
+        unique_user_params: list[Any] = [start_date, end_date]
+        if tenant_id:
+            unique_user_conditions.append("u.tenant_id = ?")
+            unique_user_params.append(tenant_id)
         unique_users_result = self.db.fetch_one(
-            """
-            SELECT COUNT(DISTINCT user_id) as unique_users
-            FROM user_daily_stats
-            WHERE date >= ? AND date <= ?
+            f"""
+            SELECT COUNT(DISTINCT uds.user_id) as unique_users
+            FROM user_daily_stats uds
+            JOIN users u ON u.id = uds.user_id
+            WHERE {" AND ".join(unique_user_conditions)}
         """,
-            (start_date, end_date),
+            tuple(unique_user_params),
         )
         unique_users = unique_users_result.get("unique_users", 0) if unique_users_result else 0
 
@@ -858,10 +870,14 @@ class ReportGenerator:
         """Generate user activity report."""
         start_date = period_start.strftime("%Y-%m-%d")
         end_date = period_end.strftime("%Y-%m-%d")
+        where_clause = "WHERE u.tenant_id = ?" if tenant_id else ""
+        params: list[Any] = [start_date, end_date]
+        if tenant_id:
+            params.append(tenant_id)
 
         # Get user activity from user_daily_stats (has user_id column)
         user_activity = self.db.fetch_all(
-            """
+            f"""
             SELECT
                 u.id as user_id,
                 u.username,
@@ -875,10 +891,11 @@ class ReportGenerator:
             FROM users u
             LEFT JOIN user_daily_stats uds ON u.id = uds.user_id
                 AND uds.date >= ? AND uds.date <= ?
+            {where_clause}
             GROUP BY u.id
             ORDER BY total_tokens DESC
         """,
-            (start_date, end_date),
+            tuple(params),
         )
 
         # Calculate summary
@@ -909,6 +926,7 @@ class ReportGenerator:
         audit_logs = self.audit_logger.query(
             start_time=period_start,
             end_time=period_end,
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -954,6 +972,7 @@ class ReportGenerator:
             start_time=period_start,
             end_time=period_end,
             resource_type="data",
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -962,6 +981,7 @@ class ReportGenerator:
             start_time=period_start,
             end_time=period_end,
             action="data_export",
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -1004,6 +1024,7 @@ class ReportGenerator:
                 start_time=period_start,
                 end_time=period_end,
                 action=action,
+                tenant_id=tenant_id,
                 limit=1000,
             )
             all_logs.extend(logs)
@@ -1055,16 +1076,18 @@ class ReportGenerator:
         """Generate quota usage report."""
         # Get quota alerts
         quota_alerts = self.db.fetch_all(
-            """
-            SELECT * FROM quota_alerts
-            WHERE created_at >= ? AND created_at <= ?
-            ORDER BY created_at DESC
+            f"""
+            SELECT qa.* FROM quota_alerts qa
+            {"JOIN users u ON u.id = qa.user_id" if tenant_id else ""}
+            WHERE qa.created_at >= ? AND qa.created_at <= ?
+            {"AND u.tenant_id = ?" if tenant_id else ""}
+            ORDER BY qa.created_at DESC
         """,
-            (period_start, period_end),
+            (period_start, period_end, tenant_id) if tenant_id else (period_start, period_end),
         )
 
         # Get user quota status
-        users = self.user_repo.get_all_users(include_inactive=False)
+        users = self.user_repo.get_all_users(include_inactive=False, tenant_id=tenant_id)
 
         summary: dict[str, Any] = {
             "period": {
