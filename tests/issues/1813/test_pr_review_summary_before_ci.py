@@ -60,4 +60,3 @@ class TestPrReviewSummaryBeforeCiCheck:
             "pr_review_summary must be created before the `if ci_failures:` "
             "block that creates ci_failed_before_report"
         )
-
