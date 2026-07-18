@@ -220,7 +220,9 @@ def recv_message(sock) -> bytes | str | None:
         if opcode == OP_CLOSE:
             # RFC 6455 §5.5.1: CLOSE payload must be empty or >= 2 bytes
             if 0 < len(payload) < MIN_CLOSE_PAYLOAD_SIZE:
-                _safe_send_close(sock, 1002, "Close frame payload must be empty or at least 2 bytes")
+                _safe_send_close(
+                    sock, 1002, "Close frame payload must be empty or at least 2 bytes"
+                )
                 raise WebSocketProtocolError(
                     f"Close frame payload {len(payload)} bytes, must be 0 or >= {MIN_CLOSE_PAYLOAD_SIZE}"
                 )

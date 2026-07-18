@@ -636,6 +636,7 @@ class TestFragmentReassemblyBoundary:
         # Create a fragmented message that would exceed max_message_size
         # We'll use a smaller limit for testing
         import os
+
         original_limit = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES")
 
         try:
