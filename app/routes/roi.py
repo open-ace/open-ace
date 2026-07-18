@@ -319,7 +319,7 @@ def get_optimization_suggestions():
         days = request.args.get("days", default=30, type=int)
 
         optimizer = CostOptimizer()
-        suggestions = optimizer.analyze(days)
+        suggestions = optimizer.analyze(days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": [s.to_dict() for s in suggestions]})
     except Exception as e:
@@ -334,7 +334,7 @@ def get_optimization_cost_trend():
         days = request.args.get("days", default=30, type=int)
 
         optimizer = CostOptimizer()
-        trend = optimizer.get_cost_trend(days)
+        trend = optimizer.get_cost_trend(days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": trend})
     except Exception as e:
@@ -349,7 +349,7 @@ def get_efficiency_report():
         days = request.args.get("days", default=30, type=int)
 
         optimizer = CostOptimizer()
-        report = optimizer.get_efficiency_report(days)
+        report = optimizer.get_efficiency_report(days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": report})
     except Exception as e:

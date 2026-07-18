@@ -4,7 +4,7 @@ Open ACE - Analysis Routes
 API routes for usage analysis and reporting.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
 from app.services.analysis_service import AnalysisService
@@ -17,6 +17,26 @@ analysis_service = AnalysisService()
 @auth_required
 def _require_auth():
     pass
+
+
+@analysis_bp.before_request
+def _require_tenant_scope():
+    """Fail closed for non-admins (Issue #1818 R4 short-term fix).
+
+    Without this gate, a non-admin whose user row has no tenant_id would
+    access global analysis data. AnalysisService depends on daily_stats /
+    hourly_stats / daily_messages tables which lack tenant_id columns,
+    so we cannot filter by tenant at the query layer. This gate restricts
+    Analysis functionality to admins only until the underlying tables are
+    migrated to support multi-tenant isolation.
+
+    - Non-admins (WITH or WITHOUT a tenant) are denied 403.
+    - Admins keep global scope (tenant_id=None).
+    """
+    user = getattr(g, "user", None) or {}
+    is_admin = user.get("role") == "admin"
+    if not is_admin:
+        return jsonify({"error": "Analysis feature requires admin privileges"}), 403
 
 
 @analysis_bp.route("/analysis/batch")
