@@ -1262,7 +1262,7 @@ class AutonomousOrchestrator:
         gh: GitHubOps,
         commit_before: str,
         attempt: int,
-        branch_name: str | None,
+        branch_name: Optional[str],
         pr_number: int,
     ) -> tuple[str, bool, str]:
         """Detect whether the CI repair agent produced changes and push them.
