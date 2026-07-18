@@ -17,7 +17,11 @@ from datetime import datetime, timezone
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import _extract_token, _load_user_from_token
-from app.modules.governance.alert_notifier import NotificationPreference, get_alert_notifier
+from app.modules.governance.alert_notifier import (
+    NotificationPreference,
+    _redact_dingtalk_secret,
+    get_alert_notifier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +178,7 @@ def get_preferences():
                 "data": {
                     "email_enabled": prefs.email_enabled,
                     "push_enabled": prefs.push_enabled,
-                    "webhook_url": prefs.webhook_url,
+                    "webhook_url": _redact_dingtalk_secret(prefs.webhook_url),
                     "alert_types": prefs.alert_types,
                     "min_severity": prefs.min_severity,
                     "notification_email": prefs.notification_email,

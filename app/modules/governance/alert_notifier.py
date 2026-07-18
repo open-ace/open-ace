@@ -50,6 +50,32 @@ _DINGTALK_WEBHOOK_HOST_SNIPPETS = ("dingtalk.com",)
 _DINGTALK_SECRET_QUERY_KEYS = ("openace_dingtalk_secret", "dingtalk_secret")
 
 
+def _redact_dingtalk_secret(webhook_url):
+    """Strip any DingTalk signing secret query param from a webhook URL.
+
+    The per-webhook signing secret must never be persisted in, or echoed back
+    from, the stored webhook URL. Outbound signing reads the secret from the
+    global ``alerts.dingtalk_webhook_secret`` config instead. This helper is the
+    single chokepoint used on both write (before persistence) and read
+    (defensive redaction) so the credential cannot leak through the URL.
+    """
+    if not webhook_url:
+        return webhook_url
+    try:
+        parsed = urlparse(webhook_url)
+    except ValueError:
+        return webhook_url
+    if not parsed.query:
+        return webhook_url
+    original_items = parse_qsl(parsed.query, keep_blank_values=True)
+    sanitized = [
+        (key, value) for key, value in original_items if key not in _DINGTALK_SECRET_QUERY_KEYS
+    ]
+    if len(sanitized) == len(original_items):
+        return webhook_url
+    return urlunparse(parsed._replace(query=urlencode(sanitized)))
+
+
 def _pin_host_to_url(url: str, pinned_ip: str) -> str:
     """Rewrite ``url`` so its host is the IP literal ``pinned_ip``.
 
@@ -1051,19 +1077,24 @@ class AlertNotifier:
         conn.close()
 
         if row:
+            columns = set(row.keys())
             return NotificationPreference(
                 user_id=row["user_id"],
                 email_enabled=bool(row["email_enabled"]),
                 push_enabled=bool(row["push_enabled"]),
-                webhook_url=row["webhook_url"],
+                webhook_url=_redact_dingtalk_secret(row["webhook_url"]),
                 alert_types=(
                     json.loads(row["alert_types"])
                     if row["alert_types"]
                     else ["quota", "system", "security"]
                 ),
                 min_severity=row["min_severity"] or "warning",
-                notification_email=row.get("notification_email"),
-                email_verified=bool(row.get("email_verified", False)),
+                notification_email=(
+                    row["notification_email"] if "notification_email" in columns else None
+                ),
+                email_verified=bool(
+                    row["email_verified"] if "email_verified" in columns else False
+                ),
             )
 
         # Return default preferences
@@ -1079,6 +1110,11 @@ class AlertNotifier:
         Returns:
             True if successful.
         """
+        # Never persist the DingTalk signing secret inside the webhook URL;
+        # strip it before writing so the DB never holds the credential. The
+        # outbound signer reads the secret from global config instead.
+        preferences.webhook_url = _redact_dingtalk_secret(preferences.webhook_url)
+
         conn = self._get_connection()
         cursor = conn.cursor()
 
