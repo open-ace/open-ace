@@ -113,6 +113,14 @@ def create_app(config=None):
         else:
             app.config.from_object(config)
 
+    # Cap unauthenticated request bodies (notably SAMLResponse POSTs to /acs) to
+    # bound CPU/memory cost of XML parsing + signature verification against
+    # oversized payloads. A real SAMLResponse is well under 100KB; 256KB is a
+    # generous ceiling. Applied after caller config so an explicit override wins,
+    # but a Flask default of None (no cap) is replaced.
+    if not app.config.get("MAX_CONTENT_LENGTH"):
+        app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
+
     from app.utils.security_env import get_secret_key_for_app
 
     # SECRET_KEY configuration with security checks
