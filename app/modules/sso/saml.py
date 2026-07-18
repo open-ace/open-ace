@@ -307,9 +307,14 @@ class SAMLProvider(SSOProvider):
         if destination and acs_url and destination != acs_url:
             raise ValueError("invalid_recipient")
 
+        # InResponseTo is REQUIRED when the SP issued an AuthnRequest (request_id is
+        # known from the stored auth state). A response omitting it can be replayed
+        # or used unsolicited, so reject it outright rather than silently accepting.
         if request_id:
             response_in_response_to = root.get("InResponseTo")
-            if response_in_response_to and response_in_response_to != request_id:
+            if not response_in_response_to:
+                raise ValueError("missing_in_response_to")
+            if response_in_response_to != request_id:
                 raise ValueError("invalid_in_response_to")
 
         self._validate_issuer(root, assertion)
@@ -473,14 +478,17 @@ class SAMLProvider(SSOProvider):
         for confirmation in confirmations:
             recipient = confirmation.get("Recipient")
             in_response_to = confirmation.get("InResponseTo")
-            if acs_url and recipient and recipient != acs_url:
-                continue
-            if request_id and in_response_to and in_response_to != request_id:
-                continue
             not_on_or_after = confirmation.get("NotOnOrAfter")
-            if not_on_or_after and self._parse_saml_datetime(not_on_or_after) <= self._skewed_now(
-                past=True
-            ):
+            # Recipient, NotOnOrAfter, and (when the SP issued a request) InResponseTo
+            # are mandatory on every bearer SubjectConfirmationData. Treating them as
+            # optional widens the replay window and enables misrouting.
+            if not recipient or (acs_url and recipient != acs_url):
+                continue
+            if request_id and (not in_response_to or in_response_to != request_id):
+                continue
+            if not not_on_or_after:
+                continue
+            if self._parse_saml_datetime(not_on_or_after) <= self._skewed_now(past=True):
                 continue
             return
 
@@ -490,11 +498,14 @@ class SAMLProvider(SSOProvider):
         now = self._now()
         not_before = conditions.get("NotBefore")
         not_on_or_after = conditions.get("NotOnOrAfter")
+        # A NotOnOrAfter bound is mandatory: an assertion without an expiry never
+        # becomes invalid, enabling effectively unbounded replay. NotBefore is
+        # optional (treated as no lower bound) per common IdP behaviour.
+        if not not_on_or_after:
+            raise ValueError("missing_conditions_lifetime")
         if not_before and now + self._clock_skew() < self._parse_saml_datetime(not_before):
             raise ValueError("assertion_not_yet_valid")
-        if not_on_or_after and now - self._clock_skew() >= self._parse_saml_datetime(
-            not_on_or_after
-        ):
+        if now - self._clock_skew() >= self._parse_saml_datetime(not_on_or_after):
             raise ValueError("assertion_expired")
 
     def _build_user(self, assertion: etree._Element, raw_xml: bytes) -> tuple[SSOUser, int]:
@@ -524,7 +535,7 @@ class SAMLProvider(SSOProvider):
             name=self._mapped_attribute(attributes, "name"),
             first_name=self._mapped_attribute(attributes, "first_name"),
             last_name=self._mapped_attribute(attributes, "last_name"),
-            email_verified=bool(email),
+            email_verified=self._email_verified_from_attributes(attributes),
             raw_data={
                 "attributes": attributes,
                 "name_id": provider_user_id,
@@ -569,6 +580,20 @@ class SAMLProvider(SSOProvider):
             if values:
                 return values[0]
         return None
+
+    def _email_verified_from_attributes(self, attributes: dict[str, list[str]]) -> bool:
+        """Return True only when the IdP explicitly attests email verification.
+
+        A bare email attribute does not imply verification; treating it as verified
+        amplifies email-based account-linking risk. Recognise common IdP claim names
+        (email_verified, http://schemas.../emailaddress where a verified flag is
+        present) and only trust an explicit truthy attestation.
+        """
+        for claim_name in ("email_verified", "EmailVerified"):
+            values = attributes.get(claim_name)
+            if values and str(values[0]).strip().lower() in {"true", "1", "yes"}:
+                return True
+        return False
 
     def _configured_certificates(self) -> list[str]:
         values = self.config.extra_params.get("idp_x509_cert") or self.config.extra_params.get(
