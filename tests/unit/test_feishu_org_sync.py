@@ -140,11 +140,15 @@ def test_sync_creates_users_teams_and_memberships(sync_env):
     assert [row["team_name"] for row in memberships] == ["Engineering", "QA"]
 
 
-def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_env):
-    """Sync should link by email and prune memberships on Feishu-managed teams."""
+def test_sync_provisions_new_user_and_removes_stale_membership(sync_env):
+    """Sync must NOT adopt a pre-existing password account by unverified email
+    (security: avoid account takeover). It provisions a fresh local user instead
+    and prunes stale memberships on Feishu-managed teams.
+    """
     db, config = sync_env
     user_repo = UserRepository(db=db)
 
+    # Pre-existing password account sharing Alice's email must NOT be adopted.
     existing_user_id = user_repo.create_user(
         username="alice_local",
         email="alice@example.com",
@@ -176,8 +180,9 @@ def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_en
     )
 
     first_result = service.sync_org()
-    assert first_result.users_created == 0
-    assert first_result.users_linked == 1
+    # A new local user is provisioned; the password account is left untouched.
+    assert first_result.users_created == 1
+    assert first_result.users_linked == 0
 
     synced_team = db.fetch_one("SELECT team_id FROM teams WHERE name = ?", ("Engineering",))
     assert synced_team is not None
@@ -202,7 +207,9 @@ def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_en
         "SELECT user_id FROM team_members WHERE team_id = ? ORDER BY user_id ASC",
         (synced_team["team_id"],),
     )
-    assert members == [{"user_id": existing_user_id}]
+    # Only the freshly provisioned Feishu user remains (not the stale row).
+    assert len(members) == 1
+    assert members[0]["user_id"] != stale_user_id
 
 
 def test_scheduler_gate_runs_only_when_enabled(sync_env):
