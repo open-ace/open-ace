@@ -46,6 +46,11 @@ class RemoteAgentManager:
 
     Tracks active agent connections, monitors heartbeats, dispatches
     commands to agents, and routes agent responses back to sessions.
+
+    Runtime boundary: live connection objects are process-local, but HTTP
+    polling commands, command responses, session-machine bindings, and SSE
+    output replay are persisted so active remote-session control APIs do not
+    depend on hitting the same web process.
     """
 
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
@@ -58,6 +63,12 @@ class RemoteAgentManager:
     # Prevents unbounded memory growth when SSE disconnects but CLI continues
     # 5000 messages ≈ 3-5 minutes of AI output, covers most brief disconnect scenarios
     MAX_BUFFER_SIZE = 5000
+
+    # Persisted runtime-state retention. These tables externalize the shareable
+    # control plane state for HTTP-polling agents; live socket objects remain
+    # process-local by design.
+    COMMAND_TTL_SECONDS = 3600
+    OUTPUT_RETENTION_SECONDS = 24 * 3600
 
     # Session recovery window (seconds) - allows reconnection after brief disconnects
     # Sessions are only cleaned up if they've been inactive longer than this window
@@ -78,7 +89,9 @@ class RemoteAgentManager:
             self.db = Database(db_url=f"sqlite:///{self.db_path}")
         else:
             self.db = Database()
-        # Active WebSocket connections: {machine_id: websocket_connection}
+        # Process-local live connection markers: {machine_id: websocket_connection}.
+        # HTTP polling commands/responses are persisted for cross-pod delivery;
+        # actual socket objects remain tied to the process that owns them.
         self._connections: dict[str, Any] = {}
         # Session to machine mapping: {session_id: machine_id}
         self._session_machines: dict[str, str] = {}
@@ -1006,10 +1019,12 @@ class RemoteAgentManager:
         Returns:
             True if command was queued successfully.
         """
-        with self._lock:
-            if machine_id not in self._command_queues:
-                self._command_queues[machine_id] = []
-            self._command_queues[machine_id].append(command)
+        queued = self._persist_command(machine_id, command)
+        if not queued:
+            with self._lock:
+                if machine_id not in self._command_queues:
+                    self._command_queues[machine_id] = []
+                self._command_queues[machine_id].append(command)
 
         if machine_id not in self._connections:
             logger.info(
@@ -1023,7 +1038,88 @@ class RemoteAgentManager:
     def get_pending_commands(self, machine_id: str) -> list[dict]:
         """Get and clear pending commands for an HTTP-mode agent."""
         with self._lock:
-            return self._command_queues.pop(machine_id, [])
+            memory_commands = self._command_queues.pop(machine_id, [])
+        return memory_commands + self._claim_persisted_commands(machine_id)
+
+    def _persist_command(self, machine_id: str, command: dict[str, Any]) -> bool:
+        """Persist an HTTP-polling command so any web pod can deliver it."""
+        command = dict(command)
+        command_id = str(command.get("command_id") or command.get("request_id") or uuid.uuid4())
+        command["command_id"] = command_id
+        session_id = command.get("session_id")
+        command_type = command.get("command") or command.get("type") or ""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = (now + timedelta(seconds=self.COMMAND_TTL_SECONDS)).isoformat()
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    INSERT INTO remote_runtime_commands
+                    (command_id, machine_id, session_id, command_type, payload,
+                     status, created_at, expires_at)
+                    VALUES ({_params(8)})
+                    """,
+                    (
+                        command_id,
+                        machine_id,
+                        str(session_id) if session_id else None,
+                        str(command_type),
+                        json.dumps(command),
+                        "pending",
+                        now.isoformat(),
+                        expires_at,
+                    ),
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("Falling back to in-memory command queue for %s: %s", machine_id, e)
+            return False
+
+    def _claim_persisted_commands(self, machine_id: str) -> list[dict]:
+        """Claim pending persisted commands for a polling agent."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        claimed: list[dict] = []
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT id, payload
+                    FROM remote_runtime_commands
+                    WHERE machine_id = {_param()}
+                      AND status = 'pending'
+                      AND (expires_at IS NULL OR expires_at > {_param()})
+                    ORDER BY id ASC
+                    LIMIT 100
+                    """,
+                    (machine_id, now),
+                )
+                rows = cursor.fetchall()
+                for row in rows:
+                    command_id = row["id"]
+                    cursor.execute(
+                        f"""
+                        UPDATE remote_runtime_commands
+                        SET status = 'delivered', delivered_at = {_param()}
+                        WHERE id = {_param()} AND status = 'pending'
+                        """,
+                        (now, command_id),
+                    )
+                    if cursor.rowcount != 1:
+                        continue
+                    try:
+                        payload = json.loads(row["payload"])
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        logger.warning("Skipping corrupt remote command payload id=%s", command_id)
+                        continue
+                    if isinstance(payload, dict):
+                        claimed.append(payload)
+                conn.commit()
+        except Exception as e:
+            logger.warning("Failed to claim persisted commands for %s: %s", machine_id, e)
+        return claimed
 
     def send_command_with_response(
         self,
@@ -1068,12 +1164,21 @@ class RemoteAgentManager:
             },
         )
 
-        # Wait for response (gevent Event.wait is coroutine-safe)
+        # Wait for response. The in-process Event handles the same-pod fast
+        # path; the DB poll handles non-sticky deployments where the agent's
+        # command_response lands on another web pod.
         pending = self._pending_requests[request_id]
-        if pending["event"].wait(timeout):
-            result = pending["result"]
-        else:
-            result = None  # Timeout
+        deadline = time.time() + timeout
+        result = None
+        while time.time() < deadline:
+            remaining = max(0.0, deadline - time.time())
+            if pending["event"].wait(min(0.2, remaining)):
+                result = pending["result"]
+                break
+            result = self._get_persisted_command_response(request_id)
+            if result is not None:
+                break
+        if result is None:
             logger.warning(
                 "Timeout waiting for %s response from agent %s (session %s)",
                 command,
@@ -1086,6 +1191,23 @@ class RemoteAgentManager:
             self._pending_requests.pop(request_id, None)
 
         return cast("dict | None", result)
+
+    def _get_persisted_command_response(self, request_id: str) -> dict | None:
+        """Read a command response persisted by another web process."""
+        try:
+            row = self.db.fetch_one(
+                f"SELECT response_payload FROM remote_runtime_commands WHERE command_id = {_param()}",
+                (request_id,),
+            )
+        except Exception:
+            return None
+        if not row or not row.get("response_payload"):
+            return None
+        try:
+            result = json.loads(row["response_payload"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return result if isinstance(result, dict) else None
 
     def handle_command_response(self, data: dict) -> None:
         """
@@ -1108,6 +1230,27 @@ class RemoteAgentManager:
             logger.warning(
                 "Received response for unknown request %s", request_id[:8] if request_id else "N/A"
             )
+        if request_id:
+            self._persist_command_response(request_id, data.get("result"))
+
+    def _persist_command_response(self, request_id: str, result: Any) -> None:
+        """Persist a command response for cross-pod waiters."""
+        try:
+            self.db.execute(
+                f"""
+                UPDATE remote_runtime_commands
+                SET status = {_param()}, response_payload = {_param()}, responded_at = {_param()}
+                WHERE command_id = {_param()}
+                """,
+                (
+                    "responded",
+                    json.dumps(result) if result is not None else None,
+                    datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                    request_id,
+                ),
+            )
+        except Exception as e:
+            logger.debug("Failed to persist command response %s: %s", request_id[:8], e)
 
     def store_browse_result(self, request_id: str, result: dict) -> None:
         """Store browse result from agent for later retrieval."""
@@ -1244,6 +1387,7 @@ class RemoteAgentManager:
         Limitation: If SSE disconnects for >3-5 minutes during high-frequency
         output (>5000 messages), old data will be trimmed and lost on reconnect.
         """
+        self._persist_output(session_id, output)
         with self._lock:
             if session_id not in self._output_buffers:
                 self._output_buffers[session_id] = deque(maxlen=self.MAX_BUFFER_SIZE)
@@ -1269,6 +1413,10 @@ class RemoteAgentManager:
         Returns:
             List of output entries (converted from deque slice).
         """
+        persisted = self._get_persisted_output(session_id, after_index=after_index)
+        if persisted:
+            return persisted
+
         with self._lock:
             buf: deque[dict] = self._output_buffers.get(session_id, deque())
             offset = self._buffer_offsets.get(session_id, 0)
@@ -1277,6 +1425,79 @@ class RemoteAgentManager:
             if effective_index >= len(buf):
                 return []
             return list(buf)[effective_index:]
+
+    def _persist_output(self, session_id: str, output: dict[str, Any]) -> None:
+        """Persist stream output for cross-pod SSE replay and restart recovery."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT COALESCE(MAX(event_index), 0) + 1 AS next_index
+                    FROM remote_runtime_outputs
+                    WHERE session_id = {_param()}
+                    """,
+                    (session_id,),
+                )
+                row = cursor.fetchone()
+                event_index = int(row["next_index"] if row else 1)
+                cursor.execute(
+                    f"""
+                    INSERT INTO remote_runtime_outputs
+                    (session_id, event_index, stream, payload, created_at, expires_at)
+                    VALUES ({_params(6)})
+                    """,
+                    (
+                        session_id,
+                        event_index,
+                        str(output.get("stream", "stdout")),
+                        json.dumps(output),
+                        now.isoformat(),
+                        (now + timedelta(seconds=self.OUTPUT_RETENTION_SECONDS)).isoformat(),
+                    ),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.debug("Failed to persist output for session %s: %s", session_id[:8], e)
+
+    def _get_persisted_output(self, session_id: str, after_index: int = 0) -> list[dict]:
+        """Read persisted output events after the delivered event index."""
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT event_index, payload
+                    FROM remote_runtime_outputs
+                    WHERE session_id = {_param()}
+                      AND event_index > {_param()}
+                      AND (expires_at IS NULL OR expires_at > {_param()})
+                    ORDER BY event_index ASC
+                    LIMIT {_param()}
+                    """,
+                    (
+                        session_id,
+                        max(0, after_index),
+                        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        self.MAX_BUFFER_SIZE,
+                    ),
+                )
+                rows = cursor.fetchall()
+        except Exception as e:
+            logger.debug("Failed to read persisted output for session %s: %s", session_id[:8], e)
+            return []
+
+        events: list[dict] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                payload.setdefault("event_index", row["event_index"])
+                events.append(payload)
+        return events
 
     def mark_session_ended(self, session_id: str) -> None:
         """Mark a session as ended (completed/stopped/error).
@@ -1290,7 +1511,20 @@ class RemoteAgentManager:
     def is_session_ended(self, session_id: str) -> bool:
         """Check if a session has ended (in-memory, no DB query)."""
         with self._lock:
-            return self._session_end_flags.get(session_id, False)
+            if self._session_end_flags.get(session_id, False):
+                return True
+        try:
+            row = self.db.fetch_one(
+                f"SELECT status FROM agent_sessions WHERE session_id = {_param()}",
+                (session_id,),
+            )
+        except Exception:
+            return False
+        if row and row.get("status") in ("completed", "error", "stopped"):
+            with self._lock:
+                self._session_end_flags[session_id] = True
+            return True
+        return False
 
     # ==================== SSE Last Delivered ====================
 
@@ -1688,78 +1922,6 @@ class RemoteAgentManager:
             "last_heartbeat": get_value("last_heartbeat"),
             "connected": self.is_connected(get_value("machine_id") or ""),
         }
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for remote agent manager tables."""
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""
-        CREATE TABLE IF NOT EXISTS remote_machines (
-            id {id_type},
-            machine_id TEXT NOT NULL UNIQUE,
-            machine_name TEXT NOT NULL,
-            hostname TEXT,
-            os_type TEXT,
-            os_version TEXT,
-            ip_address TEXT,
-            status TEXT DEFAULT 'offline',
-            agent_version TEXT,
-            capabilities TEXT,
-            cli_path TEXT,
-            work_dir TEXT,
-            tenant_id INTEGER,
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_heartbeat TIMESTAMP,
-            legacy_mode INTEGER DEFAULT 0
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS machine_assignments (
-            id {id_type},
-            machine_id TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            permission TEXT DEFAULT 'user',
-            granted_by INTEGER,
-            granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(machine_id, user_id)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS registration_tokens (
-            id {id_type},
-            token_hash TEXT NOT NULL UNIQUE,
-            tenant_id INTEGER NOT NULL,
-            created_by INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP,
-            is_consumed INTEGER DEFAULT 0,
-            consumed_at TIMESTAMP
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS agent_tokens (
-            id {id_type},
-            token_hash TEXT NOT NULL UNIQUE,
-            machine_id TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_revoked INTEGER DEFAULT 0,
-            revoked_at TIMESTAMP,
-            revoked_by INTEGER,
-            rotated_at TIMESTAMP
-        )
-        """,
-        # --- Indexes ---
-        "CREATE INDEX IF NOT EXISTS idx_remote_machines_machine_id ON remote_machines(machine_id)",
-        "CREATE INDEX IF NOT EXISTS idx_remote_machines_status ON remote_machines(status)",
-        "CREATE INDEX IF NOT EXISTS idx_remote_machines_hostname_tenant ON remote_machines(hostname, tenant_id)",
-        "CREATE INDEX IF NOT EXISTS idx_machine_assignments_user_id ON machine_assignments(user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_registration_tokens_hash ON registration_tokens(token_hash)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_tokens_machine ON agent_tokens(machine_id)",
-    ]
 
 
 # Global singleton

@@ -43,6 +43,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   openai: 'OpenAI',
   codex: 'Codex',
   zcode: 'ZCode',
+  dingtalk: 'DingTalk',
   run_shell_command: 'Shell',
 };
 

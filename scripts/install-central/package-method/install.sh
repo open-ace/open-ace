@@ -1263,7 +1263,7 @@ update_config_workspace() {
     if command -v python3 &>/dev/null; then
         # Use environment variables to pass values safely (avoids special character issues in heredoc)
         export _CONFIG_FILE="$config_file"
-        export _WS_ENABLED="$WORKSPACE_MULTI_USER_MODE"
+        export _WS_ENABLED="$WORKSPACE_ENABLED"
         export _WS_MULTI_USER="$WORKSPACE_MULTI_USER_MODE"
         export _WS_PORT_START="$WORKSPACE_PORT_RANGE_START"
         export _WS_PORT_END="$WORKSPACE_PORT_RANGE_END"
@@ -1380,7 +1380,8 @@ with open('$config_file', 'w') as f:
 SERVICE_PORT=""       # Web server port (will be read from config or use default)
 SERVICE_HOST="0.0.0.0" # Web server host
 
-# Multi-user workspace mode settings
+# Workspace configuration defaults
+WORKSPACE_ENABLED="true"
 WORKSPACE_MULTI_USER_MODE="true"
 WORKSPACE_PORT_RANGE_START="3100"
 WORKSPACE_PORT_RANGE_END="3200"
@@ -1403,6 +1404,8 @@ DATA_FILES=(
     "usage.db"
     "config.json"
     "feishu_users.json"
+    "dingtalk_users.json"
+    "dingtalk_groups.json"
     "upload_marker.json"
 )
 
@@ -2064,7 +2067,7 @@ ${line}"
         # authorization. Check the Cmnd_Alias definition line for each newer
         # CLI path; any missing one trips a rewrite.
         local cli_alias_line=""
-        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null)
+        cli_alias_line=$(grep "Cmnd_Alias OPENACE_CLI" "$sudoers_file" 2>/dev/null || true)
         if [ -n "$cli_alias_line" ]; then
             for cli in claude openclaw zcode; do
                 if ! echo "$cli_alias_line" | grep -qE "/${cli} \*"; then
@@ -2073,6 +2076,21 @@ ${line}"
                     break
                 fi
             done
+        fi
+
+        # 【修复 Issue #1522】Check env_keep contains GH_TOKEN and GIT_* vars.
+        # The env_keep list grew over time (Issue #1517 added GH_TOKEN/GIT_* vars).
+        # Without this check, incremental upgrades skip the rewrite when other
+        # checks pass, leaving GH_TOKEN missing and breaking autonomous dev
+        # workflows (gh issue view fails with "exit 4: populate the GH_TOKEN").
+        if ! grep -q "GH_TOKEN" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers env_keep missing GH_TOKEN (autonomous dev will fail)"
+            need_update=true
+        fi
+
+        if ! grep -q "GIT_AUTHOR_NAME" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers env_keep missing GIT_* vars (git commits may have wrong author)"
+            need_update=true
         fi
 
         # 【新增】Warn about sudoers vs systemd service user mismatch
@@ -2739,6 +2757,14 @@ detect_and_load_local_upgrade() {
         fi
         # Preserve config path for database configuration reuse
         EXISTING_CONFIG_PATH="$config_file"
+
+        # Read WORKSPACE_ENABLED from existing config (upgrade should respect original setting)
+        # Python prints True/False (capitalized), but shell expects true/false (lowercase)
+        local enabled=$(python3 -c "import json; c=json.load(open('$config_file')); print(c.get('workspace', {}).get('enabled', 'true'))" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [ -n "$enabled" ]; then
+            WORKSPACE_ENABLED="$enabled"
+            print_info "Read WORKSPACE_ENABLED=$WORKSPACE_ENABLED from existing config"
+        fi
 
         # Read WORKSPACE_MULTI_USER_MODE from existing config (upgrade should respect original setting)
         # Python prints True/False (capitalized), but shell expects true/false (lowercase)

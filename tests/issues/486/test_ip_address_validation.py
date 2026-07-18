@@ -284,16 +284,13 @@ class TestIPRegistrationIntegration(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        from app.modules.workspace.remote_agent_manager import (
-            RemoteAgentManager,
-            get_ddl_statements,
-        )
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+        from app.repositories.schema_init import load_schema_from_file
 
         self.db_file = tempfile.mktemp(suffix=".db")
         # Initialize database tables
         conn = sqlite3.connect(self.db_file)
-        for sql in get_ddl_statements():
-            conn.execute(sql)
+        load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
         conn.commit()
         conn.close()
 
@@ -377,17 +374,11 @@ class TestUpdateMachineIP(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        from app.modules.workspace.remote_agent_manager import (
-            RemoteAgentManager,
-            get_ddl_statements,
-        )
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+        from app.repositories.schema_init import load_schema_from_file
 
         self.db_file = tempfile.mktemp(suffix=".db")
-        conn = sqlite3.connect(self.db_file)
-        for sql in get_ddl_statements():
-            conn.execute(sql)
-        conn.commit()
-        conn.close()
+        load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
 
         self.mgr = RemoteAgentManager(db_path=self.db_file)
         # Register a test machine first
@@ -447,17 +438,11 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
         import sqlite3
         import tempfile
 
-        from app.modules.workspace.remote_agent_manager import (
-            RemoteAgentManager,
-            get_ddl_statements,
-        )
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+        from app.repositories.schema_init import load_schema_from_file
 
         self.db_file = tempfile.mktemp(suffix=".db")
-        conn = sqlite3.connect(self.db_file)
-        for sql in get_ddl_statements():
-            conn.execute(sql)
-        conn.commit()
-        conn.close()
+        load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
 
         self.mgr = RemoteAgentManager(db_path=self.db_file)
         # Register a test machine

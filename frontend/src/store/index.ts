@@ -157,7 +157,7 @@ export const useAppStore = create<AppState>()(
       showFileChangesPanel: true,
 
       // Feature flags
-      autonomousEnabled: false,
+      autonomousEnabled: true,
       modelGatewayEnabled: false,
       runTimelineEnabled: false,
       policyEnabled: false,

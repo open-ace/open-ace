@@ -531,7 +531,7 @@ def sync_remote():
     # Sync shared modules
     print("Syncing shared modules...")
     run_command(
-        f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py {user}@{host}:{remote_dir}/scripts/shared/"
+        f"rsync -avz scripts/shared/__init__.py scripts/shared/db.py scripts/shared/config.py scripts/shared/utils.py scripts/shared/feishu_user_cache.py scripts/shared/feishu_group_cache.py scripts/shared/dingtalk_user_cache.py scripts/shared/dingtalk_group_cache.py {user}@{host}:{remote_dir}/scripts/shared/"
     )
 
     # Sync main scripts

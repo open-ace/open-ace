@@ -18,6 +18,7 @@ interface LocalDirectoryBrowserProps {
   initialPath?: string;
   onSelectPath: (path: string) => void;
   onClose?: () => void;
+  listMaxHeight?: number | string;
 }
 
 const MAX_PATH_HISTORY = 5;
@@ -31,6 +32,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   initialPath,
   onSelectPath,
   onClose,
+  listMaxHeight = 300,
 }) => {
   const language = useLanguage();
 
@@ -311,7 +313,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         </div>
       )}
 
-      <div className="directory-list" style={{ maxHeight: '300px', overflow: 'auto' }}>
+      <div className="directory-list" style={{ maxHeight: listMaxHeight, overflow: 'auto' }}>
         {isLoading ? (
           <Loading size="sm" text={t('loading', language)} />
         ) : directories.length === 0 ? (

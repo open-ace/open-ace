@@ -148,7 +148,6 @@ class StateSyncManager:
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._running = False
-        self._ensure_tables()
 
     def _get_connection(self) -> Union[sqlite3.Connection, Any]:
         """Get database connection (SQLite or PostgreSQL)."""

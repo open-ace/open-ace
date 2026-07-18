@@ -1750,6 +1750,11 @@ table .latency-row:hover td {
   color: white;
 }
 
+.message-source.dingtalk {
+  background-color: #1677ff;
+  color: white;
+}
+
 .message-source.openclaw {
   background-color: var(--color-info);
   color: white;
@@ -3335,9 +3340,37 @@ table .latency-row:hover td {
 .work-main .prompts,
 .work-main .sessions,
 .work-main .usage-overview,
-.work-main .insights-report {
+.work-main .insights-report,
+.work-main .personal-files {
   padding: var(--spacing-md);
   overflow-y: auto;
+}
+
+.personal-files {
+  min-height: 0;
+}
+
+.personal-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.personal-files-header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.personal-files-browser {
+  max-width: 960px;
+}
+
+.personal-files .directory-list {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
 }
 
 /* Sessions page specific styles */
@@ -4339,6 +4372,14 @@ table .latency-row:hover td {
 
 /* Latency statistics cards on the conversation history page */
 [data-theme='dark'] .conversation-history .card.bg-light {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* API Key dialog — Advanced Settings panel (Issue #1739)
+   Bootstrap .bg-light stays #f8f9fa (white) in dark mode, making the
+   "Priority" / "Weight" labels appear on a white block inside the dark modal. */
+[data-theme='dark'] .api-key-advanced-settings.bg-light {
   background-color: var(--bg-secondary) !important;
   border-color: var(--border-color) !important;
 }

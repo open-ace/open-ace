@@ -74,6 +74,17 @@ export function useResetUserPassword() {
   });
 }
 
+export function useSyncFeishuOrg() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (tenantId?: number) => adminApi.syncFeishuOrg(tenantId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+  });
+}
+
 // Tenant Management Hooks
 export function useTenants() {
   return useQuery({

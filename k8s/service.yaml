@@ -9,6 +9,10 @@ metadata:
     app.kubernetes.io/component: service
 spec:
   type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
   ports:
     - port: 80
       targetPort: http
@@ -31,7 +35,7 @@ spec:
   type: ClusterIP
   clusterIP: None
   ports:
-    - port: 5001
+    - port: 19888
       targetPort: http
       protocol: TCP
       name: http
@@ -55,6 +59,9 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "openace_route"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "10800"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
   tls:

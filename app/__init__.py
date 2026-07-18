@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import uuid
+from urllib.parse import urlparse
 
 from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -27,6 +28,7 @@ REQUEST_ID_MAX_LENGTH = 128
 # C0 control chars (incl. CR/LF) + DEL. Stripped from the inbound X-Request-ID
 # to defeat header-injection (CRLF smuggling) and log-injection (log forging).
 _REQUEST_ID_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_LOCAL_CORS_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _sanitize_request_id(value: str | None) -> str:
@@ -41,6 +43,40 @@ def _sanitize_request_id(value: str | None) -> str:
         return ""
     cleaned = _REQUEST_ID_CONTROL_CHARS.sub("", value).strip()
     return cleaned[:REQUEST_ID_MAX_LENGTH]
+
+
+def _get_allowed_cors_origins() -> set[str]:
+    """Return explicitly allowed cross-origin API callers."""
+    raw_value = os.environ.get("OPENACE_CORS_ALLOWED_ORIGINS", "")
+    return {origin.strip() for origin in raw_value.split(",") if origin.strip()}
+
+
+def _is_allowed_local_webui_origin(origin: str) -> bool:
+    """Allow only loopback WebUI origins in the dev port range."""
+    try:
+        parsed = urlparse(origin)
+    except Exception:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    if parsed.hostname not in _LOCAL_CORS_HOSTS:
+        return False
+
+    if parsed.port is None:
+        return False
+
+    return 3100 <= parsed.port <= 3200
+
+
+def _is_allowed_cors_origin(origin: str) -> bool:
+    """Return whether an Origin should receive credentialed API CORS headers."""
+    if not origin:
+        return False
+    if origin in _get_allowed_cors_origins():
+        return True
+    return _is_allowed_local_webui_origin(origin)
 
 
 def create_app(config=None):
@@ -71,21 +107,16 @@ def create_app(config=None):
     # Load configuration
     app.config["TEMPLATES_AUTO_RELOAD"] = True
 
-    # SECRET_KEY configuration with security checks
-    secret_key = os.environ.get("SECRET_KEY")
-    if not secret_key:
-        flask_env = os.environ.get("FLASK_ENV", "development")
-        if flask_env == "production":
-            raise RuntimeError("SECRET_KEY environment variable must be set in production!")
-        secret_key = "dev-secret-key"
-        logger.warning("Using development SECRET_KEY - DO NOT use in production!")
-    app.config["SECRET_KEY"] = secret_key
-
     if config:
         if isinstance(config, dict):
             app.config.update(config)
         else:
             app.config.from_object(config)
+
+    from app.utils.security_env import get_secret_key_for_app
+
+    # SECRET_KEY configuration with security checks
+    app.config["SECRET_KEY"] = get_secret_key_for_app(app.config.get("SECRET_KEY"))
 
     # Register error handlers
     register_error_handlers(app)
@@ -154,35 +185,13 @@ def register_error_handlers(app):
     @app.after_request
     def add_cors_headers(response):
         """Add CORS headers for iframe integration with qwen-code-webui."""
-        # Allow requests from any origin for API routes (needed for iframe integration)
         if request.path.startswith("/api/"):
             origin = request.headers.get("Origin", "")
-            # In multi-user mode, webui instances run on different ports
-            # Allow localhost, 127.0.0.1, and workspace URL origins (any IP on port range)
-            if origin:
-                # Parse origin to check if it's from a valid webui port
-                from urllib.parse import urlparse
-
-                try:
-                    parsed = urlparse(origin)
-                    # Allow if:
-                    # 1. localhost or 127.0.0.1
-                    # 2. Same host as server but different port (workspace webui instances)
-                    if (
-                        parsed.hostname in ("localhost", "127.0.0.1")
-                        or parsed.port
-                        and 3100 <= parsed.port <= 3200
-                    ):
-                        response.headers["Access-Control-Allow-Origin"] = origin
-                        response.headers["Access-Control-Allow-Methods"] = (
-                            "GET, POST, PUT, DELETE, OPTIONS"
-                        )
-                        response.headers["Access-Control-Allow-Headers"] = (
-                            "Content-Type, Authorization"
-                        )
-                        response.headers["Access-Control-Allow-Credentials"] = "true"
-                except Exception:
-                    pass
+            if _is_allowed_cors_origin(origin):
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
 
     # Handle OPTIONS preflight requests for CORS
@@ -190,25 +199,13 @@ def register_error_handlers(app):
     def handle_options(path):
         """Handle CORS preflight requests."""
         origin = request.headers.get("Origin", "")
-        if origin:
-            from urllib.parse import urlparse
-
-            try:
-                parsed = urlparse(origin)
-                # Allow localhost, 127.0.0.1, or any origin from workspace port range
-                if parsed.hostname in ("localhost", "127.0.0.1") or (
-                    parsed.port and 3100 <= parsed.port <= 3200
-                ):
-                    response = jsonify({"status": "ok"})
-                    response.headers["Access-Control-Allow-Origin"] = origin
-                    response.headers["Access-Control-Allow-Methods"] = (
-                        "GET, POST, PUT, DELETE, OPTIONS"
-                    )
-                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-                    response.headers["Access-Control-Allow-Credentials"] = "true"
-                    return response
-            except Exception:
-                logger.debug("Failed to parse CORS origin header", exc_info=True)
+        if _is_allowed_cors_origin(origin):
+            response = jsonify({"status": "ok"})
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
         return jsonify({"status": "ok"}), 200
 
     @app.errorhandler(HTTPException)
@@ -334,7 +331,7 @@ def start_background_services():
         else:
             logger.info("Autonomous scheduler disabled by configuration")
             logger.info(
-                "To enable: set autonomous.enabled=true in config.json and restart the server"
+                "To enable it again: set autonomous.enabled=true in config.json and restart the server"
             )
     except Exception as e:
         logger.warning(f"Failed to start autonomous scheduler: {e}")

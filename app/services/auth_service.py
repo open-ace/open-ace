@@ -20,18 +20,6 @@ _security_settings_cache: dict = {}  # {"settings": dict, "timestamp": float}
 _SECURITY_SETTINGS_TTL = 60  # seconds
 
 
-def get_ddl_statements():
-    """Return DDL statements for login_attempts table."""
-    return [
-        """CREATE TABLE IF NOT EXISTS login_attempts (
-            username VARCHAR(255) PRIMARY KEY,
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            locked_until TIMESTAMP
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)",
-    ]
-
-
 def _get_security_settings() -> dict:
     """Get security settings with a 60-second in-memory cache."""
     now = time.time()

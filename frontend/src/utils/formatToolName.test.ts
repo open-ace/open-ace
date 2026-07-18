@@ -13,6 +13,7 @@ describe('formatToolName', () => {
     expect(formatToolName('openai')).toBe('OpenAI');
     expect(formatToolName('codex')).toBe('Codex');
     expect(formatToolName('zcode')).toBe('ZCode');
+    expect(formatToolName('dingtalk')).toBe('DingTalk');
     expect(formatToolName('run_shell_command')).toBe('Shell');
   });
 
@@ -45,6 +46,7 @@ describe('TOOL_DISPLAY_NAMES', () => {
     expect(TOOL_DISPLAY_NAMES).toHaveProperty('openai');
     expect(TOOL_DISPLAY_NAMES).toHaveProperty('codex');
     expect(TOOL_DISPLAY_NAMES).toHaveProperty('zcode');
+    expect(TOOL_DISPLAY_NAMES).toHaveProperty('dingtalk');
     expect(TOOL_DISPLAY_NAMES).toHaveProperty('run_shell_command');
   });
 });

@@ -3,8 +3,8 @@ Unit tests that verify the security model documented in docs/en/SECURITY.md.
 
 These tests assert the concrete, auditable guarantees the documentation makes:
   - API keys / SMTP passwords are Fernet-encrypted (AES-128-CBC + HMAC-SHA256).
-  - The encryption key is derived via SHA-256 from OPENACE_ENCRYPTION_KEY or
-    SECRET_KEY and is never the raw value.
+  - The encryption key is derived via SHA-256 from OPENACE_ENCRYPTION_KEY and is
+    never the raw value; development fallback stays separate from SECRET_KEY.
   - Only a SHA-256 hash of a registration token is stored; tokens are one-time
     use with a 1-hour TTL.
   - Proxy tokens are HMAC-SHA256 signed and expire; tampering invalidates them.
@@ -101,22 +101,24 @@ def proxy_service(tmp_path, monkeypatch):
 @pytest.fixture
 def manager(tmp_path):
     """A RemoteAgentManager backed by a temp SQLite database."""
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+    from app.repositories.schema_init import load_schema_from_file
 
     db_path = str(tmp_path / "test_agent.db")
     mgr = RemoteAgentManager(db_path=db_path)
-    with mgr.db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception as exc:
-                # Tolerate idempotent re-runs (table/column already exists)
-                # but surface anything that would mask real schema drift.
-                msg = str(exc).lower()
-                if "already exists" not in msg and "duplicate column" not in msg:
-                    raise
-        conn.commit()
+    load_schema_from_file(db_url=mgr.db.db_url, dialect="sqlite")
+    return mgr
+
+
+@pytest.fixture
+def session_manager(tmp_path):
+    """A SessionManager backed by a temp SQLite database."""
+    from app.modules.workspace.session_manager import SessionManager
+    from app.repositories.schema_init import load_schema_from_file
+
+    db_path = str(tmp_path / "test_session.db")
+    mgr = SessionManager(db_path=db_path)
+    load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
     return mgr
 
 
@@ -167,14 +169,15 @@ class TestApiEncryption:
 
         Fernet(fernet_key)  # does not raise
 
-    def test_secret_key_fallback(self, monkeypatch):
-        """When OPENACE_ENCRYPTION_KEY is unset, SECRET_KEY is used."""
+    def test_dev_fallback_is_independent_from_secret_key(self, monkeypatch):
+        """Development fallback must not derive encryption from SECRET_KEY."""
         from app.modules.workspace import api_key_proxy as akp
 
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
         monkeypatch.setenv("SECRET_KEY", "flask-secret")
+        monkeypatch.setenv("FLASK_ENV", "development")
         svc = akp.APIKeyProxyService.__new__(akp.APIKeyProxyService)
-        assert svc._get_encryption_key() == hashlib.sha256(b"flask-secret").digest()
+        assert svc._get_encryption_key() == hashlib.sha256(b"openace-dev-encryption-key").digest()
 
     def test_tampered_ciphertext_is_rejected(self, proxy_service):
         """Fernet's HMAC must catch tampering (integrity guarantee)."""
@@ -269,6 +272,24 @@ class TestRegistrationTokens:
 class TestProxyTokens:
     """SECURITY.md §6.2 — proxy tokens are HMAC-signed and expire."""
 
+    def test_default_ttl_is_shorter_than_24_hours_and_configurable(
+        self, proxy_service, monkeypatch
+    ):
+        monkeypatch.setenv("OPENACE_PROXY_TOKEN_TTL_MINUTES", "30")
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-ttl",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+        )
+        payload = proxy_service.validate_proxy_token(token)
+        assert payload is not None
+        exp = datetime.fromisoformat(payload["exp"])
+        remaining = exp - datetime.now(timezone.utc).replace(tzinfo=None)
+        assert remaining <= timedelta(minutes=31)
+        assert proxy_service.DEFAULT_PROXY_TOKEN_TTL_MINUTES < 1440
+
     def test_token_has_payload_and_signature(self, proxy_service):
         token = proxy_service.generate_proxy_token(
             user_id=1,
@@ -292,7 +313,7 @@ class TestProxyTokens:
             session_id="sess-1",
             tenant_id=1,
             provider="openai",
-            session_type="terminal",  # skips the active-session DB check
+            session_type="ha_pool",
         )
         payload = proxy_service.validate_proxy_token(token)
         assert payload is not None
@@ -304,7 +325,7 @@ class TestProxyTokens:
             session_id="sess-1",
             tenant_id=1,
             provider="openai",
-            session_type="terminal",
+            session_type="ha_pool",
         )
         payload_b64, _sig = token.split(".")
         forged = f"{payload_b64}.{'0' * 64}"
@@ -319,6 +340,30 @@ class TestProxyTokens:
             session_type="terminal",
             expires_minutes=-10,  # already expired
         )
+        assert proxy_service.validate_proxy_token(token) is None
+
+    def test_single_use_token_replay_rejected(self, proxy_service):
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-single",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+            extra_payload={"single_use": True},
+        )
+        assert proxy_service.validate_proxy_token(token) is not None
+        assert proxy_service.validate_proxy_token(token) is None
+
+    def test_session_revocation_blocks_multi_use_token(self, proxy_service):
+        token = proxy_service.generate_proxy_token(
+            user_id=1,
+            session_id="sess-revoke",
+            tenant_id=1,
+            provider="openai",
+            session_type="ha_pool",
+        )
+        assert proxy_service.validate_proxy_token(token) is not None
+        assert proxy_service.revoke_proxy_tokens_for_session("sess-revoke") >= 1
         assert proxy_service.validate_proxy_token(token) is None
 
     def test_wrong_key_rejects_token(self, proxy_service, monkeypatch):

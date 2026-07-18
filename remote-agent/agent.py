@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -778,9 +779,14 @@ class RemoteAgent:
         logger.info("Starting terminal %s: work_dir=%s", terminal_id[:8], work_dir)
 
         # Apply CLI settings before starting terminal
-        # (non-sensitive config only; API credentials are set via env vars)
+        # Windows UWP: Codex desktop cannot read system environment variables.
+        # Use experimental_bearer_token in config.toml instead of env_key.
+        codex_token = None
+        if os.name == "nt" and openai_token:
+            codex_token = openai_token
+
         if cli_settings:
-            self._apply_cli_settings(cli_settings)
+            self._apply_cli_settings(cli_settings, codex_bearer_token=codex_token)
 
         # Stop existing terminal with same ID if any
         if terminal_id in self._terminal_processes:
@@ -1817,15 +1823,36 @@ class RemoteAgent:
 
     def _read_terminal_port(self, proc: subprocess.Popen, terminal_id: str) -> int | None:
         """Read the port number from terminal server's READY:port stdout."""
-        import select as _select
-
         try:
-            # Use select to avoid blocking indefinitely
-            ready, _, _ = _select.select([proc.stdout], [], [], 10.0)
-            if not ready:
+            if proc.stdout is None:
+                logger.warning("Terminal process %s has no stdout pipe", terminal_id[:8])
+                return None
+
+            result: dict[str, str | Exception] = {}
+            ready = threading.Event()
+
+            def _reader() -> None:
+                try:
+                    raw = proc.stdout.readline()
+                    if isinstance(raw, bytes):
+                        result["line"] = raw.decode(errors="replace").strip()
+                    else:
+                        result["line"] = raw.strip()
+                except Exception as exc:  # pragma: no cover - defensive
+                    result["error"] = exc
+                finally:
+                    ready.set()
+
+            threading.Thread(target=_reader, daemon=True).start()
+            if not ready.wait(10.0):
                 logger.warning("Timeout waiting for terminal port from %s", terminal_id[:8])
                 return None
-            line = proc.stdout.readline().decode().strip()
+
+            error = result.get("error")
+            if isinstance(error, Exception):
+                raise error
+
+            line = str(result.get("line") or "")
             if line.startswith("READY:"):
                 return int(line.split(":")[1])
         except Exception as e:
@@ -1883,7 +1910,11 @@ class RemoteAgent:
         )
         return bool(hostname_pattern.match(hostname))
 
-    def _apply_cli_settings(self, cli_settings: dict[str, Any]) -> None:
+    def _apply_cli_settings(
+        self,
+        cli_settings: dict[str, Any],
+        codex_bearer_token: str | None = None,
+    ) -> None:
         """
         Write config files for configured CLI tools.
 
@@ -1894,12 +1925,19 @@ class RemoteAgent:
         Args:
             cli_settings: Dict with tool_name -> settings mapping
                          e.g., {"claude-code": {...}, "qwen-code": {...}}
+            codex_bearer_token: Optional bearer token for Codex on Windows UWP.
+                When provided, Codex config uses ``experimental_bearer_token``
+                instead of ``env_key`` to bypass UWP environment variable restrictions.
         """
         if not cli_settings:
             return
 
         proxy_base_url = f"{self.config.server_url.rstrip('/')}/api/remote/llm-proxy/v1"
-        apply_cli_settings(cli_settings, proxy_base_url=proxy_base_url)
+        apply_cli_settings(
+            cli_settings,
+            proxy_base_url=proxy_base_url,
+            codex_bearer_token=codex_bearer_token,
+        )
 
     # ----------------------------------------------------------------
     # Shutdown

@@ -126,6 +126,15 @@ POST /api/auth/change-password
 
 Change the current user's password.
 
+When a user is marked with `must_change_password=true`, the server blocks access to most protected endpoints until the password is changed. During that state, only the minimum required endpoints remain available:
+
+- `GET /api/auth/check`
+- `GET /api/auth/me`
+- `GET /api/auth/profile`
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+- `GET /api/password-policy`
+
 **Request Body:**
 ```json
 {
@@ -269,6 +278,44 @@ Update a user's token/request quotas.
   "monthly_request_quota": 10000    // optional
 }
 ```
+
+---
+
+### Sync Feishu Organization
+
+```
+POST /api/admin/feishu/sync
+```
+
+Manually sync Feishu departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `feishu.org_sync_tenant_id`.
+
+---
+
+### Sync DingTalk Organization
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+Manually sync DingTalk departments and users into local teams, users, memberships, and SSO identity links.
+
+**Request Body:**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` is optional and defaults to the configured `dingtalk.org_sync_tenant_id`.
 
 ---
 
@@ -1117,6 +1164,14 @@ Get ROI metrics for a period.
 - `end_date` - End date
 - `user_id` - Filter by user ID
 - `tool_name` - Filter by tool name
+- `hourly_labor_cost` - Optional positive labor-cost assumption used for savings estimates
+- `productivity_multiplier` - Optional positive planning multiplier for productivity gain
+- `avg_time_saved_per_request` - Optional positive minutes-saved assumption per request
+- `currency` - Optional 1-8 character currency label for the planning assumptions
+
+**Notes:**
+- ROI values are planning estimates derived from configurable assumptions, not verified realized savings.
+- Changing `currency` labels the labor-cost assumption; it does not convert provider costs with FX rates.
 
 ---
 
@@ -1128,6 +1183,8 @@ GET /api/roi/trend
 
 Get ROI trend over months.
 
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
+
 ---
 
 ### ROI by Tool
@@ -1138,6 +1195,8 @@ GET /api/roi/by-tool
 
 Get ROI breakdown by tool.
 
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
+
 ---
 
 ### ROI by User
@@ -1147,6 +1206,8 @@ GET /api/roi/by-user
 ```
 
 Get ROI breakdown by user.
+
+Supports the same optional ROI assumption query parameters as `GET /api/roi`.
 
 ---
 
@@ -1177,6 +1238,8 @@ GET /api/roi/summary
 ```
 
 Get ROI summary statistics.
+
+Supports the same optional ROI assumption query parameters as `GET /api/roi` and returns the active assumptions in the response payload.
 
 ---
 
@@ -1441,6 +1504,11 @@ POST /api/sso/providers
 ```
 
 Register a new SSO provider (admin only).
+Provider secrets are encrypted before they are persisted.
+For SAML providers, use `provider_type: "saml"` with `client_id` as the SP entity ID,
+`authorization_url` or `extra_params.idp_metadata_url`, `redirect_uri` as the ACS URL,
+and `extra_params.idp_x509_cert` or `extra_params.idp_metadata_xml` for IdP signature
+verification. SAML providers do not require `client_secret`.
 
 ---
 
@@ -1461,6 +1529,8 @@ GET /api/sso/login/<provider_name>
 ```
 
 Start SSO login flow.
+OAuth2/OIDC providers use PKCE and bind the verifier to the callback state.
+SAML providers generate an AuthnRequest and bind `RelayState` to the stored request ID.
 
 ---
 
@@ -1471,6 +1541,26 @@ GET /api/sso/callback/<provider_name>
 ```
 
 Handle SSO callback.
+
+---
+
+### SAML Metadata
+
+```
+GET /api/sso/providers/<provider_name>/metadata
+```
+
+Return Service Provider metadata XML for configuring a SAML IdP.
+
+---
+
+### SAML ACS
+
+```
+POST /api/sso/acs/<provider_name>
+```
+
+Handle SAML HTTP-POST ACS callbacks containing `SAMLResponse` and `RelayState`.
 
 ---
 

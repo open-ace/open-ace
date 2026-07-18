@@ -732,11 +732,23 @@ class AutonomousOrchestrator:
             # service user can't stat it directly), so it's correct both for
             # same-user dev runs and the multi-user deployment.
             chosen = project_path
+            path_check_result = "skipped"
             if worktree_path:
                 probe = GitHubOps(project_path, system_account=system_account)
-                if probe.path_exists_as_user(worktree_path, dir_only=True):
+                path_check_passed = probe.path_exists_as_user(worktree_path, dir_only=True)
+                path_check_result = "passed" if path_check_passed else "failed"
+                if path_check_passed:
                     chosen = worktree_path
             self._gh = GitHubOps(chosen, system_account=system_account)
+            # Issue #1736: Log binding decision for observability
+            logger.info(
+                "_get_gh binding: workflow=%s chosen=%s worktree=%s project=%s path_check=%s",
+                self._workflow_id[:8],
+                "worktree" if chosen == worktree_path else "main_repo",
+                worktree_path,
+                project_path,
+                path_check_result,
+            )
 
             # Issue #1573: Verify branch consistency after binding to worktree
             if chosen != project_path and worktree_path:  # Bound to worktree, not main repo
@@ -4780,13 +4792,20 @@ class AutonomousOrchestrator:
             # P1 修复（Issue #1611）：检查当前分支是否与预期一致
             current_branch = gh.get_current_branch()
             if branch_name and current_branch != branch_name:
+                logger.error(
+                    "Branch mismatch before push: workflow=%s expected=%s actual=%s",
+                    self._workflow_id[:8],
+                    branch_name,
+                    current_branch,
+                )
                 raise RuntimeError(
-                    f"Workflow branch changed unexpectedly before push: "
-                    f"expected {branch_name}, actual {current_branch}"
+                    f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
                 )
             gh.git_push(branch=branch_name)
         except Exception as e:
-            logger.warning("Failed to push branch %s: %s", branch_name, e)
+            logger.error("Failed to push branch %s: %s", branch_name, e, exc_info=True)
+            # 推送失败必须阻止后续 PR 创建，避免 "No commits" 错误 (Issue #1736)
+            raise RuntimeError(f"Branch push failed before PR creation: {e}") from e
 
         # Create PR on first round
         if round_num == 1:
@@ -4995,6 +5014,22 @@ class AutonomousOrchestrator:
             )
 
         if (review_passed and not force_full_rounds) or at_cap:
+            # Check CI status before proceeding to report phase (Issue #1662)
+            # If CI failed, enter CI repair loop instead of reporting
+            if ci_failures:
+                self._create_milestone(
+                    phase="pr_review",
+                    dev_round=dev_round,
+                    round_number=round_num,
+                    milestone_type="ci_failed_before_report",
+                    status="completed",
+                    title=f"CI failed after review passed: {len(ci_failures)} checks",
+                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
+                )
+                # Reuse merge-phase CI repair loop
+                self._start_ci_repair_round(wf, pr_number, ci_failures)
+                return
+
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback

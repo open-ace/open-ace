@@ -5,13 +5,21 @@ import pytest
 from app.repositories.project_repo import ProjectRepository
 
 
-def _insert_user(tmp_db, username="testuser", email=None):
+def _ensure_tenant(tmp_db, tenant_id):
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (tenant_id, f"Tenant {tenant_id}", f"tenant-{tenant_id}", "{}"),
+    )
+
+
+def _insert_user(tmp_db, username="testuser", email=None, tenant_id=1):
     """Insert a user row for foreign key references."""
+    _ensure_tenant(tmp_db, tenant_id)
     if email is None:
         email = f"{username}@example.com"
     cursor = tmp_db.execute(
-        "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-        (username, email, "hashed_pw", "user"),
+        "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
+        (username, email, "hashed_pw", "user", tenant_id),
     )
     return cursor.lastrowid
 
@@ -87,6 +95,31 @@ class TestProjectCRUD:
         project = repo.get_project_by_path("/projects/unique-path")
         assert project is not None
         assert project.name == "Path Project"
+
+    def test_same_path_allowed_across_tenants(self, tmp_db):
+        """Active project paths are unique per tenant, not globally."""
+        repo = ProjectRepository(db=tmp_db)
+        user_a = _insert_user(tmp_db, username="tenant_a_user", tenant_id=1)
+        user_b = _insert_user(tmp_db, username="tenant_b_user", tenant_id=2)
+
+        first_id = repo.create_project(
+            path="/projects/shared-path",
+            name="Tenant A",
+            created_by=user_a,
+            tenant_id=1,
+        )
+        second_id = repo.create_project(
+            path="/projects/shared-path",
+            name="Tenant B",
+            created_by=user_b,
+            tenant_id=2,
+        )
+
+        assert first_id is not None
+        assert second_id is not None
+        assert first_id != second_id
+        assert repo.get_project_by_path("/projects/shared-path", tenant_id=1).id == first_id
+        assert repo.get_project_by_path("/projects/shared-path", tenant_id=2).id == second_id
 
     def test_get_project_not_found(self, tmp_db):
         """Getting nonexistent project returns None."""
@@ -344,6 +377,28 @@ class TestUserProject:
 
         projects = repo.get_user_projects(user_id)
         assert len(projects) == 2
+
+    def test_get_user_projects_filters_by_tenant(self, tmp_db):
+        """Tenant scope excludes projects from other tenants."""
+        repo = ProjectRepository(db=tmp_db)
+        user_id = _insert_user(tmp_db, username="scoped_user", tenant_id=1)
+        other_user_id = _insert_user(tmp_db, username="other_scoped_user", tenant_id=2)
+
+        tenant_one_project = repo.create_project(
+            path="/projects/tenant-one",
+            created_by=user_id,
+            tenant_id=1,
+        )
+        tenant_two_project = repo.create_project(
+            path="/projects/tenant-two",
+            created_by=other_user_id,
+            tenant_id=2,
+        )
+        repo.add_user_project(user_id, tenant_one_project)
+        repo.add_user_project(user_id, tenant_two_project)
+
+        scoped = repo.get_user_projects(user_id, tenant_id=1)
+        assert [project.id for project in scoped] == [tenant_one_project]
 
     def test_get_all_projects(self, tmp_db):
         """Get all projects with optional filters."""

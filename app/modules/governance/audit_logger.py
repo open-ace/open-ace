@@ -112,6 +112,7 @@ class AuditLog:
     session_id: Optional[str] = None
     success: bool = True
     error_message: Optional[str] = None
+    tenant_id: Optional[int] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -130,6 +131,7 @@ class AuditLog:
             "session_id": self.session_id,
             "success": self.success,
             "error_message": self.error_message,
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -158,6 +160,7 @@ class AuditLog:
             session_id=data.get("session_id"),
             success=data.get("success", True),
             error_message=data.get("error_message"),
+            tenant_id=data.get("tenant_id"),
         )
 
     @staticmethod
@@ -217,6 +220,34 @@ class AuditLogger:
         self.db = db or Database()
         # Table structure managed by Alembic migrations
 
+    @staticmethod
+    def _normalize_tenant_id(value: Any) -> Optional[int]:
+        """Normalize a tenant identifier to a positive integer."""
+        if value in (None, "", 0, "0"):
+            return None
+        try:
+            tenant_id = int(value)
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    def _resolve_tenant_id(
+        self, tenant_id: Optional[int] = None, user_id: Optional[int] = None
+    ) -> Optional[int]:
+        """Resolve tenant scope from an explicit tenant_id or a user record."""
+        normalized = self._normalize_tenant_id(tenant_id)
+        if normalized is not None or not user_id:
+            return normalized
+
+        try:
+            row = self.db.fetch_one("SELECT tenant_id FROM users WHERE id = ?", (user_id,))
+        except Exception:
+            return None
+
+        if not row:
+            return None
+        return self._normalize_tenant_id(row.get("tenant_id"))
+
     def log(
         self,
         action: str,
@@ -232,6 +263,7 @@ class AuditLogger:
         success: bool = True,
         error_message: Optional[str] = None,
         resource_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> bool:
         """
         Log an audit event.
@@ -263,6 +295,7 @@ class AuditLogger:
                 details = dict(details or {})
                 details.setdefault("resource_name", resource_name)
             details_json = json.dumps(details) if details else None
+            effective_tenant_id = self._resolve_tenant_id(tenant_id=tenant_id, user_id=user_id)
 
             with self.db.connection() as conn:
                 cursor = conn.cursor()
@@ -272,8 +305,8 @@ class AuditLogger:
                     INSERT INTO audit_logs
                     (timestamp, user_id, username, action, severity, resource_type,
                      resource_id, details, ip_address, user_agent, session_id,
-                     success, error_message)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     success, error_message, tenant_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
                     ),
                     (
@@ -290,6 +323,7 @@ class AuditLogger:
                         session_id,
                         adapt_boolean_value(success),
                         error_message,
+                        effective_tenant_id,
                     ),
                 )
                 conn.commit()
@@ -340,6 +374,7 @@ class AuditLogger:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         success: Optional[bool] = None,
+        tenant_id: Optional[int] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditLog]:
@@ -396,6 +431,14 @@ class AuditLogger:
             conditions.append("success = ?")
             params.append(adapt_boolean_value(success))
 
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append(
+                "(tenant_id = ? OR (tenant_id IS NULL AND user_id IN "
+                "(SELECT id FROM users WHERE tenant_id = ?)))"
+            )
+            params.extend([normalized_tenant_id, normalized_tenant_id])
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         query = f"""
@@ -422,6 +465,7 @@ class AuditLogger:
         severity: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        tenant_id: Optional[int] = None,
     ) -> int:
         """
         Count audit logs matching filters.
@@ -469,6 +513,14 @@ class AuditLogger:
             conditions.append("timestamp <= ?")
             params.append(end_time)
 
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append(
+                "(tenant_id = ? OR (tenant_id IS NULL AND user_id IN "
+                "(SELECT id FROM users WHERE tenant_id = ?)))"
+            )
+            params.extend([normalized_tenant_id, normalized_tenant_id])
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         query = f"SELECT COUNT(*) as count FROM audit_logs WHERE {where_clause}"
@@ -479,7 +531,9 @@ class AuditLogger:
             logger.error(f"Failed to count audit logs: {e}")
             return 0
 
-    def get_user_activity(self, user_id: int, days: int = 30) -> dict[str, Any]:
+    def get_user_activity(
+        self, user_id: int, days: int = 30, tenant_id: Optional[int] = None
+    ) -> dict[str, Any]:
         """
         Get activity summary for a user.
 
@@ -492,7 +546,12 @@ class AuditLogger:
         """
         start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-        logs = self.query(user_id=user_id, start_time=start_time, limit=1000)
+        logs = self.query(
+            user_id=user_id,
+            start_time=start_time,
+            tenant_id=tenant_id,
+            limit=1000,
+        )
 
         # Group by action
         action_counts: dict[str, int] = {}
@@ -538,6 +597,7 @@ class AuditLogger:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         format: str = "json",
+        tenant_id: Optional[int] = None,
     ) -> str:
         """
         Export audit logs for compliance reporting.
@@ -550,7 +610,12 @@ class AuditLogger:
         Returns:
             str: Exported data as string.
         """
-        logs = self.query(start_time=start_time, end_time=end_time, limit=10000)
+        logs = self.query(
+            start_time=start_time,
+            end_time=end_time,
+            tenant_id=tenant_id,
+            limit=10000,
+        )
 
         if format == "json":
             return json.dumps([log.to_dict() for log in logs], indent=2, default=str)
@@ -605,41 +670,6 @@ class AuditLogger:
             return output.getvalue()
         else:
             raise ValueError(f"Unsupported format: {format}")
-
-
-def get_ddl_statements() -> list[str]:
-    """Return DDL statements for audit_logs table.
-
-    This function is called by schema_init.ensure_all_tables() at app startup
-    to ensure the audit_logs table exists, regardless of whether Alembic
-    migrations have been run.
-    """
-    from app.repositories.database import is_postgresql
-
-    id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    return [
-        f"""CREATE TABLE IF NOT EXISTS audit_logs (
-            id {id_type},
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            username TEXT,
-            action TEXT NOT NULL,
-            severity TEXT DEFAULT 'info',
-            resource_type TEXT,
-            resource_id TEXT,
-            details TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            session_id TEXT,
-            success INTEGER DEFAULT 1,
-            error_message TEXT
-        )""",
-        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs (user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_logs (resource_type, resource_id)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_severity ON audit_logs (severity)",
-    ]
 
 
 def get_action_categories() -> dict[str, dict[str, Any]]:

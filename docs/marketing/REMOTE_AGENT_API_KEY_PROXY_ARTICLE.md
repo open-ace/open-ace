@@ -10,7 +10,7 @@ The key mechanism is Remote Agent plus API Key proxy:
 
 - The AI CLI runs near the code, terminal, and development environment.
 - The real API key stays on the Open ACE server.
-- The remote agent receives a scoped, short-lived proxy token.
+- The remote agent receives a scoped, short-lived proxy token that the server can revoke.
 - Model calls flow through Open ACE, where quota, audit, and usage tracking can happen.
 
 ## The Team Adoption Problem
@@ -69,7 +69,7 @@ Open ACE Server
 LLM Provider
 ```
 
-The important detail: the remote agent does not need the real provider API key. It needs a proxy token that Open ACE can validate, scope, expire, and audit.
+The important detail: the remote agent does not need the real provider API key. It needs a proxy token that Open ACE can validate, scope, expire, revoke, and audit.
 
 ## Request Flow
 
@@ -78,10 +78,10 @@ The important detail: the remote agent does not need the real provider API key. 
 3. A remote machine is registered with Open ACE through Remote Agent.
 4. A user starts a remote AI session from the browser.
 5. Open ACE authorizes the user, machine, tool, provider, and session.
-6. Open ACE issues a scoped proxy token to the remote session.
+6. Open ACE issues a scoped proxy token to the remote session and records its server-side `jti`.
 7. The AI CLI runs on the remote machine.
 8. When the CLI needs to call a model, the request goes through the Open ACE LLM proxy.
-9. Open ACE validates the proxy token, checks quota, resolves the real API key, forwards the request, and records usage.
+9. Open ACE validates the proxy token, checks quota and session lifecycle, resolves the real API key, forwards the request, and records usage.
 
 This lets the CLI operate in the right execution environment while governance stays centralized.
 
@@ -89,7 +89,7 @@ This lets the CLI operate in the right execution environment while governance st
 
 ### 1. Secret Containment
 
-Real API keys stay on the Open ACE server. Remote machines receive proxy tokens instead of long-lived provider keys.
+Real API keys stay on the Open ACE server. Remote machines receive revocable proxy tokens instead of long-lived provider keys.
 
 This reduces the blast radius of a remote machine compromise and makes key rotation simpler.
 
@@ -131,7 +131,7 @@ Remote work is not only about model calls. Developers also need to interact with
 
 Open ACE's remote workspace direction includes:
 
-- browser terminal through WebSocket PTY
+- browser terminal through WebSocket with PTY on Linux/macOS and a piped subprocess on Windows
 - terminal reconnect and screen recovery
 - remote directory browsing
 - code-server/VSCode proxy support

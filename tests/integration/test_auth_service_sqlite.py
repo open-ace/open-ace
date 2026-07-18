@@ -1,6 +1,6 @@
 """Integration tests for auth_service against real SQLite database.
 
-Tests DDL creation, login lockout recording, and clearing of failed logins.
+Tests login lockout recording, and clearing of failed logins.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -13,64 +13,13 @@ from app.services.auth_service import (
     _check_login_lockout,
     _clear_failed_logins,
     _record_failed_login,
-    get_ddl_statements,
 )
-
-
-class TestDDL:
-    """Tests for DDL statement creation."""
-
-    def test_ddl_statements_create_tables(self, tmp_db):
-        """Verify DDL statements can create login_attempts table."""
-        ddl = get_ddl_statements()
-        assert len(ddl) >= 1
-
-        # Execute DDL
-        conn = tmp_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
-
-        # Verify table exists
-        assert tmp_db.table_exists("login_attempts") is True
-
-    def test_ddl_idempotent(self, tmp_db):
-        """DDL can be run multiple times without error."""
-        ddl = get_ddl_statements()
-
-        conn = tmp_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-            # Run again
-            for sql in ddl:
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
-
-        assert tmp_db.table_exists("login_attempts") is True
 
 
 class TestLoginLockout:
     """Tests for login lockout via login_attempts table."""
 
-    def _setup_login_attempts(self, tmp_db):
-        """Create the login_attempts table for testing."""
-        conn = tmp_db.get_connection()
-        try:
-            cursor = conn.cursor()
-            for sql in get_ddl_statements():
-                cursor.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
+    # login_attempts table is created by tmp_db fixture via load_schema_from_file()
 
     def _patch_db(self, tmp_db):
         """Patch Database() to use tmp_db's SQLite path.
@@ -85,7 +34,6 @@ class TestLoginLockout:
 
     def test_no_lockout_initially(self, tmp_db):
         """New username has no lockout."""
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
@@ -95,7 +43,6 @@ class TestLoginLockout:
 
     def test_record_failed_login_increments(self, tmp_db):
         """Recording failed login creates/increments attempt_count."""
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
@@ -116,7 +63,6 @@ class TestLoginLockout:
         a file (~/.open-ace/governance_settings.json).  We read the
         effective threshold to make the test environment-agnostic.
         """
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
@@ -135,7 +81,6 @@ class TestLoginLockout:
 
     def test_no_lockout_before_threshold(self, tmp_db):
         """Account is NOT locked before reaching max attempts."""
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
@@ -148,7 +93,6 @@ class TestLoginLockout:
 
     def test_clear_failed_logins(self, tmp_db):
         """Clearing failed logins removes the record."""
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         with self._patch_db(tmp_db):
@@ -172,7 +116,6 @@ class TestLoginLockout:
 
     def test_expired_lockout_allows_login(self, tmp_db):
         """Expired lockout is auto-cleaned and allows login."""
-        self._setup_login_attempts(tmp_db)
         auth_service._security_settings_cache.clear()
 
         # Manually insert an expired lockout

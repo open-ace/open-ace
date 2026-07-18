@@ -2,7 +2,7 @@
 Open ACE - User Tool Account Model
 
 Model for mapping users to their tool accounts (sender_name in different tools).
-Supports multi-source accounts: Slack, Feishu, Qwen, Claude, Openclaw, etc.
+Supports multi-source accounts: Slack, Feishu, DingTalk, Qwen, Claude, Openclaw, etc.
 """
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ class UserToolAccount:
     id: int
     user_id: int
     tool_account: str  # sender_name in the tool
-    tool_type: Optional[str] = None  # qwen, claude, openclaw, feishu, slack, etc.
+    tool_type: Optional[str] = None  # qwen, claude, openclaw, feishu, dingtalk, slack, etc.
     description: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -43,6 +43,7 @@ TOOL_TYPES = {
     "codex": "Codex",
     "zcode": "ZCode",
     "feishu": "飞书",
+    "dingtalk": "钉钉",
     "slack": "Slack",
     "other": "其他",
 }

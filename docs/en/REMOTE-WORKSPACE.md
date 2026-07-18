@@ -36,7 +36,7 @@ The remote workspace feature lets users pick a remote machine when creating a se
 | Feature | Description |
 |---------|-------------|
 | Multi-CLI support | Qwen Code, Claude Code, OpenClaw, etc. |
-| API key proxy | Keys are encrypted on the server; the remote Agent only gets a short-lived proxy token |
+| API key proxy | Keys are encrypted on the server; the remote Agent only gets a short-lived, revocable proxy token |
 | One-line install | `curl ... \| bash` deploys the remote machine |
 | Unified quota | Local and remote sessions share the same quota system |
 | Auto-reconnect | Agent reconnects with exponential backoff after disconnection |
@@ -73,6 +73,19 @@ The Agent supports two transport modes with the server:
 | WebSocket | Planned | High-real-time scenarios | Requires gevent/websocket worker; currently returns 501 |
 
 The Agent tries WebSocket first and falls back to HTTP polling on failure. For the current release, HTTP polling is recommended.
+
+---
+
+## Deployment Topology and Runtime State
+
+Remote Workspace is safe to run behind the Kubernetes reference deployment. The shareable control-plane state is persisted, while live socket bridges remain process-local:
+
+- HTTP-polling command queues, command responses, session-to-machine bindings, session output replay, machines, sessions, messages, quotas, and audit entries are persisted.
+- Remote session control APIs such as send, pause, resume, stop, abort, model update, and permission response can be served by any web pod; the next agent poll claims the persisted command.
+- SSE reconnects can replay persisted session output after a browser disconnect or web-pod restart.
+- Live terminal relay WebSocket objects are still process-local. An active browser-to-agent terminal bridge should use sticky routing or reconnect after failover.
+
+Tenant isolation covers users, projects, workspace sessions and messages, daily usage aggregates, audit logs, remote machines, session ownership, machine permissions, and quotas. System administrators intentionally have global operational visibility for support and incident response.
 
 ---
 
@@ -240,8 +253,8 @@ It also adds two columns to the `agent_sessions` table:
 
 | Variable | Required | Description | Default |
 |----------|----------|-------------|---------|
-| `OPENACE_ENCRYPTION_KEY` | Recommended | Encryption key for API keys. When unset, derived from `SECRET_KEY` | SHA-256 of `SECRET_KEY` |
-| `SECRET_KEY` | Yes | Flask session key; also affects API key encryption | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | Yes (production) | Dedicated encryption key for API keys and SMTP passwords | Development-only fallback outside production |
+| `SECRET_KEY` | Yes | Flask session key | `dev-secret-key` (development only) |
 
 ### API Key Management
 
@@ -272,7 +285,7 @@ The system has **two independent API-key mechanisms** serving different scenario
 |---|---|---|
 | **Used by** | Local workspaces (qwen-code-webui in the iframe) | Remote workspaces (Agent on the remote machine) |
 | **Storage** | Server config file / environment variables | `api_key_store` table (AES-256-GCM encrypted) |
-| **Who gets the real key** | The local CLI uses it directly | Only the server knows it; the remote Agent only gets a short-lived proxy token |
+| **Who gets the real key** | The local CLI uses it directly | Only the server knows it; the remote Agent only gets a short-lived, revocable proxy token |
 | **How to manage** | Edit config file, restart service | UI operations in the admin page, no restart needed |
 | **Who manages it** | Server ops | System administrator (web admin UI) |
 
@@ -820,7 +833,7 @@ curl -b cookies.txt -X POST \
 | **Machine registration** | Admin generates a 256-bit random one-time token. Once used by an Agent, the token is immediately invalidated. |
 | **Transport encryption** | All traffic should go over HTTPS (TLS). Agent authenticates via token. |
 | **API key storage** | Uses Fernet symmetric encryption (AES-128-CBC + HMAC-SHA256). The encryption key is derived via SHA-256 from `OPENACE_ENCRYPTION_KEY` and is never stored in the database. Falls back to Base64 encoding (insecure, dev only) if the `cryptography` package is not installed. |
-| **API key access** | The remote Agent receives a short-lived proxy token (HMAC-SHA256 signed, 5-minute validity), never the real key. The real key is never written to disk on the remote machine. |
+| **API key access** | The remote Agent receives an HMAC-SHA256 signed proxy token, never the real key. Tokens are server-issued, tracked by `jti`, revocable, and use a configurable TTL (4 hours by default for general sessions; HA pool tokens default to 15 minutes). The real key is never written to disk on the remote machine. |
 | **Access control** | The `machine_assignments` table controls which users can use which machines; the `permission` field distinguishes `user`/`admin`. Machine admins may delegate management of users and sessions on their machine. Registration, unregistration, and token generation are restricted to system admins. |
 | **Session isolation** | Users can only access their own sessions. System admins and machine admins can view/stop other users' sessions on their machine. |
 | **Unified quota** | Local and remote sessions share the `quota_usage` table and are billed uniformly. |
@@ -829,7 +842,7 @@ curl -b cookies.txt -X POST \
 ### LLM Proxy Security Flow
 
 1. The remote CLI sends a request to `/api/remote/llm-proxy` with `Authorization: Bearer <proxy_token>`
-2. The server verifies the proxy token's signature (HMAC-SHA256) and expiry
+2. The server verifies the proxy token's signature (HMAC-SHA256), server-side issuance record, expiry, and session lifecycle status
 3. The server decrypts the real API key from `api_key_store`
 4. The server replaces the Authorization header with the real key and forwards to the LLM provider
 5. The response is streamed back; token usage is parsed and recorded
@@ -922,8 +935,8 @@ For unregistered CLI tools, the system falls back to a generic adapter (`Generic
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENACE_ENCRYPTION_KEY` | Encryption key for API keys (recommended to set) | Derived from `SECRET_KEY` |
-| `SECRET_KEY` | Flask session key | `dev-secret-key` |
+| `OPENACE_ENCRYPTION_KEY` | Dedicated encryption key for API keys / SMTP passwords (required in production) | Development-only fallback outside production |
+| `SECRET_KEY` | Flask session key | `dev-secret-key` (development only) |
 
 ### Remote Agent
 
@@ -1045,7 +1058,7 @@ sudo journalctl -u open-ace-agent -f
 
 1. **API key not stored**: the admin must first add an API key for the relevant provider in the admin page (Manage Mode → Remote Workspace → API Keys). Note: `OPENAI_API_KEY` from the environment **is not** used by Remote Workspace — the two are fully independent.
 2. **Quota exhausted**: check the user's quota; the proxy checks before forwarding
-3. **Proxy token expired**: tokens are valid for 5 minutes; under normal operation the Agent gets a fresh token each time it creates a session
+3. **Proxy token expired or revoked**: general proxy tokens use a configurable TTL (4 hours by default), HA pool tokens are shorter-lived (15 minutes by default), and tokens are revoked when the backing session stops, completes, or rotates. Recreate or reattach the session to obtain a fresh token.
 
 ### CLI Tool Not Found
 

@@ -112,6 +112,8 @@ All `/manage/*` routes require admin role. Regular users and machine admins cann
 
 Most `/api/*` routes use `@auth_required` via `before_request` at the blueprint level. Sensitive operations use `@admin_required`.
 
+If a user is marked with `must_change_password=true`, the server further narrows access and only allows the minimum required auth, profile, password-change, logout, and password-policy endpoints.
+
 ### Public Routes
 
 - `/` — SPA catch-all (serves index.html)
@@ -140,3 +142,8 @@ When multi-tenant mode is enabled:
 - Tenant quotas enforce per-tenant token and request limits
 - `QuotaEnforcementScheduler` runs every 60s to check and enforce limits
 - Exceeded users get sessions terminated and alerts generated
+
+Current boundary:
+- Users, projects, workspace sessions, session messages, daily usage aggregates, audit logs, remote machines, machine permissions, and quotas are tenant-aware.
+- Non-admin user-facing APIs apply the authenticated tenant scope to session, project, usage, and audit queries. Workspace session mutations also include the session tenant in the write boundary.
+- System administrators intentionally retain global operational visibility for support and incident response.

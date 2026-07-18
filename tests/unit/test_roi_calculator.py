@@ -9,6 +9,7 @@ import pytest
 from app.modules.analytics.roi_calculator import (
     CostBreakdown,
     ModelPricing,
+    ROIAssumptions,
     ROICalculator,
     ROIMetrics,
 )
@@ -344,14 +345,162 @@ class TestROICalculator:
         assert d["tool_name"] == "test"
         assert d["total_cost"] == 0.06
 
-    def test_productivity_multiplier_is_10x(self):
-        calc, _ = self._make_calculator()
-        assert calc.PRODUCTIVITY_MULTIPLIER == 10.0
+    def test_calculate_roi_includes_assumptions(self):
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_one.return_value = {
+            "request_count": 12,
+            "total_input_tokens": 2000,
+            "total_output_tokens": 1000,
+            "total_tokens": 3000,
+        }
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "input_tokens": 2000,
+                "output_tokens": 1000,
+            }
+        ]
 
-    def test_labor_cost_assumptions(self):
-        calc, _ = self._make_calculator()
-        assert calc.HOURLY_LABOR_COST == 50.0
-        assert calc.AVG_TIME_SAVED_PER_REQUEST == 5.0
+        roi = calc.calculate_roi("2026-01-01", "2026-01-31")
+
+        assert roi is not None
+        assert roi.assumptions is not None
+        assert roi.assumptions.to_dict() == {
+            "hourly_labor_cost": 50.0,
+            "productivity_multiplier": 10.0,
+            "avg_time_saved_per_request": 5.0,
+            "currency": "USD",
+        }
+
+    def test_custom_assumptions_override_roi_estimate(self):
+        mock_db = MagicMock()
+        calc = ROICalculator(
+            db=mock_db,
+            assumptions=ROIAssumptions(
+                hourly_labor_cost=120.0,
+                productivity_multiplier=4.0,
+                avg_time_saved_per_request=15.0,
+                currency="CNY",
+            ),
+        )
+        mock_db.fetch_one.return_value = {
+            "request_count": 20,
+            "total_input_tokens": 4000,
+            "total_output_tokens": 1000,
+            "total_tokens": 5000,
+        }
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "input_tokens": 4000,
+                "output_tokens": 1000,
+            }
+        ]
+
+        roi = calc.calculate_roi("2026-01-01", "2026-01-31")
+
+        assert roi is not None
+        assert roi.assumptions is not None
+        assert roi.assumptions.currency == "CNY"
+        assert roi.estimated_hours_saved == 5.0
+        assert roi.estimated_savings == 600.0
+        assert roi.productivity_gain == 300.0
+
+    def test_calculate_roi_cache_key_includes_assumptions(self):
+        low_calc, low_db = self._make_calculator()
+        high_db = MagicMock()
+        high_calc = ROICalculator(
+            db=high_db,
+            assumptions=ROIAssumptions(
+                hourly_labor_cost=200.0,
+                productivity_multiplier=10.0,
+                avg_time_saved_per_request=5.0,
+                currency="USD",
+            ),
+        )
+        row = {
+            "request_count": 10,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 500,
+            "total_tokens": 1500,
+        }
+        model_rows = [
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        low_db.fetch_one.return_value = row
+        low_db.fetch_all.return_value = model_rows
+        high_db.fetch_one.return_value = row
+        high_db.fetch_all.return_value = model_rows
+
+        low_roi = low_calc.calculate_roi("2026-01-01", "2026-01-31")
+        high_roi = high_calc.calculate_roi("2026-01-01", "2026-01-31")
+
+        assert low_roi is not None
+        assert high_roi is not None
+        assert low_roi.estimated_savings != high_roi.estimated_savings
+        high_db.fetch_one.assert_called_once()
+
+    def test_summary_stats_exposes_active_assumptions(self):
+        calc, mock_db = self._make_calculator()
+        mock_db.fetch_one.return_value = {
+            "request_count": 50,
+            "total_input_tokens": 10000,
+            "total_output_tokens": 5000,
+            "total_tokens": 15000,
+        }
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "claude-3-haiku",
+                "requests": 50,
+                "input_tokens": 10000,
+                "output_tokens": 5000,
+            }
+        ]
+
+        stats = calc.get_summary_stats("2026-01-01", "2026-01-31")
+
+        assert stats["assumptions"] == {
+            "hourly_labor_cost": 50.0,
+            "productivity_multiplier": 10.0,
+            "avg_time_saved_per_request": 5.0,
+            "currency": "USD",
+        }
+
+    def test_roi_assumptions_from_env(self, monkeypatch):
+        monkeypatch.setenv("OPENACE_ROI_HOURLY_LABOR_COST", "88")
+        monkeypatch.setenv("OPENACE_ROI_PRODUCTIVITY_MULTIPLIER", "6.5")
+        monkeypatch.setenv("OPENACE_ROI_AVG_TIME_SAVED_PER_REQUEST", "12")
+        monkeypatch.setenv("OPENACE_ROI_CURRENCY", "cny")
+
+        assumptions = ROIAssumptions.from_env()
+
+        assert assumptions.hourly_labor_cost == 88.0
+        assert assumptions.productivity_multiplier == 6.5
+        assert assumptions.avg_time_saved_per_request == 12.0
+        assert assumptions.currency == "CNY"
+
+    def test_roi_assumptions_invalid_env_falls_back_to_defaults(self, monkeypatch):
+        monkeypatch.setenv("OPENACE_ROI_HOURLY_LABOR_COST", "abc")
+        monkeypatch.setenv("OPENACE_ROI_PRODUCTIVITY_MULTIPLIER", "-2")
+        monkeypatch.setenv("OPENACE_ROI_AVG_TIME_SAVED_PER_REQUEST", "0")
+        monkeypatch.setenv("OPENACE_ROI_CURRENCY", "")
+
+        assumptions = ROIAssumptions.from_env()
+
+        assert assumptions.to_dict() == {
+            "hourly_labor_cost": 50.0,
+            "productivity_multiplier": 10.0,
+            "avg_time_saved_per_request": 5.0,
+            "currency": "USD",
+        }
 
 
 class TestParseModelName:

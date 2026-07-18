@@ -11,10 +11,10 @@ from unittest.mock import patch
 import pytest
 
 import app.repositories.database as db_mod
-from app.modules.workspace.run_timeline import get_ddl_statements
 from app.modules.workspace.run_timeline.models import RunEvent, _dump_json, _parse_json
 from app.repositories.database import Database
 from app.repositories.run_timeline_repo import RunTimelineRepository
+from app.repositories.schema_init import load_schema_from_file
 
 TABLES = ("agent_runs", "agent_run_events", "agent_approvals")
 
@@ -23,27 +23,17 @@ TABLES = ("agent_runs", "agent_run_events", "agent_approvals")
 def rt_db(tmp_path):
     """Temp SQLite database with the run-timeline tables created.
 
-    Forces the SQLite code path by patching is_postgresql to False in every
-    module that consults it at runtime — the DDL generator (so tables use
-    INTEGER PRIMARY KEY AUTOINCREMENT, not SERIAL), the Database layer
-    (adapt_sql placeholders), and the repo (RETURNING-vs-lastrowid branch) —
-    so tests are correct regardless of the dev box's configured DATABASE_URL.
+    Forces the SQLite code path by patching is_postgresql to False in the
+    Database layer (adapt_sql placeholders) and the repo (RETURNING-vs-lastrowid
+    branch) so tests are correct regardless of the dev box's configured DATABASE_URL.
     """
     db_path = str(tmp_path / "rt_test.db")
     db = Database(db_url=f"sqlite:///{db_path}")
     with (
         patch.object(db_mod, "is_postgresql", return_value=False),
         patch("app.repositories.run_timeline_repo.is_postgresql", return_value=False),
-        patch("app.modules.workspace.run_timeline.is_postgresql", return_value=False),
     ):
-        conn = db.get_connection()
-        try:
-            cur = conn.cursor()
-            for sql in get_ddl_statements():
-                cur.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
+        load_schema_from_file(db_url=db.db_url, dialect="sqlite")
         yield db
 
 
@@ -62,16 +52,9 @@ class TestDDL:
         for t in TABLES:
             assert _table_exists(rt_db, t), f"{t} not created"
 
-    def test_ddl_idempotent(self, rt_db):
-        # Running the DDL again must not raise (CREATE ... IF NOT EXISTS).
-        conn = rt_db.get_connection()
-        try:
-            cur = conn.cursor()
-            for sql in get_ddl_statements():
-                cur.execute(sql)
-            conn.commit()
-        finally:
-            conn.close()
+    def test_schema_idempotent(self, rt_db):
+        # Running load_schema_from_file again must not raise.
+        load_schema_from_file(db_url=rt_db.db_url, dialect="sqlite")
         for t in TABLES:
             assert _table_exists(rt_db, t)
 

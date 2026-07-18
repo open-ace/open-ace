@@ -816,7 +816,7 @@ export const APIKeyManagement: React.FC = () => {
             {t('advancedSettings', language)}
           </button>
           {formData.showAdvanced && (
-            <div className="mt-2 p-3 border rounded bg-light">
+            <div className="api-key-advanced-settings mt-2 p-3 border rounded bg-light">
               <div className="row">
                 <div className="col-6">
                   <label className="form-label">{t('priority', language)}</label>
@@ -1013,7 +1013,7 @@ export const APIKeyManagement: React.FC = () => {
             {t('advancedSettings', language)}
           </button>
           {formData.showAdvanced && (
-            <div className="mt-2 p-3 border rounded bg-light">
+            <div className="api-key-advanced-settings mt-2 p-3 border rounded bg-light">
               <div className="row">
                 <div className="col-6">
                   <label className="form-label">{t('priority', language)}</label>

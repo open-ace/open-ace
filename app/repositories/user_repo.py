@@ -481,7 +481,7 @@ class UserRepository:
             Optional[Dict]: Session data with user info or None.
         """
         query = """
-            SELECT s.*, u.username, u.email, u.role, u.tenant_id
+            SELECT s.*, u.username, u.email, u.role, u.tenant_id, u.must_change_password
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?

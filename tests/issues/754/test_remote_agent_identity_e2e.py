@@ -44,15 +44,10 @@ def manager(tmp_path):
     mgr = RemoteAgentManager(db_path=db_path)
 
     # Ensure tables exist (including new ones)
-    from app.modules.workspace.remote_agent_manager import get_ddl_statements
+    from app.repositories.schema_init import load_schema_from_file
 
     with mgr.db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception:
-                pass  # ALTER TABLE may fail if column exists
+        load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
         conn.commit()
 
     return mgr

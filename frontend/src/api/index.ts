@@ -32,6 +32,7 @@ export type {
   UpdateUserRequest,
   UpdateQuotaRequest,
   QuotaUsage,
+  FeishuSyncResult,
 } from './admin';
 export { governanceApi } from './governance';
 export type {
@@ -91,6 +92,7 @@ export type {
 } from './compliance';
 export { roiApi } from './roi';
 export type {
+  ROIAssumptions,
   ROIMetrics,
   ROITrend,
   ROIBreakdown,

@@ -4,7 +4,7 @@ Open ACE - AI Computing Explorer - Usage Routes
 API routes for usage data operations.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required
 from app.services.summary_service import SummaryService
@@ -22,27 +22,34 @@ def _require_auth():
     pass
 
 
+def _current_tenant_id():
+    """Return the authenticated user's tenant scope."""
+    user = getattr(g, "user", None) or {}
+    return user.get("tenant_id")
+
+
 @usage_bp.route("/summary")
 def api_summary():
     """Get summary statistics for all tools from pre-aggregated summary table."""
     host = request.args.get("host")
     start_date = request.args.get("start")
     end_date = request.args.get("end")
+    tenant_id = _current_tenant_id()
 
-    # No date parameters -> use pre-aggregated usage_summary table (fast)
-    if not start_date and not end_date:
+    # No date parameters -> use pre-aggregated usage_summary table (fast) only
+    # for global scope. Tenant-scoped users query the tenant-aware repo path.
+    if not start_date and not end_date and tenant_id is None:
         # Check if summary needs refresh and refresh if stale
         if summary_service.needs_refresh():
             summary_service.refresh_summary()
 
         summary = summary_service.get_summary(host_name=host)
     else:
-        # With date parameters -> query from daily_stats table
-        from app.repositories.daily_stats_repo import DailyStatsRepository
-
-        daily_stats_repo = DailyStatsRepository()
-        summary = daily_stats_repo.get_tool_totals_with_range(
-            start_date=start_date, end_date=end_date, host_name=host
+        summary = usage_service.get_usage_summary(
+            host_name=host,
+            start_date=start_date,
+            end_date=end_date,
+            tenant_id=tenant_id,
         )
 
     return jsonify(summary)
@@ -52,6 +59,11 @@ def api_summary():
 def api_refresh_summary():
     """Refresh summary data from daily_messages table."""
     host = request.args.get("host")
+    if _current_tenant_id() is not None:
+        return (
+            jsonify({"status": "error", "message": "Tenant-scoped summary refresh is automatic"}),
+            403,
+        )
     success = summary_service.refresh_summary(host_name=host)
     if success:
         return jsonify({"status": "success", "message": "Summary refreshed"})
@@ -64,7 +76,11 @@ def api_today():
     """Get today's usage for all tools, merged by tool_name."""
     host = request.args.get("host")
     tool = request.args.get("tool")
-    result = usage_service.get_today_usage(tool_name=tool, host_name=host)
+    result = usage_service.get_today_usage(
+        tool_name=tool,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(result)
 
 
@@ -72,7 +88,12 @@ def api_today():
 def api_tool_usage(tool_name, days):
     """Get usage for a specific tool over N days."""
     host = request.args.get("host")
-    entries = usage_service.get_tool_usage(tool_name, days, host_name=host)
+    entries = usage_service.get_tool_usage(
+        tool_name,
+        days,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
@@ -81,7 +102,12 @@ def api_date_usage(date_str):
     """Get usage for a specific date."""
     host = request.args.get("host")
     tool = request.args.get("tool")
-    entries = usage_service.get_date_usage(date_str, tool_name=tool, host_name=host)
+    entries = usage_service.get_date_usage(
+        date_str,
+        tool_name=tool,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
@@ -93,25 +119,35 @@ def api_range_usage():
     tool = request.args.get("tool")
     host = request.args.get("host")
 
-    entries = usage_service.get_range_usage(start_date, end_date, tool_name=tool, host_name=host)
+    entries = usage_service.get_range_usage(
+        start_date,
+        end_date,
+        tool_name=tool,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
 @usage_bp.route("/tools")
 def api_tools():
     """Get list of all tools."""
-    tools = usage_service.get_all_tools()
+    tools = usage_service.get_all_tools(tenant_id=_current_tenant_id())
     return jsonify(tools)
 
 
 @usage_bp.route("/hosts")
 def api_hosts():
     """Get list of all hosts from pre-aggregated summary table."""
-    # Ensure summary is up to date
-    if summary_service.needs_refresh():
+    tenant_id = _current_tenant_id()
+    # Ensure summary is up to date for global scope
+    if tenant_id is None and summary_service.needs_refresh():
         summary_service.refresh_summary()
 
-    hosts = summary_service.get_all_hosts()
+    if tenant_id is None:
+        hosts = summary_service.get_all_hosts()
+    else:
+        hosts = usage_service.get_all_hosts(tenant_id=tenant_id)
     return jsonify(hosts)
 
 
@@ -123,13 +159,19 @@ def api_trend():
     start_date = request.args.get("start", get_days_ago(30))
     end_date = request.args.get("end", get_today())
     host = request.args.get("host")
+    tenant_id = _current_tenant_id()
 
     # Ensure daily_stats is up to date
     daily_stats_repo = DailyStatsRepository()
-    if daily_stats_repo.needs_refresh():
+    if tenant_id is None and daily_stats_repo.needs_refresh():
         daily_stats_repo.refresh_stats()
 
-    entries = usage_service.get_trend_data(start_date, end_date, host_name=host)
+    entries = usage_service.get_trend_data(
+        start_date,
+        end_date,
+        host_name=host,
+        tenant_id=tenant_id,
+    )
     return jsonify(entries)
 
 
@@ -143,7 +185,7 @@ def api_request_today():
 
     host = request.args.get("host")
     usage_repo = UsageRepository()
-    stats = usage_repo.get_today_request_stats(host_name=host)
+    stats = usage_repo.get_today_request_stats(host_name=host, tenant_id=_current_tenant_id())
     return jsonify(stats)
 
 
@@ -157,7 +199,12 @@ def api_request_trend():
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    entries = usage_repo.get_request_trend_data(start_date, end_date, host_name=host)
+    entries = usage_repo.get_request_trend_data(
+        start_date,
+        end_date,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
@@ -171,7 +218,12 @@ def api_request_by_tool():
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    entries = usage_repo.get_request_trend_by_tool(start_date, end_date, host_name=host)
+    entries = usage_repo.get_request_trend_by_tool(
+        start_date,
+        end_date,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
@@ -184,7 +236,11 @@ def api_request_by_user():
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    stats = usage_repo.get_request_stats_by_user(date=date, host_name=host)
+    stats = usage_repo.get_request_stats_by_user(
+        date=date,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(stats)
 
 
@@ -198,7 +254,13 @@ def api_user_request_trend(user_name):
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    entries = usage_repo.get_user_request_trend(user_name, start_date, end_date, host_name=host)
+    entries = usage_repo.get_user_request_trend(
+        user_name,
+        start_date,
+        end_date,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(entries)
 
 
@@ -214,5 +276,10 @@ def api_request_monthly():
     host = request.args.get("host")
 
     usage_repo = UsageRepository()
-    stats = usage_repo.get_monthly_request_stats_by_user(year, month, host_name=host)
+    stats = usage_repo.get_monthly_request_stats_by_user(
+        year,
+        month,
+        host_name=host,
+        tenant_id=_current_tenant_id(),
+    )
     return jsonify(stats)

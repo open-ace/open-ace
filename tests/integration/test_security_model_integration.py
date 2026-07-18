@@ -67,7 +67,8 @@ def isolated_stack(tmp_path, monkeypatch):
     db_path = str(tmp_path / "stack.db")
 
     from app.modules.workspace import api_key_proxy as akp
-    from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_ddl_statements
+    from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+    from app.repositories.schema_init import load_schema_from_file
 
     monkeypatch.setattr(akp, "DB_PATH", db_path, raising=False)
 
@@ -75,18 +76,7 @@ def isolated_stack(tmp_path, monkeypatch):
     proxy._ensure_tables()
 
     manager = RemoteAgentManager(db_path=db_path)
-    with manager.db.connection() as conn:
-        cursor = conn.cursor()
-        for sql in get_ddl_statements():
-            try:
-                cursor.execute(sql)
-            except Exception as exc:
-                # Tolerate idempotent re-runs (table/column already exists)
-                # but surface anything that would mask real schema drift.
-                msg = str(exc).lower()
-                if "already exists" not in msg and "duplicate column" not in msg:
-                    raise
-        conn.commit()
+    load_schema_from_file(db_url=manager.db.db_url, dialect="sqlite")
 
     return proxy, manager, db_path
 
@@ -119,6 +109,7 @@ class TestEndToEndSecurityFlow:
 
     def test_registration_then_proxy_token_full_flow(self, isolated_stack):
         proxy, manager, _ = isolated_stack
+        from app.modules.workspace.session_manager import SessionManager
 
         # Step 4 of the demo: admin generates a registration token.
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
@@ -144,6 +135,13 @@ class TestEndToEndSecurityFlow:
         assert replay is None
 
         # Step 6: server issues a short-lived proxy token for a coding session.
+        session_mgr = SessionManager(db_path=proxy.db_path)
+        session_mgr.create_session(
+            session_id="sess-demo",
+            tool_name="claude-code",
+            user_id=2,
+            title="demo",
+        )
         proxy_token = proxy.generate_proxy_token(
             user_id=2,
             session_id="sess-demo",
@@ -158,6 +156,29 @@ class TestEndToEndSecurityFlow:
         assert payload["provider"] == "openai"
         # The real API key is never embedded in the proxy token.
         assert "sk-" not in proxy_token
+
+    def test_proxy_token_revoked_when_session_completes(self, isolated_stack):
+        proxy, _manager, db_path = isolated_stack
+        from app.modules.workspace.session_manager import SessionManager
+
+        session_mgr = SessionManager(db_path=db_path)
+        session_mgr.create_session(
+            session_id="sess-complete",
+            tool_name="claude-code",
+            user_id=2,
+            title="demo",
+        )
+        token = proxy.generate_proxy_token(
+            user_id=2,
+            session_id="sess-complete",
+            tenant_id=1,
+            provider="openai",
+            session_type="terminal",
+        )
+        assert proxy.validate_proxy_token(token) is not None
+
+        assert session_mgr.complete_session("sess-complete") is True
+        assert proxy.validate_proxy_token(token) is None
 
     def test_cross_key_isolation(self, isolated_stack, monkeypatch):
         """A token signed under one encryption key is invalid under another.

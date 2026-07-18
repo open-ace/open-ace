@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import cached
+from app.utils.sender_hash import EMPTY_SENDER_HASH, compute_sender_hash
 from app.utils.senders import get_sender_filter_sql
 from app.utils.tool_names import normalize_tool_name
 
@@ -278,13 +279,19 @@ class DailyStatsRepository:
 
         if is_postgresql():
             # PostgreSQL: use subquery for user_id resolution
+            # Issue #1573: Use hash fallback for unresolved senders (each counts as unique user)
             query = f"""
                 SELECT
                     COALESCE(ds.user_id,
                         (SELECT u.id FROM users u
                          WHERE ds.sender_name LIKE (u.system_account || '-%%')
                             OR ds.sender_name = u.username
-                         LIMIT 1), -1) as resolved_user_id,
+                         LIMIT 1),
+                        CASE
+                            WHEN ds.sender_name = '' THEN {EMPTY_SENDER_HASH}
+                            ELSE -ABS(('0x' || LEFT(MD5(ds.sender_name), 16))::BIT(64)::BIGINT)
+                        END
+                    ) as resolved_user_id,
                     COALESCE(u.username,
                         CASE WHEN ds.sender_name LIKE '%%-%%-%%'
                              THEN SUBSTRING(ds.sender_name FROM '^[^-]+')
@@ -303,13 +310,18 @@ class DailyStatsRepository:
             """
         else:
             # SQLite: use subquery for user_id resolution
+            # Issue #1573: SQLite doesn't support SQL-level MD5 conversion like PostgreSQL.
+            # We must include sender_name in GROUP BY to preserve per-sender data,
+            # then compute hash in application layer for each unresolved sender.
+            # This ensures each unresolved sender appears as a distinct user in rankings.
             query = f"""
                 SELECT
                     COALESCE(ds.user_id,
                         (SELECT u.id FROM users u
                          WHERE ds.sender_name LIKE (u.system_account || '-%%')
                             OR ds.sender_name = u.username
-                         LIMIT 1), -1) as resolved_user_id,
+                         LIMIT 1)) as resolved_user_id,
+                    ds.sender_name,
                     COALESCE(u.username,
                         CASE WHEN ds.sender_name LIKE '%%-%%-%%'
                              THEN SUBSTR(ds.sender_name, 1, INSTR(ds.sender_name, '-') - 1)
@@ -323,11 +335,24 @@ class DailyStatsRepository:
                     OR ds.sender_name LIKE (u.system_account || '-%%')
                     OR ds.sender_name = u.username
                 {where_clause}
-                GROUP BY resolved_user_id, unified_username
+                GROUP BY resolved_user_id, ds.sender_name, unified_username
                 ORDER BY total_tokens DESC
             """
 
-        return self.db.fetch_all(query, tuple(params))
+        rows = self.db.fetch_all(query, tuple(params))
+
+        # For SQLite: compute hash for unresolved senders
+        if not is_postgresql():
+            for row in rows:
+                # Check if resolved_user_id is None or missing (unresolved sender)
+                if row.get("resolved_user_id") is None:
+                    # Compute hash for unresolved sender
+                    row["resolved_user_id"] = compute_sender_hash(row.get("sender_name") or "")
+                # Remove sender_name from output (not part of expected schema)
+                if "sender_name" in row:
+                    del row["sender_name"]
+
+        return rows
 
     @cached(ttl=300, key_prefix="hourly_stats", skip_args=[0])
     def get_hourly_totals(
@@ -539,7 +564,7 @@ class DailyStatsRepository:
 
         if is_postgresql():
             # PostgreSQL: use CASE WHEN to maintain type consistency
-            # user_id is integer, cannot mix with sender_name (varchar)
+            # Issue #1573: Use hash fallback for unresolved senders (each counts as unique user)
             query = f"""
                 SELECT
                     SUM(message_count) as total_messages,
@@ -556,7 +581,10 @@ class DailyStatsRepository:
                                  WHERE sender_name LIKE (u.system_account || '-%%')
                                     OR sender_name = u.username
                                  LIMIT 1),
-                                -1
+                                CASE
+                                    WHEN sender_name = '' THEN {EMPTY_SENDER_HASH}
+                                    ELSE -ABS(('0x' || LEFT(MD5(sender_name), 16))::BIT(64)::BIGINT)
+                                END
                             )
                         END
                     END) as unique_users,
@@ -564,9 +592,38 @@ class DailyStatsRepository:
                 FROM daily_stats
                 {where_clause}
             """
+
+            result = self.db.fetch_one(query, tuple(params))
+
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(f"get_batch_aggregates took {duration_ms:.2f}ms")
+
+            if not result:
+                return {
+                    "total_messages": 0,
+                    "total_tokens": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "unique_tools": 0,
+                    "unique_hosts": 0,
+                    "unique_users": 0,
+                    "unique_days": 0,
+                }
+
+            return {
+                "total_messages": result.get("total_messages", 0) or 0,
+                "total_tokens": result.get("total_tokens", 0) or 0,
+                "total_input_tokens": result.get("total_input_tokens", 0) or 0,
+                "total_output_tokens": result.get("total_output_tokens", 0) or 0,
+                "unique_tools": result.get("unique_tools", 0) or 0,
+                "unique_hosts": result.get("unique_hosts", 0) or 0,
+                "unique_users": result.get("unique_users", 0) or 0,
+                "unique_days": result.get("unique_days", 0) or 0,
+            }
         else:
             # SQLite: use subquery for user_id resolution
-            # Fallback to sender_name when user_id cannot be resolved
+            # Issue #1573: For consistency with PostgreSQL, compute hash in application layer
+            # First, get basic aggregates without unique_users
             query = f"""
                 SELECT
                     SUM(message_count) as total_messages,
@@ -575,44 +632,66 @@ class DailyStatsRepository:
                     SUM(total_output_tokens) as total_output_tokens,
                     COUNT(DISTINCT tool_name) as unique_tools,
                     COUNT(DISTINCT host_name) as unique_hosts,
-                    COUNT(DISTINCT CASE WHEN {sender_filter} THEN COALESCE(user_id,
-                        (SELECT u.id FROM users u
-                         WHERE sender_name LIKE (u.system_account || '-%%')
-                            OR sender_name = u.username
-                         LIMIT 1),
-                        sender_name) END) as unique_users,
                     COUNT(DISTINCT date) as unique_days
                 FROM daily_stats
                 {where_clause}
             """
 
-        result = self.db.fetch_one(query, tuple(params))
+            result = self.db.fetch_one(query, tuple(params))
 
-        duration_ms = (time.time() - start_time) * 1000
-        logger.info(f"get_batch_aggregates took {duration_ms:.2f}ms")
+            if not result:
+                return {
+                    "total_messages": 0,
+                    "total_tokens": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "unique_tools": 0,
+                    "unique_hosts": 0,
+                    "unique_users": 0,
+                    "unique_days": 0,
+                }
 
-        if not result:
+            # Compute unique_users separately using application-layer hash
+            # This ensures consistency with PostgreSQL's hash algorithm
+            # Build WHERE clause: if no date/host filters, start with WHERE; otherwise append AND
+            sender_where = f"{where_clause} AND" if where_clause else "WHERE"
+            sender_query = f"""
+                SELECT DISTINCT sender_name, user_id,
+                    (SELECT u.id FROM users u
+                     WHERE sender_name LIKE (u.system_account || '-%%')
+                        OR sender_name = u.username
+                     LIMIT 1) as matched_user_id
+                FROM daily_stats
+                {sender_where} {sender_filter}
+            """
+            sender_rows = self.db.fetch_all(sender_query, tuple(params))
+
+            unique_user_ids = set()
+            for row in sender_rows:
+                if row["user_id"] is not None:
+                    unique_user_ids.add(row["user_id"])
+                elif row["matched_user_id"] is not None:
+                    unique_user_ids.add(row["matched_user_id"])
+                else:
+                    # Unresolved sender: compute hash
+                    hash_id = compute_sender_hash(row["sender_name"] or "")
+                    unique_user_ids.add(hash_id)
+
+            result["unique_users"] = len(unique_user_ids)
+
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(f"get_batch_aggregates took {duration_ms:.2f}ms")
+
             return {
-                "total_messages": 0,
-                "total_tokens": 0,
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
-                "unique_tools": 0,
-                "unique_hosts": 0,
-                "unique_users": 0,
-                "unique_days": 0,
+                "total_messages": result.get("total_messages", 0) or 0,
+                "total_tokens": result.get("total_tokens", 0) or 0,
+                "total_input_tokens": result.get("total_input_tokens", 0) or 0,
+                "total_output_tokens": result.get("total_output_tokens", 0) or 0,
+                "unique_tools": result.get("unique_tools", 0) or 0,
+                "unique_hosts": result.get("unique_hosts", 0) or 0,
+                "unique_users": result.get("unique_users", 0) or 0,
+                "unique_days": result.get("unique_days", 0) or 0,
             }
-
-        return {
-            "total_messages": result.get("total_messages", 0) or 0,
-            "total_tokens": result.get("total_tokens", 0) or 0,
-            "total_input_tokens": result.get("total_input_tokens", 0) or 0,
-            "total_output_tokens": result.get("total_output_tokens", 0) or 0,
-            "unique_tools": result.get("unique_tools", 0) or 0,
-            "unique_hosts": result.get("unique_hosts", 0) or 0,
-            "unique_users": result.get("unique_users", 0) or 0,
-            "unique_days": result.get("unique_days", 0) or 0,
-        }
 
     def refresh_stats(self, date: Optional[str] = None) -> bool:
         """
