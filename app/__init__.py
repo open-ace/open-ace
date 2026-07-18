@@ -32,6 +32,7 @@ _LOCAL_CORS_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 # Cache for CORS allowed origins (populated at startup)
 _CORS_ALLOWED_ORIGINS_CACHE: set[str] | None = None
+_CORS_ORIGINS_ENV_SNAPSHOT: str | None = None
 
 
 def _sanitize_request_id(value: str | None) -> str:
@@ -106,8 +107,19 @@ def _build_cors_origins_cache() -> set[str]:
 
 
 def _get_allowed_cors_origins() -> set[str]:
-    """Return explicitly allowed cross-origin API callers (cached)."""
-    global _CORS_ALLOWED_ORIGINS_CACHE
+    """Return explicitly allowed cross-origin API callers (cached).
+
+    The cache is invalidated if the environment variable changes.
+    """
+    global _CORS_ALLOWED_ORIGINS_CACHE, _CORS_ORIGINS_ENV_SNAPSHOT
+
+    current_env = os.environ.get("OPENACE_CORS_ALLOWED_ORIGINS", "")
+
+    # Check if environment variable has changed since last cache
+    if current_env != _CORS_ORIGINS_ENV_SNAPSHOT:
+        _CORS_ORIGINS_ENV_SNAPSHOT = current_env
+        _CORS_ALLOWED_ORIGINS_CACHE = None
+
     if _CORS_ALLOWED_ORIGINS_CACHE is None:
         _CORS_ALLOWED_ORIGINS_CACHE = _build_cors_origins_cache()
     return _CORS_ALLOWED_ORIGINS_CACHE
@@ -115,8 +127,9 @@ def _get_allowed_cors_origins() -> set[str]:
 
 def _reset_cors_origins_cache():
     """Reset CORS origins cache (for testing)."""
-    global _CORS_ALLOWED_ORIGINS_CACHE
+    global _CORS_ALLOWED_ORIGINS_CACHE, _CORS_ORIGINS_ENV_SNAPSHOT
     _CORS_ALLOWED_ORIGINS_CACHE = None
+    _CORS_ORIGINS_ENV_SNAPSHOT = None
 
 
 def _is_allowed_local_webui_origin(origin: str) -> bool:
@@ -274,19 +287,28 @@ def register_error_handlers(app):
                 response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
 
-    # Handle OPTIONS preflight requests for CORS
-    @app.route("/api/<path:path>", methods=["OPTIONS"])
-    def handle_options(path):
-        """Handle CORS preflight requests."""
-        origin = request.headers.get("Origin", "")
-        if _is_allowed_cors_origin(origin):
+    @app.before_request
+    def handle_options_preflight():
+        """Handle CORS preflight requests before routing.
+
+        This must be a before_request hook because Flask's automatic OPTIONS
+        handler for specific routes takes precedence over the generic
+        /api/<path:path> route matcher.
+        """
+        if request.method == "OPTIONS" and request.path.startswith("/api/"):
+            origin = request.headers.get("Origin", "")
+            if _is_allowed_cors_origin(origin):
+                response = jsonify({"status": "ok"})
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["X-Request-ID"] = getattr(g, "request_id", "")
+                return response
+            # Even for blocked origins, return success to avoid information leakage
             response = jsonify({"status": "ok"})
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["X-Request-ID"] = getattr(g, "request_id", "")
             return response
-        return jsonify({"status": "ok"}), 200
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):

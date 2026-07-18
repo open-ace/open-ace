@@ -59,15 +59,24 @@ def _build_client_frame(payload: bytes, opcode: int = ws_frame.OP_TEXT, fin: boo
     return header + mask_key + _mask(mask_key, payload)
 
 
-@pytest.fixture(autouse=True)
-def _clear_cors_env(monkeypatch):
+@pytest.fixture
+def clean_cors_env(monkeypatch):
+    """Clear CORS environment before each test.
+
+    Using monkeypatch ensures the environment is restored after the test,
+    preventing cross-test pollution.
+    """
     monkeypatch.delenv("OPENACE_CORS_ALLOWED_ORIGINS", raising=False)
     # Reset cache to ensure clean state
+    _reset_cors_origins_cache()
+    # Yield to let test run
+    yield
+    # Clean up after test
     _reset_cors_origins_cache()
 
 
 @pytest.fixture
-def cors_app():
+def cors_app(clean_cors_env):
     from flask import Flask, jsonify
 
     app = Flask(__name__)
@@ -131,21 +140,23 @@ class TestCorsPolicy:
     def test_preflight_honors_explicit_allowlist(self, monkeypatch, request):
         # Use monkeypatch to set env - this happens AFTER autouse fixture clears it
         # Create a fresh app for this test to avoid state pollution
+
+        # Set the environment variable using monkeypatch
+        monkeypatch.setenv("OPENACE_CORS_ALLOWED_ORIGINS", "https://workspace.internal.example, https://ops.example")
+
+        # Force cache rebuild immediately
+        from app.__init__ import _get_allowed_cors_origins
+        cache = _get_allowed_cors_origins()
+        print(f"Cache after setting env: {cache}")
+
         from flask import Flask, jsonify
-        import os
-
-        # Clear any existing state first
-        os.environ.pop("OPENACE_CORS_ALLOWED_ORIGINS", None)
-        _reset_cors_origins_cache()
-
-        # Set the environment variable
-        os.environ["OPENACE_CORS_ALLOWED_ORIGINS"] = "https://workspace.internal.example, https://ops.example"
-        _reset_cors_origins_cache()
-
         app = Flask(__name__)
         app.config["TESTING"] = True
+
+        # Register error handlers first (includes OPTIONS handler)
         register_error_handlers(app)
 
+        # Then register the actual route
         @app.route("/api/ping", methods=["GET"])
         def ping():
             return jsonify({"ok": True})
@@ -161,7 +172,3 @@ class TestCorsPolicy:
         assert "Access-Control-Allow-Origin" in resp.headers, f"Expected CORS headers, got: {dict(resp.headers)}"
         assert resp.headers["Access-Control-Allow-Origin"] == "https://workspace.internal.example"
         assert resp.headers["Access-Control-Allow-Credentials"] == "true"
-
-        # Clean up
-        os.environ.pop("OPENACE_CORS_ALLOWED_ORIGINS", None)
-        _reset_cors_origins_cache()
