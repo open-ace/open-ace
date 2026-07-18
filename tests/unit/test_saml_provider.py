@@ -256,3 +256,154 @@ def test_saml_response_rejects_missing_required_email_attribute():
 
     assert result.success is False
     assert result.error == "missing_attribute"
+
+
+def _evil_unsigned_assertion(*, name_id: str, email: str) -> etree._Element:
+    """Build a validly-structured but UNSIGNED Assertion element for wrapping attacks."""
+    now = datetime.now(timezone.utc)
+    assertion = etree.Element(
+        f"{{{SAML_ASSERTION_NS}}}Assertion",
+        nsmap={"saml": SAML_ASSERTION_NS},
+        ID="_evil-1",
+        Version="2.0",
+        IssueInstant=_saml_time(now),
+    )
+    etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}Issuer").text = IDP_ENTITY_ID
+    subject = etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}Subject")
+    etree.SubElement(subject, f"{{{SAML_ASSERTION_NS}}}NameID").text = name_id
+    confirmation = etree.SubElement(subject, f"{{{SAML_ASSERTION_NS}}}SubjectConfirmation")
+    etree.SubElement(
+        confirmation,
+        f"{{{SAML_ASSERTION_NS}}}SubjectConfirmationData",
+        Recipient=ACS_URL,
+        InResponseTo="_request-1",
+        NotOnOrAfter=_saml_time(now + timedelta(minutes=5)),
+    )
+    conditions = etree.SubElement(
+        assertion,
+        f"{{{SAML_ASSERTION_NS}}}Conditions",
+        NotBefore=_saml_time(now - timedelta(minutes=1)),
+        NotOnOrAfter=_saml_time(now + timedelta(minutes=5)),
+    )
+    audience_restriction = etree.SubElement(
+        conditions,
+        f"{{{SAML_ASSERTION_NS}}}AudienceRestriction",
+    )
+    etree.SubElement(audience_restriction, f"{{{SAML_ASSERTION_NS}}}Audience").text = SP_ENTITY_ID
+    attr_statement = etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}AttributeStatement")
+    email_attr = etree.SubElement(attr_statement, f"{{{SAML_ASSERTION_NS}}}Attribute", Name="email")
+    etree.SubElement(email_attr, f"{{{SAML_ASSERTION_NS}}}AttributeValue").text = email
+    return assertion
+
+
+def test_saml_response_rejects_unsigned_wrapped_assertion():
+    """Signature wrapping: an UNSIGNED assertion placed before a signed one must be rejected.
+
+    A legitimate single-Assertion response is signed. An attacker inserts an unsigned
+    "evil" Assertion as the first child of <Response>, ahead of the signed one. On the
+    vulnerable code path, _verify_signature verifies the signed (second) Assertion while
+    _select_assertion returns the first (unsigned, evil) Assertion, leading to account
+    takeover. The fix couples verification to selection.
+    """
+    key_pem, cert_pem, cert_body = _idp_key_and_cert()
+    provider = _provider(cert_body)
+    signed_response = _signed_response(
+        key_pem, cert_pem, name_id="legit-user", email="legit@example.com"
+    )
+
+    root = etree.fromstring(base64.b64decode(signed_response))
+    evil_assertion = _evil_unsigned_assertion(
+        name_id="victim-admin@example.com", email="victim-admin@example.com"
+    )
+    # Insert the unsigned evil assertion BEFORE the signed one so that document-order
+    # lookup (.//saml:Assertion) returns it first.
+    root.insert(0, evil_assertion)
+    wrapped_response = base64.b64encode(etree.tostring(root)).decode("ascii")
+
+    result = provider.authenticate_saml_response(wrapped_response, "_request-1", ACS_URL)
+
+    assert result.success is False
+    assert result.error in ("invalid_signature", "signature_wrapping")
+
+
+def test_saml_response_single_signed_assertion_still_authenticates():
+    """Guard against over-rejecting: a normal single signed Assertion must still succeed."""
+    key_pem, cert_pem, cert_body = _idp_key_and_cert()
+    provider = _provider(cert_body)
+    saml_response = _signed_response(key_pem, cert_pem)
+
+    result = provider.authenticate_saml_response(saml_response, "_request-1", ACS_URL)
+
+    assert result.success is True
+    assert result.user is not None
+    assert result.user.email == "alice@example.com"
+
+
+def test_saml_response_message_signed_single_assertion_authenticates():
+    """A Response-signed (message-signed) single Assertion must still authenticate.
+
+    Real-world IdPs sometimes sign the Response instead of the Assertion. The fix must
+    not break that legitimate path while closing the signature-wrapping hole.
+    """
+    key_pem, cert_pem, cert_body = _idp_key_and_cert()
+    provider = _provider(cert_body)
+    now = datetime.now(timezone.utc)
+    response_id = "_response-1"
+    assertion_id = "_assertion-1"
+    response = etree.Element(
+        f"{{{SAML_PROTOCOL_NS}}}Response",
+        nsmap={"samlp": SAML_PROTOCOL_NS, "saml": SAML_ASSERTION_NS},
+        ID=response_id,
+        Version="2.0",
+        IssueInstant=_saml_time(now),
+        Destination=ACS_URL,
+        InResponseTo="_request-1",
+    )
+    etree.SubElement(response, f"{{{SAML_ASSERTION_NS}}}Issuer").text = IDP_ENTITY_ID
+    status = etree.SubElement(response, f"{{{SAML_PROTOCOL_NS}}}Status")
+    etree.SubElement(status, f"{{{SAML_PROTOCOL_NS}}}StatusCode", Value=SAML_SUCCESS_STATUS)
+    assertion = etree.SubElement(
+        response,
+        f"{{{SAML_ASSERTION_NS}}}Assertion",
+        ID=assertion_id,
+        Version="2.0",
+        IssueInstant=_saml_time(now),
+    )
+    etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}Issuer").text = IDP_ENTITY_ID
+    subject = etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}Subject")
+    etree.SubElement(subject, f"{{{SAML_ASSERTION_NS}}}NameID").text = "msg-user"
+    confirmation = etree.SubElement(subject, f"{{{SAML_ASSERTION_NS}}}SubjectConfirmation")
+    etree.SubElement(
+        confirmation,
+        f"{{{SAML_ASSERTION_NS}}}SubjectConfirmationData",
+        Recipient=ACS_URL,
+        InResponseTo="_request-1",
+        NotOnOrAfter=_saml_time(now + timedelta(minutes=5)),
+    )
+    conditions = etree.SubElement(
+        assertion,
+        f"{{{SAML_ASSERTION_NS}}}Conditions",
+        NotBefore=_saml_time(now - timedelta(minutes=1)),
+        NotOnOrAfter=_saml_time(now + timedelta(minutes=5)),
+    )
+    audience_restriction = etree.SubElement(
+        conditions,
+        f"{{{SAML_ASSERTION_NS}}}AudienceRestriction",
+    )
+    etree.SubElement(audience_restriction, f"{{{SAML_ASSERTION_NS}}}Audience").text = SP_ENTITY_ID
+    attr_statement = etree.SubElement(assertion, f"{{{SAML_ASSERTION_NS}}}AttributeStatement")
+    email_attr = etree.SubElement(attr_statement, f"{{{SAML_ASSERTION_NS}}}Attribute", Name="email")
+    etree.SubElement(email_attr, f"{{{SAML_ASSERTION_NS}}}AttributeValue").text = "msg@example.com"
+
+    signed_response = XMLSigner(
+        method=methods.enveloped,
+        signature_algorithm="rsa-sha256",
+        digest_algorithm="sha256",
+    ).sign(response, key=key_pem, cert=cert_pem, reference_uri=response_id)
+    b64 = base64.b64encode(etree.tostring(signed_response, xml_declaration=False)).decode("ascii")
+
+    result = provider.authenticate_saml_response(b64, "_request-1", ACS_URL)
+
+    assert result.success is True
+    assert result.user is not None
+    assert result.user.email == "msg@example.com"

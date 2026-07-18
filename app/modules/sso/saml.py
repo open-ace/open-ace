@@ -197,8 +197,8 @@ class SAMLProvider(SSOProvider):
 
         try:
             root = self._parse_xml(response_xml)
-            self._verify_signature(root)
-            assertion = self._select_assertion(root)
+            verified_element = self._verify_signature(root)
+            assertion = self._select_assertion(root, verified_element)
             effective_acs_url = acs_url or self.acs_url
             self._validate_response(root, assertion, request_id, effective_acs_url)
             user, expires_in = self._build_user(assertion, response_xml)
@@ -316,7 +316,13 @@ class SAMLProvider(SSOProvider):
         self._validate_conditions(assertion, acs_url)
         self._validate_subject_confirmation(assertion, request_id, acs_url)
 
-    def _verify_signature(self, root: etree._Element) -> None:
+    def _verify_signature(self, root: etree._Element) -> etree._Element:
+        """Verify a SAML signature and return the element whose signature verified.
+
+        Returns the verified element (the Response root or a saml:Assertion) so the
+        caller can couple assertion selection to verification, preventing XML signature
+        wrapping where an unsigned assertion is consumed alongside a verified sibling.
+        """
         certs = self._configured_certificates()
         if not certs:
             raise ValueError("missing_idp_certificate")
@@ -336,18 +342,87 @@ class SAMLProvider(SSOProvider):
                         validate_schema=False,
                         expect_config=expect_config,
                     )
-                    return
+                    return candidate
                 except Exception as e:
                     last_error = e
 
         logger.warning("SAML signature validation failed: %s", last_error)
         raise ValueError("invalid_signature")
 
-    def _select_assertion(self, root: etree._Element) -> etree._Element:
-        assertion = root.find(".//saml:Assertion", namespaces=NSMAP)
-        if assertion is None:
-            raise ValueError("missing_assertion")
-        return assertion
+    def _select_assertion(
+        self,
+        root: etree._Element,
+        verified_element: etree._Element,
+    ) -> etree._Element:
+        """Return the assertion to consume, coupled to the verified element.
+
+        - If the Assertion itself was signed, the consumed assertion MUST be that exact
+          verified element (object identity). Any unsigned sibling placed ahead of it
+          (signature wrapping) is rejected.
+        - If the Response (message) was signed, the consumed assertion must be the
+          single assertion whose ID is referenced by the verified Signature. Ambiguous
+          multi-assertion responses are rejected to avoid wrapping.
+        """
+        assertion_tag = f"{{{SAML_ASSERTION_NS}}}Assertion"
+        if verified_element.tag == assertion_tag:
+            # Fail closed if any sibling assertion exists that was not the verified
+            # element: an attacker can prepend an unsigned (or differently-signed)
+            # Assertion ahead of the signed one (signature wrapping). Reject rather
+            # than risk consuming an attacker-controlled assertion.
+            all_assertions = root.findall(".//saml:Assertion", namespaces=NSMAP)
+            if any(assertion is not verified_element for assertion in all_assertions):
+                raise ValueError("signature_wrapping")
+            if verified_element not in root.iter():
+                raise ValueError("signature_wrapping")
+            return verified_element
+
+        referenced_ids = self._signature_reference_ids(verified_element)
+        all_assertions = root.findall(".//saml:Assertion", namespaces=NSMAP)
+
+        # When the Response (message) is signed, the Signature reference typically
+        # points at the Response ID (it covers the whole document), not at an
+        # Assertion ID. Accept the single contained assertion; reject any wrapped
+        # multi-assertion response where coverage is ambiguous.
+        if referenced_ids and verified_element.get("ID") in referenced_ids:
+            if len(all_assertions) != 1:
+                raise ValueError("signature_wrapping")
+            return all_assertions[0]
+
+        matching = []
+        for assertion in all_assertions:
+            if (
+                assertion is verified_element
+                or assertion.get("ID")
+                and assertion.get("ID") in referenced_ids
+            ):
+                matching.append(assertion)
+
+        if not matching:
+            raise ValueError("signature_wrapping")
+        if len(matching) > 1:
+            raise ValueError("signature_wrapping")
+        # Fail closed if any assertion is present that the verified Signature does not
+        # cover: an attacker can inject an unsigned sibling (signature wrapping).
+        if any(
+            assertion is not matching[0]
+            and (not assertion.get("ID") or assertion.get("ID") not in referenced_ids)
+            for assertion in all_assertions
+        ):
+            raise ValueError("signature_wrapping")
+        return matching[0]
+
+    def _signature_reference_ids(self, signed_element: etree._Element) -> set[str]:
+        """Return the set of ID URIs referenced by the element's Signature."""
+        ids: set[str] = set()
+        for reference in signed_element.findall(
+            ".//ds:Signature/ds:SignedInfo/ds:Reference", namespaces=NSMAP
+        ):
+            uri = reference.get("URI") or ""
+            if uri.startswith("#"):
+                uri = uri[1:]
+            if uri:
+                ids.add(uri)
+        return ids
 
     def _validate_issuer(self, root: etree._Element, assertion: etree._Element) -> None:
         expected_issuer = self.idp_entity_id
