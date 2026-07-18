@@ -110,8 +110,6 @@ _PASSWORD_CHANGE_ALLOWED_ENDPOINTS = {
 
 def _is_password_change_allowed_request() -> bool:
     """Return whether the current request is exempt from password-change enforcement."""
-    if request.method == "OPTIONS":
-        return True
     return (request.method, request.path) in _PASSWORD_CHANGE_ALLOWED_ENDPOINTS
 
 
