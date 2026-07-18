@@ -31,7 +31,8 @@
   },
   "alerts": {
     "allow_private_webhook_urls": false,
-    "dingtalk_webhook_secret": ""
+    "dingtalk_webhook_secret": "",
+    "webhook_secret": ""
   },
   "tools": {
     "openclaw": {
