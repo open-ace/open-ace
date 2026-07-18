@@ -46,9 +46,20 @@ fi
 # Create logs directory (Issue #1205)
 mkdir -p /app/logs
 
-# Keep the legacy Docker path by default, but let non-root deployments (K8s)
-# mount and write config under the application user's home.
-OPENACE_CONFIG_DIR="${OPENACE_CONFIG_DIR:-/root/.open-ace}"
+# Default the config dir to a path the current uid can actually write.
+# The image runs as the non-root open-ace user (uid 1000) by default
+# (Dockerfile `USER 1000`). /root is root:root 0700, so defaulting to
+# /root/.open-ace made `generate_default_config`'s `mkdir -p /root/.open-ace`
+# fail with Permission denied under `set -e`, breaking bare `docker run` and
+# the default docker-compose single-user path. Pick a writable home-based dir
+# unless the caller overrides OPENACE_CONFIG_DIR (e.g. K8s sets it explicitly).
+if [ -z "${OPENACE_CONFIG_DIR:-}" ]; then
+    if [ "$(id -u)" = "0" ]; then
+        OPENACE_CONFIG_DIR="/root/.open-ace"
+    else
+        OPENACE_CONFIG_DIR="${HOME:-/home/open-ace}/.open-ace"
+    fi
+fi
 OPENACE_CONFIG_FILE="${OPENACE_CONFIG_FILE:-${OPENACE_CONFIG_DIR}/config.json}"
 export OPENACE_CONFIG_DIR OPENACE_CONFIG_FILE
 
