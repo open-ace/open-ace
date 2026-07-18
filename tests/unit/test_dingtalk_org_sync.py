@@ -29,7 +29,7 @@ class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
         assert app_secret == "test-app-secret"
         return "test-token"
 
-    def _fetch_directory_snapshot(self, token: str, root_department_id: str):
+    def _fetch_directory_snapshot(self, token: str, root_department_id: str, **kwargs):
         assert token == "test-token"
         assert root_department_id == "1"
         return self._departments, self._users
@@ -142,8 +142,10 @@ def test_sync_creates_users_teams_memberships_and_sso_links(sync_env):
     assert [row["team_name"] for row in memberships] == ["Engineering", "QA"]
 
 
-def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_env):
-    """Sync should link by email and prune memberships on DingTalk-managed teams."""
+def test_sync_does_not_link_unverified_email_and_removes_stale_membership(sync_env):
+    """Sync must NOT bind a DingTalk identity to a pre-existing account by unverified
+    email, and must still prune memberships on DingTalk-managed teams.
+    """
     db, config = sync_env
     user_repo = UserRepository(db=db)
 
@@ -178,9 +180,13 @@ def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_en
     )
 
     first_result = service.sync_org()
-    assert first_result.users_created == 0
-    assert first_result.users_linked == 1
+    # The DingTalk user is provisioned as a separate (inactive) local user; the
+    # pre-existing alice_local account is NOT linked.
+    assert first_result.users_created == 1
+    assert first_result.users_linked == 0
+    assert any("unverified" in w for w in first_result.warnings)
 
+    # The DingTalk-synced team belongs to the newly provisioned user, not alice_local.
     synced_team = db.fetch_one("SELECT team_id FROM teams WHERE name = ?", ("Engineering",))
     assert synced_team is not None
     db.execute(
@@ -204,7 +210,14 @@ def test_sync_reuses_existing_user_by_email_and_removes_stale_membership(sync_en
         "SELECT user_id FROM team_members WHERE team_id = ? ORDER BY user_id ASC",
         (synced_team["team_id"],),
     )
-    assert members == [{"user_id": existing_user_id}]
+    # The DingTalk-synced team contains the separately-provisioned DingTalk user,
+    # NOT the pre-existing alice_local account (unverified email must not be linked).
+    dingtalk_identity = db.fetch_one(
+        "SELECT user_id FROM sso_identities WHERE provider_user_id = ?",
+        ("manager123",),
+    )
+    assert dingtalk_identity is not None
+    assert members == [{"user_id": dingtalk_identity["user_id"]}]
 
 
 def test_scheduler_gate_runs_only_when_enabled(sync_env):

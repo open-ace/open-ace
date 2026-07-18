@@ -470,8 +470,8 @@ class DataFetchScheduler:
                     result.departments_seen,
                     result.users_seen,
                 )
-        except Exception as e:
-            logger.exception("Scheduled Feishu org sync failed: %s", e)
+        except Exception:
+            logger.exception("Scheduled Feishu org sync failed")
 
     def _maybe_sync_dingtalk_org(self):
         """Synchronize DingTalk org data when auto-sync is enabled."""
@@ -486,8 +486,8 @@ class DataFetchScheduler:
                     result.departments_seen,
                     result.users_seen,
                 )
-        except Exception as e:
-            logger.exception("Scheduled DingTalk org sync failed: %s", e)
+        except Exception:
+            logger.exception("Scheduled DingTalk org sync failed")
 
 
 # Global scheduler instance

@@ -538,7 +538,7 @@ class FeishuOrgSyncService:
             if not isinstance(department_ids, list):
                 department_ids = [department_id]
             raw_status = item.get("status")
-            status = cast(dict[str, Any], raw_status) if isinstance(raw_status, dict) else {}
+            status = cast("dict[str, Any]", raw_status) if isinstance(raw_status, dict) else {}
 
             users.append(
                 FeishuUser(

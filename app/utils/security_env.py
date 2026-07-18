@@ -19,6 +19,12 @@ _WEAK_SECRET_VALUES = frozenset(
     }
 )
 
+# Prefixes used by committed deployment manifests (k8s/configmap.yaml) as
+# placeholders the operator must replace. Matching the prefix (rather than
+# each literal string) keeps a future manifest from silently reintroducing a
+# new ``replace-with-random-*`` value that passes the weak-secret check.
+_WEAK_SECRET_PREFIXES = ("replace-with-random",)
+
 _DEV_SECRET_KEY = "dev-secret-key"  # nosec B105 - explicit development-only fallback
 _DEV_ENCRYPTION_KEY = (  # nosec B105 - explicit development-only fallback
     "openace-dev-encryption-key"
@@ -34,7 +40,10 @@ def is_weak_secret_value(value: str | None) -> bool:
     """Return whether the given secret value is missing or a known placeholder."""
     if value is None:
         return True
-    return value.strip().lower() in _WEAK_SECRET_VALUES
+    normalized = value.strip().lower()
+    if normalized in _WEAK_SECRET_VALUES:
+        return True
+    return any(normalized.startswith(prefix) for prefix in _WEAK_SECRET_PREFIXES)
 
 
 def get_secret_key_for_app(secret_key: str | None = None) -> str:

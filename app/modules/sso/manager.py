@@ -473,7 +473,13 @@ class SSOManager:
         if auth_state.get("provider_name") != provider_name:
             return SSOAuthResult(success=False, error="invalid_state")
 
-        request_id = cast("Optional[str]", auth_state.get("code_verifier"))
+        # Normalize an empty-string request id (stored under the NOT NULL
+        # code_verifier column when no SAML AuthnRequest id was generated) back
+        # to None. The InResponseTo strong-check in
+        # SAMLProvider._validate_response gates on `if request_id:`; without
+        # this normalization a stored "" would silently disable the check,
+        # which is exactly the replay gap this PR closes.
+        request_id = cast("Optional[str]", auth_state.get("code_verifier")) or None
         result = provider.authenticate_saml_response(
             saml_response=saml_response,
             request_id=request_id,

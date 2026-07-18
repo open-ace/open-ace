@@ -199,11 +199,17 @@ def test_clear_active_terminal_metadata(monkeypatch, tmp_path):
     assert not active_path.exists()
 
 
-def test_cmd_menu_execs_terminal_menu_on_windows(monkeypatch):
+def test_cmd_menu_runs_terminal_menu_and_clears_token(monkeypatch):
+    """cmd_menu launches the menu as a waitable child and cleans up afterwards.
+
+    Previously cmd_menu used ``os.execvpe``, which replaces the process image
+    so no ``finally``/``atexit`` cleanup could run, leaving the persisted Codex
+    bearer token orphaned on disk. The menu now runs via ``subprocess.run`` and
+    the bearer token + active-terminal pointer are scrubbed in a ``finally``.
+    """
     openace_cli = load_openace_cli()
     calls = {}
 
-    monkeypatch.setattr(openace_cli.os, "name", "nt", raising=False)
     monkeypatch.setattr(
         openace_cli,
         "_start_cli_terminal",
@@ -213,22 +219,38 @@ def test_cmd_menu_execs_terminal_menu_on_windows(monkeypatch):
     monkeypatch.setattr(openace_cli, "_write_active_terminal", lambda terminal: None)
     monkeypatch.setattr(openace_cli, "_session_env", lambda terminal: {"ENV": "1"})
 
-    def fake_execvpe(file, argv, env):
-        calls["file"] = file
-        calls["argv"] = argv
-        calls["env"] = env
-        raise RuntimeError("stop")
+    cleared_tokens = []
+    cleared_terminal = []
+    monkeypatch.setattr(
+        openace_cli,
+        "clear_codex_bearer_token",
+        lambda home_dir=None: cleared_tokens.append(home_dir),
+    )
+    monkeypatch.setattr(
+        openace_cli, "_clear_active_terminal", lambda: cleared_terminal.append(True)
+    )
 
-    monkeypatch.setattr(openace_cli.os, "execvpe", fake_execvpe)
+    class FakeProc:
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+    def fake_run(args, env=None, cwd=None, check=False):
+        calls["args"] = list(args)
+        calls["env"] = env
+        calls["cwd"] = cwd
+        return FakeProc()
+
+    monkeypatch.setattr(openace_cli.subprocess, "run", fake_run)
 
     args = type("Args", (), {"work_dir": "/repo"})()
-    try:
-        openace_cli.cmd_menu(args)
-    except RuntimeError as exc:
-        assert str(exc) == "stop"
-    else:  # pragma: no cover - defensive
-        raise AssertionError("cmd_menu did not attempt to exec the terminal menu")
+    rc = openace_cli.cmd_menu(args)
 
-    assert calls["file"] == openace_cli.sys.executable
-    assert calls["argv"] == [openace_cli.sys.executable, str(openace_cli.MENU_PATH)]
+    assert rc == 0
+    assert calls["args"] == [openace_cli.sys.executable, str(openace_cli.MENU_PATH)]
     assert calls["env"] == {"ENV": "1"}
+    assert calls["cwd"] == "/repo"
+    # Cleanup must run in the finally path after the menu exits.
+    assert cleared_tokens == [None]
+    assert cleared_terminal == [True]

@@ -1,9 +1,27 @@
+import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from app.modules.governance.alert_notifier import AlertNotifier, NotificationPreference
+
+
+def _wait_for_post(mock_session, timeout=2.0):
+    """Block until the async webhook worker issues its POST (or timeout).
+
+    Webhook delivery now runs on a background daemon thread, so the caller must
+    wait for the POST to actually happen before asserting on it.
+    """
+    post = mock_session.return_value.post
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if post.called:
+            return post
+        time.sleep(0.005)
+    return post
 
 
 class TestAlertNotifierWebhook(unittest.TestCase):
@@ -59,8 +77,9 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        mock_session.return_value.post.assert_called_once()
-        post_args = mock_session.return_value.post.call_args
+        post = _wait_for_post(mock_session)
+        post.assert_called_once()
+        post_args = post.call_args
         post_kwargs = post_args.kwargs
         assert post_kwargs["allow_redirects"] is False
         # The verified IP is pinned into the outbound URL (first positional arg).
@@ -68,7 +87,8 @@ class TestAlertNotifierWebhook(unittest.TestCase):
         assert "93.184.216.34" in pinned_url.split("/")[2]
         # The original hostname is preserved as Host for SNI / virtual hosting.
         assert post_kwargs["headers"]["Host"] == "alerts.example.com"
-        payload = post_kwargs["json"]
+        # The body is signed bytes (data=) rather than json=.
+        payload = json.loads(post_kwargs["data"])
         assert payload["event"] == "openace.alert"
         assert payload["alert"]["title"] == "Quota Warning"
         assert "Usage reached 80%" in payload["summary"]
@@ -105,7 +125,8 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_session.return_value.post.call_args.kwargs["json"]
+        post = _wait_for_post(mock_session)
+        payload = json.loads(post.call_args.kwargs["data"])
         assert payload["msg_type"] == "text"
         assert "System Alert" in payload["content"]["text"]
         assert "Service unavailable" in payload["content"]["text"]
@@ -142,7 +163,8 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_session.return_value.post.call_args.kwargs["json"]
+        post = _wait_for_post(mock_session)
+        payload = json.loads(post.call_args.kwargs["data"])
         assert payload["msgtype"] == "text"
         assert "System Alert" in payload["text"]["content"]
         assert "Service unavailable" in payload["text"]["content"]
@@ -179,7 +201,8 @@ class TestAlertNotifierWebhook(unittest.TestCase):
             username="alice",
         )
 
-        payload = mock_session.return_value.post.call_args.kwargs["json"]
+        post = _wait_for_post(mock_session)
+        payload = json.loads(post.call_args.kwargs["data"])
         assert payload["event"] == "openace.alert"
         assert "System Alert" in payload["summary"]
 

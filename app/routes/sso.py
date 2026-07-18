@@ -1239,9 +1239,24 @@ def callback(provider_name: str):
     return _finalize_sso_login(provider_name, auth_result, frontend_url)
 
 
+def _allow_email_linking(provider_name: str) -> bool:
+    """Return True only when the SSO provider explicitly opts into email-based
+    account linking.
+
+    Default is False (secure): an IdP-asserted email is not trusted to bind onto a
+    pre-existing local account, which prevents privilege escalation via email
+    collision when the IdP asserts an unverified/attacker-controlled address.
+    """
+    provider = get_sso_manager().get_provider(provider_name)
+    if provider is None:
+        return False
+    return bool(provider.config.extra_params.get("allow_email_linking"))
+
+
 def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[str]):
     """Create/link the local user and establish Open ACE sessions after SSO success."""
     user_id = None
+    linked_by_email = False
     if auth_result.user:
         user_id = get_sso_manager().get_user_by_sso_identity(
             provider_name,
@@ -1249,11 +1264,15 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
         )
 
         if not user_id:
-            # Try to find user by email
-            if auth_result.user.email:
+            # Link to an existing local account by email ONLY when the provider
+            # explicitly opts in. Default behaviour is to provision a fresh user
+            # rather than risk binding an IdP-asserted (unverified) email onto an
+            # existing account — especially a privileged one.
+            if auth_result.user.email and _allow_email_linking(provider_name):
                 existing_user = user_repo.get_user_by_email(auth_result.user.email)
                 if existing_user:
                     user_id = existing_user.get("id")
+                    linked_by_email = True  # an actual binding happened
 
             # Create new user if not found
             if not user_id:
@@ -1290,6 +1309,33 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
             expires_at=expires_at,
         )
 
+    # Audit-log the SSO login. Password auth records LOGIN/LOGOUT; SSO sessions,
+    # email-based linking, and auto-provisioning must be visible to the audit trail
+    # for forensic purposes.
+    try:
+        get_audit_logger().log(
+            action=AuditAction.LOGIN.value,
+            user_id=user_id,
+            username=auth_result.user.username if auth_result.user else None,
+            resource_type="sso_session",
+            resource_id=provider_name,
+            details={
+                "provider": provider_name,
+                "method": "sso",
+                # Reflect the ACTUAL linking outcome for forensic accuracy: True
+                # only when an existing local account was bound to the IdP email.
+                "email_linked": linked_by_email,
+                # Config snapshot so investigators can tell whether linking was
+                # even permitted at login time, independent of the outcome above.
+                "email_linking_enabled": _allow_email_linking(provider_name),
+            },
+            ip_address=request.remote_addr if request else None,
+            user_agent=request.headers.get("User-Agent") if request else None,
+            success=bool(user_id),
+        )
+    except Exception:
+        logger.warning("Failed to audit-log SSO login", exc_info=True)
+
     # Redirect to frontend if configured, otherwise return JSON
     if frontend_url and session_token and _validate_redirect_uri(frontend_url):
         timeout_seconds = int(_get_session_timeout_hours() * 3600)
@@ -1318,6 +1364,15 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: Optional[
 @public_endpoint
 def saml_acs(provider_name: str):
     """Handle SAML HTTP-POST Assertion Consumer Service callbacks."""
+    # Scope the parse-DoS cap to this one unauthenticated endpoint (a real
+    # SAMLResponse is well under 100KB; 256KB is a generous ceiling). We check
+    # request.content_length here instead of setting a global MAX_CONTENT_LENGTH
+    # so authenticated upload endpoints that legitimately carry larger bodies
+    # are unaffected.
+    max_saml_response = 256 * 1024
+    if (request.content_length or 0) > max_saml_response:
+        return jsonify({"error": "saml_response_too_large"}), 413
+
     saml_response = request.form.get("SAMLResponse")
     relay_state = request.form.get("RelayState", "")
 
@@ -1378,8 +1433,29 @@ def logout():
         "Authorization", ""
     ).replace("Bearer ", "")
 
+    session_data = None
     if token:
+        session_data = get_sso_manager().get_sso_session(token)
         get_sso_manager().delete_sso_session(token)
+
+    # Audit-log the SSO logout so SSO session termination is visible alongside
+    # password-auth logouts.
+    try:
+        get_audit_logger().log(
+            action=AuditAction.LOGOUT.value,
+            user_id=session_data.get("user_id") if session_data else None,
+            resource_type="sso_session",
+            resource_id=session_data.get("provider_name") if session_data else None,
+            details={
+                "method": "sso",
+                "provider": session_data.get("provider_name") if session_data else None,
+            },
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+            success=bool(session_data),
+        )
+    except Exception:
+        logger.warning("Failed to audit-log SSO logout", exc_info=True)
 
     return jsonify({"message": "Logged out successfully"})
 
