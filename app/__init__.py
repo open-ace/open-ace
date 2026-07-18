@@ -61,20 +61,20 @@ def _normalize_origin(origin: str) -> str | None:
         return None
 
     # Validate scheme
-    if parsed.scheme not in ('http', 'https'):
+    if parsed.scheme not in ("http", "https"):
         return None
 
     # Normalize host
     host = parsed.hostname
     if not host:
         return None
-    host = host.rstrip('.').lower()
+    host = host.rstrip(".").lower()
 
     # Infer port if missing
     if parsed.port:
         port = parsed.port
     else:
-        port = 443 if parsed.scheme == 'https' else 80
+        port = 443 if parsed.scheme == "https" else 80
 
     return f"{parsed.scheme}://{host}:{port}"
 
@@ -92,9 +92,7 @@ def _build_cors_origins_cache() -> set[str]:
     for origin in raw_origins:
         normalized = _normalize_origin(origin)
         if normalized is None:
-            logger.warning(
-                f"CORS origin '{origin}' is invalid (must be http/https URL), skipping"
-            )
+            logger.warning(f"CORS origin '{origin}' is invalid (must be http/https URL), skipping")
             continue
         if normalized != origin:
             logger.warning(

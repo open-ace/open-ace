@@ -142,14 +142,19 @@ class TestCorsPolicy:
         # Create a fresh app for this test to avoid state pollution
 
         # Set the environment variable using monkeypatch
-        monkeypatch.setenv("OPENACE_CORS_ALLOWED_ORIGINS", "https://workspace.internal.example, https://ops.example")
+        monkeypatch.setenv(
+            "OPENACE_CORS_ALLOWED_ORIGINS",
+            "https://workspace.internal.example, https://ops.example",
+        )
 
         # Force cache rebuild immediately
         from app.__init__ import _get_allowed_cors_origins
+
         cache = _get_allowed_cors_origins()
         print(f"Cache after setting env: {cache}")
 
         from flask import Flask, jsonify
+
         app = Flask(__name__)
         app.config["TESTING"] = True
 
@@ -169,6 +174,8 @@ class TestCorsPolicy:
         )
 
         assert resp.status_code == 200
-        assert "Access-Control-Allow-Origin" in resp.headers, f"Expected CORS headers, got: {dict(resp.headers)}"
+        assert (
+            "Access-Control-Allow-Origin" in resp.headers
+        ), f"Expected CORS headers, got: {dict(resp.headers)}"
         assert resp.headers["Access-Control-Allow-Origin"] == "https://workspace.internal.example"
         assert resp.headers["Access-Control-Allow-Credentials"] == "true"

@@ -76,7 +76,9 @@ def _get_allowed_ports() -> set[int]:
             if 1 <= port <= 65535:
                 ports.add(port)
             else:
-                logger.warning(f"Invalid port '{p}' in OPENACE_OUTBOUND_ALLOWED_PORTS (out of range)")
+                logger.warning(
+                    f"Invalid port '{p}' in OPENACE_OUTBOUND_ALLOWED_PORTS (out of range)"
+                )
         except ValueError:
             logger.warning(f"Non-integer port '{p}' in OPENACE_OUTBOUND_ALLOWED_PORTS")
     return ports or {80, 443}  # Fallback to minimal safe set
@@ -104,23 +106,25 @@ def _normalize_hostname(host: str) -> str:
     """
     # 1. Percent-decode once
     try:
-        decoded = urllib.parse.unquote(host, errors='strict')
+        decoded = urllib.parse.unquote(host, errors="strict")
     except UnicodeDecodeError as exc:
         raise ValueError("Hostname contains invalid percent-encoding") from exc
 
     # 2. Security checks
-    if '%' in decoded:
+    if "%" in decoded:
         raise ValueError("Hostname contains unexpected percent-encoding (possible double-encoding)")
-    if '\x00' in decoded:
+    if "\x00" in decoded:
         raise ValueError("Hostname contains NULL character")
 
     # 3. Normalization
-    normalized = decoded.rstrip('.').lower()
+    normalized = decoded.rstrip(".").lower()
 
     return normalized
 
 
-def _check_username_password_for_dangerous_chars(username: str | None, password: str | None) -> str | None:
+def _check_username_password_for_dangerous_chars(
+    username: str | None, password: str | None
+) -> str | None:
     """Check username/password for dangerous characters after decoding.
 
     Returns:
@@ -130,13 +134,14 @@ def _check_username_password_for_dangerous_chars(username: str | None, password:
         if not value:
             continue
         # Decode percent-encoding
-        decoded = urllib.parse.unquote(value, errors='strict')
+        decoded = urllib.parse.unquote(value, errors="strict")
         # Check for dangerous characters
-        if '\x00' in decoded:
+        if "\x00" in decoded:
             return f"URL {name} contains NULL character"
-        if '@' in decoded:
+        if "@" in decoded:
             return f"URL {name} contains '@' character (possible parser confusion)"
     return None
+
 
 # Networks that must be rejected even though ``ipaddress.is_global`` returns
 # ``True`` for them. These cover NAT64 encodings of private/metadata IPs
@@ -222,8 +227,7 @@ def validate_public_http_url(
         # Explicit port must be in whitelist
         if parsed.port not in allowed_ports:
             return OutboundUrlValidationResult(
-                False,
-                f"Port {parsed.port} not in allowed ports: {sorted(allowed_ports)}"
+                False, f"Port {parsed.port} not in allowed ports: {sorted(allowed_ports)}"
             )
     # If port is None, it's inferred from scheme (80/443) and is allowed
 
