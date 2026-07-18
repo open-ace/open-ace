@@ -163,15 +163,22 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 COPY scripts/openace-run-as.sh /usr/local/bin/openace-run-as
 RUN chmod 755 /usr/local/bin/openace-run-as && chown root:root /usr/local/bin/openace-run-as
 
-# NOTE: Container runs as root to support multi-user workspace mode (sudo -u <user>)
-# The entrypoint script handles privilege management and user creation.
+# NOTE: The image defaults to the non-root open-ace user (uid 1000) so that
+# `docker run`, docker-compose, and Kubernetes all execute the entrypoint as
+# uid 1000 without relying solely on the K8s manifest's securityContext.
+# This matches the stable uid/gid 1000 created above and the COPY --chown
+# ownership baked into the image.
 #
 # SECURITY CONSIDERATIONS:
-# - Multi-user mode requires root to create system users (useradd) dynamically
+# - Single-user mode (the default) needs only uid 1000 and runs non-root here.
+# - Multi-user workspace mode genuinely needs root (it runs useradd/chown and
+#   sudo -u across /home). For those deployments, opt back into root explicitly:
+#   set `--user 0` (docker run) / `runAsUser: 0` (manifest) AND the env
+#   OPENACE_ALLOW_ROOT_MULTI_USER=1. docker-entrypoint.sh fail-fasts otherwise.
 # - sudoers is configured to allow open-ace user to run specific commands only
-# - For single-user deployments, consider running as non-root (USER open-ace)
 # - In production, use network isolation and limit container privileges
 # - Refer to docker-entrypoint.sh for sudoers configuration details
+USER 1000
 
 # Environment variables (Issue #1192: add LANG/LC_ALL for Unicode support)
 ENV PYTHONUNBUFFERED=1 \
@@ -196,6 +203,11 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # =============================================================================
 FROM production AS development
 
+# The development target installs extra tools into /opt/venv (root-owned by
+# the builder stage), so it opts back into root for the build. The default
+# `open-ace:latest` image stays non-root.
+USER root
+
 # Install development tools
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
     pytest \
@@ -217,6 +229,11 @@ CMD ["python", "server.py"]
 # Migration Stage (for running database migrations)
 # =============================================================================
 FROM production AS migration
+
+# The migration target is a one-shot init Job (alembic upgrade), not the
+# long-running web image, so it opts back into root to write /entrypoint.sh
+# under / (owned by root). The default `open-ace:latest` image stays non-root.
+USER root
 
 # Create migration entrypoint script
 RUN echo '#!/bin/bash\n\

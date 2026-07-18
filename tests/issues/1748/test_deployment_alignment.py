@@ -82,6 +82,39 @@ class TestComposeSunset:
         assert "./ssl:/etc/nginx/ssl:ro" not in compose
 
 
+class TestDockerImageDefaultsToNonRoot:
+    def test_dockerfile_sets_non_root_user_directive(self):
+        """The image must default to non-root everywhere, not only under K8s.
+
+        Regression for PR #1780 review: image had no USER directive so
+        `docker run` executed as root even though deployment.yaml set 1000.
+        """
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        # Strip comment lines so the line-172 suggestion comment doesn't false-pass.
+        lines = [
+            ln for ln in dockerfile.splitlines() if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        body = "\n".join(lines)
+        # Require an active USER directive naming the non-root user or its uid.
+        assert re.search(r"^USER\s+(open-ace|1000)\s*$", body, re.MULTILINE), (
+            "Dockerfile must declare `USER open-ace` (or `USER 1000`) in the "
+            "production stage so the image is non-root by default, not just "
+            "under the K8s manifest."
+        )
+
+    def test_dockerfile_non_root_user_matches_manifest_uid(self):
+        """If the image sets USER <uid>, it must match deployment.yaml runAsUser."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        deployment = (ROOT / "k8s" / "deployment.yaml").read_text(encoding="utf-8")
+        m = re.search(r"runAsUser:\s*(\d+)", deployment)
+        assert m, "deployment.yaml must set runAsUser"
+        manifest_uid = m.group(1)
+        # The image must not contradict the manifest (either name or same uid).
+        assert re.search(
+            rf"^USER\s+(open-ace|{manifest_uid})\s*$", dockerfile, re.MULTILINE
+        ), f"Dockerfile USER directive must resolve to uid {manifest_uid}"
+
+
 class TestDockerEntrypointDefaults:
     def test_generated_config_enables_autonomous_by_default(self):
         entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")

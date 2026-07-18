@@ -45,6 +45,31 @@ python3 server.py
 - Open ACE Docker image (`open-ace:latest`)
 - PostgreSQL image (`postgres:15-alpine`)
 
+### Non-root runtime (default)
+
+The Open ACE image runs as the non-root `open-ace` user (uid 1000) by default.
+A `USER 1000` directive in the production stage means `docker run`,
+docker-compose, and Kubernetes all execute the entrypoint as uid 1000 without
+relying solely on a manifest `securityContext`. The uid/gid 1000 is stable and
+matches the filesystem ownership baked into the image and the K8s
+`runAsUser`/`runAsGroup: 1000`.
+
+Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
+`workspace.multi_user_mode: true` in config) genuinely needs root — it creates
+system users (`useradd`), fixes ownership (`chown`), and switches identity
+(`sudo -u <user>`) across `/home`. For multi-user deployments you must opt back
+into root explicitly:
+
+```bash
+docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+```
+
+Without both `--user 0` (or manifest `runAsUser: 0`) and
+`OPENACE_ALLOW_ROOT_MULTI_USER=1`, the entrypoint exits with a clear error
+rather than silently swallowing the `useradd`/`chown` permission failures that
+a naive non-root multi-user deployment would hit.
+
 ### Initial Deployment
 
 ```bash

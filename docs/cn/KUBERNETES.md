@@ -61,7 +61,7 @@ k8s/
 
 **粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程会话 HTTP 控制态已经持久化并可跨 Pod，但实时终端 relay WebSocket bridge 仍属于单个 Web 进程；对活跃终端会话而言，粘性路由仍是最稳妥的默认配置。
 
-**多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
+**多用户工作区说明：** Docker 镜像本身通过 `USER 1000` 指令默认以非 root 用户 `open-ace`（uid 1000）运行，默认 Kubernetes 清单也通过 `runAsNonRoot: true` / `runAsUser: 1000` 予以加强。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行（`runAsUser: 0`）**并** 设置 `OPENACE_ALLOW_ROOT_MULTI_USER=1`；入口脚本在缺少两者之一时会直接报错退出，并请在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 

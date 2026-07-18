@@ -45,6 +45,28 @@ python3 server.py
 - Open ACE Docker 镜像（`open-ace:latest`）
 - PostgreSQL 镜像（`postgres:15-alpine`）
 
+### 非 root 运行（默认）
+
+Open ACE 镜像默认以非 root 用户 `open-ace`（uid 1000）运行。生产阶段中的
+`USER 1000` 指令意味着 `docker run`、docker-compose 与 Kubernetes 都会以
+uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`。uid/gid 1000
+是稳定的，并与镜像中内置的文件属主、K8s 的 `runAsUser`/`runAsGroup: 1000`
+保持一致。
+
+多用户工作区模式（`WORKSPACE_MULTI_USER_MODE=true` 或配置中的
+`workspace.multi_user_mode: true`）确实需要 root——它会创建系统用户
+（`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
+（`sudo -u <user>`）。多用户部署必须显式回退到 root：
+
+```bash
+docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+```
+
+必须同时设置 `--user 0`（或清单中的 `runAsUser: 0`）与
+`OPENACE_ALLOW_ROOT_MULTI_USER=1`，否则入口脚本会以清晰的错误信息退出，
+而不是默默吞掉非 root 多用户部署会遇到的 `useradd`/`chown` 权限失败。
+
 ### 初始部署
 
 ```bash
