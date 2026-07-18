@@ -278,7 +278,12 @@ class SinglePtyTerminalServer:
         """Handle input from a single WebSocket connection."""
         try:
             async for message in websocket:
-                if not self._pty_alive or self.master_fd is None:
+                # Path-aware guard: the PTY model needs master_fd to write to,
+                # while the Windows pipe model writes via process.stdin and never
+                # assigns master_fd. The old `master_fd is None` check short-
+                # circuited the pipe path on the first message, making the
+                # restored Windows terminal receive-only.
+                if not self._pty_alive or (self._uses_pty and self.master_fd is None):
                     break
 
                 if isinstance(message, str):
