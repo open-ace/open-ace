@@ -65,7 +65,11 @@ def _authenticate_user():
         return None
 
     # Try session token first
-    from app.auth.decorators import _extract_token, _load_user_from_token
+    from app.auth.decorators import (
+        _extract_token,
+        _load_user_from_token,
+        enforce_password_change_requirement,
+    )
 
     token = _extract_token()
     if token:
@@ -76,6 +80,9 @@ def _authenticate_user():
                 g.user = user
                 g.user_id = user.get("id")
                 g.user_role = user.get("role")
+                password_change_response = enforce_password_change_requirement(user)
+                if password_change_response is not None:
+                    return password_change_response
                 return None
 
     # Fallback: try WebUI token from query param (for iframe integration)
@@ -92,6 +99,9 @@ def _authenticate_user():
                     g.user = user
                     g.user_id = user_id
                     g.user_role = user.get("role")
+                    password_change_response = enforce_password_change_requirement(user)
+                    if password_change_response is not None:
+                        return password_change_response
                     return None
 
     return jsonify({"error": "Authentication required"}), 401

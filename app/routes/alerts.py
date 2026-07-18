@@ -16,7 +16,11 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import _extract_token, _load_user_from_token
+from app.auth.decorators import (
+    _extract_token,
+    _load_user_from_token,
+    enforce_password_change_requirement,
+)
 from app.modules.governance.alert_notifier import (
     NotificationPreference,
     _redact_dingtalk_secret,
@@ -38,6 +42,9 @@ def load_user():
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
             return None
     return jsonify({"error": "Authentication required"}), 401
 
