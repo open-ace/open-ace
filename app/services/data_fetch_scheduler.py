@@ -487,7 +487,7 @@ class DataFetchScheduler:
                     result.users_seen,
                 )
         except Exception as e:
-            logger.warning(f"Scheduled DingTalk org sync failed: {e}")
+            logger.exception("Scheduled DingTalk org sync failed: %s", e)
 
 
 # Global scheduler instance

@@ -13,7 +13,7 @@ import re
 import threading
 import uuid
 from collections import deque
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -22,7 +22,7 @@ import requests
 
 from app.modules.sso.manager import SSOManager
 from app.modules.workspace.collaboration import CollaborationManager
-from app.repositories.database import Database
+from app.repositories.database import Database, release_postgresql_connection
 from app.repositories.user_repo import UserRepository
 from app.utils.config import get_config_value
 
@@ -221,30 +221,55 @@ class FeishuOrgSyncService:
     def _acquire_sync_lock(self):
         """Acquire mutual-exclusion for sync_org.
 
-        On PostgreSQL a transaction-level advisory lock is taken so that
+        On PostgreSQL a **session-level** advisory lock is taken so that
         concurrent workers (separate processes) cannot run overlapping syncs.
-        The in-process threading.Lock is still held as a cheap first fence to
+        The lock is bound to a single dedicated connection that is held open
+        across the entire critical section (the ``yield``) and only released
+        afterwards; this is essential because ``Database`` commits per statement
+        and returns pooled connections after every call, so a transaction-level
+        lock (``pg_try_advisory_xact_lock``) would be freed the instant the
+        ``fetch_one`` returned -- before the sync body even started. The
+        in-process threading.Lock is still acquired first as a cheap fence to
         avoid needless DB round-trips within a single worker. On SQLite (and
         other non-Postgres backends) the advisory lock is unavailable, so the
         threading.Lock remains the only guard; SQLite deployments are
         single-process by nature.
         """
         with self._sync_lock:
+            conn = None
             if self.db.is_postgresql:
-                # pg_try_advisory_xact_lock returns immediately; 0 means another
-                # worker holds the lock, in which case we skip this run.
-                row = self.db.fetch_one(
-                    "SELECT pg_try_advisory_xact_lock(?) AS ok", (self._DB_SYNC_LOCK_KEY,)
-                )
-                if row and row.get("ok") is False:
-                    raise RuntimeError("Another Feishu org sync is already running")
-            try:
+                # Hold a dedicated connection for the whole critical section so
+                # the session-level advisory lock stays bound to this backend
+                # connection and is visible to every other worker's backend.
+                conn = self.db.get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT pg_try_advisory_lock(%s)",
+                        (self._DB_SYNC_LOCK_KEY,),
+                    )
+                    ok = cur.fetchone()[0]
+                    if not ok:
+                        raise RuntimeError("Another Feishu org sync is already running")
+                    try:
+                        yield
+                    finally:
+                        # Session-level locks survive transaction end, so they
+                        # MUST be released explicitly on the same connection.
+                        with suppress(Exception):
+                            unlock_cur = conn.cursor()
+                            unlock_cur.execute(
+                                "SELECT pg_advisory_unlock(%s)",
+                                (self._DB_SYNC_LOCK_KEY,),
+                            )
+                            unlock_cur.fetchone()
+                        with suppress(Exception):
+                            conn.commit()
+                finally:
+                    if conn is not None:
+                        release_postgresql_connection(conn)
+            else:
                 yield
-            finally:
-                # Transaction-level advisory locks release at commit; the
-                # Database connection context commits per statement, so nothing
-                # explicit is required here.
-                pass
 
     def _reconcile_removed_users(
         self,
@@ -728,9 +753,7 @@ class FeishuOrgSyncService:
                     prior_role = row.get("role")
                     break
             if prior_role and prior_role != "member":
-                existing = preserved_roles.get(user_id)
-                if not existing or str(prior_role) != "member":
-                    preserved_roles[user_id] = str(prior_role)
+                preserved_roles.setdefault(user_id, str(prior_role))
             self.db.execute(
                 "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
                 (team_id, user_id),
