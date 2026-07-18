@@ -649,6 +649,11 @@ class DingTalkOrgSyncService:
             "department_ids": list(user.department_ids),
             "status": user.status,
             "synced_by": "dingtalk_org_sync",
+            # Record the tenant this identity was synced under so the departed-user
+            # deactivation pass can scope itself to the syncing tenant. Without this
+            # marker a multi-tenant deployment would let tenant A's sync deactivate
+            # tenant B's DingTalk identities (cross-tenant leak).
+            "tenant_id": tenant_id,
             "synced_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
         self.sso_manager.link_identity(
@@ -803,6 +808,12 @@ class DingTalkOrgSyncService:
         let a recycled id re-resolve to the previous local account on a later sync.
         We detect previously-synced identities via the ``synced_by`` marker stored in
         ``provider_data`` and drop the ones whose provider_user_id is no longer seen.
+
+        The pass is scoped to the syncing tenant: only identities whose
+        ``provider_data.tenant_id`` matches (or, for legacy rows without that marker,
+        whose linked local user belongs to this tenant) are eligible. Without this
+        filter a multi-tenant deployment would let tenant A's sync deactivate tenant
+        B's DingTalk identities.
         """
         rows = self.db.fetch_all(
             """
@@ -834,10 +845,35 @@ class DingTalkOrgSyncService:
                 continue
 
             local_user_id = row.get("user_id")
-            if local_user_id is not None:
-                local_user = self.user_repo.get_user_by_id(int(local_user_id))
-                if local_user and local_user.get("tenant_id") in (None, tenant_id):
-                    self.user_repo.update_user(user_id=int(local_user_id), is_active=False)
+            local_user = (
+                self.user_repo.get_user_by_id(int(local_user_id))
+                if local_user_id is not None
+                else None
+            )
+
+            # Scope deactivation to the syncing tenant. Prefer the tenant_id stamp
+            # recorded in provider_data; fall back to the linked local user's
+            # tenant_id for legacy identity rows that predate the stamp (and treat
+            # a missing/None tenant as belonging to this tenant, preserving the
+            # original lenient behavior for single-tenant deployments).
+            identity_tenant_id = provider_data.get("tenant_id")
+            if identity_tenant_id is None and local_user is not None:
+                identity_tenant_id = local_user.get("tenant_id")
+            if identity_tenant_id is not None:
+                try:
+                    identity_tenant_id = int(identity_tenant_id)
+                except (TypeError, ValueError):
+                    identity_tenant_id = None
+            if identity_tenant_id is not None and identity_tenant_id != int(tenant_id):
+                # Belongs to a different tenant; must not be touched here.
+                continue
+
+            if (
+                local_user_id is not None
+                and local_user is not None
+                and local_user.get("tenant_id") in (None, tenant_id)
+            ):
+                self.user_repo.update_user(user_id=int(local_user_id), is_active=False)
 
             self.db.execute(
                 "DELETE FROM sso_identities WHERE provider_name = ? AND provider_user_id = ?",

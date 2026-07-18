@@ -790,6 +790,8 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
     if message_source == "dingtalk":
         dingtalk_sender_match = re.search(r'"sender_id":\s*"([^"]+)"', text)
         if not dingtalk_sender_match:
+            # A bare "userid: content" prefix on the message body. We can return
+            # immediately because there is no further metadata to extract here.
             dingtalk_sender_match = re.match(
                 r"^\s*([a-zA-Z][a-zA-Z0-9_-]{2,63}):\s*(.+)$", text.strip(), re.DOTALL
             )
@@ -801,6 +803,12 @@ def extract_user_message_metadata(text: str) -> Optional[dict]:
                     "message_source": "dingtalk",
                 }
         if dingtalk_sender_match:
+            # Record sender_id on the function scope (Step 6 below also parses
+            # JSON metadata for conversation_label/group_subject/etc. and emits
+            # the final return, so do NOT early-return here -- doing so would
+            # drop those metadata fields). The earlier round-2 code wrote this
+            # to a throwaway local, which read as dead code; assigning to the
+            # function-scoped ``sender_id`` makes the data flow explicit.
             sender_id = dingtalk_sender_match.group(1)
 
     # ========== Step 4: Handle Slack System message format ==========

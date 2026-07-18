@@ -344,9 +344,12 @@ class AlertNotifier:
         parsed = urlparse(webhook_url)
         host = (parsed.hostname or "").lower()
         path = parsed.path.lower()
-        return self._matches_webhook_host(host, _DINGTALK_WEBHOOK_HOST_SNIPPETS) and path.endswith(
-            "/robot/send"
-        )
+        # rstrip("/") so a user-configured trailing slash (e.g. "/robot/send/")
+        # is still recognized as the DingTalk send endpoint rather than falling
+        # through to the default-payload path.
+        return self._matches_webhook_host(host, _DINGTALK_WEBHOOK_HOST_SNIPPETS) and path.rstrip(
+            "/"
+        ).endswith("/robot/send")
 
     def _format_webhook_text(self, alert: Alert) -> str:
         """Render a plain-text alert summary suitable for chat webhook bots."""
