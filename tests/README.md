@@ -106,6 +106,26 @@ python tests/e2e/regression/run_regression.py
 pytest tests/integration/ -m postgres
 ```
 
+### 扩展测试自动化
+```bash
+# 每个 PR 和发布前运行的关键 E2E 门禁
+cd frontend && npm ci && npm run build && cd ..
+python scripts/run_extended_tests.py --category critical --isolated-home
+
+# 手动运行完整 E2E
+python scripts/run_extended_tests.py --category e2e --isolated-home
+
+# 手动运行指定 issue 回归测试
+python scripts/run_extended_tests.py --category issues --issue 716 --issue 740 --isolated-home
+
+# 分片运行 issue 测试
+python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
+```
+
+GitHub Actions 的 `Extended Tests` workflow 会在每个 PR 自动运行
+`critical`，每周运行 issue 分片；给 PR 添加 `run-full-e2e` 或
+`run-issue-tests` 标签可触发更重的测试范围。
+
 ### 运行特定 issue 的测试
 ```bash
 # 运行 issue 50 的测试

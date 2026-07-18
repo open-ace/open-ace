@@ -121,6 +121,14 @@ npm run test
 
 # 使用 Playwright 运行 E2E 测试
 npx playwright test
+
+# CI PR / 发布门禁使用的服务依赖扩展测试
+cd frontend && npm ci && npm run build && cd ..
+python scripts/run_extended_tests.py --category critical --isolated-home
+
+# 完整 E2E 或 issue 回归分片
+python scripts/run_extended_tests.py --category e2e --isolated-home
+python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
 完整前端参考请参阅 [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)。

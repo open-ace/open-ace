@@ -1,0 +1,292 @@
+name: Extended Tests
+
+on:
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      category:
+        description: 'Test category to run'
+        required: true
+        default: 'critical'
+        type: choice
+        options:
+          - critical
+          - regression
+          - e2e
+          - issues
+          - all
+          - specific
+      issue_numbers:
+        description: 'Comma-separated issue numbers for category=issues'
+        required: false
+        default: ''
+      target:
+        description: 'Specific pytest target for category=specific'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  critical-pr:
+    name: Critical PR E2E
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run critical extended tests
+        run: |
+          python scripts/run_extended_tests.py \
+            --category critical \
+            --isolated-home \
+            --reruns 1 \
+            --timeout 180 \
+            --maxfail 5 \
+            --junitxml test-results/critical-pr.xml
+        env:
+          CI: true
+          HEADLESS: true
+
+      - name: Upload critical test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: critical-pr-extended-tests
+          path: |
+            test-results/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  full-e2e:
+    name: Full E2E
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.category == 'e2e' || inputs.category == 'all')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-full-e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run full E2E tests
+        run: |
+          python scripts/run_extended_tests.py \
+            --category e2e \
+            --isolated-home \
+            --reruns 1 \
+            --timeout 240 \
+            --junitxml test-results/full-e2e.xml
+        env:
+          CI: true
+          HEADLESS: true
+
+      - name: Upload full E2E report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-e2e
+          path: |
+            test-results/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  issue-tests:
+    name: Issue Tests (${{ matrix.group }}/4)
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.category == 'issues' || inputs.category == 'all')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-issue-tests'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run issue regression shard
+        run: |
+          python scripts/run_extended_tests.py \
+            --category issues \
+            --issue-numbers "${{ github.event.inputs.issue_numbers || '' }}" \
+            --split-total 4 \
+            --split-group "${{ matrix.group }}" \
+            --isolated-home \
+            --reruns 1 \
+            --timeout 240 \
+            --junitxml "test-results/issues-${{ matrix.group }}.xml"
+        env:
+          CI: true
+          HEADLESS: true
+
+      - name: Upload issue test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: issue-tests-${{ matrix.group }}
+          path: |
+            test-results/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  manual-extended:
+    name: Manual Extended Tests
+    if: github.event_name == 'workflow_dispatch' && inputs.category != 'issues' && inputs.category != 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run selected extended tests
+        run: |
+          if [ -n "$TARGET" ]; then
+            python scripts/run_extended_tests.py \
+              --category "$CATEGORY" \
+              --target "$TARGET" \
+              --isolated-home \
+              --reruns 1 \
+              --timeout 240 \
+              --junitxml test-results/manual-extended.xml
+          else
+            python scripts/run_extended_tests.py \
+              --category "$CATEGORY" \
+              --isolated-home \
+              --reruns 1 \
+              --timeout 240 \
+              --junitxml test-results/manual-extended.xml
+          fi
+        env:
+          CATEGORY: ${{ github.event.inputs.category }}
+          TARGET: ${{ github.event.inputs.target }}
+          CI: true
+          HEADLESS: true
+
+      - name: Upload manual test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-extended-tests
+          path: |
+            test-results/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

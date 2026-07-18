@@ -14,6 +14,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+PAGE_LOAD_TIMEOUT_MS = int(os.environ.get("E2E_PAGE_LOAD_TIMEOUT_MS", "60000"))
 SCREENSHOT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     "screenshots",
@@ -49,7 +50,7 @@ def login(page: Page):
     避免使用 networkidle，改用 domcontentloaded 和显式等待
     """
     # 导航到登录页面，等待 DOM 加载完成
-    page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+    page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
 
     # 等待登录表单元素可见
     page.wait_for_selector("#username", state="visible", timeout=10000)
@@ -80,7 +81,7 @@ def navigate_to(page: Page, path: str):
 
     避免使用 networkidle，改用 domcontentloaded 和元素等待
     """
-    page.goto(f"{BASE_URL}{path}", wait_until="domcontentloaded")
+    page.goto(f"{BASE_URL}{path}", wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
 
     # 等待骨架屏消失（如果存在）
     try:

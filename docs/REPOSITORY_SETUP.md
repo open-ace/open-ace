@@ -59,6 +59,8 @@ gh release create v1.2.0 --title "Open ACE v1.2.0" --notes-file release_notes.md
 ### Release Checklist
 
 - Publish releases from Git tags such as `v1.1.0`.
+- The Release workflow runs `scripts/run_extended_tests.py --category critical`
+  before building and publishing release artifacts.
 - Use `scripts/generate_changelog.py` to collect commits since last release:
   ```bash
   python3 scripts/generate_changelog.py --since v1.1.0
