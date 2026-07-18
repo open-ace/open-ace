@@ -6,7 +6,7 @@ API routes for usage data operations.
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import auth_required
+from app.auth.decorators import auth_required, require_tenant_scope
 from app.services.summary_service import SummaryService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
@@ -22,8 +22,27 @@ def _require_auth():
     pass
 
 
+@usage_bp.before_request
+def _require_tenant_scope():
+    """Fail closed for non-admins with no tenant (Issue #1775).
+
+    Without this gate, ``_current_tenant_id()`` returns ``None`` and the
+    repository layer treats it as a wildcard/global filter, leaking
+    cross-tenant usage data to a no-tenant non-admin. Admins keep global
+    scope; tenant-scoped non-admins keep their tenant.
+    """
+    _, error = require_tenant_scope()
+    if error is not None:
+        return error
+
+
 def _current_tenant_id():
-    """Return the authenticated user's tenant scope."""
+    """Return the authenticated user's tenant scope.
+
+    Non-admins reaching this point are guaranteed to have a resolvable
+    tenant (``_require_tenant_scope`` denies the request otherwise); admins
+    may still be ``None`` (global scope).
+    """
     user = getattr(g, "user", None) or {}
     return user.get("tenant_id")
 

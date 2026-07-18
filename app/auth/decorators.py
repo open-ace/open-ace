@@ -314,3 +314,57 @@ def public_endpoint(f):
     # Copy the marker to the wrapper so scanner can find it
     wrapper._is_public_endpoint = True  # type: ignore[attr-defined]
     return wrapper
+
+
+# ── Tenant scope helpers ──────────────────────────────────────────────
+
+
+def _normalize_user_tenant_id(value: object) -> int | None:
+    """Coerce a raw ``tenant_id`` value into a positive int or None."""
+    if value in (None, ""):
+        return None
+    try:
+        tenant_id = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return tenant_id if tenant_id > 0 else None
+
+
+def resolve_tenant_scope() -> tuple[int | None, bool]:
+    """Return ``(tenant_id, is_admin)`` for the current request.
+
+    Mirrors the workspace pattern (``_tenant_scope_required`` /
+    ``_session_lookup_tenant_id`` in ``app/routes/workspace.py``): admins
+    keep global scope (``tenant_id`` may be ``None``), while non-admins are
+    tenant-scoped to their resolved ``tenant_id``.
+
+    This helper is side-effect free; callers decide what to do when a
+    non-admin has no tenant (the route layer denies with 403, see
+    :func:`require_tenant_scope`).
+    """
+    user = getattr(g, "user", None) or {}
+    is_admin = user.get("role") == "admin"
+    tenant_id = _normalize_user_tenant_id(user.get("tenant_id"))
+    return tenant_id, is_admin
+
+
+def require_tenant_scope() -> tuple[int | None, tuple[Response, int] | None]:
+    """Resolve the request's tenant scope, denying non-admins without one.
+
+    Returns ``(tenant_id, None)`` when the caller may proceed:
+
+    * admins -> ``tenant_id`` is ``None`` (global scope preserved);
+    * tenant-scoped non-admins -> their resolved ``tenant_id``.
+
+    Returns ``(None, error_response)`` for a non-admin user with no
+    resolvable tenant — the caller must ``return`` the error response to
+    fail closed instead of passing ``None`` to the repository layer (which
+    would otherwise be treated as a wildcard/global filter and leak
+    cross-tenant data, see Issue #1775).
+    """
+    tenant_id, is_admin = resolve_tenant_scope()
+    if is_admin:
+        return None, None
+    if tenant_id is None:
+        return None, (jsonify({"error": "Tenant scope required"}), 403)
+    return tenant_id, None
