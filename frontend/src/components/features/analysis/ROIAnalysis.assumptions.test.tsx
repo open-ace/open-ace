@@ -102,6 +102,7 @@ const mockedGetCostBreakdown = vi.fn();
 const mockedGetDailyCosts = vi.fn();
 const mockedGetOptimizationSuggestions = vi.fn();
 const mockedGetEfficiencyReport = vi.fn();
+const mockedGetROISummary = vi.fn();
 
 vi.mock('@/api', () => ({
   roiApi: {
@@ -111,6 +112,7 @@ vi.mock('@/api', () => ({
     getDailyCosts: (...args: unknown[]) => mockedGetDailyCosts(...args),
     getOptimizationSuggestions: (...args: unknown[]) => mockedGetOptimizationSuggestions(...args),
     getEfficiencyReport: (...args: unknown[]) => mockedGetEfficiencyReport(...args),
+    getROISummary: (...args: unknown[]) => mockedGetROISummary(...args),
   },
 }));
 
@@ -159,6 +161,7 @@ describe('ROIAnalysis assumptions', () => {
       waste_percentage: 12,
       recommendation_items: [],
     });
+    mockedGetROISummary.mockResolvedValue({ assumptions: defaultAssumptions });
   });
 
   it('shows baseline assumptions, applies overrides, and resets the draft', async () => {
@@ -219,5 +222,45 @@ describe('ROIAnalysis assumptions', () => {
       expect(productivityMultiplier).toHaveValue(10);
       expect(currency).toHaveValue('USD');
     });
+  });
+
+  it('seeds the Reset baseline from a non-overridden summary, not the first ROI payload', async () => {
+    // Simulate the failure scenario: the very first getROI payload carries
+    // overridden values (e.g. an override leaked into the initial fetch). The
+    // baseline must still come from the dedicated getROISummary() call so that
+    // Reset restores the true server/env default, not the override.
+    const serverDefault = defaultAssumptions;
+    const leakedOverride = {
+      hourly_labor_cost: 999,
+      productivity_multiplier: 999,
+      avg_time_saved_per_request: 999,
+      currency: 'XYZ',
+    };
+    mockedGetROI.mockResolvedValueOnce({
+      period: '2026-06-01 to 2026-06-30',
+      start_date: '2026-06-01',
+      end_date: '2026-06-30',
+      total_cost: 120.5,
+      tokens_used: 5000,
+      requests_made: 25,
+      estimated_savings: 104.0,
+      roi_percentage: -13.7,
+      assumptions: leakedOverride,
+    });
+    mockedGetROISummary.mockResolvedValueOnce({ assumptions: serverDefault });
+
+    render(<ROIAnalysis />);
+
+    const hourlyLaborCost = await screen.findByLabelText('Hourly labor cost');
+    const currency = screen.getByLabelText('Currency');
+
+    // Baseline comes from the summary call, so the draft shows the server
+    // default (50 / USD), never the leaked override (999 / XYZ).
+    await waitFor(() => {
+      expect(hourlyLaborCost).toHaveValue(50);
+      expect(currency).toHaveValue('USD');
+    });
+
+    expect(mockedGetROISummary).toHaveBeenCalledWith({});
   });
 });

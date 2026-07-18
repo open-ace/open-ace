@@ -7,11 +7,12 @@ Provides cost analysis, savings estimation, and productivity metrics.
 
 import json
 import logging
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from app.repositories.database import Database
 from app.utils.cache import cached
@@ -21,6 +22,22 @@ logger = logging.getLogger(__name__)
 
 # Thread pool for parallel queries
 _executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _normalize_tenant_id(value: object) -> Optional[int]:
+    """Normalize a tenant identifier to a positive integer.
+
+    Mirrors ``usage_repo.UsageRepository._normalize_tenant_id``. ``None``/0/blank
+    collapse to ``None`` so single-tenant deployments keep their original
+    query shape (no tenant filter), while multi-tenant callers always scope.
+    """
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        tenant_id = int(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+    return tenant_id if tenant_id > 0 else None
 
 
 @dataclass
@@ -57,7 +74,7 @@ class ROIAssumptions:
                 "Invalid ROI env override %s=%r; using default %s", env_name, raw_value, default
             )
             return default
-        return parsed if parsed > 0 else default
+        return parsed if (math.isfinite(parsed) and parsed > 0) else default
 
     @classmethod
     def from_env(cls) -> "ROIAssumptions":
@@ -435,6 +452,7 @@ class ROICalculator:
         end_date: str,
         user_id: Optional[int] = None,
         tool_name: Optional[str] = None,
+        tenant_id: Optional[int] = None,
     ) -> Optional[ROIMetrics]:
         """
         Calculate ROI for a period.
@@ -444,10 +462,14 @@ class ROICalculator:
             end_date: End date (YYYY-MM-DD).
             user_id: Optional user ID filter.
             tool_name: Optional tool name filter.
+            tenant_id: Optional tenant scope (caller's tenant). Included in the
+                cache key so one tenant never reads another's aggregate.
 
         Returns:
             Optional[ROIMetrics]: ROI metrics, or None if no data found.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
+
         # Build query
         query = """
             SELECT
@@ -459,6 +481,10 @@ class ROICalculator:
             WHERE date >= ? AND date <= ?
         """
         params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
 
         if user_id:
             query += " AND user_id = ?"
@@ -482,6 +508,10 @@ class ROICalculator:
             WHERE date >= ? AND date <= ?
         """
         model_params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            model_query += " AND tenant_id = ?"
+            model_params.append(normalized_tenant_id)
 
         if user_id:
             model_query += " AND user_id = ?"
@@ -533,7 +563,12 @@ class ROICalculator:
         )
 
     @cached(ttl=60, key_prefix="roi")
-    def get_roi_trend(self, months: int = 6, user_id: Optional[int] = None) -> list[ROIMetrics]:
+    def get_roi_trend(
+        self,
+        months: int = 6,
+        user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
+    ) -> list[ROIMetrics]:
         """
         Get ROI trend over months.
 
@@ -543,12 +578,14 @@ class ROICalculator:
         Args:
             months: Number of months to analyze.
             user_id: Optional user ID filter.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             List of ROIMetrics.
         """
         today = datetime.now(timezone.utc).replace(tzinfo=None)
         start_date = (today - timedelta(days=months * 30)).strftime("%Y-%m-%d")
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
 
         # Check database type for SQL syntax
         from app.repositories.database import is_postgresql
@@ -572,6 +609,10 @@ class ROICalculator:
         """
         params: list[Any] = [start_date]
 
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
+
         if user_id:
             query += " AND user_id = ?"
             params.append(user_id)
@@ -591,6 +632,10 @@ class ROICalculator:
             WHERE date >= ?
         """
         model_params: list[Any] = [start_date]
+
+        if normalized_tenant_id is not None:
+            model_query += " AND tenant_id = ?"
+            model_params.append(normalized_tenant_id)
 
         if user_id:
             model_query += " AND user_id = ?"
@@ -668,7 +713,12 @@ class ROICalculator:
         return trends
 
     @cached(ttl=60, key_prefix="roi")
-    def get_roi_by_tool(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
+    def get_roi_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        tenant_id: Optional[int] = None,
+    ) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by tool.
 
@@ -678,35 +728,45 @@ class ROICalculator:
         Args:
             start_date: Start date.
             end_date: End date.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             Dict mapping tool name to ROI metrics.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
+        tenant_clause = " AND tenant_id = ?" if normalized_tenant_id is not None else ""
+
         # Single query to get aggregated data by tool
-        query = """
+        query = f"""
             SELECT
                 tool_name,
                 COUNT(*) as request_count,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL
+            WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL{tenant_clause}
             GROUP BY tool_name
         """
-        rows = self.db.fetch_all(query, (start_date, end_date))
+        params: list[Any] = [start_date, end_date]
+        if normalized_tenant_id is not None:
+            params.append(normalized_tenant_id)
+        rows = self.db.fetch_all(query, params)
 
         # Single query to get model breakdown by tool
-        model_query = """
+        model_query = f"""
             SELECT
                 tool_name,
                 models_used as model,
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL
+            WHERE date >= ? AND date <= ? AND tool_name IS NOT NULL{tenant_clause}
             GROUP BY tool_name, models_used
         """
-        model_rows = self.db.fetch_all(model_query, (start_date, end_date))
+        model_params: list[Any] = [start_date, end_date]
+        if normalized_tenant_id is not None:
+            model_params.append(normalized_tenant_id)
+        model_rows = self.db.fetch_all(model_query, model_params)
 
         # Group model data by tool (normalize tool names)
         model_data_by_tool: dict[str, list[dict]] = {}
@@ -761,42 +821,57 @@ class ROICalculator:
         return result
 
     @cached(ttl=60, key_prefix="roi")
-    def get_roi_by_user(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
+    def get_roi_by_user(
+        self,
+        start_date: str,
+        end_date: str,
+        tenant_id: Optional[int] = None,
+    ) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by user (via host_name grouping).
 
         Args:
             start_date: Start date.
             end_date: End date.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             Dict mapping host_name to ROI metrics.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
+        tenant_clause = " AND tenant_id = ?" if normalized_tenant_id is not None else ""
+
         # Aggregate by host_name since daily_usage lacks user_id
-        query = """
+        query = f"""
             SELECT
                 host_name,
                 COUNT(*) as request_count,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL
+            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL{tenant_clause}
             GROUP BY host_name
         """
-        rows = self.db.fetch_all(query, (start_date, end_date))
+        params: list[Any] = [start_date, end_date]
+        if normalized_tenant_id is not None:
+            params.append(normalized_tenant_id)
+        rows = self.db.fetch_all(query, params)
 
         # Model breakdown by host_name
-        model_query = """
+        model_query = f"""
             SELECT
                 host_name,
                 models_used as model,
                 SUM(input_tokens) as input_tokens,
                 SUM(output_tokens) as output_tokens
             FROM daily_usage
-            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL
+            WHERE date >= ? AND date <= ? AND host_name IS NOT NULL{tenant_clause}
             GROUP BY host_name, models_used
         """
-        model_rows = self.db.fetch_all(model_query, (start_date, end_date))
+        model_params: list[Any] = [start_date, end_date]
+        if normalized_tenant_id is not None:
+            model_params.append(normalized_tenant_id)
+        model_rows = self.db.fetch_all(model_query, model_params)
 
         # Group model data by host
         model_data_by_host: dict[str, list[dict]] = {}
@@ -870,7 +945,11 @@ class ROICalculator:
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_cost_breakdown(
-        self, start_date: str, end_date: str, user_id: Optional[int] = None
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[CostBreakdown]:
         """
         Get detailed cost breakdown.
@@ -879,10 +958,12 @@ class ROICalculator:
             start_date: Start date.
             end_date: End date.
             user_id: Optional user ID filter.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             List of CostBreakdown objects.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
         query = """
             SELECT tool_name, models_used as model,
                    COUNT(*) as requests,
@@ -892,6 +973,10 @@ class ROICalculator:
             WHERE date >= ? AND date <= ?
         """
         params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
 
         if user_id:
             query += " AND user_id = ?"
@@ -945,7 +1030,11 @@ class ROICalculator:
 
     @cached(ttl=60, key_prefix="roi", skip_args=[0])
     def get_daily_costs(
-        self, start_date: str, end_date: str, user_id: Optional[int] = None
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
     ) -> list[dict[str, Any]]:
         """
         Get daily cost data for charting.
@@ -954,10 +1043,12 @@ class ROICalculator:
             start_date: Start date.
             end_date: End date.
             user_id: Optional user ID filter.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             List of daily cost dictionaries.
         """
+        normalized_tenant_id = _normalize_tenant_id(tenant_id)
         query = """
             SELECT date,
                    SUM(input_tokens) as input_tokens,
@@ -966,6 +1057,10 @@ class ROICalculator:
             WHERE date >= ? AND date <= ?
         """
         params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            query += " AND tenant_id = ?"
+            params.append(normalized_tenant_id)
 
         if user_id:
             query += " AND user_id = ?"
@@ -1014,7 +1109,11 @@ class ROICalculator:
 
     @cached(ttl=60, key_prefix="roi")
     def get_summary_stats(
-        self, start_date: str, end_date: str, user_id: Optional[int] = None
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
     ) -> dict[str, Any]:
         """
         Get summary statistics for the period.
@@ -1023,12 +1122,13 @@ class ROICalculator:
             start_date: Start date.
             end_date: End date.
             user_id: Optional user ID filter.
+            tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             Dict with summary statistics.
         """
-        roi = self.calculate_roi(start_date, end_date, user_id)
-        breakdown = self.get_cost_breakdown(start_date, end_date, user_id)
+        roi = self.calculate_roi(start_date, end_date, user_id, tenant_id=tenant_id)
+        breakdown = self.get_cost_breakdown(start_date, end_date, user_id, tenant_id=tenant_id)
 
         # Calculate totals
         total_cost = sum(b.total_cost for b in breakdown)
