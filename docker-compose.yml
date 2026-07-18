@@ -63,9 +63,13 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       # Config: Use named volume for persistence (Issue #1260)
-      # Entrypoint will auto-generate config.json if not exists
-      # Users can mount custom config: - ./my-config.json:/root/.open-ace/config.json:ro
-      - config-data:/root/.open-ace
+      # Entrypoint will auto-generate config.json if not exists.
+      # Mount under the non-root open-ace user's home (/home/open-ace) so uid
+      # 1000 (the image default, Dockerfile `USER 1000`) can write to it. The
+      # directory is pre-created and chowned in the Dockerfile so Docker's named
+      # volume init copies uid-1000 ownership into the volume on first run.
+      # Users can mount custom config: - ./my-config.json:/home/open-ace/.open-ace/config.json:ro
+      - config-data:/home/open-ace/.open-ace
       - ./logs:/app/logs
       # Workspace data: per-user project directories, persisted across restarts
       - workspace-data:/workspace
