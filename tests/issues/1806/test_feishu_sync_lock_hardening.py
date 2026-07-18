@@ -37,10 +37,16 @@ class _FakeCursor:
         sql_norm = " ".join(str(sql).split())
         if "pg_try_advisory_lock" in sql_norm:
             self._fake_conn.lock_calls.append(("try", tuple(params or ())))
-            self._result = (self._fake_conn.try_result,)
+            # Mirror psycopg2 RealDictCursor semantics: fetchone() returns a
+            # dict keyed by the SELECT column name, NOT a positional tuple.
+            # Returning a dict here is what lets the test catch the production
+            # bug where the source code indexed fetchone()[0] (KeyError: 0).
+            self._result = {"pg_try_advisory_lock": self._fake_conn.try_result}
         elif "pg_advisory_unlock" in sql_norm:
             self._fake_conn.unlock_calls.append(("unlock", tuple(params or ())))
-            self._result = (True,)
+            if self._fake_conn.unlock_raises:
+                raise RuntimeError("simulated unlock failure")
+            self._result = {"pg_advisory_unlock": self._fake_conn.unlock_result}
         else:
             self._fake_conn.other_calls.append((sql_norm, tuple(params or ())))
 
@@ -53,8 +59,10 @@ class _FakePgConnection:
     whether it has been released back to the pool.
     """
 
-    def __init__(self, try_result=True):
+    def __init__(self, try_result=True, unlock_result=True, unlock_raises=False):
         self.try_result = try_result
+        self.unlock_result = unlock_result
+        self.unlock_raises = unlock_raises
         self.lock_calls: list = []
         self.unlock_calls: list = []
         self.other_calls: list = []
@@ -74,9 +82,13 @@ class _FakePostgresDatabase:
     when that connection is released back to the pool.
     """
 
-    def __init__(self, try_result=True):
+    def __init__(self, try_result=True, unlock_result=True, unlock_raises=False):
         self.is_postgresql = True
-        self._conn = _FakePgConnection(try_result=try_result)
+        self._conn = _FakePgConnection(
+            try_result=try_result,
+            unlock_result=unlock_result,
+            unlock_raises=unlock_raises,
+        )
 
     def get_connection(self):
         return self._conn
@@ -87,8 +99,12 @@ def _fake_release(conn):
     conn.released = True
 
 
-def _make_service(try_result=True):
-    db = _FakePostgresDatabase(try_result=try_result)
+def _make_service(try_result=True, unlock_result=True, unlock_raises=False):
+    db = _FakePostgresDatabase(
+        try_result=try_result,
+        unlock_result=unlock_result,
+        unlock_raises=unlock_raises,
+    )
     service = FeishuOrgSyncService.__new__(FeishuOrgSyncService)
     service.db = db
     return service, db
@@ -225,3 +241,48 @@ def test_sync_lock_provides_real_mutual_exclusion(monkeypatch):
         "second worker must be blocked from the critical section while the "
         "first holds the session-level advisory lock"
     )
+
+
+# Non-blocking review ask: a failing pg_advisory_unlock must NOT silently
+# vanish -- it should emit a warning so a leaked lock (which would wedge every
+# future sync) is observable in logs.
+def test_sync_lock_logs_warning_when_unlock_fails(monkeypatch, caplog):
+    import logging
+
+    service, db = _make_service(unlock_raises=True)
+    monkeypatch.setattr("app.services.feishu_org_sync.release_postgresql_connection", _fake_release)
+
+    with caplog.at_level(logging.WARNING, logger="app.services.feishu_org_sync"):
+        with service._acquire_sync_lock():
+            pass  # critical section runs normally
+
+    assert db._conn.released, "connection must still be released even if unlock failed"
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "advisory lock" in r.getMessage()
+    ]
+    assert warnings, "an unlock failure must be surfaced via a logger.warning"
+    assert warnings[0].exc_info, "the warning must carry exc_info for triage"
+
+
+# Non-blocking review ask: if pg_advisory_unlock reports False (we did not
+# actually hold the lock), that is suspicious and should also produce a
+# warning so a leaked/dropped lock is observable.
+def test_sync_lock_logs_warning_when_unlock_reports_false(monkeypatch, caplog):
+    import logging
+
+    service, db = _make_service(unlock_result=False)
+    monkeypatch.setattr("app.services.feishu_org_sync.release_postgresql_connection", _fake_release)
+
+    with caplog.at_level(logging.WARNING, logger="app.services.feishu_org_sync"):
+        with service._acquire_sync_lock():
+            pass
+
+    assert db._conn.released
+    warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "was not held" in r.getMessage()
+    ]
+    assert warnings, "pg_advisory_unlock returning False must warn about a possible leak"

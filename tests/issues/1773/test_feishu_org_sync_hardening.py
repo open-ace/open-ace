@@ -344,24 +344,3 @@ def test_scheduler_hook_logs_exception_with_traceback(sync_env, caplog):
     matched = [r for r in caplog.records if "Feishu org sync failed" in r.getMessage()]
     assert matched, "expected a failure log record"
     assert matched[0].exc_info is not None, "failure log must include traceback (exc_info)"
-
-
-# Finding 4: Process-local lock (threading.Lock) -> DB advisory lock.
-# This is validated structurally: sync_org must obtain a DB-level lock so that
-# multiple workers cannot run concurrent syncs. We assert the service uses a
-# DB-backed lock helper rather than only the class-level threading.Lock.
-def test_sync_uses_db_level_lock(sync_env):
-    """sync_org must delegate mutual exclusion to a DB-level lock (advisory on
-    Postgres, fallback on SQLite) rather than only an in-process threading.Lock.
-    """
-    db, config = sync_env
-    service = FakeFeishuOrgSyncService(
-        db=db,
-        user_repo=UserRepository(db=db),
-        config_override=config,
-        departments=[],
-        users=[],
-    )
-    assert hasattr(service, "_acquire_sync_lock"), "service must expose a DB lock helper"
-    # The class-level threading locks must not be the only guard.
-    assert hasattr(FeishuOrgSyncService, "_DB_SYNC_LOCK_KEY")

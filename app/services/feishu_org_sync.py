@@ -13,7 +13,7 @@ import re
 import threading
 import uuid
 from collections import deque
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -105,7 +105,12 @@ class FeishuOrgSyncService:
     _sync_lock = threading.Lock()
     _schedule_lock = threading.Lock()
     _last_scheduled_sync_at: datetime | None = None
-    # Class-level handle exposed for tests/observability; see _acquire_sync_lock.
+    # Class-level handle exposed for tests/observability; see
+    # _acquire_sync_lock. WARNING: do NOT change this value once deployed. It
+    # is the Postgres advisory-lock key shared by every worker process for
+    # cross-process mutual exclusion; changing it would make old and new
+    # workers lock on different keys and run overlapping syncs (the two
+    # pg_try_advisory_lock calls would both succeed).
     _DB_SYNC_LOCK_KEY: int = _FEISHU_SYNC_LOCK_KEY
 
     def __init__(
@@ -248,7 +253,13 @@ class FeishuOrgSyncService:
                         "SELECT pg_try_advisory_lock(%s)",
                         (self._DB_SYNC_LOCK_KEY,),
                     )
-                    ok = cur.fetchone()[0]
+                    # Database.get_connection() returns a PgConnectionWrapper
+                    # that forces cursor_factory=RealDictCursor, so fetchone()
+                    # yields a dict (RealDictRow) keyed by the SELECT column
+                    # name -- NOT a positional tuple. Indexing it as [0] raises
+                    # KeyError: 0 and would crash every Postgres sync at lock
+                    # acquisition. Read the scalar via its string key instead.
+                    ok = cur.fetchone()["pg_try_advisory_lock"]
                     if not ok:
                         raise RuntimeError("Another Feishu org sync is already running")
                     try:
@@ -256,15 +267,40 @@ class FeishuOrgSyncService:
                     finally:
                         # Session-level locks survive transaction end, so they
                         # MUST be released explicitly on the same connection.
-                        with suppress(Exception):
+                        # A failure here would leak the advisory lock and wedge
+                        # every future sync until the backend connection dies,
+                        # so we log loudly instead of silently swallowing it.
+                        try:
                             unlock_cur = conn.cursor()
                             unlock_cur.execute(
                                 "SELECT pg_advisory_unlock(%s)",
                                 (self._DB_SYNC_LOCK_KEY,),
                             )
-                            unlock_cur.fetchone()
-                        with suppress(Exception):
+                            unlocked = unlock_cur.fetchone()
+                            if not unlocked or not unlocked.get("pg_advisory_unlock"):
+                                logger.warning(
+                                    "pg_advisory_unlock(%s) reported the lock "
+                                    "was not held by this session; a prior "
+                                    "error may have leaked it",
+                                    self._DB_SYNC_LOCK_KEY,
+                                )
+                        except Exception:
+                            logger.warning(
+                                "Failed to release Feishu org sync advisory "
+                                "lock key=%s; the lock may leak and block "
+                                "future syncs until the connection is closed",
+                                self._DB_SYNC_LOCK_KEY,
+                                exc_info=True,
+                            )
+                        try:
                             conn.commit()
+                        except Exception:
+                            logger.warning(
+                                "Failed to commit after releasing Feishu org "
+                                "sync advisory lock key=%s",
+                                self._DB_SYNC_LOCK_KEY,
+                                exc_info=True,
+                            )
                 finally:
                     if conn is not None:
                         release_postgresql_connection(conn)
