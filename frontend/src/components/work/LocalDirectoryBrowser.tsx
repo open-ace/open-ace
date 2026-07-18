@@ -5,11 +5,13 @@
  * - Navigate local directory structure
  * - Create new directories
  * - Select directory as project path
- * - Path history (saves recent paths to localStorage)
+ * - Path history (saves recent paths to localStorage with user/tenant scoping)
+ *
+ * Issue #1813: Added user/tenant scoping for path history and display-time validation
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useLanguage } from '@/store';
+import { useLanguage, useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { fsApi, type DirectoryEntry } from '@/api/fs';
 import { Loading, Button, EmptyState } from '@/components/common';
@@ -19,10 +21,26 @@ interface LocalDirectoryBrowserProps {
   onSelectPath: (path: string) => void;
   onClose?: () => void;
   listMaxHeight?: number | string;
+  lockToRoot?: boolean; // Issue #1813: Disable up navigation and root button
+  rootPath?: string; // Issue #1813: Locked root path for range checking
+  hideManualInput?: boolean; // Issue #1813: Hide manual path input
+  hideRecentPaths?: boolean; // Issue #1813: Hide recent paths history
 }
 
 const MAX_PATH_HISTORY = 5;
-const PATH_HISTORY_KEY = 'local-path-history';
+const PATH_HISTORY_VERSION = 1;
+const PATH_HISTORY_KEY_PREFIX = 'local-path-history';
+
+/**
+ * Generate scoped localStorage key for path history.
+ * Format: 'local-path-history:v{version}:{tenantId}:{userId}'
+ * Issue #1813: Ensures user/tenant isolation
+ */
+function getPathHistoryKey(userId: string | null, tenantId: number | null): string {
+  const tenant = tenantId ?? 'default';
+  const user = userId ?? 'anonymous';
+  return `${PATH_HISTORY_KEY_PREFIX}:v${PATH_HISTORY_VERSION}:${tenant}:${user}`;
+}
 
 function isWindowsPath(path: string): boolean {
   return /^[A-Za-z]:([\\/]|$)/.test(path);
@@ -33,8 +51,18 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   onSelectPath,
   onClose,
   listMaxHeight = 300,
+  lockToRoot = false,
+  rootPath,
+  hideManualInput = false,
+  hideRecentPaths = false,
 }) => {
   const language = useLanguage();
+  const user = useAppStore((state) => state.user);
+
+  // Extract user ID and tenant ID for localStorage scoping (Issue #1813)
+  const userId = user?.id ?? null;
+  const tenantId = user?.tenant_id ?? null;
+  const scopedHistoryKey = useMemo(() => getPathHistoryKey(userId, tenantId), [userId, tenantId]);
 
   const [currentPath, setCurrentPath] = useState(initialPath ?? '');
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
@@ -61,31 +89,66 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     return parts;
   }, []);
 
+  // Load path history from scoped localStorage key (Issue #1813)
+  // Includes migration from old global key and display-time validation
   useEffect(() => {
-    const savedHistory = localStorage.getItem(PATH_HISTORY_KEY);
+    // Try to load from new scoped key
+    const savedHistory = localStorage.getItem(scopedHistoryKey);
     if (savedHistory) {
       try {
         const parsed = JSON.parse(savedHistory);
         if (Array.isArray(parsed)) {
-          setPathHistory(parsed.slice(0, MAX_PATH_HISTORY));
+          // Display-time validation: filter paths based on lockToRoot and rootPath
+          const validatedHistory =
+            lockToRoot && rootPath ? parsed.filter((p: string) => p.startsWith(rootPath)) : parsed;
+          setPathHistory(validatedHistory.slice(0, MAX_PATH_HISTORY));
         }
       } catch {
         // Ignore parse errors
       }
+    } else {
+      // Migration: Try to load from old global key and migrate to new key
+      const oldHistory = localStorage.getItem(PATH_HISTORY_KEY_PREFIX);
+      if (oldHistory) {
+        try {
+          const parsed = JSON.parse(oldHistory);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // Migrate to new scoped key
+            localStorage.setItem(scopedHistoryKey, JSON.stringify(parsed));
+            // Clean up old key
+            localStorage.removeItem(PATH_HISTORY_KEY_PREFIX);
+
+            // Display-time validation
+            const validatedHistory =
+              lockToRoot && rootPath
+                ? parsed.filter((p: string) => p.startsWith(rootPath))
+                : parsed;
+            setPathHistory(validatedHistory.slice(0, MAX_PATH_HISTORY));
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
     }
-  }, []);
+  }, [scopedHistoryKey, lockToRoot, rootPath]);
 
   const savePathToHistory = useCallback(
     (path: string) => {
       if (!path) return;
+
+      // Display-time validation before saving
+      if (lockToRoot && rootPath && !path.startsWith(rootPath)) {
+        return; // Don't save paths outside locked range
+      }
+
       const newHistory = [path, ...pathHistory.filter((p) => p !== path)].slice(
         0,
         MAX_PATH_HISTORY
       );
       setPathHistory(newHistory);
-      localStorage.setItem(PATH_HISTORY_KEY, JSON.stringify(newHistory));
+      localStorage.setItem(scopedHistoryKey, JSON.stringify(newHistory));
     },
-    [pathHistory]
+    [pathHistory, scopedHistoryKey, lockToRoot, rootPath]
   );
 
   const fetchDirectories = useCallback(async (path?: string) => {
@@ -116,7 +179,24 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
     void fetchDirectories(dir.path);
   };
 
+  // Issue #1813: Breadcrumb click handler with range checking
+  const handleBreadcrumbClick = (path: string) => {
+    // If lockToRoot is enabled and rootPath exists, check if target path is within range
+    if (lockToRoot && rootPath) {
+      if (!path.startsWith(rootPath) && path !== rootPath) {
+        // Prevent navigation outside locked range
+        console.warn(`Navigation blocked: path ${path} is outside locked range ${rootPath}`);
+        return;
+      }
+    }
+    void fetchDirectories(path);
+  };
+
   const handleNavigateUp = () => {
+    // Issue #1813: If lockToRoot is enabled, don't allow navigating up
+    if (lockToRoot) {
+      return;
+    }
     if (parentPath) {
       void fetchDirectories(parentPath);
     }
@@ -203,7 +283,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
 
   return (
     <div className="local-directory-browser">
-      {pathHistory.length > 0 && (
+      {/* Issue #1813: Hide recent paths when hideRecentPaths is true */}
+      {pathHistory.length > 0 && !hideRecentPaths && (
         <div className="mb-2">
           <label className="form-label small text-muted">
             {t('recentPaths', language) || 'Recent Paths'}
@@ -224,7 +305,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
 
       <div className="mb-2">
         <div className="d-flex align-items-center gap-1 small">
-          {!isWindows && (
+          {/* Issue #1813: Hide root "/" button when lockToRoot is true */}
+          {!isWindows && !lockToRoot && (
             <button className="btn btn-link btn-sm p-0" onClick={() => void fetchDirectories('/')}>
               /
             </button>
@@ -236,7 +318,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                 className={`btn btn-link btn-sm p-0 ${
                   index === breadcrumbs.length - 1 ? 'fw-bold' : ''
                 }`}
-                onClick={() => void fetchDirectories(crumb.path)}
+                onClick={() => handleBreadcrumbClick(crumb.path)}
               >
                 {crumb.name}
               </button>
@@ -246,7 +328,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
       </div>
 
       <div className="mb-2 d-flex gap-2">
-        {parentPath && (
+        {/* Issue #1813: Hide Up button when lockToRoot is true */}
+        {parentPath && !lockToRoot && (
           <Button variant="outline-secondary" size="sm" onClick={handleNavigateUp}>
             <i className="bi bi-arrow-up-circle me-1" />
             {t('up', language) || 'Up'}
@@ -347,24 +430,37 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         )}
       </div>
 
-      <div className="mt-3">
-        <label className="form-label small text-muted">
-          {t('currentPath', language) || 'Current Path'}
-        </label>
-        <div className="input-group">
-          <input
-            type="text"
-            className="form-control"
-            value={currentPath}
-            onChange={(e) => setCurrentPath(e.target.value)}
-            placeholder="/path/to/project"
-          />
+      {/* Issue #1813: Hide manual input when hideManualInput is true */}
+      {!hideManualInput && (
+        <div className="mt-3">
+          <label className="form-label small text-muted">
+            {t('currentPath', language) || 'Current Path'}
+          </label>
+          <div className="input-group">
+            <input
+              type="text"
+              className="form-control"
+              value={currentPath}
+              onChange={(e) => setCurrentPath(e.target.value)}
+              placeholder="/path/to/project"
+            />
+            <Button variant="primary" onClick={handleSelect}>
+              <i className="bi bi-check-lg me-1" />
+              {t('select', language) || 'Select'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Issue #1813: Always show Select button when manual input is hidden */}
+      {hideManualInput && (
+        <div className="mt-3">
           <Button variant="primary" onClick={handleSelect}>
             <i className="bi bi-check-lg me-1" />
             {t('select', language) || 'Select'}
           </Button>
         </div>
-      </div>
+      )}
     </div>
   );
 };

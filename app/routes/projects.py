@@ -34,7 +34,7 @@ user_repo = UserRepository()
 def _current_tenant_id() -> int | None:
     """Return the current request's tenant scope, if any."""
     user = getattr(g, "user", None) or {}
-    raw_tenant_id = cast(Any, user.get("tenant_id"))
+    raw_tenant_id = cast("Any", user.get("tenant_id"))
     if raw_tenant_id in (None, ""):
         return None
     try:

@@ -31,8 +31,9 @@ from app.modules.workspace.session_manager import (
 )
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
+from app.routes.fs import is_valid_path
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
-from app.utils.workspace import get_workspace_base_dir
+from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -970,6 +971,15 @@ def create_session():
         # Get project info from request or look up by path
         project_id = data.get("project_id")
         project_path = data.get("project_path")
+
+        # Validate project_path before using it (Issue #1813)
+        # Prevent authorization bypass by validating path server-side
+        if project_path:
+            base_dirs = get_workspace_base_dirs()
+            if not is_valid_path(project_path, allowed_prefixes=base_dirs):
+                # Log without exposing the actual path for security
+                logger.warning("Invalid project_path rejected")
+                return jsonify({"success": False, "error": "Invalid project path"}), 400
 
         # If project_path is provided but not project_id, look up the project
         if project_path and not project_id:
