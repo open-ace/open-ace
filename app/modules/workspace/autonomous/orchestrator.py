@@ -5106,27 +5106,17 @@ class AutonomousOrchestrator:
             )
 
         if (review_passed and not force_full_rounds) or at_cap:
-            # Check CI status before proceeding to report phase (Issue #1662)
-            # If CI failed, enter CI repair loop instead of reporting
-            if ci_failures:
-                self._create_milestone(
-                    phase="pr_review",
-                    dev_round=dev_round,
-                    round_number=round_num,
-                    milestone_type="ci_failed_before_report",
-                    status="completed",
-                    title=f"CI failed after review passed: {len(ci_failures)} checks",
-                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
-                )
-                # Reuse merge-phase CI repair loop
-                self._start_ci_repair_round(wf, pr_number, ci_failures)
-                return
-
             # All PR review rounds completed — summarize via the main session,
             # then move to report. The main session resumes with the development
             # history (incl. fixes) and is given the last review round's feedback
             # (review runs on the review session, so it must be injected), then
             # asked whether all review points were addressed and the PR is ready.
+            #
+            # The summary is created BEFORE the CI check so that a CI failure
+            # (which redirects to the CI repair loop and returns) doesn't skip
+            # it. Without this ordering, the frontend "PR Review Summary" button
+            # stays permanently disabled when CI fails after review passes
+            # (#1813 regression — pr_review_summary milestone never created).
             last_pr_review = ""
             pr_milestones = self.repo.list_milestones(self._workflow_id, phase="pr_review")
             for ms in reversed(pr_milestones):
@@ -5142,6 +5132,22 @@ class AutonomousOrchestrator:
                 status="in_progress",
                 title="PR Review Summary",
             )
+
+            # Check CI status before proceeding to report phase (Issue #1662)
+            # If CI failed, enter CI repair loop instead of reporting
+            if ci_failures:
+                self._create_milestone(
+                    phase="pr_review",
+                    dev_round=dev_round,
+                    round_number=round_num,
+                    milestone_type="ci_failed_before_report",
+                    status="completed",
+                    title=f"CI failed after review passed: {len(ci_failures)} checks",
+                    result_summary=", ".join(c.get("name", "unknown") for c in ci_failures),
+                )
+                # Reuse merge-phase CI repair loop
+                self._start_ci_repair_round(wf, pr_number, ci_failures)
+                return
 
             summary_prompt = (
                 AUTONOMOUS_CONTEXT + "代码审查已全部完成。请根据最后一轮审查意见，"
