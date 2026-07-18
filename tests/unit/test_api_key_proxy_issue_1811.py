@@ -29,14 +29,18 @@ class TestFailClosedBehavior:
         """Create mock APIKeyProxyService."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}):
+            with patch.dict(
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+            ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
 
     def test_session_allows_proxy_token_db_connection_error_returns_false(self, mock_service):
         """Test that DB connection error causes token rejection (fail-closed)."""
         # Mock _get_connection to raise connection error
-        with patch.object(mock_service, '_get_connection', side_effect=Exception("Connection failed")):
+        with patch.object(
+            mock_service, "_get_connection", side_effect=Exception("Connection failed")
+        ):
             result = mock_service._session_allows_proxy_token(
                 session_id="test-session-123",
                 session_type="agent",
@@ -54,7 +58,7 @@ class TestFailClosedBehavior:
         mock_cursor.execute.side_effect = Exception("Query failed")
         mock_conn.cursor.return_value = mock_cursor
 
-        with patch.object(mock_service, '_get_connection', return_value=mock_conn):
+        with patch.object(mock_service, "_get_connection", return_value=mock_conn):
             result = mock_service._session_allows_proxy_token(
                 session_id="test-session-123",
                 session_type="agent",
@@ -69,10 +73,10 @@ class TestFailClosedBehavior:
         # Mock connection to simulate timeout
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
-        mock_cursor.execute.side_effect=TimeoutError("Query timeout")
+        mock_cursor.execute.side_effect = TimeoutError("Query timeout")
         mock_conn.cursor.return_value = mock_cursor
 
-        with patch.object(mock_service, '_get_connection', return_value=mock_conn):
+        with patch.object(mock_service, "_get_connection", return_value=mock_conn):
             result = mock_service._session_allows_proxy_token(
                 session_id="test-session-123",
                 session_type="agent",
@@ -90,7 +94,7 @@ class TestFailClosedBehavior:
         mock_cursor.fetchone.return_value = None
         mock_conn.cursor.return_value = mock_cursor
 
-        with patch.object(mock_service, '_get_connection', return_value=mock_conn):
+        with patch.object(mock_service, "_get_connection", return_value=mock_conn):
             # Test sensitive session types
             for session_type in ["agent", "terminal", "workflow"]:
                 result = mock_service._session_allows_proxy_token(
@@ -111,7 +115,9 @@ class TestConnectionPool:
         """Create mock APIKeyProxyService."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}):
+            with patch.dict(
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+            ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
 
@@ -133,8 +139,8 @@ class TestConnectionPool:
 
     def test_get_connection_returns_pooled_connection_for_postgresql(self, mock_service):
         """Test that _get_connection returns pooled connection for PostgreSQL."""
-        with patch('app.modules.workspace.api_key_proxy.is_postgresql', return_value=True):
-            with patch('app.repositories.database.get_connection') as mock_get_conn:
+        with patch("app.modules.workspace.api_key_proxy.is_postgresql", return_value=True):
+            with patch("app.repositories.database.get_connection") as mock_get_conn:
                 mock_conn = MagicMock()
                 mock_get_conn.return_value = mock_conn
 
@@ -151,7 +157,9 @@ class TestProxyTokenCleanup:
         """Create mock APIKeyProxyService."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}):
+            with patch.dict(
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+            ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
 
@@ -161,10 +169,21 @@ class TestProxyTokenCleanup:
         conn = mock_service._get_connection()
         cursor = conn.cursor()
 
-        expired_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)).isoformat()
+        expired_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+        ).isoformat()
         cursor.execute(
             "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("test-jti-expired", "test-hash", 1, "test-session", 1, "openai", "agent", expired_time),
+            (
+                "test-jti-expired",
+                "test-hash",
+                1,
+                "test-session",
+                1,
+                "openai",
+                "agent",
+                expired_time,
+            ),
         )
         conn.commit()
         conn.close()
@@ -196,7 +215,17 @@ class TestProxyTokenCleanup:
 
         cursor.execute(
             "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("test-jti-consumed", "test-hash", 1, "test-session", 1, "openai", "agent", expires_time, consumed_time),
+            (
+                "test-jti-consumed",
+                "test-hash",
+                1,
+                "test-session",
+                1,
+                "openai",
+                "agent",
+                expires_time,
+                consumed_time,
+            ),
         )
         conn.commit()
         conn.close()
@@ -210,7 +239,9 @@ class TestProxyTokenCleanup:
         # Verify record is deleted
         conn = mock_service._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM proxy_token_jtis WHERE jti = ?", ("test-jti-consumed",))
+        cursor.execute(
+            "SELECT COUNT(*) FROM proxy_token_jtis WHERE jti = ?", ("test-jti-consumed",)
+        )
         count = cursor.fetchone()[0]
         conn.close()
 
@@ -228,7 +259,17 @@ class TestProxyTokenCleanup:
 
         cursor.execute(
             "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("test-jti-revoked", "test-hash", 1, "test-session", 1, "openai", "agent", expires_time, revoked_time),
+            (
+                "test-jti-revoked",
+                "test-hash",
+                1,
+                "test-session",
+                1,
+                "openai",
+                "agent",
+                expires_time,
+                revoked_time,
+            ),
         )
         conn.commit()
         conn.close()
@@ -264,8 +305,8 @@ class TestProxyTokenCleanup:
         conn.commit()
         conn.close()
 
-        # Run cleanup
-        deleted = mock_service.cleanup_proxy_token_jtis(days_old=7)
+        # Run cleanup (result not checked - we verify count below)
+        mock_service.cleanup_proxy_token_jtis(days_old=7)
 
         # Should not delete active record
         # (deleted might be 0 or more if there are other expired records from other tests)
@@ -283,11 +324,22 @@ class TestProxyTokenCleanup:
         cursor = conn.cursor()
 
         # Create more than 1000 expired records
-        expired_time = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)).isoformat()
+        expired_time = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+        ).isoformat()
         for i in range(1500):
             cursor.execute(
                 "INSERT INTO proxy_token_jtis (jti, token_hash, user_id, session_id, tenant_id, provider, session_type, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (f"test-jti-batch-{i}", f"test-hash-{i}", 1, "test-session", 1, "openai", "agent", expired_time),
+                (
+                    f"test-jti-batch-{i}",
+                    f"test-hash-{i}",
+                    1,
+                    "test-session",
+                    1,
+                    "openai",
+                    "agent",
+                    expired_time,
+                ),
             )
         conn.commit()
         conn.close()
@@ -317,7 +369,9 @@ class TestTTLConfiguration:
         """Create mock APIKeyProxyService."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            with patch.dict(os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}):
+            with patch.dict(
+                os.environ, {"OPENACE_ENCRYPTION_KEY": "test-key-12345678901234567890"}
+            ):
                 service = APIKeyProxyService(db_path=db_path)
                 yield service
 
@@ -334,6 +388,7 @@ class TestTTLConfiguration:
 
             # Decode token and check expiry
             from base64 import b64decode
+
             payload_b64 = token.split(".")[0]
             payload = json.loads(b64decode(payload_b64))
 
@@ -363,6 +418,7 @@ class TestTTLConfiguration:
 
             # Decode token and check expiry
             from base64 import b64decode
+
             payload_b64 = token.split(".")[0]
             payload = json.loads(b64decode(payload_b64))
 

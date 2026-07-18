@@ -146,6 +146,7 @@ class APIKeyProxyService:
         if is_postgresql():
             # Use global connection pool for PostgreSQL
             from app.repositories.database import get_connection
+
             return get_connection()
         else:
             conn = sqlite3.connect(self.db_path)
@@ -1884,7 +1885,9 @@ class APIKeyProxyService:
     def _start_proxy_token_cleanup(self) -> None:
         """Start the proxy token cleanup timer (daemon thread)."""
         # Get cleanup interval from environment variable (default: 24 hours)
-        cleanup_interval = int(os.environ.get("OPENACE_PROXY_TOKEN_CLEANUP_INTERVAL_SECONDS", "86400"))
+        cleanup_interval = int(
+            os.environ.get("OPENACE_PROXY_TOKEN_CLEANUP_INTERVAL_SECONDS", "86400")
+        )
 
         def _tick():
             try:
