@@ -26,7 +26,7 @@ Open ACE (AI Computing Explorer) is an enterprise AI workspace platform with thr
 ┌──────────┴──────┐  ┌────────┴────────────────────────────┐
 │ SQLite/PostgreSQL│  │       Remote Agent (daemon)          │
 │  35+ tables      │  │  HTTP polling │ CLI subprocesses     │
-│  Alembic         │  │  WebSocket PTY │ Session sync        │
+│  Alembic         │  │  WS terminal   │ Session sync        │
 └─────────────────┘  │  Claude/Qwen/Codex/OpenClaw          │
                       └─────────────────────────────────────┘
 ```
@@ -77,7 +77,7 @@ Modules (domain logic):
 | `remote_bp` | `/api/remote` | Remote machines, sessions, LLM proxy |
 | `report_bp` | `/api` | Usage reports |
 | `roi_bp` | `/api` | ROI analysis, cost optimization |
-| `sso_bp` | `/api/sso` | SSO provider management, OAuth2/OIDC |
+| `sso_bp` | `/api/sso` | SSO provider management, OAuth2/OIDC/SAML |
 | `tenant_bp` | `/api/tenants` | Multi-tenant management |
 | `tool_accounts_bp` | `/api` | User-tool-account mapping |
 | `upload_bp` | `/api` | External data ingestion |
@@ -124,7 +124,7 @@ Modules (domain logic):
 
 **`app/modules/governance/`** — Audit logging, alert notifications, quota management, content filtering (PII detection)
 
-**`app/modules/sso/`** — SSO provider lifecycle, OAuth2 authorization code flow, OIDC with ID token verification
+**`app/modules/sso/`** — SSO provider lifecycle, OAuth2 authorization code flow, OIDC with ID token verification, and SAML 2.0 SP metadata/AuthnRequest/ACS handling
 
 **`app/modules/workspace/`** — API key proxy (encrypted storage), collaboration, prompt library, remote agent/session managers, session persistence, state sync, terminal store, tool connector, WebSocket proxy
 
@@ -159,7 +159,7 @@ See [DATABASE-SCHEMA.md](DATABASE-SCHEMA.md) for the full table reference.
 | Middleware | Purpose |
 |------------|---------|
 | `ProxyFix` | Trusts `X-Forwarded-For` / `X-Forwarded-Proto` from nginx |
-| CORS headers | `after_request` handler for `/api/` routes from localhost |
+| CORS headers | `after_request` handler for `/api/` routes from loopback WebUI origins plus explicit allowlist entries |
 | OPTIONS handler | Preflight CORS responses |
 | Error handlers | JSON for API routes, standard HTTP for pages |
 | `/health` | Returns service status and git commit hash |

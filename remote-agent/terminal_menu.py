@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
-import termios
-import tty
 from pathlib import Path
 
 TOOLS = [
@@ -54,6 +53,7 @@ TOOLS = [
 
 MENU_PATH = os.path.abspath(__file__)
 ACTIVE_TERMINAL_PATH = Path.home() / ".open-ace-agent" / "active_terminal.json"
+IS_WINDOWS = os.name == "nt"
 
 # ANSI codes
 CLEAR = "\x1b[2J\x1b[H"
@@ -68,11 +68,7 @@ YELLOW = "\x1b[33m"
 
 
 def check_installed(cli_name: str) -> bool:
-    try:
-        result = subprocess.run(["which", cli_name], capture_output=True, timeout=5)
-        return result.returncode == 0
-    except Exception:
-        return False
+    return shutil.which(cli_name) is not None
 
 
 def get_menu_items() -> list[dict]:
@@ -113,7 +109,10 @@ def render_menu(items: list[dict], selected: int) -> None:
         else:
             lines.append(f"    {label}")
     lines.append("")
-    lines.append(f"  {DIM}↑↓ Navigate   Enter Select{RESET}")
+    if IS_WINDOWS:
+        lines.append(f"  {DIM}Type a number, then press Enter{RESET}")
+    else:
+        lines.append(f"  {DIM}↑↓ Navigate   Enter Select{RESET}")
     lines.append("")
 
     output = CLEAR + "\r\n".join(lines)
@@ -124,6 +123,13 @@ def render_menu(items: list[dict], selected: int) -> None:
 def show_message(message: str) -> None:
     sys.stdout.write(f"\r\n  {message}\r\n\r\n  {DIM}Press any key to continue...{RESET}")
     sys.stdout.flush()
+
+
+def wait_for_continue() -> None:
+    if IS_WINDOWS:
+        input("\n  Press Enter to continue...")
+        return
+    os.read(sys.stdin.fileno(), 1)
 
 
 def read_key(fd: int) -> str:
@@ -143,17 +149,30 @@ def read_key(fd: int) -> str:
 
 
 def get_shell_path() -> str:
+    if IS_WINDOWS:
+        for candidate in (
+            shutil.which("pwsh"),
+            shutil.which("powershell"),
+            os.environ.get("COMSPEC"),
+            "cmd.exe",
+        ):
+            if candidate:
+                return candidate
     return os.environ.get("SHELL") or "/bin/sh"
 
 
 def get_login_shell_args() -> list[str]:
     shell = get_shell_path()
+    if IS_WINDOWS:
+        shell_name = os.path.basename(shell).lower()
+        if shell_name in {"pwsh", "pwsh.exe", "powershell", "powershell.exe"}:
+            return [shell, "-NoLogo"]
+        return [shell]
     return [shell, "-l"]
 
 
 def get_login_shell_command() -> str:
-    shell = get_shell_path()
-    return f"{shlex.quote(shell)} -l"
+    return " ".join(shlex.quote(part) for part in get_login_shell_args())
 
 
 def clear_active_terminal() -> None:
@@ -173,6 +192,9 @@ def exec_command(command: str) -> None:
 
 def handle_select(item: dict) -> None:
     if item.get("is_shell_return"):
+        if IS_WINDOWS:
+            subprocess.run(get_login_shell_args(), check=False)
+            return
         cmd = (
             'echo "Type \\"exit\\" to return to the Open ACE menu. '
             'Type \\"openace menu\\" to restart it anytime."; '
@@ -185,7 +207,7 @@ def handle_select(item: dict) -> None:
         sys.stdout.write("\r\n  Type 'openace menu' to return to the Open ACE menu.\r\n\r\n")
         sys.stdout.flush()
         clear_active_terminal()
-        os.execvp(get_shell_path(), get_login_shell_args())
+        os.execvp(get_login_shell_args()[0], get_login_shell_args())
         return
 
     if item["installed"] and not item["configured"]:
@@ -193,7 +215,17 @@ def handle_select(item: dict) -> None:
             f"{BOLD_YELLOW}⚠ {item['name']} is installed but API is not configured.\r\n"
             f"  Please contact your admin to configure the {item['env_key']} token.{RESET}"
         )
-        os.read(sys.stdin.fileno(), 1)
+        wait_for_continue()
+        return
+
+    if IS_WINDOWS:
+        if not item["installed"]:
+            install_result = subprocess.run(item["install_cmd"], shell=True, check=False)
+            if install_result.returncode != 0:
+                show_message(f"{BOLD_RED}Failed to install {item['name']}.{RESET}")
+                wait_for_continue()
+                return
+        subprocess.run(item["cmd"], shell=True, check=False)
         return
 
     if not item["installed"]:
@@ -203,8 +235,55 @@ def handle_select(item: dict) -> None:
     exec_command(cmd)
 
 
+def run_windows_menu() -> None:
+    while True:
+        items = get_menu_items()
+        lines = [
+            "",
+            f"  {BOLD_CYAN}========================================{RESET}",
+            f"  {BOLD_CYAN}  Open ACE Remote Terminal{RESET}",
+            f"  {BOLD_CYAN}========================================{RESET}",
+            "",
+            "  Select a tool:",
+            "",
+        ]
+        for index, item in enumerate(items, start=1):
+            lines.append(f"    {index}. {get_label(item)}")
+        lines.append("")
+        lines.append(f"  {DIM}Type a number and press Enter{RESET}")
+        lines.append("")
+
+        sys.stdout.write(CLEAR + "\r\n".join(lines))
+        sys.stdout.flush()
+
+        choice = input("  Select a tool: ").strip()
+        if not choice:
+            continue
+
+        try:
+            selected = int(choice) - 1
+        except ValueError:
+            show_message(f"{BOLD_RED}Invalid selection.{RESET}")
+            wait_for_continue()
+            continue
+
+        if selected < 0 or selected >= len(items):
+            show_message(f"{BOLD_RED}Selection out of range.{RESET}")
+            wait_for_continue()
+            continue
+
+        handle_select(items[selected])
+
+
 def main() -> None:
+    if IS_WINDOWS:
+        run_windows_menu()
+        return
+
     items = get_menu_items()
+
+    import termios
+    import tty
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)

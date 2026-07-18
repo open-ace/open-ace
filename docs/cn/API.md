@@ -126,6 +126,15 @@ POST /api/auth/change-password
 
 修改当前用户的密码。
 
+当用户被标记为 `must_change_password=true` 时，服务端会拒绝其访问大多数受保护接口，直到密码修改完成。此时仅保留以下最小必要接口可用：
+
+- `GET /api/auth/check`
+- `GET /api/auth/me`
+- `GET /api/auth/profile`
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+- `GET /api/password-policy`
+
 **请求体：**
 ```json
 {
@@ -269,6 +278,44 @@ PUT /api/admin/users/<user_id>/quota
   "monthly_request_quota": 10000    // 可选
 }
 ```
+
+---
+
+### 同步飞书组织架构
+
+```
+POST /api/admin/feishu/sync
+```
+
+手动将飞书部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `feishu.org_sync_tenant_id` 配置。
+
+---
+
+### 同步钉钉组织架构
+
+```
+POST /api/admin/dingtalk/sync
+```
+
+手动将钉钉部门和用户同步为本地团队、用户、成员关系和 SSO 身份关联。
+
+**请求体：**
+```json
+{
+  "tenant_id": 1
+}
+```
+
+`tenant_id` 可选，默认使用 `dingtalk.org_sync_tenant_id` 配置。
 
 ---
 
@@ -1117,6 +1164,14 @@ GET /api/roi
 - `end_date` - 结束日期
 - `user_id` - 按用户 ID 筛选
 - `tool_name` - 按工具名筛选
+- `hourly_labor_cost` - 可选，正数；用于节约金额估算的人力成本假设
+- `productivity_multiplier` - 可选，正数；用于生产力提升展示的规划倍数
+- `avg_time_saved_per_request` - 可选，正数；单次请求平均节省分钟数假设
+- `currency` - 可选，1-8 个字符；规划假设使用的货币标签
+
+**说明：**
+- ROI 数值基于可配置假设进行规划估算，并非已验证的真实收益。
+- 修改 `currency` 只会标记人工成本假设，不会对模型成本做汇率换算。
 
 ---
 
@@ -1128,6 +1183,8 @@ GET /api/roi/trend
 
 获取月度 ROI 趋势。
 
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
+
 ---
 
 ### 按工具 ROI
@@ -1138,6 +1195,8 @@ GET /api/roi/by-tool
 
 获取按工具分类的 ROI 明细。
 
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
+
 ---
 
 ### 按用户 ROI
@@ -1147,6 +1206,8 @@ GET /api/roi/by-user
 ```
 
 获取按用户分类的 ROI 明细。
+
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数。
 
 ---
 
@@ -1177,6 +1238,8 @@ GET /api/roi/summary
 ```
 
 获取 ROI 汇总统计。
+
+支持与 `GET /api/roi` 相同的 ROI 假设查询参数，并会在响应中返回当前生效的假设。
 
 ---
 
@@ -1441,6 +1504,11 @@ POST /api/sso/providers
 ```
 
 注册新的 SSO 提供商（仅管理员）。
+Provider 的密钥在持久化前会先加密。
+SAML Provider 使用 `provider_type: "saml"`；`client_id` 是 SP entity ID，
+`authorization_url` 或 `extra_params.idp_metadata_url` 指向 IdP 登录/metadata，
+`redirect_uri` 是 ACS URL，`extra_params.idp_x509_cert` 或
+`extra_params.idp_metadata_xml` 用于校验 IdP 签名。SAML 不要求 `client_secret`。
 
 ---
 
@@ -1461,6 +1529,8 @@ GET /api/sso/login/<provider_name>
 ```
 
 发起 SSO 登录流程。
+对于 OAuth2/OIDC Provider，登录流程会启用 PKCE，并将 verifier 绑定到回调 state。
+对于 SAML Provider，系统会生成 AuthnRequest，并将 `RelayState` 绑定到已保存的 request ID。
 
 ---
 
@@ -1471,6 +1541,26 @@ GET /api/sso/callback/<provider_name>
 ```
 
 处理 SSO 回调。
+
+---
+
+### SAML Metadata
+
+```
+GET /api/sso/providers/<provider_name>/metadata
+```
+
+返回用于配置 SAML IdP 的 Service Provider metadata XML。
+
+---
+
+### SAML ACS
+
+```
+POST /api/sso/acs/<provider_name>
+```
+
+处理包含 `SAMLResponse` 与 `RelayState` 的 SAML HTTP-POST ACS 回调。
 
 ---
 

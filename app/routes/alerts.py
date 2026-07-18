@@ -200,11 +200,19 @@ def update_preferences():
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         notifier = get_alert_notifier()
+        webhook_url = data.get("webhook_url")
+        if isinstance(webhook_url, str):
+            webhook_url = webhook_url.strip() or None
+
+        valid, error = notifier.validate_webhook_url(webhook_url, resolve_dns=False)
+        if not valid:
+            return jsonify({"success": False, "error": error}), 400
+
         prefs = NotificationPreference(
             user_id=user_id,
             email_enabled=data.get("email_enabled", True),
             push_enabled=data.get("push_enabled", True),
-            webhook_url=data.get("webhook_url"),
+            webhook_url=webhook_url,
             alert_types=data.get("alert_types", ["quota", "system", "security"]),
             min_severity=data.get("min_severity", "warning"),
             notification_email=data.get("notification_email"),

@@ -127,6 +127,7 @@ AI agent session tracking.
 |--------|------|-------|
 | id | integer PK | |
 | session_id | text | UNIQUE |
+| tenant_id | integer | DEFAULT 1; tenant-scoped session lookup and write boundary |
 | session_type | text | DEFAULT 'chat' |
 | title | text | |
 | tool_name | text | NOT NULL |
@@ -160,12 +161,15 @@ Messages within an agent session.
 |--------|------|-------|
 | id | integer PK | |
 | session_id | text | FK → agent_sessions(session_id) |
+| tenant_id | integer | DEFAULT 1; tenant-scoped message lookup |
 | role | text | NOT NULL |
 | content | text | |
 | tokens_used | integer | DEFAULT 0 |
 | model | text | |
 | timestamp | timestamp | |
 | metadata | text | |
+
+Session indexes include `idx_agent_sessions_tenant_user`, `idx_agent_sessions_tenant_updated`, `idx_session_messages_tenant_session`, and `idx_session_messages_tenant_session_timestamp`.
 
 ## Statistics
 
@@ -212,6 +216,7 @@ Daily usage with cache token tracking.
 | Column | Type | Notes |
 |--------|------|-------|
 | id | integer PK | |
+| tenant_id | integer | DEFAULT 1; tenant-scoped usage aggregation key |
 | date | date | NOT NULL |
 | tool_name | varchar | NOT NULL |
 | host_name | varchar | DEFAULT 'localhost' |
@@ -222,7 +227,9 @@ Daily usage with cache token tracking.
 | request_count | integer | DEFAULT 0 |
 | models_used | text | |
 
-Unique: `(date, tool_name, host_name)`
+Unique: `(tenant_id, date, tool_name, host_name)`
+
+Indexes: `idx_usage_date`, `idx_usage_date_tool_host(tenant_id, date, tool_name, host_name)`, `idx_usage_tenant_date`
 
 ### usage_summary
 
@@ -305,8 +312,8 @@ Unique: `(tenant_id, date)`
 |--------|------|-------|
 | id | integer PK | |
 | name | text | UNIQUE |
-| provider_type | text | NOT NULL (oauth2/oidc) |
-| config | text | NOT NULL (JSON) |
+| provider_type | text | NOT NULL (oauth2/oidc/saml) |
+| config | text | NOT NULL (JSON; stores encrypted `client_secret_encrypted` instead of plaintext `client_secret`) |
 | tenant_id | integer | FK → tenants(id) |
 | is_active | boolean | DEFAULT true |
 
@@ -342,6 +349,7 @@ Unique: `(provider_name, provider_user_id)`
 | id | integer PK | |
 | timestamp | timestamp | DEFAULT CURRENT_TIMESTAMP |
 | user_id | integer | |
+| tenant_id | integer | Resolved from the actor when available for tenant-scoped audit queries |
 | username | text | |
 | action | text | NOT NULL |
 | severity | text | DEFAULT 'info' |
@@ -351,7 +359,7 @@ Unique: `(provider_name, provider_user_id)`
 | ip_address | text | |
 | success | boolean | DEFAULT true |
 
-Indexes: `idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_action`, `idx_audit_severity`
+Indexes: `idx_audit_timestamp`, `idx_audit_user_id`, `idx_audit_tenant_id`, `idx_audit_action`, `idx_audit_severity`
 
 ### content_filter_rules
 
@@ -505,12 +513,15 @@ Unique: `(user_id, date, period)`
 | Column | Type | Notes |
 |--------|------|-------|
 | id | integer PK | |
-| path | varchar(500) | UNIQUE |
+| tenant_id | integer | DEFAULT 1; used for tenant-scoped project lookup and uniqueness |
+| path | varchar(500) | UNIQUE per active `(tenant_id, path)` |
 | name | varchar(200) | |
 | description | text | |
 | created_by | integer | |
 | is_active | boolean | DEFAULT true |
 | is_shared | boolean | DEFAULT false |
+
+Indexes: `idx_projects_created_by`, `idx_projects_is_active`, `idx_projects_path(tenant_id, path)`, `idx_projects_tenant_created_by`
 
 ### user_projects
 
@@ -565,6 +576,45 @@ Remote workspace machine registry.
 | created_at | timestamp | Creation time |
 | updated_at | timestamp | Update time |
 | last_heartbeat | timestamp | Last heartbeat time |
+
+### remote_runtime_commands
+
+Persistent HTTP-polling command queue for remote agents.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | |
+| command_id | varchar(64) | UNIQUE; request_id for command-response calls |
+| machine_id | text | Target remote machine |
+| session_id | text | Optional remote session |
+| command_type | text | Command name |
+| payload | text | JSON command payload |
+| status | varchar(32) | `pending`, `delivered`, or `responded` |
+| response_payload | text | JSON response payload for synchronous commands |
+| created_at | timestamp | Creation time |
+| delivered_at | timestamp | Agent poll claim time |
+| responded_at | timestamp | Response arrival time |
+| expires_at | timestamp | Retention cutoff |
+
+Indexes: `idx_remote_runtime_commands_machine_status`, `idx_remote_runtime_commands_expires`
+
+### remote_runtime_outputs
+
+Persistent SSE replay buffer for remote session output.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | integer PK | |
+| session_id | text | Remote session ID |
+| event_index | integer | Monotonic per-session output index |
+| stream | text | stdout, stderr, system, permission, request_state |
+| payload | text | JSON output payload |
+| created_at | timestamp | Creation time |
+| expires_at | timestamp | Retention cutoff |
+
+Unique: `(session_id, event_index)`
+
+Indexes: `idx_remote_runtime_outputs_session_index`, `idx_remote_runtime_outputs_expires`
 
 ### machine_assignments
 

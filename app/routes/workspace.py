@@ -11,7 +11,7 @@ API endpoints for workspace functionality including:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from flask import Blueprint, g, jsonify, request
 
@@ -61,6 +61,32 @@ def format_datetime(dt):
     return dt
 
 
+def _current_tenant_id() -> Optional[int]:
+    """Return the current authenticated tenant id, if any."""
+    if not hasattr(g, "user") or not g.user:
+        return None
+    raw_tenant_id = g.user.get("tenant_id")
+    if raw_tenant_id in (None, ""):
+        return None
+    try:
+        tenant_id = int(raw_tenant_id)
+    except (TypeError, ValueError):
+        return None
+    return tenant_id if tenant_id > 0 else None
+
+
+def _tenant_scope_required() -> bool:
+    """Whether workspace data should be tenant-scoped for this request."""
+    current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+    return bool(current_role != "admin")
+
+
+def _session_lookup_tenant_id() -> Optional[int]:
+    """Return tenant scope for session lookups; system admins stay global."""
+    tenant_id = _current_tenant_id()
+    return tenant_id if tenant_id is not None and _tenant_scope_required() else None
+
+
 workspace_bp = Blueprint("workspace", __name__)
 
 
@@ -84,6 +110,7 @@ def load_user():
             g.user = user
             g.user_id = user.get("id")
             g.user_role = user.get("role")
+            g.tenant_id = user.get("tenant_id")
             _refresh_session(token)
             return None
 
@@ -104,9 +131,11 @@ def load_user():
                         "username": user_data.get("username"),
                         "email": user_data.get("email"),
                         "role": user_data.get("role"),
+                        "tenant_id": user_data.get("tenant_id"),
                     }
                     g.user_id = user_id
                     g.user_role = user_data.get("role")
+                    g.tenant_id = user_data.get("tenant_id")
                     _refresh_session(token, user_repo=user_repo)
                     return None
         except Exception as e:
@@ -250,6 +279,10 @@ def get_session_models():
         tool_name="qwen-code",
         scope="remote",
         provider="openai",
+    )
+    api_proxy.revoke_proxy_tokens_for_session(
+        f"ha-pool:{machine_id}",
+        reason="ha_pool_rotated",
     )
     ha_pool_token = api_proxy.generate_proxy_token(
         user_id=g.user["id"],
@@ -535,6 +568,7 @@ def list_sessions():
 
         # Get user_id from g.user to filter sessions
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        tenant_id = _current_tenant_id()
 
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "error"}
@@ -554,7 +588,7 @@ def list_sessions():
 
         # Query agent_sessions table (user-created sessions)
         base_conditions = ["1=1"]
-        base_params = []
+        base_params: list[Any] = []
 
         # Filter out webui aggregate sessions (session_id LIKE 'webui:%')
         # These are internal containers that mix multiple conversations
@@ -568,6 +602,9 @@ def list_sessions():
         if user_id:
             base_conditions.append(f"user_id = {p}")
             base_params.append(user_id)
+        if tenant_id is not None and _tenant_scope_required():
+            base_conditions.append(f"tenant_id = {p}")
+            base_params.append(tenant_id)
 
         if tool_name:
             aliases = TOOL_NAME_ALIASES.get(tool_name, [tool_name])
@@ -620,6 +657,7 @@ def list_sessions():
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
+                        AND sm.tenant_id = s.tenant_id
                         AND {time_cond}
                         AND LOWER(sm.content) LIKE {p} ESCAPE '\\'  -- escape_like used
                     )
@@ -639,6 +677,7 @@ def list_sessions():
                     OR EXISTS (
                       SELECT 1 FROM session_messages sm
                       WHERE sm.session_id = s.session_id
+                        AND sm.tenant_id = s.tenant_id
                         AND {time_cond}
                         AND LOWER(sm.content) LIKE {p} ESCAPE '\\'  -- escape_like used
                     )
@@ -681,29 +720,31 @@ def list_sessions():
                 if is_postgresql():
                     # PostgreSQL: use DISTINCT ON for efficient first-row-per-group
                     first_msg_query = f"""
-                        SELECT DISTINCT ON (session_id) session_id, content
+                        SELECT DISTINCT ON (session_id, tenant_id) session_id, tenant_id, content
                         FROM session_messages
                         WHERE session_id IN ({sid_placeholders})
                           AND role = 'user'
                           AND content IS NOT NULL
                           AND content != ''
-                        ORDER BY session_id, timestamp ASC
+                        ORDER BY session_id, tenant_id, timestamp ASC
                     """
                     first_msg_rows = db.fetch_all(first_msg_query, tuple(session_ids))
                 else:
                     # SQLite: use subquery with MIN(timestamp)
                     first_msg_query = f"""
-                        SELECT sm.session_id, sm.content
+                        SELECT sm.session_id, sm.tenant_id, sm.content
                         FROM session_messages sm
                         INNER JOIN (
-                            SELECT session_id, MIN(timestamp) as first_ts
+                            SELECT session_id, tenant_id, MIN(timestamp) as first_ts
                             FROM session_messages
                             WHERE session_id IN ({sid_placeholders})
                               AND role = 'user'
                               AND content IS NOT NULL
                               AND content != ''
-                            GROUP BY session_id
-                        ) first ON sm.session_id = first.session_id AND sm.timestamp = first.first_ts
+                            GROUP BY session_id, tenant_id
+                        ) first ON sm.session_id = first.session_id
+                            AND sm.tenant_id = first.tenant_id
+                            AND sm.timestamp = first.first_ts
                     """
                     first_msg_rows = db.fetch_all(first_msg_query, tuple(session_ids))
 
@@ -811,11 +852,17 @@ def get_remote_projects():
         p = get_param_placeholder()
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        tenant_id = _current_tenant_id()
         if not user_id:
             return jsonify({"success": False, "error": "Authentication required"}), 401
 
         # Query distinct remote projects with their latest session info
         # Only include remote workspace sessions (workspace_type = 'remote')
+        tenant_clause = ""
+        params: list = [user_id]
+        if tenant_id is not None and _tenant_scope_required():
+            tenant_clause = f" AND tenant_id = {p}"
+            params.append(tenant_id)
         query = f"""
             SELECT
                 project_path,
@@ -824,6 +871,7 @@ def get_remote_projects():
                 COUNT(*) as session_count
             FROM agent_sessions
             WHERE user_id = {p}
+              {tenant_clause}
               AND workspace_type = 'remote'
               AND project_path IS NOT NULL
               AND project_path != ''
@@ -832,7 +880,7 @@ def get_remote_projects():
             ORDER BY last_used DESC
             LIMIT 50
         """
-        results = db.fetch_all(query, [user_id])
+        results = db.fetch_all(query, params)
 
         # Batch lookup machine names to avoid N+1 queries
         # Use set to deduplicate machine_ids (multiple projects may share same machine)
@@ -896,6 +944,7 @@ def create_session():
         tool_name = normalize_tool_name(tool_name)
 
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        tenant_id = _current_tenant_id()
 
         # Get project info from request or look up by path
         project_id = data.get("project_id")
@@ -907,7 +956,7 @@ def create_session():
                 from app.repositories.project_repo import ProjectRepository
 
                 project_repo = ProjectRepository()
-                project = project_repo.get_project_by_path(project_path)
+                project = project_repo.get_project_by_path(project_path, tenant_id=tenant_id)
                 if project:
                     project_id = project.id
                     # Auto-add user to project if not already
@@ -920,6 +969,7 @@ def create_session():
         session = manager.create_session(
             tool_name=tool_name,
             user_id=user_id,
+            tenant_id=tenant_id,
             session_type=data.get("session_type", SessionType.CHAT.value),
             title=data.get("title", ""),
             host_name=data.get("host_name", "localhost"),
@@ -953,7 +1003,10 @@ def _check_session_access(session, *, require_owner: bool = True):
         return None
     current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
     current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+    current_tenant_id = _current_tenant_id()
     if current_role != "admin":
+        if current_tenant_id is not None and session.tenant_id != current_tenant_id:
+            return jsonify({"success": False, "error": "Access denied"}), 403
         if not current_user_id or not session.user_id or session.user_id != current_user_id:
             return jsonify({"success": False, "error": "Access denied"}), 403
     return None
@@ -967,8 +1020,43 @@ def _messages_total(manager, session, milestone_id: Optional[str]) -> int:
     "loaded/total" indicator stays correct (Issue #241 #22 review).
     """
     if milestone_id is not None:
-        return int(manager.count_messages(session.session_id, milestone_id=milestone_id))
+        try:
+            return int(
+                manager.count_messages(
+                    session.session_id,
+                    milestone_id=milestone_id,
+                    tenant_id=session.tenant_id,
+                )
+            )
+        except TypeError:
+            return int(manager.count_messages(session.session_id, milestone_id=milestone_id))
     return int(session.message_count or 0)
+
+
+def _get_messages_page_for_session(
+    manager,
+    session,
+    *,
+    limit: Optional[int] = None,
+    before_timestamp: Optional[str] = None,
+    before_id: Optional[int] = None,
+    milestone_id: Optional[str] = None,
+):
+    """Call SessionManager.get_messages_page with a tenant-aware fallback."""
+    kwargs: dict[str, Any] = {}
+    if limit is not None:
+        kwargs["limit"] = limit
+    if before_timestamp is not None:
+        kwargs["before_timestamp"] = before_timestamp
+    if before_id is not None:
+        kwargs["before_id"] = before_id
+    if milestone_id is not None:
+        kwargs["milestone_id"] = milestone_id
+
+    try:
+        return manager.get_messages_page(session.session_id, tenant_id=session.tenant_id, **kwargs)
+    except TypeError:
+        return manager.get_messages_page(session.session_id, **kwargs)
 
 
 @workspace_bp.route("/sessions/<session_id>", methods=["GET"])
@@ -985,7 +1073,9 @@ def get_session(session_id):
         manager = get_session_manager()
 
         # Load the lightweight session (no messages) for ownership + metadata.
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
@@ -996,8 +1086,9 @@ def get_session(session_id):
         if include_messages:
             message_limit = request.args.get("message_limit", default=None, type=int)
             milestone_id = request.args.get("milestone_id")
-            page = manager.get_messages_page(
-                session_id,
+            page = _get_messages_page_for_session(
+                manager,
+                session,
                 limit=message_limit,
                 milestone_id=milestone_id,
             )
@@ -1030,7 +1121,9 @@ def get_session_messages(session_id):
     try:
         manager = get_session_manager()
         # Ownership must be checked on the session BEFORE reading messages.
-        session = manager.get_session(session_id, include_messages=False)
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
         denied = _check_session_access(session)
         if denied:
             return denied
@@ -1047,8 +1140,9 @@ def get_session_messages(session_id):
             before_timestamp = None
             before_id = None
 
-        page = manager.get_messages_page(
-            session_id,
+        page = _get_messages_page_for_session(
+            manager,
+            session,
             limit=message_limit,
             before_timestamp=before_timestamp,
             before_id=before_id,
@@ -1079,15 +1173,15 @@ def complete_session(session_id):
         manager = get_session_manager()
 
         # Ownership check
-        session = manager.get_session(session_id, include_messages=False)
-        if session:
-            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if current_role != "admin":
-                if not current_user_id or not session.user_id or session.user_id != current_user_id:
-                    return jsonify({"success": False, "error": "Access denied"}), 403
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
+        denied = _check_session_access(session)
+        if denied:
+            return denied
 
-        success = manager.complete_session(session_id)
+        assert session is not None
+        success = manager.complete_session(session_id, tenant_id=session.tenant_id)
 
         if not success:
             return jsonify({"success": False, "error": "Session not found"}), 404
@@ -1105,15 +1199,15 @@ def delete_session(session_id):
         manager = get_session_manager()
 
         # Ownership check before deletion
-        session = manager.get_session(session_id, include_messages=False)
-        if session:
-            current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-            current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-            if current_role != "admin":
-                if not current_user_id or not session.user_id or session.user_id != current_user_id:
-                    return jsonify({"success": False, "error": "Access denied"}), 403
+        session = manager.get_session(
+            session_id, include_messages=False, tenant_id=_session_lookup_tenant_id()
+        )
+        denied = _check_session_access(session)
+        if denied:
+            return denied
 
-        success = manager.delete_session(session_id)
+        assert session is not None
+        success = manager.delete_session(session_id, tenant_id=session.tenant_id)
 
         if not success:
             return jsonify({"success": False, "error": "Session not found"}), 404
@@ -1146,6 +1240,12 @@ def restore_session(session_id):
         conn = get_connection()
         cursor = conn.cursor()
         p = get_param_placeholder()
+        tenant_id = _current_tenant_id()
+        tenant_clause = ""
+        params = [session_id]
+        if tenant_id is not None and _tenant_scope_required():
+            tenant_clause = f" AND tenant_id = {p}"
+            params.append(tenant_id)
 
         session_query = f"""
             SELECT
@@ -1155,12 +1255,14 @@ def restore_session(session_id):
                 workspace_type,
                 remote_machine_id,
                 user_id,
-                cli_session_id
+                cli_session_id,
+                tenant_id
             FROM agent_sessions
             WHERE session_id = {p}
+              {tenant_clause}
             LIMIT 1
         """
-        _execute(cursor, session_query, [session_id])
+        _execute(cursor, session_query, params)
         session_data = cursor.fetchone()
 
         if not session_data:
@@ -1176,8 +1278,11 @@ def restore_session(session_id):
         # Ownership check: only the session owner or admin can restore
         current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
         current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
+        current_tenant_id = _current_tenant_id()
         session_user_id = session_data.get("user_id")
         if current_role != "admin":
+            if current_tenant_id is not None and session_data.get("tenant_id") != current_tenant_id:
+                return jsonify({"success": False, "error": "Access denied"}), 403
             if not current_user_id or not session_user_id or session_user_id != current_user_id:
                 return jsonify({"success": False, "error": "Access denied"}), 403
 
@@ -1396,17 +1501,11 @@ def rename_session(session_id):
             return jsonify({"success": False, "error": "Session name cannot be empty"}), 400
 
         manager = get_session_manager()
-        session = manager.get_session(session_id)
-
-        if not session:
-            return jsonify({"success": False, "error": "Session not found"}), 404
-
-        # Ownership check
-        current_user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
-        current_role = g.user.get("role") if hasattr(g, "user") and g.user else None
-        if current_role != "admin":
-            if not current_user_id or not session.user_id or session.user_id != current_user_id:
-                return jsonify({"success": False, "error": "Access denied"}), 403
+        session = manager.get_session(session_id, tenant_id=_session_lookup_tenant_id())
+        denied = _check_session_access(session)
+        if denied:
+            return denied
+        assert session is not None
 
         session.title = new_name
         success = manager.update_session(session)
@@ -1427,7 +1526,7 @@ def get_session_stats():
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
         manager = get_session_manager()
-        stats = manager.get_session_stats(user_id)
+        stats = manager.get_session_stats(user_id, tenant_id=_session_lookup_tenant_id())
 
         return jsonify({"success": True, "data": stats})
     except Exception as e:
@@ -1828,7 +1927,7 @@ def get_workspace_config():
             "max_instances": 30,
             "idle_timeout_minutes": 30,
             "base_dir": base_dir,  # For path validation in frontend
-            "autonomous_enabled": False,
+            "autonomous_enabled": True,
         }
 
         if os.path.exists(config_path):
@@ -1845,7 +1944,7 @@ def get_workspace_config():
 
             # Expose autonomous feature status
             autonomous_config = config.get("autonomous", {})
-            workspace_config["autonomous_enabled"] = autonomous_config.get("enabled", False)
+            workspace_config["autonomous_enabled"] = autonomous_config.get("enabled", True)
 
         return jsonify(workspace_config)
     except Exception as e:
@@ -1856,7 +1955,7 @@ def get_workspace_config():
                 "url": "",
                 "multi_user_mode": False,
                 "base_dir": get_workspace_base_dir(),
-                "autonomous_enabled": False,
+                "autonomous_enabled": True,
             }
         )
 

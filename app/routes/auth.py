@@ -11,9 +11,9 @@ from typing import Optional, cast
 
 import bcrypt
 import filetype
-from flask import Blueprint, jsonify, make_response, request
+from flask import Blueprint, g, jsonify, make_response, request
 
-from app.auth.decorators import public_endpoint
+from app.auth.decorators import auth_required, public_endpoint
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
@@ -196,20 +196,10 @@ def api_logout():
 
 
 @auth_bp.route("/auth/profile", methods=["GET"])
+@auth_required
 def api_profile():
     """Get current user profile."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    if session_or_error is None:
-        return jsonify({"error": "Invalid session"}), 401
-
-    user_id = int(session_or_error.get("user_id", 0))
+    user_id = int(g.user_id)
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
@@ -325,20 +315,10 @@ def api_auth_check():
 
 
 @auth_bp.route("/auth/me", methods=["GET"])
+@auth_required
 def api_current_user():
     """Get current user info (alias for /auth/profile)."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    if session_or_error is None:
-        return jsonify({"error": "Invalid session"}), 401
-
-    user_id = int(session_or_error.get("user_id", 0))
+    user_id = int(g.user_id)
     profile = auth_service.get_user_profile(user_id)
 
     if profile:
@@ -349,19 +329,9 @@ def api_current_user():
 
 
 @auth_bp.route("/auth/change-password", methods=["POST"])
+@auth_required
 def api_change_password():
     """Change password endpoint."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    if session_or_error is None:
-        return jsonify({"error": "Invalid session"}), 401
-
     data = request.get_json() or {}
     current_password = data.get("current_password")
     new_password = data.get("new_password")
@@ -369,8 +339,8 @@ def api_change_password():
     if not current_password or not new_password:
         return jsonify({"error": "Current password and new password required"}), 400
 
-    user_id = int(session_or_error.get("user_id", 0))
-    username = session_or_error.get("username")
+    user_id = int(g.user_id)
+    username = cast("Optional[str]", getattr(g, "user", {}).get("username"))
 
     success, error = auth_service.change_password(
         user_id, current_password, new_password, verify_password, hash_password
@@ -399,20 +369,10 @@ def allowed_file(filename: str) -> bool:
 
 
 @auth_bp.route("/user/avatar", methods=["POST"])
+@auth_required
 def api_upload_avatar():
     """Upload user avatar."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    if session_or_error is None:
-        return jsonify({"error": "Invalid session"}), 401
-
-    user_id = int(session_or_error.get("user_id", 0))
+    user_id = int(g.user_id)
 
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -484,20 +444,10 @@ def api_upload_avatar():
 
 
 @auth_bp.route("/user/avatar", methods=["DELETE"])
+@auth_required
 def api_delete_avatar():
     """Delete user avatar."""
-    token = request.cookies.get("session_token") or request.headers.get(
-        "Authorization", ""
-    ).replace("Bearer ", "")
-
-    is_auth, session_or_error = auth_service.require_auth(token)
-    if not is_auth:
-        return jsonify(session_or_error), 401
-
-    if session_or_error is None:
-        return jsonify({"error": "Invalid session"}), 401
-
-    user_id = int(session_or_error.get("user_id", 0))
+    user_id = int(g.user_id)
 
     # Get current avatar URL to delete file
     profile = auth_service.get_user_profile(user_id)

@@ -183,13 +183,16 @@ class SSOProvider(ABC):
         pass
 
     @abstractmethod
-    def exchange_code(self, code: str, redirect_uri: Optional[str] = None) -> SSOAuthResult:
+    def exchange_code(
+        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+    ) -> SSOAuthResult:
         """
         Exchange authorization code for tokens.
 
         Args:
             code: Authorization code from callback.
             redirect_uri: Redirect URI used in authorization.
+            code_verifier: PKCE code verifier used during authorization.
 
         Returns:
             SSOAuthResult: Authentication result with tokens.
@@ -222,19 +225,22 @@ class SSOProvider(ABC):
         """
         pass
 
-    def authenticate(self, code: str, redirect_uri: Optional[str] = None) -> SSOAuthResult:
+    def authenticate(
+        self, code: str, redirect_uri: Optional[str] = None, code_verifier: Optional[str] = None
+    ) -> SSOAuthResult:
         """
         Complete authentication flow.
 
         Args:
             code: Authorization code.
             redirect_uri: Redirect URI.
+            code_verifier: PKCE code verifier used during authorization.
 
         Returns:
             SSOAuthResult: Authentication result.
         """
         # Exchange code for tokens
-        result = self.exchange_code(code, redirect_uri)
+        result = self.exchange_code(code, redirect_uri, code_verifier)
 
         if not result.success:
             return result

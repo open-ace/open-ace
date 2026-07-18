@@ -7,6 +7,7 @@ Provides cost analysis, savings estimation, and productivity metrics.
 
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,85 @@ class ModelPricing:
     output_price: float  # per 1K tokens
 
 
+@dataclass(frozen=True)
+class ROIAssumptions:
+    """Configurable assumptions used to estimate ROI."""
+
+    hourly_labor_cost: float
+    productivity_multiplier: float
+    avg_time_saved_per_request: float
+    currency: str = "USD"
+
+    DEFAULT_HOURLY_LABOR_COST = 50.0
+    DEFAULT_PRODUCTIVITY_MULTIPLIER = 10.0
+    DEFAULT_AVG_TIME_SAVED_PER_REQUEST = 5.0
+    DEFAULT_CURRENCY = "USD"
+
+    @classmethod
+    def _read_float_env(cls, env_name: str, default: float) -> float:
+        raw_value = os.environ.get(env_name, "").strip()
+        if not raw_value:
+            return default
+        try:
+            parsed = float(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid ROI env override %s=%r; using default %s", env_name, raw_value, default
+            )
+            return default
+        return parsed if parsed > 0 else default
+
+    @classmethod
+    def from_env(cls) -> "ROIAssumptions":
+        """Build default assumptions from environment overrides."""
+        currency = os.environ.get("OPENACE_ROI_CURRENCY", cls.DEFAULT_CURRENCY).strip().upper()
+        if not currency:
+            currency = cls.DEFAULT_CURRENCY
+
+        return cls(
+            hourly_labor_cost=cls._read_float_env(
+                "OPENACE_ROI_HOURLY_LABOR_COST", cls.DEFAULT_HOURLY_LABOR_COST
+            ),
+            productivity_multiplier=cls._read_float_env(
+                "OPENACE_ROI_PRODUCTIVITY_MULTIPLIER", cls.DEFAULT_PRODUCTIVITY_MULTIPLIER
+            ),
+            avg_time_saved_per_request=cls._read_float_env(
+                "OPENACE_ROI_AVG_TIME_SAVED_PER_REQUEST",
+                cls.DEFAULT_AVG_TIME_SAVED_PER_REQUEST,
+            ),
+            currency=currency,
+        )
+
+    def with_overrides(
+        self,
+        *,
+        hourly_labor_cost: Optional[float] = None,
+        productivity_multiplier: Optional[float] = None,
+        avg_time_saved_per_request: Optional[float] = None,
+        currency: Optional[str] = None,
+    ) -> "ROIAssumptions":
+        """Return a copy with per-request overrides applied."""
+        normalized_currency = self.currency
+        if currency is not None:
+            normalized_currency = currency.strip().upper() or self.currency
+
+        return ROIAssumptions(
+            hourly_labor_cost=hourly_labor_cost or self.hourly_labor_cost,
+            productivity_multiplier=productivity_multiplier or self.productivity_multiplier,
+            avg_time_saved_per_request=avg_time_saved_per_request
+            or self.avg_time_saved_per_request,
+            currency=normalized_currency,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hourly_labor_cost": round(self.hourly_labor_cost, 2),
+            "productivity_multiplier": round(self.productivity_multiplier, 2),
+            "avg_time_saved_per_request": round(self.avg_time_saved_per_request, 2),
+            "currency": self.currency,
+        }
+
+
 @dataclass
 class ROIMetrics:
     """ROI metrics data structure."""
@@ -51,6 +131,7 @@ class ROIMetrics:
     input_cost: float = 0.0
     output_cost: float = 0.0
     efficiency_score: float = 0.0
+    assumptions: Optional[ROIAssumptions] = None
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +152,7 @@ class ROIMetrics:
             "cost_per_request": round(self.cost_per_request, 6),
             "cost_per_token": round(self.cost_per_token, 8),
             "efficiency_score": round(self.efficiency_score, 1),
+            "assumptions": self.assumptions.to_dict() if self.assumptions else None,
         }
 
 
@@ -151,21 +233,76 @@ class ROICalculator:
     # Default pricing for unknown models
     DEFAULT_PRICING = ModelPricing(input_price=0.01, output_price=0.03)
 
-    # Labor cost assumptions
-    HOURLY_LABOR_COST = 50.0  # USD/hour
-
-    # Productivity assumptions
-    PRODUCTIVITY_MULTIPLIER = 10.0  # AI is 10x faster
-    AVG_TIME_SAVED_PER_REQUEST = 5.0  # minutes
-
-    def __init__(self, db: Optional[Database] = None):
+    def __init__(self, db: Optional[Database] = None, assumptions: Optional[ROIAssumptions] = None):
         """
         Initialize ROI Calculator.
 
         Args:
             db: Optional Database instance.
+            assumptions: Optional ROI assumptions override.
         """
         self.db = db or Database()
+        self.assumptions = assumptions or ROIAssumptions.from_env()
+
+    def __repr__(self) -> str:
+        """Stable cache-key representation that includes ROI assumptions."""
+        return f"ROICalculator(assumptions={self.assumptions!r})"
+
+    def _build_metrics(
+        self,
+        *,
+        period: str,
+        start_date: str,
+        end_date: str,
+        total_cost: float,
+        tokens_used: int,
+        input_tokens: int,
+        output_tokens: int,
+        input_cost: float,
+        output_cost: float,
+        requests_made: int,
+    ) -> ROIMetrics:
+        """Build ROI metrics using the calculator's current assumptions."""
+        estimated_hours_saved = requests_made * self.assumptions.avg_time_saved_per_request / 60
+        estimated_savings = estimated_hours_saved * self.assumptions.hourly_labor_cost
+
+        if total_cost > 0:
+            roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
+        else:
+            roi_percentage = 0.0
+
+        productivity_gain = (self.assumptions.productivity_multiplier - 1) * 100
+        cost_per_request = total_cost / requests_made if requests_made > 0 else 0
+        cost_per_token = total_cost / tokens_used if tokens_used > 0 else 0
+        efficiency_score = self._calculate_efficiency_score(
+            tokens_used,
+            input_tokens,
+            output_tokens,
+            requests_made,
+            total_cost,
+            estimated_savings,
+        )
+
+        return ROIMetrics(
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            total_cost=total_cost,
+            tokens_used=tokens_used,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            input_cost=input_cost,
+            output_cost=output_cost,
+            requests_made=requests_made,
+            estimated_hours_saved=estimated_hours_saved,
+            estimated_savings=estimated_savings,
+            productivity_gain=productivity_gain,
+            roi_percentage=roi_percentage,
+            cost_per_request=cost_per_request,
+            cost_per_token=cost_per_token,
+            efficiency_score=efficiency_score,
+            assumptions=self.assumptions,
+        )
 
     def get_model_pricing(self, model: str) -> ModelPricing:
         """Get pricing for a model."""
@@ -291,7 +428,7 @@ class ROICalculator:
 
         return input_cost, output_cost, total_cost
 
-    @cached(ttl=60, key_prefix="roi", skip_args=[0])
+    @cached(ttl=60, key_prefix="roi")
     def calculate_roi(
         self,
         start_date: str,
@@ -382,29 +519,7 @@ class ROICalculator:
         input_tokens = row.get("total_input_tokens") or 0
         output_tokens = row.get("total_output_tokens") or 0
 
-        # Calculate savings
-        estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
-        estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
-
-        # Calculate ROI
-        if total_cost > 0:
-            roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
-        else:
-            roi_percentage = 0.0
-
-        # Productivity gain
-        productivity_gain = (self.PRODUCTIVITY_MULTIPLIER - 1) * 100
-
-        # Unit costs
-        cost_per_request = total_cost / requests if requests > 0 else 0
-        cost_per_token = total_cost / tokens if tokens > 0 else 0
-
-        # Calculate efficiency score
-        efficiency_score = self._calculate_efficiency_score(
-            tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
-        )
-
-        return ROIMetrics(
+        return self._build_metrics(
             period=f"{start_date} to {end_date}",
             start_date=start_date,
             end_date=end_date,
@@ -415,16 +530,9 @@ class ROICalculator:
             input_cost=total_input_cost,
             output_cost=total_output_cost,
             requests_made=requests,
-            estimated_hours_saved=estimated_hours_saved,
-            estimated_savings=estimated_savings,
-            productivity_gain=productivity_gain,
-            roi_percentage=roi_percentage,
-            cost_per_request=cost_per_request,
-            cost_per_token=cost_per_token,
-            efficiency_score=efficiency_score,
         )
 
-    @cached(ttl=120, key_prefix="roi", skip_args=[0])
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_trend(self, months: int = 6, user_id: Optional[int] = None) -> list[ROIMetrics]:
         """
         Get ROI trend over months.
@@ -529,21 +637,6 @@ class ROICalculator:
                 total_output_cost += output_cost
                 total_cost += cost
 
-            # Calculate savings
-            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
-            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
-
-            # Calculate ROI
-            if total_cost > 0:
-                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
-            else:
-                roi_percentage = 0.0
-
-            # Calculate efficiency score
-            efficiency_score = self._calculate_efficiency_score(
-                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
-            )
-
             # Create period string (first day of month to last day)
             period_start = f"{month}-01"
             # Calculate last day of month
@@ -558,7 +651,7 @@ class ROICalculator:
                 period_end = period_start
 
             trends.append(
-                ROIMetrics(
+                self._build_metrics(
                     period=f"{period_start} to {period_end}",
                     start_date=period_start,
                     end_date=period_end,
@@ -569,19 +662,12 @@ class ROICalculator:
                     input_cost=total_input_cost,
                     output_cost=total_output_cost,
                     requests_made=requests,
-                    estimated_hours_saved=estimated_hours_saved,
-                    estimated_savings=estimated_savings,
-                    productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
-                    roi_percentage=roi_percentage,
-                    cost_per_request=total_cost / requests if requests > 0 else 0,
-                    cost_per_token=total_cost / tokens if tokens > 0 else 0,
-                    efficiency_score=efficiency_score,
                 )
             )
 
         return trends
 
-    @cached(ttl=60, key_prefix="roi", skip_args=[0])
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_by_tool(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by tool.
@@ -659,22 +745,7 @@ class ROICalculator:
                 total_output_cost += output_cost
                 total_cost += cost
 
-            # Calculate savings
-            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
-            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
-
-            # Calculate ROI
-            if total_cost > 0:
-                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
-            else:
-                roi_percentage = 0.0
-
-            # Calculate efficiency score
-            efficiency_score = self._calculate_efficiency_score(
-                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
-            )
-
-            result[tool] = ROIMetrics(
+            result[tool] = self._build_metrics(
                 period=f"{start_date} to {end_date}",
                 start_date=start_date,
                 end_date=end_date,
@@ -685,18 +756,11 @@ class ROICalculator:
                 input_cost=total_input_cost,
                 output_cost=total_output_cost,
                 requests_made=requests,
-                estimated_hours_saved=estimated_hours_saved,
-                estimated_savings=estimated_savings,
-                productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
-                roi_percentage=roi_percentage,
-                cost_per_request=total_cost / requests if requests > 0 else 0,
-                cost_per_token=total_cost / tokens if tokens > 0 else 0,
-                efficiency_score=efficiency_score,
             )
 
         return result
 
-    @cached(ttl=60, key_prefix="roi", skip_args=[0])
+    @cached(ttl=60, key_prefix="roi")
     def get_roi_by_user(self, start_date: str, end_date: str) -> dict[str, ROIMetrics]:
         """
         Get ROI breakdown by user (via host_name grouping).
@@ -768,20 +832,7 @@ class ROICalculator:
                 total_output_cost += output_cost
                 total_cost += cost
 
-            estimated_hours_saved = requests * self.AVG_TIME_SAVED_PER_REQUEST / 60
-            estimated_savings = estimated_hours_saved * self.HOURLY_LABOR_COST
-
-            if total_cost > 0:
-                roi_percentage = ((estimated_savings - total_cost) / total_cost) * 100
-            else:
-                roi_percentage = 0.0
-
-            # Calculate efficiency score
-            efficiency_score = self._calculate_efficiency_score(
-                tokens, input_tokens, output_tokens, requests, total_cost, estimated_savings
-            )
-
-            result[host_name] = ROIMetrics(
+            result[host_name] = self._build_metrics(
                 period=f"{start_date} to {end_date}",
                 start_date=start_date,
                 end_date=end_date,
@@ -792,13 +843,6 @@ class ROICalculator:
                 input_cost=total_input_cost,
                 output_cost=total_output_cost,
                 requests_made=requests,
-                estimated_hours_saved=estimated_hours_saved,
-                estimated_savings=estimated_savings,
-                productivity_gain=(self.PRODUCTIVITY_MULTIPLIER - 1) * 100,
-                roi_percentage=roi_percentage,
-                cost_per_request=total_cost / requests if requests > 0 else 0,
-                cost_per_token=total_cost / tokens if tokens > 0 else 0,
-                efficiency_score=efficiency_score,
             )
 
         return result
@@ -968,7 +1012,7 @@ class ROICalculator:
 
         return daily_costs
 
-    @cached(ttl=60, key_prefix="roi", skip_args=[0])
+    @cached(ttl=60, key_prefix="roi")
     def get_summary_stats(
         self, start_date: str, end_date: str, user_id: Optional[int] = None
     ) -> dict[str, Any]:
@@ -994,7 +1038,8 @@ class ROICalculator:
         top_tools = sorted(breakdown, key=lambda x: x.total_cost, reverse=True)[:5]
 
         return {
-            "roi": roi.to_dict(),
+            "roi": roi.to_dict() if roi else None,
+            "assumptions": self.assumptions.to_dict(),
             "total_cost": round(total_cost, 4),
             "total_requests": total_requests,
             "top_tools": [t.to_dict() for t in top_tools],

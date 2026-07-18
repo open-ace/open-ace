@@ -22,10 +22,12 @@ Documentation files are in the [en/](en/) directory.
 | [**REMOTE-AGENT**](en/REMOTE-AGENT.md) | Remote agent client — installation, configuration, CLI tools |
 | [**REMOTE-WORKSPACE**](en/REMOTE-WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API |
 | [**DEPLOYMENT**](en/DEPLOYMENT.md) | Docker deployment and multi-user workspace setup |
-| [**KUBERNETES**](en/KUBERNETES.md) | Kubernetes deployment guide with manifests reference |
+| [**KUBERNETES**](en/KUBERNETES.md) | Single-instance Kubernetes deployment guide with manifests reference |
 | [**NGINX**](en/NGINX.md) | Nginx reverse proxy configuration for HTTPS and WebSocket |
 | [**DEVELOPMENT**](en/DEVELOPMENT.md) | Development environment setup, project structure, and testing |
 | [**FEISHU-CONFIG**](en/FEISHU_CONFIG.md) | Feishu/Lark integration configuration guide |
+| [**DINGTALK-CONFIG**](en/DINGTALK_CONFIG.md) | DingTalk integration configuration guide |
+| [**SAML-CONFIG**](en/SAML_CONFIG.md) | SAML 2.0 SSO provider configuration guide |
 | [**CONCEPTS**](en/CONCEPTS.md) | Core concept definitions — Request, Message, Session, Conversation |
 | [**TOKEN-ACCOUNTING**](en/token-accounting.md) | Deep dive into Claude / Codex / ZCode / Qwen token collection, computation, storage, and downstream usage |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub repository topics, labels, releases, and demo checklist |
@@ -62,10 +64,12 @@ Documentation files are in the [en/](en/) directory.
 | [**REMOTE-AGENT**](cn/REMOTE-AGENT.md) | 远程代理客户端 — 安装、配置、CLI 工具 |
 | [**REMOTE-WORKSPACE**](cn/REMOTE-WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API |
 | [**DEPLOYMENT**](cn/DEPLOYMENT.md) | Docker 部署和多用户工作空间配置 |
-| [**KUBERNETES**](cn/KUBERNETES.md) | Kubernetes 部署指南及 manifests 参考 |
+| [**KUBERNETES**](cn/KUBERNETES.md) | 单实例 Kubernetes 部署指南及 manifests 参考 |
 | [**NGINX**](cn/NGINX.md) | Nginx 反向代理配置（HTTPS 和 WebSocket） |
 | [**DEVELOPMENT**](cn/DEVELOPMENT.md) | 开发环境搭建、项目结构和测试 |
 | [**FEISHU-CONFIG**](cn/FEISHU_CONFIG.md) | 飞书集成配置指南 |
+| [**DINGTALK-CONFIG**](cn/DINGTALK_CONFIG.md) | 钉钉集成配置指南 |
+| [**SAML-CONFIG**](cn/SAML_CONFIG.md) | SAML 2.0 SSO Provider 配置指南 |
 | [**CONCEPTS**](cn/CONCEPTS.md) | 核心概念定义 — Request、Message、Session、Conversation |
 | [**TOKEN-ACCOUNTING**](cn/token-accounting.md) | Claude / Codex / ZCode / Qwen token 抓取、计算、落库和下游消费链路说明 |
 | [**REPOSITORY-SETUP**](REPOSITORY_SETUP.md) | GitHub 仓库 topics、labels、releases 和 Demo 检查清单 |
@@ -89,8 +93,8 @@ Documentation files are in the [en/](en/) directory.
 ```
 docs/
 ├── README.md          ← You are here / 你在这里
-├── en/                # English documentation (16 files)
-├── cn/                # 中文文档（16 个文件）
+├── en/                # English documentation (17 files)
+├── cn/                # 中文文档（17 个文件）
 ├── marketing/         # Launch and outreach materials / 发布传播材料
 └── images/            # Documentation images / 文档图片
 ```

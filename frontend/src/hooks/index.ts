@@ -27,6 +27,7 @@ export {
   useDeleteUser,
   useUpdateUserPassword,
   useResetUserPassword,
+  useSyncFeishuOrg,
   useTenants,
   useQuotaUsage,
   useQuotaStats,

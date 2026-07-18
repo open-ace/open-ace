@@ -2,12 +2,13 @@
 """
 Tests for Issue #1169: WebUI session token validation based on instance alive status.
 
-Tests that validate_proxy_token() checks instance alive status for WebUI sessions
-instead of fixed expiration time.
+Tests that validate_proxy_token() checks both TTL and instance-alive status for
+WebUI sessions.
 """
 
 import json
 import os
+import secrets
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -23,7 +24,7 @@ def _make_proxy_token_payload(
     session_id: str = "webui:1",
     tenant_id: int = 1,
     provider: str = "openai",
-    expires_minutes: int = -1,  # Already expired by default
+    expires_minutes: int = 60,
     session_type: str = "webui",
 ) -> dict:
     """Create a mock proxy token payload."""
@@ -36,7 +37,7 @@ def _make_proxy_token_payload(
         "tenant_id": tenant_id,
         "provider": provider,
         "exp": exp_str,
-        "jti": "test-token-id",
+        "jti": secrets.token_hex(16),
         "session_type": session_type,
     }
 
@@ -57,7 +58,14 @@ def _make_signed_token(service, payload: dict) -> str:
         payload_b64.encode(),
         hashlib.sha256,
     ).hexdigest()
-    return f"{payload_b64}.{signature}"
+    token = f"{payload_b64}.{signature}"
+    service._record_proxy_token_issue(
+        token=token,
+        payload=payload,
+        expires_at=datetime.fromisoformat(payload["exp"]),
+        reuse_mode=payload.get("reuse_mode", "multi_use"),
+    )
+    return token
 
 
 class TestWebUITokenInstanceCheck:
@@ -66,7 +74,7 @@ class TestWebUITokenInstanceCheck:
     @patch("app.services.webui_manager.get_webui_manager")
     def test_webui_session_instance_alive_token_accepted(self, mock_get_manager):
         """
-        Test that expired token for WebUI session is accepted if instance is alive.
+        Test that a valid WebUI token is accepted only if the instance is alive.
         """
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
@@ -82,7 +90,6 @@ class TestWebUITokenInstanceCheck:
         payload = _make_proxy_token_payload(
             user_id=1,
             session_id="webui:1",
-            expires_minutes=-1,  # Already expired
         )
         token = _make_signed_token(service, payload)
 
@@ -95,7 +102,7 @@ class TestWebUITokenInstanceCheck:
     @patch("app.services.webui_manager.get_webui_manager")
     def test_webui_session_instance_dead_token_rejected(self, mock_get_manager):
         """
-        Test that expired token for WebUI session is rejected if instance is dead.
+        Test that a valid WebUI token is rejected if instance is dead.
         """
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
@@ -111,7 +118,6 @@ class TestWebUITokenInstanceCheck:
         payload = _make_proxy_token_payload(
             user_id=1,
             session_id="webui:1",
-            expires_minutes=-1,
         )
         token = _make_signed_token(service, payload)
 
@@ -122,7 +128,7 @@ class TestWebUITokenInstanceCheck:
     @patch("app.services.webui_manager.get_webui_manager")
     def test_webui_session_no_instance_token_rejected(self, mock_get_manager):
         """
-        Test that expired token for WebUI session is rejected if instance not found.
+        Test that a valid WebUI token is rejected if instance not found.
         """
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
@@ -136,7 +142,6 @@ class TestWebUITokenInstanceCheck:
         payload = _make_proxy_token_payload(
             user_id=1,
             session_id="webui:1",
-            expires_minutes=-1,
         )
         token = _make_signed_token(service, payload)
 
@@ -238,9 +243,9 @@ class TestWebUIvsAgentBehaviorDifference:
     """Tests to verify different behavior between WebUI and Agent sessions."""
 
     @patch("app.services.webui_manager.get_webui_manager")
-    def test_webui_ignores_expiration_if_instance_alive(self, mock_get_manager):
+    def test_webui_rejects_expiration_even_if_instance_alive(self, mock_get_manager):
         """
-        Test that WebUI session completely ignores expiration time when instance is alive.
+        Test that WebUI session tokens still expire even when the instance is alive.
         """
         from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
@@ -262,9 +267,7 @@ class TestWebUIvsAgentBehaviorDifference:
         token = _make_signed_token(service, payload)
 
         result = service.validate_proxy_token(token)
-        assert (
-            result is not None
-        ), "WebUI session should accept even very old token if instance alive"
+        assert result is None, "WebUI session must reject expired tokens even if instance alive"
 
     def test_agent_rejects_expiration_even_very_old(self):
         """

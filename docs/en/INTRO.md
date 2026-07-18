@@ -76,8 +76,9 @@ Open ACE provides two distinct interfaces based on user role:
 #### ROI Analysis
 - Cost per conversation
 - Token efficiency metrics
-- Tool ROI calculation
+- Tool ROI calculation with visible, configurable assumptions
 - Budget vs actual spending
+- Planning estimate disclaimers for ROI interpretation
 
 ### 4. Enterprise Governance
 
@@ -94,7 +95,7 @@ Open ACE provides two distinct interfaces based on user role:
 - Permission granularization
 
 #### Security & Compliance
-- SSO/SAML integration (OIDC, OAuth2)
+- SSO integration (OIDC/OAuth2 and SAML 2.0)
 - Comprehensive audit logging
 - Content filtering
 - Data retention policies
@@ -464,7 +465,7 @@ Password: admin123
 - Email report generation
 - User authentication & role-based access
 - Quota management & alerts
-- SSO/SAML integration (OIDC, OAuth2)
+- SSO integration (OIDC/OAuth2 and SAML 2.0)
 - Audit logging & compliance features
 - Tenant management
 - Prompt library & session management
@@ -497,6 +498,7 @@ Password: admin123
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Deployment guides (local, Docker, enterprise) |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | Development setup & contribution guide |
 | [FEISHU_CONFIG.md](./FEISHU_CONFIG.md) | Feishu integration configuration |
+| [DINGTALK_CONFIG.md](./DINGTALK_CONFIG.md) | DingTalk integration configuration |
 
 ---
 
@@ -511,7 +513,7 @@ Open ACE is a comprehensive enterprise AI work platform that provides:
 | **Management** | Users, tenants, quotas, roles, permissions |
 | **Governance** | Audit logs, security, compliance, retention |
 | **Collaboration** | Session sharing, prompt library, team workspaces |
-| **Integration** | SSO/SAML, tool connector, state sync |
+| **Integration** | OIDC/OAuth2/SAML 2.0 SSO, tool connector, state sync |
 
 **For individual developers**: Track personal usage and optimize costs
 **For teams**: Monitor usage, share prompts, collaborate on sessions

@@ -5,6 +5,13 @@
 import { apiClient } from './client';
 
 // Types
+export interface ROIAssumptions {
+  hourly_labor_cost: number;
+  productivity_multiplier: number;
+  avg_time_saved_per_request: number;
+  currency: string;
+}
+
 export interface ROIMetrics {
   period: string;
   start_date: string;
@@ -24,6 +31,7 @@ export interface ROIMetrics {
   cost_per_token: number;
   efficiency_score?: number;
   total_savings?: number;
+  assumptions?: ROIAssumptions | null;
 }
 
 export interface ROITrend {
@@ -127,19 +135,31 @@ export interface EfficiencyReport {
   recommendations?: string[];
 }
 
+interface ROIRequestParams {
+  start_date?: string;
+  end_date?: string;
+  user_id?: number;
+  tool_name?: string;
+  assumptions?: ROIAssumptions;
+}
+
+function appendAssumptions(queryParams: Record<string, string>, assumptions?: ROIAssumptions) {
+  if (!assumptions) return;
+  queryParams.hourly_labor_cost = String(assumptions.hourly_labor_cost);
+  queryParams.productivity_multiplier = String(assumptions.productivity_multiplier);
+  queryParams.avg_time_saved_per_request = String(assumptions.avg_time_saved_per_request);
+  queryParams.currency = assumptions.currency;
+}
+
 // API
 export const roiApi = {
-  async getROI(params?: {
-    start_date?: string;
-    end_date?: string;
-    user_id?: number;
-    tool_name?: string;
-  }): Promise<ROIMetrics> {
+  async getROI(params?: ROIRequestParams): Promise<ROIMetrics> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
     if (params?.user_id) queryParams.user_id = String(params.user_id);
     if (params?.tool_name) queryParams.tool_name = params.tool_name;
+    appendAssumptions(queryParams, params?.assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: ROIMetrics }>(
       '/api/roi',
@@ -148,10 +168,15 @@ export const roiApi = {
     return response.data;
   },
 
-  async getROITrend(months?: number, userId?: number): Promise<ROITrend[]> {
+  async getROITrend(
+    months?: number,
+    userId?: number,
+    assumptions?: ROIAssumptions
+  ): Promise<ROITrend[]> {
     const queryParams: Record<string, string> = {};
     if (months) queryParams.months = String(months);
     if (userId) queryParams.user_id = String(userId);
+    appendAssumptions(queryParams, assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: ROITrend[] }>(
       '/api/roi/trend',
@@ -160,13 +185,13 @@ export const roiApi = {
     return response.data;
   },
 
-  async getROIByTool(params?: {
-    start_date?: string;
-    end_date?: string;
-  }): Promise<Record<string, ROIBreakdown>> {
+  async getROIByTool(
+    params?: Omit<ROIRequestParams, 'user_id' | 'tool_name'>
+  ): Promise<Record<string, ROIBreakdown>> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
+    appendAssumptions(queryParams, params?.assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: Record<string, ROIBreakdown> }>(
       '/api/roi/by-tool',
@@ -175,13 +200,13 @@ export const roiApi = {
     return response.data;
   },
 
-  async getROIByUser(params?: {
-    start_date?: string;
-    end_date?: string;
-  }): Promise<Record<string, ROIBreakdown>> {
+  async getROIByUser(
+    params?: Omit<ROIRequestParams, 'user_id' | 'tool_name'>
+  ): Promise<Record<string, ROIBreakdown>> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
+    appendAssumptions(queryParams, params?.assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: Record<string, ROIBreakdown> }>(
       '/api/roi/by-user',
@@ -228,11 +253,13 @@ export const roiApi = {
     start_date?: string;
     end_date?: string;
     user_id?: number;
+    assumptions?: ROIAssumptions;
   }): Promise<Record<string, unknown>> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
     if (params?.user_id) queryParams.user_id = String(params.user_id);
+    appendAssumptions(queryParams, params?.assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: Record<string, unknown> }>(
       '/api/roi/summary',

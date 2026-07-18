@@ -1,4 +1,9 @@
-"""In-memory store for terminal session info with TTL-based cleanup."""
+"""In-memory store for terminal session info with TTL-based cleanup.
+
+This metadata cache is process-local. Remote-session commands and SSE output
+are durable, but active terminal bridge sockets still require the owning web
+process or a reconnect after failover.
+"""
 
 from __future__ import annotations
 

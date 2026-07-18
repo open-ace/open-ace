@@ -12,6 +12,7 @@ environment variables to override defaults.
 import json
 import os
 from typing import Optional, cast
+from urllib.parse import quote
 
 # Configuration directory path
 # This is the main configuration that should be set during installation
@@ -129,7 +130,7 @@ def get_database_config() -> dict:
 
 def get_database_url() -> str:
     """
-    Get database URL with priority: environment variable > config file > default PostgreSQL > fallback SQLite.
+    Get database URL with priority: full env URL > split env settings > config file > default PostgreSQL > fallback SQLite.
 
     Returns:
         str: Database URL.
@@ -138,7 +139,18 @@ def get_database_url() -> str:
     if os.environ.get("DATABASE_URL"):
         return os.environ["DATABASE_URL"]
 
-    # Priority 2: Config file
+    # Priority 2: Split PostgreSQL environment variables (used by Kubernetes manifests)
+    db_host = os.environ.get("DB_HOST")
+    db_name = os.environ.get("DB_NAME")
+    db_user = os.environ.get("DB_USER")
+    if db_host and db_name and db_user:
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_password = os.environ.get("DB_PASSWORD", "")
+        quoted_user = quote(db_user, safe="")
+        quoted_password = quote(db_password, safe="")
+        return f"postgresql://{quoted_user}:{quoted_password}@{db_host}:{db_port}/{db_name}"
+
+    # Priority 3: Config file
     db_config = get_database_config()
     db_type = db_config.get("type", "postgresql").lower()
 
@@ -151,7 +163,7 @@ def get_database_url() -> str:
         db_path = db_config.get("path", DB_PATH)
         return f"sqlite:///{db_path}"
 
-    # Priority 3: SQLite (explicitly configured)
+    # Priority 4: SQLite (explicitly configured)
     db_path = db_config.get("path", DB_PATH)
     return f"sqlite:///{db_path}"
 

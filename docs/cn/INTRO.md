@@ -76,8 +76,9 @@ Open ACE 根据用户角色提供两个不同的界面：
 #### ROI 分析
 - 每次对话的成本
 - Token 效率指标
-- 工具 ROI 计算
+- 带可见、可配置假设的工具 ROI 估算
 - 预算与实际支出对比
+- ROI 解读提示与规划免责声明
 
 ### 4. 企业治理
 
@@ -94,7 +95,7 @@ Open ACE 根据用户角色提供两个不同的界面：
 - 权限精细化
 
 #### 安全与合规
-- SSO/SAML 集成（OIDC、OAuth2）
+- SSO 集成（OIDC/OAuth2 与 SAML 2.0）
 - 全面的审计日志
 - 内容过滤
 - 数据保留策略
@@ -464,7 +465,7 @@ docker compose restart
 - 邮件报告生成
 - 用户认证和基于角色的访问控制
 - 配额管理和警报
-- SSO/SAML 集成（OIDC、OAuth2）
+- SSO 集成（OIDC/OAuth2 与 SAML 2.0）
 - 审计日志和合规功能
 - 租户管理
 - 提示库和会话管理
@@ -497,6 +498,7 @@ docker compose restart
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | 部署指南（本地、Docker、企业） |
 | [DEVELOPMENT.md](./DEVELOPMENT.md) | 开发设置和贡献指南 |
 | [FEISHU_CONFIG.md](./FEISHU_CONFIG.md) | 飞书集成配置 |
+| [DINGTALK_CONFIG.md](./DINGTALK_CONFIG.md) | 钉钉集成配置 |
 
 ---
 
@@ -511,7 +513,7 @@ Open ACE 是一个全面的企业 AI 工作平台，提供：
 | **管理** | 用户、租户、配额、角色、权限 |
 | **治理** | 审计日志、安全、合规、保留 |
 | **协作** | 会话共享、提示库、团队工作空间 |
-| **集成** | SSO/SAML、工具连接器、状态同步 |
+| **集成** | OIDC/OAuth2/SAML 2.0 SSO、工具连接器、状态同步 |
 
 **个人开发者**：追踪个人使用情况和优化成本
 **团队**：监控使用情况、共享提示、协作会话

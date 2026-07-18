@@ -112,6 +112,8 @@ def health_check():
 
 大多数 `/api/*` 路由通过 blueprint 级别的 `before_request` 使用 `@auth_required`。敏感操作使用 `@admin_required`。
 
+如果用户被标记为 `must_change_password=true`，服务端会额外收紧访问范围，只允许认证检查、个人资料、密码修改、登出和密码策略等最小必要接口。
+
 ### 公开路由
 
 - `/` — SPA 全局捕获（提供 index.html）
@@ -140,3 +142,8 @@ has_perm = PermissionService.has_permission(user_id, 'export_analysis')
 - 租户配额强制执行每个租户的 token 和请求限制
 - `QuotaEnforcementScheduler` 每 60 秒运行一次，检查并执行限制
 - 超额用户会被终止会话并生成告警
+
+当前边界：
+- 用户、项目、工作区会话、会话消息、每日用量聚合、审计日志、远程机器、机器权限和配额均具备租户感知。
+- 非管理员用户可见 API 会把认证租户范围应用到会话、项目、用量和审计查询；工作区会话变更也会在写入边界携带会话租户。
+- 系统管理员有意保留全局运维可见性，用于支持和故障处理。

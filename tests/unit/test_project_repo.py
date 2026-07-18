@@ -37,6 +37,7 @@ class TestProjectRepository:
             description="Test project",
             created_by=5,
             is_shared=False,
+            tenant_id=1,
         )
         assert result == 1
         # create_project also calls add_user_project when created_by is set
@@ -51,7 +52,7 @@ class TestProjectRepository:
         self.db.execute.return_value = mock_cursor
 
         with patch.object(self.repo, "add_user_project", return_value=100) as mock_add:
-            result = self.repo.create_project(path="/test", name="T", created_by=5)
+            result = self.repo.create_project(path="/test", name="T", created_by=5, tenant_id=1)
         assert result == 10
         mock_add.assert_called_once_with(5, 10)
 
@@ -75,7 +76,7 @@ class TestProjectRepository:
         self.db.fetch_one.side_effect = [None, {"id": 3}]
 
         with patch.object(self.repo, "add_user_project", return_value=1):
-            result = self.repo.create_project(path="/test/pg", name="PG", created_by=1)
+            result = self.repo.create_project(path="/test/pg", name="PG", created_by=1, tenant_id=1)
         assert result == 3
         # fetch_one called twice: check soft-deleted, then insert with RETURNING
         assert self.db.fetch_one.call_count == 2
@@ -101,6 +102,7 @@ class TestProjectRepository:
                 name="Restored Project",
                 description="Restored desc",
                 created_by=10,
+                tenant_id=1,
             )
 
         # Should return the restored project ID
@@ -121,6 +123,7 @@ class TestProjectRepository:
                 path="/test/pg-restored",
                 name="PG Restored",
                 created_by=12,
+                tenant_id=1,
             )
 
         # Should return the restored project ID
@@ -135,6 +138,7 @@ class TestProjectRepository:
     def test_get_project_by_id_found(self):
         self.db.fetch_one.return_value = {
             "id": 1,
+            "tenant_id": 1,
             "path": "/test",
             "name": "Test",
             "is_active": True,
@@ -155,7 +159,12 @@ class TestProjectRepository:
     # -------------------------------------------------------------------------
 
     def test_get_project_by_path_found(self):
-        self.db.fetch_one.return_value = {"id": 1, "path": "/home/user/proj", "name": "Proj"}
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "path": "/home/user/proj",
+            "name": "Proj",
+        }
         result = self.repo.get_project_by_path("/home/user/proj")
         assert result is not None
         assert result.path == "/home/user/proj"
@@ -196,6 +205,14 @@ class TestProjectRepository:
         params = self.db.fetch_all.call_args[0][1]
         assert params == (5,)
 
+    def test_get_all_projects_filter_by_tenant(self):
+        self.db.fetch_all.return_value = []
+        self.repo.get_all_projects(tenant_id=7)
+        query = self.db.fetch_all.call_args[0][0]
+        params = self.db.fetch_all.call_args[0][1]
+        assert "tenant_id = ?" in query
+        assert params == (7,)
+
     # -------------------------------------------------------------------------
     # get_user_projects
     # -------------------------------------------------------------------------
@@ -209,6 +226,14 @@ class TestProjectRepository:
         query = self.db.fetch_all.call_args[0][0]
         assert "INNER JOIN user_projects" in query
         assert "up.user_id = ?" in query
+
+    def test_get_user_projects_filters_by_tenant(self):
+        self.db.fetch_all.return_value = []
+        self.repo.get_user_projects(user_id=5, tenant_id=2)
+        query = self.db.fetch_all.call_args[0][0]
+        params = self.db.fetch_all.call_args[0][1]
+        assert "p.tenant_id = ?" in query
+        assert params == (5, 2)
 
     # -------------------------------------------------------------------------
     # update_project
@@ -389,7 +414,7 @@ class TestProjectRepository:
     def test_get_project_stats(self):
         # First call: get_project_by_id
         self.db.fetch_one.side_effect = [
-            {"id": 1, "path": "/proj", "name": "Proj", "is_active": True},  # project
+            {"id": 1, "tenant_id": 1, "path": "/proj", "name": "Proj", "is_active": True},
             {  # aggregate stats
                 "total_users": 3,
                 "total_sessions": 100,
@@ -445,6 +470,13 @@ class TestProjectRepository:
     # -------------------------------------------------------------------------
 
     def test_get_project_daily_stats_basic(self):
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "path": "/p",
+            "name": "Project",
+            "is_active": True,
+        }
         self.db.fetch_all.return_value = [
             {
                 "date": "2024-01-01",
@@ -463,6 +495,13 @@ class TestProjectRepository:
         assert result[0].total_tokens == 1000
 
     def test_get_project_daily_stats_with_date_range(self):
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "path": "/p",
+            "name": "Project",
+            "is_active": True,
+        }
         self.db.fetch_all.return_value = []
         self.repo.get_project_daily_stats(
             project_id=1, start_date="2024-01-01", end_date="2024-12-31"
@@ -474,6 +513,13 @@ class TestProjectRepository:
         assert params == (1, "2024-01-01", "2024-12-31")
 
     def test_get_project_daily_stats_handles_none_values(self):
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "path": "/p",
+            "name": "Project",
+            "is_active": True,
+        }
         self.db.fetch_all.return_value = [
             {
                 "date": "2024-01-01",

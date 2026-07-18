@@ -36,7 +36,7 @@ describe('App Store', () => {
       sidebarCollapsed: false,
       workspaceTabs: [],
       workspaceActiveTabId: '',
-      autonomousEnabled: false,
+      autonomousEnabled: true,
       modelGatewayEnabled: false,
       runTimelineEnabled: false,
       policyEnabled: false,
@@ -62,7 +62,7 @@ describe('App Store', () => {
       expect(state.theme).toBe('light');
       expect(state.language).toBe('en');
       expect(state.sidebarCollapsed).toBe(false);
-      expect(state.autonomousEnabled).toBe(false);
+      expect(state.autonomousEnabled).toBe(true);
       expect(state.configLoaded).toBe(false);
     });
   });
@@ -305,12 +305,6 @@ describe('App Store', () => {
 
   describe('feature flag actions', () => {
     it('should set autonomousEnabled', () => {
-      expect(useAppStore.getState().autonomousEnabled).toBe(false);
-
-      act(() => {
-        useAppStore.getState().setAutonomousEnabled(true);
-      });
-
       expect(useAppStore.getState().autonomousEnabled).toBe(true);
 
       act(() => {
@@ -318,6 +312,12 @@ describe('App Store', () => {
       });
 
       expect(useAppStore.getState().autonomousEnabled).toBe(false);
+
+      act(() => {
+        useAppStore.getState().setAutonomousEnabled(true);
+      });
+
+      expect(useAppStore.getState().autonomousEnabled).toBe(true);
     });
 
     it('should set modelGatewayEnabled', () => {

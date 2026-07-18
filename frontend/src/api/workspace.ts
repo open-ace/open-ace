@@ -77,7 +77,7 @@ export const workspaceApi = {
         port_range_end: 3200,
         max_instances: 30,
         idle_timeout_minutes: 30,
-        autonomous_enabled: false,
+        autonomous_enabled: true,
       };
     }
   },

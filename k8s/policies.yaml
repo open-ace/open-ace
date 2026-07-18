@@ -37,7 +37,7 @@ spec:
               kubernetes.io/metadata.name: ingress-nginx
       ports:
         - protocol: TCP
-          port: 5001
+          port: 19888
     # Allow health checks from within the cluster
     - from:
         - namespaceSelector:
@@ -45,7 +45,7 @@ spec:
               kubernetes.io/metadata.name: open-ace
       ports:
         - protocol: TCP
-          port: 5001
+          port: 19888
   egress:
     # Allow DNS
     - to:

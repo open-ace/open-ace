@@ -12,7 +12,7 @@ The remote agent is a Python daemon that runs on remote machines to provide AI c
      │
      ├── subprocess ──► CLI Tool (claude/qwen/codex/openclaw)
      │
-     └── WebSocket ──► Terminal Server (PTY)
+     └── WebSocket ──► Terminal Server (PTY / piped subprocess)
                          │
                     Browser (xterm.js)
 ```
@@ -88,13 +88,15 @@ The `openace` command-line tool is installed alongside the agent:
 
 ## Terminal Server
 
-The terminal server provides WebSocket-based PTY access:
+The terminal server provides WebSocket-based terminal access:
 
-- **Single PTY model** — One PTY per terminal server instance
+- **Terminal process model** — Uses a persistent PTY on Linux/macOS and a persistent piped subprocess on Windows
 - **Authentication** — HMAC token via query parameters
-- **Reconnection** — PTY persists across WebSocket disconnects; 64KB output history for screen restore
+- **Reconnection** — Terminal process persists across WebSocket disconnects; 64KB output history for screen restore
 - **Resize** — JSON control messages `{"type":"resize","cols":N,"rows":N}`
 - **Environment** — Auto-injects `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` from proxy tokens
+
+On Windows, `openace menu` uses a numbered text menu instead of the Unix arrow-key raw-terminal UI so the same workflow remains available in PowerShell/cmd and browser terminals.
 
 ## Session Sync
 

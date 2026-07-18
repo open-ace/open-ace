@@ -20,6 +20,7 @@ from typing import Any, Optional, Union, cast
 
 from app.modules.workspace.api_key_router import APIKeyRouter
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
+from app.utils.security_env import get_encryption_key_material
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 
 try:
@@ -123,22 +124,19 @@ class APIKeyProxyService:
     proxy tokens are issued to remote agents for authenticating LLM proxy calls.
     """
 
+    DEFAULT_PROXY_TOKEN_TTL_MINUTES = 240
+    _DEFAULT_PROXY_TOKEN_REUSE_MODE = "multi_use"
+    _ALLOWED_PROXY_TOKEN_REUSE_MODES = frozenset({"multi_use", "single_use"})
+
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or str(DB_PATH)
         self._encryption_key = self._get_encryption_key()
         self._router = APIKeyRouter()
+        self._ensure_tables()
 
     def _get_encryption_key(self) -> bytes:
         """Get the AES encryption key from environment variable."""
-        key_env = os.environ.get("OPENACE_ENCRYPTION_KEY")
-        if not key_env:
-            secret = os.environ.get("SECRET_KEY")
-            if not secret:
-                raise RuntimeError(
-                    "OPENACE_ENCRYPTION_KEY or SECRET_KEY must be set for API key encryption. "
-                    "Refusing to use default key in production."
-                )
-            key_env = secret
+        key_env = get_encryption_key_material(purpose="API key encryption")
         # Derive a 32-byte key using SHA-256
         return hashlib.sha256(key_env.encode()).digest()
 
@@ -166,6 +164,7 @@ class APIKeyProxyService:
 
         id_type = "SERIAL PRIMARY KEY" if is_postgresql() else "INTEGER PRIMARY KEY AUTOINCREMENT"
         bool_true = "BOOLEAN DEFAULT TRUE" if is_postgresql() else "INTEGER DEFAULT 1"
+        bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
@@ -193,8 +192,263 @@ class APIKeyProxyService:
         """
         )
 
+        cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS proxy_token_jtis (
+                id {id_type},
+                jti TEXT NOT NULL UNIQUE,
+                token_hash TEXT NOT NULL UNIQUE,
+                user_id INTEGER,
+                session_id TEXT NOT NULL,
+                tenant_id INTEGER,
+                provider TEXT NOT NULL,
+                session_type TEXT NOT NULL,
+                scope TEXT,
+                reuse_mode TEXT NOT NULL DEFAULT 'multi_use',
+                is_single_use {bool_false} NOT NULL,
+                issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                first_used_at TIMESTAMP,
+                last_used_at TIMESTAMP,
+                consumed_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                revoke_reason TEXT,
+                use_count INTEGER DEFAULT 0 NOT NULL,
+                metadata TEXT
+            )
+        """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proxy_token_jtis_session ON proxy_token_jtis(session_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proxy_token_jtis_expires ON proxy_token_jtis(expires_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proxy_token_jtis_active ON proxy_token_jtis(revoked_at, consumed_at)"
+        )
+
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def _row_get(row: Any, key: str, default: Any = None) -> Any:
+        """Read a value from sqlite Row / dict / tuple-like objects."""
+        if row is None:
+            return default
+        if isinstance(row, dict):
+            return row.get(key, default)
+        try:
+            return row[key]
+        except Exception:
+            return default
+
+    def _get_default_proxy_token_ttl_minutes(self, session_type: str) -> int:
+        """Return the configured default TTL for a proxy-token session type."""
+        session_env = f"OPENACE_PROXY_TOKEN_TTL_{session_type.upper()}_MINUTES"
+        for env_name in (session_env, "OPENACE_PROXY_TOKEN_TTL_MINUTES"):
+            raw_value = os.environ.get(env_name, "").strip()
+            if not raw_value:
+                continue
+            try:
+                parsed = int(raw_value)
+            except ValueError:
+                logger.warning(
+                    "Invalid proxy token TTL override %s=%r; using fallback",
+                    env_name,
+                    raw_value,
+                )
+                continue
+            if parsed > 0:
+                return parsed
+            logger.warning(
+                "Proxy token TTL override %s=%r must be positive; using fallback",
+                env_name,
+                raw_value,
+            )
+        return self.DEFAULT_PROXY_TOKEN_TTL_MINUTES
+
+    def _normalize_proxy_token_reuse_mode(self, reuse_mode: Any) -> str:
+        """Normalize the configured token reuse mode."""
+        normalized = str(reuse_mode or self._DEFAULT_PROXY_TOKEN_REUSE_MODE).strip().lower()
+        if normalized not in self._ALLOWED_PROXY_TOKEN_REUSE_MODES:
+            logger.warning(
+                "Unknown proxy token reuse_mode=%r; falling back to multi_use", reuse_mode
+            )
+            return self._DEFAULT_PROXY_TOKEN_REUSE_MODE
+        return normalized
+
+    def _decode_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
+        """Verify the proxy-token signature and return the payload."""
+        import hmac
+
+        try:
+            parts = token.split(".")
+            if len(parts) != 2:
+                return None
+
+            payload_b64, signature = parts
+            expected_sig = hmac.new(
+                self._encryption_key,
+                payload_b64.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+
+            if not hmac.compare_digest(signature, expected_sig):
+                logger.warning("Proxy token signature mismatch")
+                return None
+
+            payload = json.loads(b64decode(payload_b64))
+            if not isinstance(payload, dict):
+                return None
+            return cast("dict[str, Any]", payload)
+        except Exception as e:
+            logger.warning("Failed to decode proxy token: %s", e)
+            return None
+
+    def _record_proxy_token_issue(
+        self,
+        *,
+        token: str,
+        payload: dict[str, Any],
+        expires_at: datetime,
+        reuse_mode: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Persist the server-side lifecycle record for a proxy token."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            metadata_json = json.dumps(metadata, sort_keys=True) if metadata else None
+            is_single_use = reuse_mode == "single_use"
+            cursor.execute(
+                f"""
+                INSERT INTO proxy_token_jtis (
+                    jti, token_hash, user_id, session_id, tenant_id, provider,
+                    session_type, scope, reuse_mode, is_single_use, expires_at, metadata
+                )
+                VALUES (
+                    {_param()}, {_param()}, {_param()}, {_param()}, {_param()}, {_param()},
+                    {_param()}, {_param()}, {_param()}, {_param()}, {_param()}, {_param()}
+                )
+            """,
+                (
+                    payload["jti"],
+                    token_hash,
+                    payload.get("user_id"),
+                    payload.get("session_id", ""),
+                    payload.get("tenant_id"),
+                    payload.get("provider", ""),
+                    payload.get("session_type", "agent"),
+                    payload.get("scope"),
+                    reuse_mode,
+                    is_single_use if is_postgresql() else (1 if is_single_use else 0),
+                    expires_at.isoformat(),
+                    metadata_json,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _get_proxy_token_record(self, jti: str) -> Optional[dict[str, Any]]:
+        """Load a proxy-token lifecycle record by JTI."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM proxy_token_jtis
+                WHERE jti = {_param()}
+            """,
+                (jti,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if isinstance(row, dict) else (dict(row) if row else None)
+        except Exception:
+            # sqlite3.Row supports ``dict(row)``, psycopg2 RealDictRow already is dict-like.
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM proxy_token_jtis WHERE jti = {_param()}",
+                (jti,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if isinstance(row, dict):
+                return row
+            try:
+                return dict(row)
+            except Exception:
+                return None
+        finally:
+            conn.close()
+
+    def _touch_proxy_token_record(self, jti: str, now: datetime) -> None:
+        """Update last-seen bookkeeping for a multi-use token."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE proxy_token_jtis
+                SET first_used_at = COALESCE(first_used_at, {_param()}),
+                    last_used_at = {_param()},
+                    use_count = COALESCE(use_count, 0) + 1
+                WHERE jti = {_param()}
+            """,
+                (now.isoformat(), now.isoformat(), jti),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _consume_single_use_proxy_token(self, jti: str, now: datetime) -> bool:
+        """Atomically consume a single-use token and reject replays."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE proxy_token_jtis
+                SET first_used_at = COALESCE(first_used_at, {_param()}),
+                    last_used_at = {_param()},
+                    consumed_at = {_param()},
+                    use_count = COALESCE(use_count, 0) + 1
+                WHERE jti = {_param()} AND revoked_at IS NULL AND consumed_at IS NULL
+            """,
+                (now.isoformat(), now.isoformat(), now.isoformat(), jti),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def revoke_proxy_tokens_for_session(
+        self, session_id: str, reason: str = "session_revoked"
+    ) -> int:
+        """Revoke every active proxy token issued for a session id."""
+        if not session_id:
+            return 0
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE proxy_token_jtis
+                SET revoked_at = {_param()},
+                    revoke_reason = {_param()}
+                WHERE session_id = {_param()} AND revoked_at IS NULL
+            """,
+                (now, reason, session_id),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+        finally:
+            conn.close()
 
     def _encrypt_key(self, api_key: str) -> str:
         """Encrypt an API key using Fernet (requires cryptography package)."""
@@ -1197,7 +1451,7 @@ class APIKeyProxyService:
         session_id: str,
         tenant_id: int,
         provider: str,
-        expires_minutes: int = 1440,
+        expires_minutes: Optional[int] = None,
         session_type: str = "agent",
         extra_payload: Optional[dict[str, Any]] = None,
     ) -> str:
@@ -1212,7 +1466,8 @@ class APIKeyProxyService:
             session_id: Session ID.
             tenant_id: Tenant ID for API key lookup.
             provider: LLM provider name.
-            expires_minutes: Token validity in minutes (default 24 hours).
+            expires_minutes: Token validity in minutes. Uses the configured
+                default when omitted.
             session_type: Type of session - "agent" or "terminal".
 
         Returns:
@@ -1220,19 +1475,33 @@ class APIKeyProxyService:
         """
         import hmac
 
+        raw_payload = deepcopy(extra_payload or {})
+        reuse_mode = self._normalize_proxy_token_reuse_mode(
+            raw_payload.pop(
+                "reuse_mode",
+                "single_use" if raw_payload.pop("single_use", False) else "multi_use",
+            )
+        )
+        effective_ttl = (
+            expires_minutes
+            if expires_minutes is not None
+            else self._get_default_proxy_token_ttl_minutes(session_type)
+        )
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+            minutes=effective_ttl
+        )
         payload = {
             "user_id": user_id,
             "session_id": session_id,
             "tenant_id": tenant_id,
             "provider": provider,
             "session_type": session_type,
-            "exp": (
-                datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=expires_minutes)
-            ).isoformat(),
+            "exp": expires_at.isoformat(),
             "jti": secrets.token_hex(16),
+            "reuse_mode": reuse_mode,
         }
-        if extra_payload:
-            payload.update(extra_payload)
+        if raw_payload:
+            payload.update(raw_payload)
 
         payload_json = json.dumps(payload, sort_keys=True)
         payload_b64 = b64encode(payload_json.encode()).decode()
@@ -1244,7 +1513,79 @@ class APIKeyProxyService:
             hashlib.sha256,
         ).hexdigest()
 
-        return f"{payload_b64}.{signature}"
+        token = f"{payload_b64}.{signature}"
+        self._record_proxy_token_issue(
+            token=token,
+            payload=payload,
+            expires_at=expires_at,
+            reuse_mode=reuse_mode,
+            metadata=raw_payload if raw_payload else None,
+        )
+        return token
+
+    def _session_allows_proxy_token(
+        self,
+        *,
+        session_id: Optional[str],
+        session_type: str,
+        user_id: Any,
+        now: datetime,
+        exp: datetime,
+    ) -> bool:
+        """Return whether the session lifecycle still allows proxy-token use."""
+        if now > exp:
+            logger.warning("Proxy token expired")
+            return False
+
+        if session_id and session_id.startswith("webui:") and user_id:
+            from app.services.webui_manager import get_webui_manager
+
+            manager = get_webui_manager()
+            instance = manager.get_user_instance(int(user_id))
+            if instance and instance.is_alive():
+                return True
+            logger.warning(
+                "WebUI instance not alive for session: %s, user_id: %s",
+                session_id,
+                user_id,
+            )
+            return False
+
+        if not session_id or session_type == "ha_pool":
+            return True
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT status FROM agent_sessions WHERE session_id = {_param()}",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+        except Exception as e:
+            logger.warning("Failed to check session status for proxy token: %s", e)
+            return True
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if not row:
+            if session_type in {"agent", "terminal", "workflow"}:
+                logger.warning("Proxy token session not found: %s", session_id[:8])
+                return False
+            return True
+
+        status = row[0] if isinstance(row, (list, tuple)) else self._row_get(row, "status")
+        if status not in ("active", "paused"):
+            logger.warning(
+                "Proxy token session not active: %s (status=%s)",
+                session_id[:8],
+                status,
+            )
+            return False
+        return True
 
     def validate_proxy_token(self, token: str) -> Optional[dict[str, Any]]:
         """
@@ -1256,80 +1597,59 @@ class APIKeyProxyService:
         Returns:
             Dict with token payload or None if invalid/expired.
         """
-        import hmac
-
         try:
-            parts = token.split(".")
-            if len(parts) != 2:
+            payload = self._decode_proxy_token(token)
+            if not payload:
                 return None
 
-            payload_b64, signature = parts
-
-            # Verify signature
-            expected_sig = hmac.new(
-                self._encryption_key,
-                payload_b64.encode(),
-                hashlib.sha256,
-            ).hexdigest()
-
-            if not hmac.compare_digest(signature, expected_sig):
-                logger.warning("Proxy token signature mismatch")
+            jti = str(payload.get("jti") or "").strip()
+            if not jti:
+                logger.warning("Proxy token missing jti")
+                return None
+            record = self._get_proxy_token_record(jti)
+            if not record:
+                logger.warning("Proxy token jti not issued by this server: %s", jti[:8])
+                return None
+            if self._row_get(record, "token_hash") != hashlib.sha256(token.encode()).hexdigest():
+                logger.warning("Proxy token hash mismatch for jti=%s", jti[:8])
+                return None
+            if self._row_get(record, "revoked_at"):
+                logger.warning("Proxy token revoked: %s", jti[:8])
                 return None
 
-            payload = json.loads(b64decode(payload_b64))
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            exp = datetime.fromisoformat(str(payload["exp"]))
+            record_exp_raw = self._row_get(record, "expires_at")
+            record_exp = datetime.fromisoformat(str(record_exp_raw)) if record_exp_raw else exp
+            if now > record_exp:
+                logger.warning("Proxy token server record expired: %s", jti[:8])
+                return None
 
             session_id = payload.get("session_id")
             session_type = payload.get("session_type", "agent")
             user_id = payload.get("user_id")
 
-            # For WebUI sessions, check instance alive status instead of fixed expiration
-            if session_id and session_id.startswith("webui:") and user_id:
-                from app.services.webui_manager import get_webui_manager
+            if not self._session_allows_proxy_token(
+                session_id=session_id,
+                session_type=str(session_type),
+                user_id=user_id,
+                now=now,
+                exp=exp,
+            ):
+                return None
 
-                manager = get_webui_manager()
-                instance = manager.get_user_instance(user_id)
-                if instance and instance.is_alive():
-                    # Instance alive, skip expiration check
-                    pass
-                else:
-                    logger.warning(
-                        "WebUI instance not alive for session: %s, user_id: %s",
-                        session_id,
-                        user_id,
-                    )
+            reuse_mode = self._normalize_proxy_token_reuse_mode(
+                self._row_get(record, "reuse_mode", payload.get("reuse_mode"))
+            )
+            if reuse_mode == "single_use":
+                if not self._consume_single_use_proxy_token(jti, now):
+                    logger.warning("Single-use proxy token replay rejected: %s", jti[:8])
                     return None
             else:
-                # For other session types (agent), check fixed expiration time
-                exp = datetime.fromisoformat(payload["exp"])
-                if datetime.now(timezone.utc).replace(tzinfo=None) > exp:
-                    logger.warning("Proxy token expired")
+                if self._row_get(record, "consumed_at"):
+                    logger.warning("Consumed proxy token replay rejected: %s", jti[:8])
                     return None
-
-            # Check session is still active (skip for terminal sessions)
-            if session_id and session_type == "agent":
-                try:
-                    from app.repositories.database import adapt_sql, get_db_connection
-
-                    with get_db_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            adapt_sql("SELECT status FROM agent_sessions WHERE session_id = ?"),
-                            (session_id,),
-                        )
-                        row = cursor.fetchone()
-                        if not row:
-                            logger.warning("Proxy token session not found: %s", session_id[:8])
-                            return None
-                        status = row[0] if isinstance(row, (list, tuple)) else row.get("status")
-                        if status not in ("active", "paused"):
-                            logger.warning(
-                                "Proxy token session not active: %s (status=%s)",
-                                session_id[:8],
-                                status,
-                            )
-                            return None
-                except Exception as e:
-                    logger.warning("Failed to check session status for proxy token: %s", e)
+                self._touch_proxy_token_record(jti, now)
 
             return cast("Optional[dict[str, Any]]", payload)
         except Exception as e:

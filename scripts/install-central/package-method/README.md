@@ -226,6 +226,8 @@ cd /home/openace && python3 server.py
 
 - `~/.open-ace/config.json` - 配置文件
 - `~/.open-ace/feishu_users.json` - 飞书用户配置
+- `~/.open-ace/dingtalk_users.json` - 钉钉用户缓存
+- `~/.open-ace/dingtalk_groups.json` - 钉钉群缓存
 - `logs/` - 日志目录
 
 ## 卸载

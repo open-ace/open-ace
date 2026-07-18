@@ -117,9 +117,10 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /root/.npm
 
-# Create non-root user for security
-RUN groupadd -r open-ace && \
-    useradd -r -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
+# Create non-root user for security. Keep uid/gid stable so Kubernetes
+# runAsUser/runAsGroup can match the filesystem ownership baked into the image.
+RUN groupadd -g 1000 open-ace && \
+    useradd -u 1000 -g open-ace -d /home/open-ace -s /bin/bash -c "Open ACE user" open-ace && \
     mkdir -p /home/open-ace && \
     chown -R open-ace:open-ace /home/open-ace
 

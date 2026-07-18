@@ -983,6 +983,7 @@ export const Workspace: React.FC = () => {
         workspaceType: searchParams.get('workspaceType') as 'local' | 'remote' | null,
         machineId: searchParams.get('machineId'),
         machineName: searchParams.get('machineName'),
+        projectPath: searchParams.get('projectPath'),
       };
       const sessionId = searchParams.get('sessionId') ?? undefined;
 
@@ -991,6 +992,7 @@ export const Workspace: React.FC = () => {
       searchParams.delete('workspaceType');
       searchParams.delete('machineId');
       searchParams.delete('machineName');
+      searchParams.delete('projectPath');
       searchParams.delete('sessionId');
       setSearchParams(searchParams, { replace: true });
 
@@ -1000,6 +1002,7 @@ export const Workspace: React.FC = () => {
             workspaceType: remoteParams.workspaceType,
             machineId: remoteParams.machineId ?? undefined,
             machineName: remoteParams.machineName ?? undefined,
+            projectPath: remoteParams.projectPath ?? undefined,
           }
         : undefined;
       createNewTab(sessionId, rp);

@@ -34,11 +34,14 @@ def check_session_access(
     status = session_mgr.get_session_status(session_id)
     if not status:
         return None, (jsonify({"error": "Session not found"}), 404)
-    # System admin
+    # System admins intentionally have global session visibility for operations.
     if g.user.get("role") == "admin":
         return status, None
     # Session owner
-    session = session_mgr._session_manager.get_session(session_id)
+    current_tenant_id = g.user.get("tenant_id")
+    session = session_mgr._session_manager.get_session(session_id, tenant_id=current_tenant_id)
+    if session and current_tenant_id not in (None, session.tenant_id):
+        return None, (jsonify({"error": "Access denied"}), 403)
     if session and session.user_id == g.user["id"]:
         return status, None
     # Machine admin
@@ -59,6 +62,7 @@ def _apply_user(user: dict[str, Any]) -> None:
     g.user = user
     g.user_id = user.get("id")
     g.user_role = user.get("role")
+    g.tenant_id = user.get("tenant_id")
 
 
 def _set_user_from_token() -> bool:
@@ -93,6 +97,7 @@ def _set_user_from_webui_token() -> bool:
                         "username": user_data.get("username"),
                         "email": user_data.get("email"),
                         "role": user_data.get("role"),
+                        "tenant_id": user_data.get("tenant_id"),
                     }
                 )
                 return True

@@ -4,7 +4,7 @@
 
 - Kubernetes 集群（1.24+）
 - 已配置 `kubectl`
-- 可用的 StorageClass（默认：`standard`）
+- 可用且支持 `ReadWriteMany` 的 StorageClass（用于共享应用 PVC）
 - Ingress 控制器（推荐 nginx-ingress）
 - cert-manager（可选，用于 TLS）
 
@@ -40,9 +40,9 @@ k8s/
 |------|-----|
 | 副本数 | 3 |
 | 镜像 | `open-ace:latest` |
-| 容器端口 | 5001 |
+| 容器端口 | 19888 |
 | 更新策略 | RollingUpdate（maxSurge=1, maxUnavailable=0） |
-| 安全上下文 | runAsNonRoot, runAsUser=1000 |
+| 安全上下文 | `runAsNonRoot: true`、`runAsUser: 1000`、`allowPrivilegeEscalation: false` |
 
 **资源限制：**
 
@@ -55,22 +55,17 @@ k8s/
 - 存活检查：HTTP GET `/health`，initialDelay=10s，period=10s
 - 就绪检查：HTTP GET `/health`，initialDelay=5s，period=5s
 
-**Pod 反亲和性：** 优先分布在不同节点上。
+**Pod 反亲和性：** 优先分散到不同节点，以便在容量允许时保持可用性。
 
-### HorizontalPodAutoscaler
+**HorizontalPodAutoscaler：** 参考清单至少保留 3 个副本，并可根据 CPU 与内存利用率扩展到 10 个副本。
 
-| 设置 | 值 |
-|------|-----|
-| 最小副本数 | 3 |
-| 最大副本数 | 10 |
-| CPU 目标 | 70% |
-| 内存目标 | 80% |
-| 扩容 | max(100%/15s, 2 pods/15s) |
-| 缩容 | 10%/60s，稳定期 300s |
+**粘性路由：** Service 使用 `sessionAffinity: ClientIP`，nginx Ingress 使用 cookie affinity。远程会话 HTTP 控制态已经持久化并可跨 Pod，但实时终端 relay WebSocket bridge 仍属于单个 Web 进程；对活跃终端会话而言，粘性路由仍是最稳妥的默认配置。
+
+**多用户工作区说明：** 默认 Kubernetes 清单以非 root 用户运行 Web 容器。如果启用 `workspace.multi_user_mode` 且需要在容器内动态创建 Linux 用户，请使用专门的 overlay 显式让 Web Pod 以 root 运行，并在集群变更流程中记录该例外。
 
 ### Service 与 Ingress
 
-**ClusterIP Service：** 端口 80 → targetPort 5001
+**ClusterIP Service：** 端口 80 → targetPort 19888
 
 **Ingress：**
 - 主机：`open-ace.example.com`（需修改）
@@ -104,20 +99,22 @@ k8s/
 
 ### ConfigMap
 
-应用配置键：`FLASK_APP`、`FLASK_ENV`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
+应用配置键：`FLASK_APP`、`FLASK_ENV`、`PYTHONUNBUFFERED`、`LOG_LEVEL`、`DB_HOST`、`DB_PORT`、`DB_NAME`、`REDIS_HOST`、`REDIS_PORT`、`ENABLE_SSO`、`ENABLE_MULTI_TENANT`、`ENABLE_AUDIT_LOG`、`ENABLE_CONTENT_FILTER`、`WORKSPACE_BASE_DIR`、`AUDIT_LOG_RETENTION_DAYS`、`DATA_RETENTION_DAYS`
 
 ### Secret
 
 **重要：** 部署到生产环境前，请更改所有占位值。建议使用 sealed-secrets 或外部密钥管理工具。
 
-键：`SECRET_KEY`、`UPLOAD_AUTH_KEY`、`DB_USER`、`DB_PASSWORD`、`REDIS_PASSWORD`
+键：`SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`、`UPLOAD_AUTH_KEY`、`DB_USER`、`DB_PASSWORD`、`REDIS_PASSWORD`
 
 ### PersistentVolumeClaim
 
 - 名称：`open-ace-data`
 - 大小：10Gi
-- 访问模式：ReadWriteOnce
-- 挂载路径：`/app/data`
+- 访问模式：ReadWriteMany
+- 挂载路径：
+  - `/workspace`（subPath `workspace`）
+  - `/home/open-ace/.open-ace`（subPath `config`）
 
 ### RBAC
 
@@ -128,7 +125,7 @@ k8s/
 ### NetworkPolicy
 
 **入站规则：**
-- 允许来自 `ingress-nginx` 命名空间到端口 5001
+- 允许来自 `ingress-nginx` 命名空间到端口 19888
 - 允许来自 `open-ace` 命名空间（健康检查）
 
 **出站规则：**
@@ -139,7 +136,7 @@ k8s/
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — 确保中断期间至少有 2 个副本
+- `minAvailable: 2` — 自愿驱逐期间至少保留两个 Web Pod 可用
 
 ## 配置
 
@@ -152,6 +149,14 @@ k8s/
 3. **StorageClass** 在 `storage.yaml` 中 — 匹配集群的 StorageClass
 4. **镜像** 在 `kustomization.yaml` 中 — 设置你的容器镜像仓库路径
 
+### 当前支持边界
+
+- 仓库内提供的 Kubernetes 清单仍是**带粘性路由的多副本参考部署**，因为这对实时终端 relay WebSocket 仍是最稳妥的默认配置。
+- 普通 HTTP/API 请求可以在 Pod 间负载均衡。远程会话命令、命令响应、会话输出回放、session-machine 绑定、远程机器、会话、消息、配额和审计记录均已持久化。
+- 如果承载某个活跃终端 / relay socket 的 Pod 重启，已持久化的远程会话状态仍可用，但该实时终端 bridge 需要重新连接。
+- 浏览器 SSE 重连可以在 Web Pod 重启后回放已持久化的远程会话输出。
+- tenant-aware schema / query 边界覆盖用户、项目、工作区会话与消息、用量聚合、审计日志、远程机器、权限和配额；系统管理员保留有意设计的全局可见性。
+
 ### 使用 cert-manager 配置 TLS
 
 Ingress 已为 cert-manager 预配置了 `letsencrypt-prod` ClusterIssuer。请先安装 cert-manager：
@@ -162,20 +167,12 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## 监控
 
-Deployment 上设置了 Prometheus 注解：
-
-```yaml
-prometheus.io/scrape: "true"
-prometheus.io/port: "5001"
-prometheus.io/path: "/metrics"
-```
-
 `/health` 端点返回服务状态和 git commit hash。
 
 ## 扩容
 
-HPA 基于 CPU（70%）和内存（80%）利用率自动在 3-10 个副本之间扩缩。手动扩缩：
+当前参考清单以三个 Web 副本和粘性路由作为起点。如需重启或重新调度：
 
 ```bash
-kubectl scale deployment open-ace -n open-ace --replicas=5
+kubectl rollout restart deployment open-ace -n open-ace
 ```

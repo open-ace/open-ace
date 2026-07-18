@@ -4,7 +4,7 @@
 
 - Kubernetes cluster (1.24+)
 - `kubectl` configured
-- StorageClass available (default: `standard`)
+- StorageClass available with `ReadWriteMany` support for the shared app PVC
 - Ingress controller (nginx-ingress recommended)
 - cert-manager (optional, for TLS)
 
@@ -40,9 +40,9 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 |---------|-------|
 | Replicas | 3 |
 | Image | `open-ace:latest` |
-| Container port | 5001 |
+| Container port | 19888 |
 | Strategy | RollingUpdate (maxSurge=1, maxUnavailable=0) |
-| Security context | runAsNonRoot, runAsUser=1000 |
+| Security context | `runAsNonRoot: true`, `runAsUser: 1000`, `allowPrivilegeEscalation: false` |
 
 **Resource Limits:**
 
@@ -55,22 +55,17 @@ Creates the `open-ace` namespace with standard Kubernetes labels.
 - Liveness: HTTP GET `/health`, initialDelay=10s, period=10s
 - Readiness: HTTP GET `/health`, initialDelay=5s, period=5s
 
-**Pod Anti-Affinity:** Preferred spread across different nodes.
+**Pod Anti-Affinity:** Preferred across nodes to preserve availability when capacity allows.
 
-### HorizontalPodAutoscaler
+**HorizontalPodAutoscaler:** The reference manifest keeps at least 3 replicas and can scale to 10 replicas based on CPU and memory utilization.
 
-| Setting | Value |
-|---------|-------|
-| Min replicas | 3 |
-| Max replicas | 10 |
-| CPU target | 70% |
-| Memory target | 80% |
-| Scale up | max(100%/15s, 2 pods/15s) |
-| Scale down | 10%/60s, stabilization 300s |
+**Sticky routing:** The Service uses `sessionAffinity: ClientIP`, and the nginx Ingress uses cookie affinity. Remote session HTTP control state is persisted and can cross pods, but live terminal relay WebSocket bridges still belong to one web process; sticky routing remains the safest default for active terminal sessions.
+
+**Multi-user workspace note:** The default Kubernetes manifest runs the web container as a non-root user. If you enable `workspace.multi_user_mode` and need dynamic Linux user creation inside the container, deploy a dedicated overlay that intentionally runs the web pod as root and document that exception in your cluster change process.
 
 ### Service & Ingress
 
-**ClusterIP Service:** Port 80 → targetPort 5001
+**ClusterIP Service:** Port 80 → targetPort 19888
 
 **Ingress:**
 - Host: `open-ace.example.com` (change this)
@@ -104,20 +99,22 @@ Credentials from Secret `open-ace-secrets` (keys: `DB_USER`, `DB_PASSWORD`).
 
 ### ConfigMap
 
-Application configuration keys: `FLASK_APP`, `FLASK_ENV`, `PYTHONUNBUFFERED`, `LOG_LEVEL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`, `ENABLE_SSO`, `ENABLE_MULTI_TENANT`, `ENABLE_AUDIT_LOG`, `ENABLE_CONTENT_FILTER`, `AUDIT_LOG_RETENTION_DAYS`, `DATA_RETENTION_DAYS`
+Application configuration keys: `FLASK_APP`, `FLASK_ENV`, `PYTHONUNBUFFERED`, `LOG_LEVEL`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`, `ENABLE_SSO`, `ENABLE_MULTI_TENANT`, `ENABLE_AUDIT_LOG`, `ENABLE_CONTENT_FILTER`, `WORKSPACE_BASE_DIR`, `AUDIT_LOG_RETENTION_DAYS`, `DATA_RETENTION_DAYS`
 
 ### Secret
 
 **IMPORTANT:** Change all placeholder values before deploying to production. Use sealed-secrets or an external secret management tool.
 
-Keys: `SECRET_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD`
+Keys: `SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD`
 
 ### PersistentVolumeClaim
 
 - Name: `open-ace-data`
 - Size: 10Gi
-- Access: ReadWriteOnce
-- Mount: `/app/data`
+- Access: ReadWriteMany
+- Mounts:
+  - `/workspace` via subPath `workspace`
+  - `/home/open-ace/.open-ace` via subPath `config`
 
 ### RBAC
 
@@ -128,7 +125,7 @@ Keys: `SECRET_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD
 ### NetworkPolicy
 
 **Ingress:**
-- Allow from `ingress-nginx` namespace to port 5001
+- Allow from `ingress-nginx` namespace to port 19888
 - Allow from `open-ace` namespace (health checks)
 
 **Egress:**
@@ -139,7 +136,7 @@ Keys: `SECRET_KEY`, `UPLOAD_AUTH_KEY`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD
 
 ### PodDisruptionBudget
 
-- `minAvailable: 2` — Ensures at least 2 replicas during disruptions
+- `minAvailable: 2` — Keeps at least two web pods available during voluntary disruptions
 
 ## Configuration
 
@@ -152,6 +149,14 @@ Before deploying, update:
 3. **StorageClass** in `storage.yaml` — Match your cluster's StorageClass
 4. **Image** in `kustomization.yaml` — Set your container registry path
 
+### Current support boundary
+
+- The shipped Kubernetes manifest is a **multi-replica reference deployment with sticky routing** because that is still the safest default for live terminal relay WebSockets.
+- Ordinary HTTP/API requests can be balanced across pods. Remote session commands, command responses, session output replay, session-machine bindings, machines, sessions, messages, quotas, and audit records are persisted.
+- If the pod that owns an active terminal/relay socket restarts, persisted remote-session state remains available, but that live terminal bridge must reconnect.
+- Browser SSE reconnects can replay persisted remote session output after a web-pod restart.
+- Tenant-aware schema and query boundaries cover users, projects, workspace sessions/messages, usage aggregates, audit logs, remote machines, permissions, and quotas; system administrators retain intentional global visibility.
+
 ### TLS with cert-manager
 
 The Ingress is pre-configured for cert-manager with `letsencrypt-prod` ClusterIssuer. Install cert-manager first:
@@ -162,20 +167,12 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 
 ## Monitoring
 
-Prometheus annotations are set on the Deployment:
-
-```yaml
-prometheus.io/scrape: "true"
-prometheus.io/port: "5001"
-prometheus.io/path: "/metrics"
-```
-
 The `/health` endpoint returns service status and git commit hash.
 
 ## Scaling
 
-The HPA automatically scales between 3-10 replicas based on CPU (70%) and memory (80%) utilization. For manual scaling:
+The reference manifest starts with three web replicas plus sticky routing. For manual restarts or rescheduling:
 
 ```bash
-kubectl scale deployment open-ace -n open-ace --replicas=5
+kubectl rollout restart deployment open-ace -n open-ace
 ```

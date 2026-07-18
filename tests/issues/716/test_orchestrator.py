@@ -1359,6 +1359,7 @@ class TestOrchestratorPrReview:
             orch._gh.get_diff.return_value = "diff content"
             orch._gh.git_push.return_value = None
             orch._gh.create_pr.return_value = {"number": 99, "url": "https://github.com/pull/99"}
+            orch._gh.get_current_branch.return_value = wf_data.get("branch_name") or "main"
 
         return orch, mock_repo
 
@@ -1651,6 +1652,24 @@ class TestOrchestratorPrReview:
         orch._do_pr_review(wf)
 
         orch._gh.git_push.assert_called()
+
+    def test_pr_review_push_failure_blocks_pr_creation(self):
+        """A failed branch push must stop before PR creation."""
+        wf = _make_workflow(
+            current_phase="pr_review",
+            status="pr_review",
+            current_round=0,
+            branch_name="feature/test",
+        )
+        orch, _ = self._make_orchestrator(wf)
+        orch._runner = MagicMock()
+        orch._gh.get_current_branch.return_value = "feature/test"
+        orch._gh.git_push.side_effect = RuntimeError("network down")
+
+        with pytest.raises(RuntimeError, match="Branch push failed before PR creation"):
+            orch._do_pr_review(wf)
+
+        orch._gh.create_pr.assert_not_called()
 
     def test_pr_review_no_changes_marks_completed(self):
         """When branch has no commits vs main, workflow completes gracefully."""

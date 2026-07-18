@@ -49,7 +49,7 @@ open-ace/
 │   │   ├── analytics/  # Usage analytics, ROI, cost optimization
 │   │   ├── compliance/ # Audit analysis, reports, retention
 │   │   ├── governance/ # Audit logging, alerts, quotas, content filter
-│   │   ├── sso/        # OAuth2/OIDC SSO
+│   │   ├── sso/        # OAuth2/OIDC/SAML SSO
 │   │   └── workspace/  # Remote agents, sessions, collaboration
 │   ├── models/         # Data models (User, Message, Session, Tenant, etc.)
 │   ├── auth/           # Authentication decorators
@@ -69,7 +69,7 @@ open-ace/
 │   ├── agent.py        # Main daemon loop
 │   ├── executor.py     # CLI subprocess management
 │   ├── cli_adapters/   # Tool adapters (Claude, Qwen, Codex, OpenClaw)
-│   ├── terminal_server.py  # WebSocket PTY server
+│   ├── terminal_server.py  # WebSocket terminal server (PTY on Linux/macOS, piped subprocess on Windows)
 │   └── session_sync.py # Session history sync
 │
 ├── scripts/            # Data collection scripts
