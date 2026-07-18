@@ -30,6 +30,14 @@ class TestSecretKeyValidation:
         with pytest.raises(RuntimeError, match="SECRET_KEY must be set to a strong, unique value"):
             get_secret_key_for_app()
 
+    def test_replace_with_random_secret_key_raises_in_production(self, monkeypatch):
+        """Production environment must reject replace-with-random-* placeholders."""
+        monkeypatch.setenv("SECRET_KEY", "replace-with-random-flask-secret")
+        monkeypatch.setenv("FLASK_ENV", "production")
+
+        with pytest.raises(RuntimeError, match="SECRET_KEY must be set to a strong, unique value"):
+            get_secret_key_for_app()
+
     def test_explicit_config_secret_key_is_respected(self, monkeypatch):
         monkeypatch.delenv("SECRET_KEY", raising=False)
         monkeypatch.setenv("FLASK_ENV", "development")
@@ -65,6 +73,14 @@ class TestEncryptionKeyValidation:
         with pytest.raises(RuntimeError, match="OPENACE_ENCRYPTION_KEY must be set"):
             get_encryption_key_material(purpose="SMTP password encryption")
 
+    def test_replace_with_random_encryption_key_raises_in_production(self, monkeypatch):
+        """Production environment must reject replace-with-random-* placeholders for encryption key."""
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "replace-with-random-dedicated-encryption-key")
+        monkeypatch.setenv("FLASK_ENV", "production")
+
+        with pytest.raises(RuntimeError, match="OPENACE_ENCRYPTION_KEY must be set"):
+            get_encryption_key_material(purpose="test")
+
 
 class TestUploadAuthValidation:
     def test_missing_upload_auth_key_disables_uploads(self, monkeypatch):
@@ -73,6 +89,11 @@ class TestUploadAuthValidation:
 
     def test_weak_upload_auth_key_is_rejected(self, monkeypatch):
         monkeypatch.setenv("UPLOAD_AUTH_KEY", "change-me-in-production")
+        assert get_upload_auth_key() is None
+
+    def test_replace_with_random_upload_auth_key_is_rejected(self, monkeypatch):
+        """Upload endpoint must be disabled when using replace-with-random-* placeholder."""
+        monkeypatch.setenv("UPLOAD_AUTH_KEY", "replace-with-random-upload-auth-key")
         assert get_upload_auth_key() is None
 
     def test_strong_upload_auth_key_is_returned(self, monkeypatch):

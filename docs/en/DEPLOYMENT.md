@@ -597,7 +597,12 @@ chmod -R 755 ~/.open-ace/
 3. **Firewall**: Restrict access to port 19888
 4. **Secrets**: Use environment variables or a secret manager for sensitive data
 5. **Dedicated encryption key**: Set `OPENACE_ENCRYPTION_KEY` explicitly; encrypted secret storage no longer derives from `SECRET_KEY`
-6. **No placeholder secrets**: Do not use values such as `change-me-in-production` for `SECRET_KEY` or `UPLOAD_AUTH_KEY`
+6. **No placeholder secrets**: Do not use the following placeholder values in production:
+   - `change-me-in-production`
+   - `replace-with-random-*` (k8s manifest placeholders)
+   - Development placeholders like `dev-secret-key`, `dev-smtp-password-key`, `default-secret-key`
+
+   Using these placeholders will cause the application to refuse startup in production (`SECRET_KEY`, `OPENACE_ENCRYPTION_KEY`) or disable features (`UPLOAD_AUTH_KEY`).
 
 ### Upgrade Note: Encrypted Secrets
 

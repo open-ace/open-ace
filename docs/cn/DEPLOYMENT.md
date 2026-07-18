@@ -595,7 +595,12 @@ chmod -R 755 ~/.open-ace/
 3. **防火墙**：限制对 19888 端口的访问
 4. **密钥管理**：使用环境变量或密钥管理系统存储敏感数据
 5. **独立加密密钥**：显式设置 `OPENACE_ENCRYPTION_KEY`；加密后的敏感数据不再从 `SECRET_KEY` 派生
-6. **禁止占位密钥**：不要在生产环境使用 `change-me-in-production` 之类的占位值作为 `SECRET_KEY` 或 `UPLOAD_AUTH_KEY`
+6. **禁止占位密钥**：不要在生产环境使用以下占位符作为密钥：
+   - `change-me-in-production`
+   - `replace-with-random-*`（k8s 清单占位符）
+   - `dev-secret-key`、`dev-smtp-password-key`、`default-secret-key` 等开发环境占位符
+
+   使用这些占位符会导致应用在生产环境拒绝启动（`SECRET_KEY`、`OPENACE_ENCRYPTION_KEY`）或功能被禁用（`UPLOAD_AUTH_KEY`）。
 
 ### 升级注意：已加密敏感数据
 
