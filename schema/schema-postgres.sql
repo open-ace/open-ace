@@ -1243,13 +1243,19 @@ CREATE SEQUENCE smtp_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE smtp_settings_id_seq OWNED BY smtp_settings.id;
+
+-- Issue #1815 Finding 2: Added expires_at for TTL-based cleanup
 CREATE TABLE sso_auth_states (
     state text NOT NULL,
     code_verifier text NOT NULL,
     provider_name text NOT NULL,
     nonce text,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    expires_at timestamp without time zone NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '600 seconds')
 );
+
+-- Issue #1815 Finding 2: Index for efficient cleanup queries
+CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states(expires_at);
 
 CREATE TABLE sso_identities (
     id integer NOT NULL,

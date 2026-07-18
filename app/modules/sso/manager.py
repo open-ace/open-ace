@@ -6,11 +6,14 @@ Manages SSO providers and authentication sessions.
 
 import json
 import logging
+import os
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union, cast
 
+from app.modules.sso.exceptions import SSOConfigDecryptionError
 from app.modules.sso.oauth2 import OAuth2Provider
 from app.modules.sso.oidc import OIDCProvider, get_provider_class
 from app.modules.sso.provider import (
@@ -24,6 +27,30 @@ from app.repositories.database import Database, adapt_boolean_condition, adapt_b
 from app.utils.smtp_crypto import get_password_manager
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Configuration Constants (Issue #1815)
+# ============================================================================
+
+# Default TTL for auth_state records (10 minutes, typical OAuth code lifetime)
+AUTH_STATE_TTL_SECONDS = int(os.environ.get("OPENACE_SSO_AUTH_STATE_TTL_SECONDS", "600"))
+
+# Cleanup task interval (5 minutes)
+AUTH_STATE_CLEANUP_INTERVAL_SECONDS = int(
+    os.environ.get("OPENACE_SSO_AUTH_STATE_CLEANUP_INTERVAL", "300")
+)
+
+# Batch size for cleanup operations
+CLEANUP_BATCH_SIZE = int(os.environ.get("OPENACE_SSO_CLEANUP_BATCH_SIZE", "1000"))
+
+
+# ============================================================================
+# Module-level cleanup state
+# ============================================================================
+
+_cleanup_lock_path = "/tmp/openace-sso-cleanup.lock"
+_cleanup_timer: Optional[threading.Timer] = None
+_shutdown_requested = False
 
 
 class SSOManager:
@@ -62,8 +89,21 @@ class SSOManager:
         )
         return json.dumps(stored)
 
-    def deserialize_provider_config(self, raw_config: Union[str, dict[str, Any]]) -> dict[str, Any]:
-        """Deserialize provider config and restore the decrypted client secret."""
+    def deserialize_provider_config(
+        self, raw_config: Union[str, dict[str, Any]], provider_name: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Deserialize provider config and restore the decrypted client secret.
+
+        Args:
+            raw_config: Raw configuration string or dict from database.
+            provider_name: Provider name for error context (used in exception message).
+
+        Returns:
+            Dict with decrypted client_secret.
+
+        Raises:
+            SSOConfigDecryptionError: If decryption fails (Issue #1815 Finding 1).
+        """
         config_data = (
             cast("dict[str, Any]", json.loads(raw_config))
             if isinstance(raw_config, str)
@@ -76,8 +116,17 @@ class SSOManager:
             try:
                 client_secret = self._password_manager.decrypt(encrypted_secret)
             except Exception as e:
-                logger.error(f"Failed to decrypt SSO client_secret: {e}")
-                client_secret = ""
+                # Issue #1815 Finding 1: Fail-fast instead of silent fallback
+                # Determine provider name for error message
+                name = provider_name or config_data.get("name", "unknown")
+                logger.error(
+                    f"SSO provider '{name}' client_secret decryption failed: {e}",
+                    exc_info=True,
+                )
+                raise SSOConfigDecryptionError(
+                    provider_name=name,
+                    original_error=e,
+                ) from e
 
         config_data["client_secret"] = client_secret
         return config_data
@@ -315,7 +364,7 @@ class SSOManager:
             return None
 
         try:
-            config_data = self.deserialize_provider_config(row["config"])
+            config_data = self.deserialize_provider_config(row["config"], provider_name=name)
             config = SSOProviderConfig(
                 name=config_data.get("name", name),
                 provider_type=config_data.get("provider_type", "oauth2"),
@@ -340,6 +389,25 @@ class SSOManager:
                 self._providers[name] = provider
 
             return cast("Optional[SSOProvider]", provider)
+
+        except SSOConfigDecryptionError as e:
+            # Issue #1815 Finding 1: Audit log for decryption failures
+            logger.error(
+                f"SSO provider '{e.provider_name}' failed to load due to decryption error",
+                exc_info=True,
+            )
+            try:
+                from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+                AuditLogger().log(
+                    action=AuditAction.SYSTEM_CONFIG_ERROR.value,
+                    resource_type="sso_provider",
+                    resource_id=e.provider_name,
+                    details={"error": "decryption_failed"},
+                )
+            except Exception as audit_error:
+                logger.warning(f"Failed to log audit for decryption error: {audit_error}")
+            return None
 
         except Exception as e:
             logger.error(f"Failed to load SSO provider {name}: {e}")
@@ -729,10 +797,14 @@ class SSOManager:
             logger.error(f"Failed to cleanup sessions: {e}")
             return 0
 
+    # ========================================================================
+    # Issue #1815 Finding 2: Auth State TTL Methods
+    # ========================================================================
+
     def _store_auth_state(
         self, state: str, code_verifier: str, provider_name: str, nonce: Optional[str] = None
     ) -> None:
-        """Store authentication state for verification.
+        """Store authentication state for verification with TTL.
 
         Requires the ``sso_auth_states`` table to already exist. In production it
         is created at startup from the authoritative schema files via
@@ -742,23 +814,35 @@ class SSOManager:
         or ``get_ddl_statements()`` first — otherwise the INSERT below fails and
         is swallowed by the broad except, surfacing as a downstream SSO failure
         instead of a clear error (Issue #237 item 4, review note).
+
+        Issue #1815 Finding 2: Added expires_at for TTL-based cleanup.
         """
         try:
+            expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+                seconds=AUTH_STATE_TTL_SECONDS
+            )
             self.db.execute(
                 """
-                INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO sso_auth_states (state, code_verifier, provider_name, nonce, expires_at)
+                VALUES (?, ?, ?, ?, ?)
             """,
-                (state, code_verifier, provider_name, nonce),
+                (state, code_verifier, provider_name, nonce, expires_at),
             )
 
         except Exception as e:
             logger.error(f"Failed to store auth state: {e}")
 
     def _get_auth_state(self, state: str) -> Optional[dict[str, Any]]:
-        """Get authentication state."""
+        """Get authentication state, excluding expired entries.
+
+        Issue #1815 Finding 2: Added expiry predicate to prevent replay attacks.
+        """
         try:
-            row = self.db.fetch_one("SELECT * FROM sso_auth_states WHERE state = ?", (state,))
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            row = self.db.fetch_one(
+                "SELECT * FROM sso_auth_states WHERE state = ? AND expires_at > ?",
+                (state, now),
+            )
             return dict(row) if row else None
 
         except Exception as e:
@@ -772,3 +856,158 @@ class SSOManager:
 
         except Exception as e:
             logger.error(f"Failed to delete auth state: {e}")
+
+    def cleanup_expired_auth_states(self) -> int:
+        """Delete expired auth state records in batches.
+
+        Issue #1815 Finding 2: Batch deletion with dialect-specific SQL.
+
+        Returns:
+            int: Total number of deleted rows.
+        """
+        total_deleted = 0
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        try:
+            while True:
+                if self.db.is_postgresql:
+                    # PostgreSQL: use subquery with LIMIT
+                    cursor = self.db.execute(
+                        f"""
+                        DELETE FROM sso_auth_states
+                        WHERE state IN (
+                            SELECT state FROM sso_auth_states
+                            WHERE expires_at < %s
+                            LIMIT {CLEANUP_BATCH_SIZE}
+                        )
+                    """,
+                        (now,),
+                    )
+                else:
+                    # SQLite: use subquery with LIMIT (DELETE LIMIT not widely supported)
+                    cursor = self.db.execute(
+                        f"""
+                        DELETE FROM sso_auth_states
+                        WHERE state IN (
+                            SELECT state FROM sso_auth_states
+                            WHERE expires_at < ?
+                            LIMIT {CLEANUP_BATCH_SIZE}
+                        )
+                    """,
+                        (now,),
+                    )
+
+                deleted = cursor.rowcount
+                total_deleted += deleted
+
+                if deleted < CLEANUP_BATCH_SIZE:
+                    break
+
+                logger.debug(f"Deleted {deleted} expired auth states, continuing...")
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired auth states: {e}")
+
+        if total_deleted > 0:
+            logger.info(f"Cleaned up {total_deleted} expired auth state records")
+
+        return total_deleted
+
+
+# ============================================================================
+# Module-level cleanup task management (Issue #1815 Finding 2)
+# ============================================================================
+
+
+def _acquire_cleanup_lock() -> bool:
+    """Try to acquire the file lock for cleanup task.
+
+    Returns:
+        bool: True if lock acquired, False otherwise.
+    """
+    import fcntl
+
+    try:
+        # Create lock file if not exists
+        lock_file = open(_cleanup_lock_path, "w")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # Store file handle globally to keep lock
+        global _cleanup_lock_file
+        _cleanup_lock_file = lock_file
+        return True
+    except (IOError, OSError):
+        return False
+
+
+def _release_cleanup_lock() -> None:
+    """Release the file lock for cleanup task."""
+    import fcntl
+
+    global _cleanup_lock_file
+    if "_cleanup_lock_file" in globals() and _cleanup_lock_file:
+        try:
+            fcntl.flock(_cleanup_lock_file.fileno(), fcntl.LOCK_UN)
+            _cleanup_lock_file.close()
+        except Exception:
+            pass
+
+
+def _cleanup_tick() -> None:
+    """Single cleanup tick executed by timer."""
+    global _shutdown_requested
+
+    if _shutdown_requested:
+        return
+
+    try:
+        # Try to acquire lock (single-process guarantee)
+        if _acquire_cleanup_lock():
+            try:
+                manager = SSOManager()
+                manager.cleanup_expired_auth_states()
+            finally:
+                _release_cleanup_lock()
+    except Exception as e:
+        logger.error(f"SSO auth state cleanup error: {e}")
+
+    # Reschedule if not shutting down
+    if not _shutdown_requested:
+        global _cleanup_timer
+        _cleanup_timer = threading.Timer(AUTH_STATE_CLEANUP_INTERVAL_SECONDS, _cleanup_tick)
+        _cleanup_timer.daemon = True
+        _cleanup_timer.start()
+
+
+def init_sso_cleanup() -> None:
+    """Initialize the SSO auth state cleanup task.
+
+    Should be called during application startup via start_background_services().
+    Uses file lock to ensure single-process execution in multi-worker deployments.
+    """
+    global _cleanup_timer, _shutdown_requested
+
+    if _cleanup_timer is not None:
+        logger.debug("SSO auth state cleanup already initialized")
+        return
+
+    _shutdown_requested = False
+    _cleanup_timer = threading.Timer(AUTH_STATE_CLEANUP_INTERVAL_SECONDS, _cleanup_tick)
+    _cleanup_timer.daemon = True
+    _cleanup_timer.start()
+    logger.info("SSO auth state cleanup task started")
+
+
+def shutdown_sso_cleanup() -> None:
+    """Gracefully shutdown the SSO auth state cleanup task.
+
+    Called during application shutdown to stop the timer cleanly.
+    """
+    global _cleanup_timer, _shutdown_requested
+
+    _shutdown_requested = True
+
+    if _cleanup_timer:
+        _cleanup_timer.cancel()
+        _cleanup_timer = None
+
+    logger.info("SSO auth state cleanup task stopped")

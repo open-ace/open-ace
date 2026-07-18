@@ -794,13 +794,18 @@ CREATE TABLE smtp_settings (
  created_by integer
 );
 
+-- Issue #1815 Finding 2: Added expires_at for TTL-based cleanup
 CREATE TABLE sso_auth_states (
  state text PRIMARY KEY NOT NULL,
  code_verifier text NOT NULL,
  provider_name text NOT NULL,
  nonce text,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ expires_at TIMESTAMP NOT NULL DEFAULT (datetime('now', '+600 seconds'))
 );
+
+-- Issue #1815 Finding 2: Index for efficient cleanup queries
+CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states(expires_at);
 
 CREATE TABLE sso_identities (
  id INTEGER PRIMARY KEY AUTOINCREMENT,

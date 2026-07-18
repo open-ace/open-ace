@@ -24,6 +24,19 @@ from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# Issue #1815 Finding 3: Sanitized error messages
+# ============================================================================
+# These generic error messages are safe to expose to end users.
+# Detailed error information is logged at ERROR level for debugging.
+# IdP-returned error/error_description (JSON response) are still transparently
+# passed through, as they originate from the identity provider.
+
+ERROR_TOKEN_EXCHANGE_FAILED = "Token exchange failed"
+ERROR_TOKEN_EXCHANGE_ERROR = "Token exchange error"
+ERROR_TOKEN_EXCHANGE_BLOCKED = "Token endpoint blocked"
+
+
 class OAuth2Provider(SSOProvider):
     """OAuth2 authentication provider."""
 
@@ -118,6 +131,11 @@ class OAuth2Provider(SSOProvider):
                     error_description="Token endpoint redirects are blocked",
                 )
 
+            # Issue #1815 Finding 3: Transparent passthrough for IdP-returned errors.
+            # When the IdP returns a JSON error response (per OAuth2 spec), we pass
+            # through the error and error_description as-is since they originate from
+            # the trusted identity provider. For non-JSON responses or internal errors,
+            # we use sanitized messages to avoid leaking sensitive information.
             if response.status_code >= 400:
                 try:
                     error_data = response.json()
@@ -127,10 +145,16 @@ class OAuth2Provider(SSOProvider):
                         error_description=error_data.get("error_description"),
                     )
                 except ValueError:
+                    # Issue #1815 Finding 3: Non-JSON 4xx response - use sanitized message.
+                    # Log the actual response for debugging but don't expose to user.
+                    logger.error(
+                        f"OAuth2 token exchange failed with non-JSON response "
+                        f"(status={response.status_code}): {response.text[:500]}"
+                    )
                     return SSOAuthResult(
                         success=False,
                         error="token_exchange_failed",
-                        error_description=response.text,
+                        error_description=ERROR_TOKEN_EXCHANGE_FAILED,
                     )
 
             token_data = response.json()
@@ -141,19 +165,23 @@ class OAuth2Provider(SSOProvider):
                 token=token,
             )
 
+        # Issue #1815 Finding 3: OutboundUrlBlockedError - internal security policy error.
+        # Log the full error for debugging but use sanitized message for user.
         except OutboundUrlBlockedError as e:
-            logger.error(f"OAuth2 token endpoint blocked: {e}")
+            logger.error(f"OAuth2 token endpoint blocked by security policy: {e}")
             return SSOAuthResult(
                 success=False,
                 error="token_exchange_blocked",
-                error_description=str(e),
+                error_description=ERROR_TOKEN_EXCHANGE_BLOCKED,
             )
+        # Issue #1815 Finding 3: Generic exception - internal error, not user-facing.
+        # Log the full error for debugging but use sanitized message for user.
         except Exception as e:
-            logger.error(f"OAuth2 token exchange error: {e}")
+            logger.error(f"OAuth2 token exchange error: {e}", exc_info=True)
             return SSOAuthResult(
                 success=False,
                 error="token_exchange_error",
-                error_description=str(e),
+                error_description=ERROR_TOKEN_EXCHANGE_ERROR,
             )
 
     def get_user_info(self, access_token: str) -> Optional[SSOUser]:
