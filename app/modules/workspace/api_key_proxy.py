@@ -1815,7 +1815,7 @@ class APIKeyProxyService:
             (now.isoformat(), now.isoformat(), now.isoformat(), jti),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        return int(cursor.rowcount or 0) > 0
 
     def cleanup_proxy_token_jtis(self, days_old: int = 7) -> int:
         """
