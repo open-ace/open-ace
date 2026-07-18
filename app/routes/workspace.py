@@ -978,7 +978,8 @@ def create_session():
         if project_path:
             base_dirs = get_workspace_base_dirs()
             if not is_valid_path(project_path, allowed_prefixes=base_dirs):
-                logger.warning(f"Invalid project_path rejected: {project_path}")
+                # Log without exposing the actual path for security
+                logger.warning("Invalid project_path rejected")
                 return jsonify({"success": False, "error": "Invalid project path"}), 400
 
         # If project_path is provided but not project_id, look up the project

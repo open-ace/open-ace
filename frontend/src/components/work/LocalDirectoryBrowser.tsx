@@ -21,10 +21,10 @@ interface LocalDirectoryBrowserProps {
   onSelectPath: (path: string) => void;
   onClose?: () => void;
   listMaxHeight?: number | string;
-  lockToRoot?: boolean;        // Issue #1813: Disable up navigation and root button
-  rootPath?: string;           // Issue #1813: Locked root path for range checking
-  hideManualInput?: boolean;   // Issue #1813: Hide manual path input
-  hideRecentPaths?: boolean;   // Issue #1813: Hide recent paths history
+  lockToRoot?: boolean; // Issue #1813: Disable up navigation and root button
+  rootPath?: string; // Issue #1813: Locked root path for range checking
+  hideManualInput?: boolean; // Issue #1813: Hide manual path input
+  hideRecentPaths?: boolean; // Issue #1813: Hide recent paths history
 }
 
 const MAX_PATH_HISTORY = 5;
@@ -62,10 +62,7 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
   // Extract user ID and tenant ID for localStorage scoping (Issue #1813)
   const userId = user?.id ?? null;
   const tenantId = user?.tenant_id ?? null;
-  const scopedHistoryKey = useMemo(
-    () => getPathHistoryKey(userId, tenantId),
-    [userId, tenantId]
-  );
+  const scopedHistoryKey = useMemo(() => getPathHistoryKey(userId, tenantId), [userId, tenantId]);
 
   const [currentPath, setCurrentPath] = useState(initialPath ?? '');
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
@@ -102,9 +99,8 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
         const parsed = JSON.parse(savedHistory);
         if (Array.isArray(parsed)) {
           // Display-time validation: filter paths based on lockToRoot and rootPath
-          const validatedHistory = lockToRoot && rootPath
-            ? parsed.filter((p: string) => p.startsWith(rootPath))
-            : parsed;
+          const validatedHistory =
+            lockToRoot && rootPath ? parsed.filter((p: string) => p.startsWith(rootPath)) : parsed;
           setPathHistory(validatedHistory.slice(0, MAX_PATH_HISTORY));
         }
       } catch {
@@ -123,9 +119,10 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
             localStorage.removeItem(PATH_HISTORY_KEY_PREFIX);
 
             // Display-time validation
-            const validatedHistory = lockToRoot && rootPath
-              ? parsed.filter((p: string) => p.startsWith(rootPath))
-              : parsed;
+            const validatedHistory =
+              lockToRoot && rootPath
+                ? parsed.filter((p: string) => p.startsWith(rootPath))
+                : parsed;
             setPathHistory(validatedHistory.slice(0, MAX_PATH_HISTORY));
           }
         } catch {
